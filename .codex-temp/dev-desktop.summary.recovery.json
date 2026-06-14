@@ -1,0 +1,121 @@
+{
+  "pid": 72768,
+  "hasExited": false,
+  "exitCode": null,
+  "processTree": [
+    {
+      "ProcessId": 72768,
+      "Name": "bun"
+    },
+    {
+      "ProcessId": 36636,
+      "Name": "electron.exe"
+    },
+    {
+      "ProcessId": 53712,
+      "Name": "electron-vite.exe"
+    },
+    {
+      "ProcessId": 56832,
+      "Name": "node.exe"
+    },
+    {
+      "ProcessId": 63580,
+      "Name": "conhost.exe"
+    },
+    {
+      "ProcessId": 64240,
+      "Name": "esbuild.exe"
+    },
+    {
+      "ProcessId": 72824,
+      "Name": "electron.exe"
+    },
+    {
+      "ProcessId": 113500,
+      "Name": "electron.exe"
+    },
+    {
+      "ProcessId": 132416,
+      "Name": "electron.exe"
+    }
+  ],
+  "recentLogs": [
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\main.log",
+      "Length": 930,
+      "LastWriteTime": "2026-06-12T23:49:10.426849+08:00"
+    }
+  ],
+  "listeningPorts": [
+    {
+      "LocalAddress": "::1",
+      "LocalPort": 5173,
+      "OwningProcess": 56832
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 1354,
+      "OwningProcess": 113500
+    }
+  ],
+  "stdoutTail": [
+    "Copied dev icons from ./icons/dev to resources/icons",
+    "opencode script {",
+    "  \"channel\": \"dev\",",
+    "  \"version\": \"0.0.0-dev-202606121548\",",
+    "  \"preview\": true,",
+    "  \"release\": false",
+    "}",
+    "Generated models-snapshot.js",
+    "Loaded 34 migrations",
+    "Build complete",
+    "\u001b[36mvite v7.1.4 \u001b[32mbuilding SSR bundle for development...\u001b[36m\u001b[39m",
+    "transforming...",
+    "\u001b[32m✓\u001b[39m 18 modules transformed.",
+    "rendering chunks...",
+    "\u001b[2mout/main/\u001b[22m\u001b[36mindex.js                 \u001b[39m\u001b[1m\u001b[2m    39.77 kB\u001b[22m\u001b[1m\u001b[22m",
+    "\u001b[2mout/main/\u001b[22m\u001b[36mchunks/node-Bvtg7egV.js  \u001b[39m\u001b[1m\u001b[33m20,087.24 kB\u001b[39m\u001b[22m",
+    "\u001b[32m✓ built in 14.92s\u001b[39m",
+    "\u001b[32m",
+    "electron main process built successfully\u001b[39m",
+    "\u001b[90m",
+    "-----",
+    "\u001b[39m",
+    "\u001b[36mvite v7.1.4 \u001b[32mbuilding SSR bundle for development...\u001b[36m\u001b[39m",
+    "transforming...",
+    "\u001b[32m✓\u001b[39m 1 modules transformed.",
+    "rendering chunks...",
+    "\u001b[2mout/preload/\u001b[22m\u001b[36mindex.js  \u001b[39m\u001b[1m\u001b[2m4.27 kB\u001b[22m\u001b[1m\u001b[22m",
+    "\u001b[32m✓ built in 33ms\u001b[39m",
+    "\u001b[32m",
+    "electron preload scripts built successfully\u001b[39m",
+    "\u001b[90m",
+    "-----",
+    "\u001b[39m",
+    "\u001b[32mdev server running for the electron renderer process at:",
+    "\u001b[39m",
+    "  \u001b[32m➜\u001b[39m  \u001b[1mLocal\u001b[22m:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m",
+    "\u001b[2m  \u001b[32m➜\u001b[39m  \u001b[1mNetwork\u001b[22m\u001b[2m: use \u001b[22m\u001b[1m--host\u001b[22m\u001b[2m to expose\u001b[22m",
+    "\u001b[32m",
+    "starting electron app...",
+    "\u001b[39m",
+    "",
+    "23:49:02.680 > app starting { version: '0.1.0', packaged: false }",
+    "23:49:02.748 > sidecar connection started { url: 'http://127.0.0.1:1354' }",
+    "23:49:02.749 > spawning sidecar { url: 'http://127.0.0.1:1354' }",
+    "23:49:03.838 > loading task finished",
+    "23:49:03.841 > init step { step: { phase: 'done' } }",
+    "23:49:10.424 > awaiting server ready",
+    "23:49:10.425 > server ready { url: 'http://127.0.0.1:1354' }"
+  ],
+  "stderrTail": [
+    "$ bun ./scripts/predev.ts",
+    "$ electron-vite dev",
+    "\u001b[33m../opencode/dist/node/node.js (122870:15): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "\u001b[33m../opencode/dist/node/node.js (256731:34): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "\u001b[33m../opencode/dist/node/node.js (256754:36): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "(node:113500) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+    "(Use `electron --trace-warnings ...` to show where the warning was created)"
+  ]
+}

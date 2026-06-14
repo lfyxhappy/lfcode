@@ -1,0 +1,72 @@
+{
+  "pid": 128556,
+  "hasExited": true,
+  "exitCode": 1,
+  "processTree": [
+    {
+      "ProcessId": 128556,
+      "Name": null
+    }
+  ],
+  "logRoot": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs",
+  "logFiles": [
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\renderer.log",
+      "Length": 569,
+      "LastWriteTime": "2026-06-12T21:28:23.0632031+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\main.log",
+      "Length": 927,
+      "LastWriteTime": "2026-06-12T21:28:23.0317484+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\network.log",
+      "Length": 178,
+      "LastWriteTime": "2026-06-12T21:28:08.2934158+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\network.netlog",
+      "Length": 387,
+      "LastWriteTime": "2026-06-12T21:28:08.2901864+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\crash.log",
+      "Length": 154,
+      "LastWriteTime": "2026-06-12T21:28:07.8827056+08:00"
+    }
+  ],
+  "electronDist": null,
+  "electronDistFiles": [],
+  "stdoutTail": [
+    "Copied dev icons from ./icons/dev to resources/icons",
+    "opencode script {",
+    "  \"channel\": \"dev\",",
+    "  \"version\": \"0.0.0-dev-202606121527\",",
+    "  \"preview\": true,",
+    "  \"release\": false",
+    "}",
+    "Generated models-snapshot.js",
+    "Loaded 34 migrations",
+    "Build complete",
+    "Electron runtime missing, installing local binary"
+  ],
+  "stderrTail": [
+    "$ bun ./scripts/predev.ts",
+    "RequestError: unable to verify the first certificate",
+    "    at <anonymous> (C:\\算法\\小应用\\知识库\\10_Projects\\opencode\\node_modules\\.bun\\got@11.8.6\\node_modules\\got\\dist\\source\\core\\index.js:970:115)",
+    "    at emitError (node:events:43:23)",
+    "    at <anonymous> (node:_http_client:251:22)",
+    "    at processTicksAndRejections (native:7:39)",
+    "ShellError: Failed with exit code 1",
+    " exitCode: 1,",
+    "   stdout: \"\",",
+    "   stderr: \"RequestError: unable to verify the first certificate\\n    at <anonymous> (C:\\\\算法\\\\小应用\\\\知识库\\\\10_Projects\\\\opencode\\\\node_modules\\\\.bun\\\\got@11.8.6\\\\node_modules\\\\got\\\\dist\\\\source\\\\core\\\\index.js:970:115)\\n    at emitError (node:events:43:23)\\n    at <anonymous> (node:_http_client:251:22)\\n    at processTicksAndRejections (native:7:39)\\n\",",
+    "",
+    "      at ShellPromise (unknown:75:16)",
+    "      at BunShell2 (unknown:190:36)",
+    "",
+    "Bun v1.3.14 (Windows x64)",
+    "error: script \"predev\" exited with code 1"
+  ]
+}

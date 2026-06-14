@@ -1,0 +1,27 @@
+$ bun --cwd packages/desktop dev
+$ bun ./scripts/predev.ts
+$ electron-vite dev
+[33m../opencode/dist/node/node.js (122497:15): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+[33m../opencode/dist/node/node.js (256364:34): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+[33m../opencode/dist/node/node.js (256387:36): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+(node:40740) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `electron --trace-warnings ...` to show where the warning was created)
+21:07:42.792 (window) > renderer process gone {
+  window: 'main',
+  currentURL: 'http://localhost:5173/index.html',
+  details: { reason: 'crashed', exitCode: -1 }
+}
+21:07:42.800          > child process gone {
+  details: {
+    type: 'Utility',
+    reason: 'crashed',
+    exitCode: -1,
+    serviceName: 'network.mojom.NetworkService',
+    name: 'Network Service'
+  }
+}
+[40740:0613/210742.802:ERROR:content\browser\network_service_instance_impl.cc:608] Network service crashed or was terminated, restarting service.
+[40740:0613/210742.817:ERROR:content\browser\gpu\gpu_process_host.cc:996] GPU process exited unexpectedly: exit_code=-1
+21:07:42.817          > child process gone {
+  details: { type: 'GPU', reason: 'crashed', exitCode: -1, serviceName: 'GPU' }
+}

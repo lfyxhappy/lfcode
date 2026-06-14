@@ -1,0 +1,46 @@
+Copied dev icons from ./icons/dev to resources/icons
+opencode script {
+  "channel": "dev",
+  "version": "0.0.0-dev-202606121533",
+  "preview": true,
+  "release": false
+}
+Generated models-snapshot.js
+Loaded 34 migrations
+Build complete
+[36mvite v7.1.4 [32mbuilding SSR bundle for development...[36m[39m
+transforming...
+[32m✓[39m 18 modules transformed.
+rendering chunks...
+[2mout/main/[22m[36mindex.js                 [39m[1m[2m    33.16 kB[22m[1m[22m
+[2mout/main/[22m[36mchunks/node-Bvtg7egV.js  [39m[1m[33m20,087.24 kB[39m[22m
+[32m✓ built in 17.54s[39m
+[32m
+electron main process built successfully[39m
+[90m
+-----
+[39m
+[36mvite v7.1.4 [32mbuilding SSR bundle for development...[36m[39m
+transforming...
+[32m✓[39m 1 modules transformed.
+rendering chunks...
+[2mout/preload/[22m[36mindex.js  [39m[1m[2m4.27 kB[22m[1m[22m
+[32m✓ built in 35ms[39m
+[32m
+electron preload scripts built successfully[39m
+[90m
+-----
+[39m
+[32mdev server running for the electron renderer process at:
+[39m
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[32m
+starting electron app...
+[39m
+
+23:34:07.390 > app starting { version: '0.1.0', packaged: false }
+23:34:07.538 > sidecar connection started { url: 'http://127.0.0.1:2986' }
+23:34:07.539 > spawning sidecar { url: 'http://127.0.0.1:2986' }
+23:34:08.653 > loading task finished
+23:34:08.654 > init step { step: { phase: 'done' } }

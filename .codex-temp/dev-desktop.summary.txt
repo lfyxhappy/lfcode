@@ -1,0 +1,93 @@
+{
+  "pid": 52092,
+  "hasExited": true,
+  "exitCode": 1,
+  "processTree": [
+    {
+      "ProcessId": 52092,
+      "Name": null
+    }
+  ],
+  "logRoot": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs",
+  "logFiles": [
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\renderer.log",
+      "Length": 569,
+      "LastWriteTime": "2026-06-12T21:28:23.0632031+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\main.log",
+      "Length": 927,
+      "LastWriteTime": "2026-06-12T21:28:23.0317484+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\network.log",
+      "Length": 178,
+      "LastWriteTime": "2026-06-12T21:28:08.2934158+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\network.netlog",
+      "Length": 387,
+      "LastWriteTime": "2026-06-12T21:28:08.2901864+08:00"
+    },
+    {
+      "FullName": "C:\\Users\\liangfeng\\AppData\\Roaming\\ai.opencode.desktop.dev\\logs\\20260612T132807\\crash.log",
+      "Length": 154,
+      "LastWriteTime": "2026-06-12T21:28:07.8827056+08:00"
+    }
+  ],
+  "stdoutTail": [
+    "Copied dev icons from ./icons/dev to resources/icons",
+    "opencode script {",
+    "  \"channel\": \"dev\",",
+    "  \"version\": \"0.0.0-dev-202606121524\",",
+    "  \"preview\": true,",
+    "  \"release\": false",
+    "}",
+    "Generated models-snapshot.js",
+    "Loaded 34 migrations",
+    "Build complete",
+    "\u001b[36mvite v7.1.4 \u001b[32mbuilding SSR bundle for development...\u001b[36m\u001b[39m",
+    "transforming...",
+    "\u001b[32m✓\u001b[39m 18 modules transformed.",
+    "rendering chunks...",
+    "\u001b[2mout/main/\u001b[22m\u001b[36mindex.js                 \u001b[39m\u001b[1m\u001b[2m    33.16 kB\u001b[22m\u001b[1m\u001b[22m",
+    "\u001b[2mout/main/\u001b[22m\u001b[36mchunks/node-ByyQFyCt.js  \u001b[39m\u001b[1m\u001b[33m20,080.64 kB\u001b[39m\u001b[22m",
+    "\u001b[32m✓ built in 13.88s\u001b[39m",
+    "\u001b[32m",
+    "electron main process built successfully\u001b[39m",
+    "\u001b[90m",
+    "-----",
+    "\u001b[39m",
+    "\u001b[36mvite v7.1.4 \u001b[32mbuilding SSR bundle for development...\u001b[36m\u001b[39m",
+    "transforming...",
+    "\u001b[32m✓\u001b[39m 1 modules transformed.",
+    "rendering chunks...",
+    "\u001b[2mout/preload/\u001b[22m\u001b[36mindex.js  \u001b[39m\u001b[1m\u001b[2m4.27 kB\u001b[22m\u001b[1m\u001b[22m",
+    "\u001b[32m✓ built in 18ms\u001b[39m",
+    "\u001b[32m",
+    "electron preload scripts built successfully\u001b[39m",
+    "\u001b[90m",
+    "-----",
+    "\u001b[39m",
+    "\u001b[32mdev server running for the electron renderer process at:",
+    "\u001b[39m",
+    "  \u001b[32m➜\u001b[39m  \u001b[1mLocal\u001b[22m:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m",
+    "\u001b[2m  \u001b[32m➜\u001b[39m  \u001b[1mNetwork\u001b[22m\u001b[2m: use \u001b[22m\u001b[1m--host\u001b[22m\u001b[2m to expose\u001b[22m"
+  ],
+  "stderrTail": [
+    "$ bun ./scripts/predev.ts",
+    "$ electron-vite dev",
+    "\u001b[33m../opencode/dist/node/node.js (122870:15): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "\u001b[33m../opencode/dist/node/node.js (256731:34): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "\u001b[33m../opencode/dist/node/node.js (256754:36): Use of eval in \"../opencode/dist/node/node.js\" is strongly discouraged as it poses security risks and may cause issues with minification.\u001b[39m",
+    "\u001b[31merror during start dev server and electron app:",
+    "Error: Electron uninstall",
+    "    at getElectronPath (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/opencode/node_modules/.bun/electron-vite@5.0.0+69dee0f214cbc281/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js:155:19)",
+    "    at startElectron (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/opencode/node_modules/.bun/electron-vite@5.0.0+69dee0f214cbc281/node_modules/electron-vite/dist/chunks/lib-q6ns0vZr.js:222:26)",
+    "    at createServer (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/opencode/node_modules/.bun/electron-vite@5.0.0+69dee0f214cbc281/node_modules/electron-vite/dist/chunks/lib-7y7CgM8M.js:74:14)",
+    "    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+    "    at async CAC.<anonymous> (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/opencode/node_modules/.bun/electron-vite@5.0.0+69dee0f214cbc281/node_modules/electron-vite/dist/cli.js:67:9)\u001b[39m",
+    "error: script \"dev\" exited with code 1"
+  ]
+}
