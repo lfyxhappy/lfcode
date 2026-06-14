@@ -1,3 +1,0 @@
-$ bun ./scripts/predev.ts
-$ electron-vite dev
-error: script "dev" exited with code 255

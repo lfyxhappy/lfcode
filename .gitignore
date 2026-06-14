@@ -7,6 +7,8 @@ node_modules
 .idea
 .vscode
 .codex
+.codex-temp/
+.playwright-mcp/
 *~
 playground
 tmp

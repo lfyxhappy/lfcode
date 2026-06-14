@@ -1,8 +1,0 @@
-$ bun --cwd packages/desktop dev
-$ bun ./scripts/predev.ts
-$ electron-vite dev
-[33m../opencode/dist/node/node.js (122497:15): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
-[33m../opencode/dist/node/node.js (256364:34): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
-[33m../opencode/dist/node/node.js (256387:36): Use of eval in "../opencode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
-(node:82976) ExperimentalWarning: SQLite is an experimental feature and might change at any time
-(Use `electron --trace-warnings ...` to show where the warning was created)

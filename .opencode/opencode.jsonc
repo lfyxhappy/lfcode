@@ -6,7 +6,7 @@
       "name": "Volcano Engine",
       "options": {
         "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-        "apiKey": "cbd0e8ce-1645-4583-93fd-8bb8ae701bd7",
+        "apiKey": "",
       },
       "models": {
         "ark-code-latest": {
