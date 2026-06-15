@@ -47,6 +47,24 @@ Examples:
 
 await rm(file, { force: true })
 
+async function fallback() {
+  console.error("opencode changelog unavailable, falling back to raw changelog")
+  const proc = Bun.spawn(["bun", "script/raw-changelog.ts", ...args], {
+    cwd: root,
+    stdin: "inherit",
+    stdout: "pipe",
+    stderr: "inherit",
+  })
+  const out = await new Response(proc.stdout).text()
+  const code = await proc.exited
+  if (code !== 0) process.exit(code)
+  await Bun.write(file, out.endsWith("\n") ? out : `${out}\n`)
+  if (values.print) process.stdout.write(await Bun.file(file).text())
+  process.exit(0)
+}
+
+if (!process.env.OPENCODE_API_KEY) await fallback()
+
 const quiet = values.quiet
 const cmd = ["opencode", "run"]
 cmd.push("--variant", values.variant)
@@ -73,4 +91,4 @@ if (quiet) {
   if (err) process.stderr.write(err)
 }
 
-process.exit(code)
+await fallback()
