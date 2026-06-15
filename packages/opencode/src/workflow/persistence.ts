@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import path from "path"
 import { createHash } from "node:crypto"
 import { appendFileSync, mkdirSync } from "node:fs"
+import fs from "fs/promises"
 import { Database, eq, desc } from "../storage"
 import { WorkflowRunTable } from "./workflow.sql"
 import { Global } from "../global"
@@ -229,16 +230,14 @@ const load = (runID: string) =>
 
 const writeScript = (runID: string, body: string) =>
   Effect.promise(async () => {
-    const fs = await import("fs/promises")
     await fs.mkdir(scriptDir(), { recursive: true })
-    await Bun.write(scriptPath(runID), body)
+    await fs.writeFile(scriptPath(runID), body)
   })
 
-const readScript = (runID: string) => Effect.promise(() => Bun.file(scriptPath(runID)).text())
+const readScript = (runID: string) => Effect.promise(() => fs.readFile(scriptPath(runID), "utf-8"))
 
 const appendJournal = (runID: string, event: JournalEvent) =>
   Effect.promise(async () => {
-    const fs = await import("fs/promises")
     await fs.mkdir(scriptDir(), { recursive: true })
     await fs.appendFile(journalPath(runID), JSON.stringify(event) + "\n")
   })
@@ -262,9 +261,11 @@ const appendJournalSync = (runID: string, events: JournalEvent[]) =>
 
 const loadJournal = (runID: string): Effect.Effect<JournalLoad> =>
   Effect.promise(async () => {
-    const file = Bun.file(journalPath(runID))
-    if (!(await file.exists())) return { results: new Map(), pass: 1 }
-    const text = await file.text()
+    const text = await fs.readFile(journalPath(runID), "utf-8").catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ENOENT") return undefined
+      throw e
+    })
+    if (text === undefined) return { results: new Map(), pass: 1 }
     const results = new Map<string, unknown>()
     let maxPass = 0
     for (const line of text.split("\n")) {
@@ -291,9 +292,8 @@ const loadJournal = (runID: string): Effect.Effect<JournalLoad> =>
 // truncate cannot fail on a never-written run (no journal yet → still ends empty).
 const clearJournal = (runID: string) =>
   Effect.promise(async () => {
-    const fs = await import("fs/promises")
     await fs.mkdir(scriptDir(), { recursive: true })
-    await Bun.write(journalPath(runID), "")
+    await fs.writeFile(journalPath(runID), "")
   })
 
 export const WorkflowPersistence = {

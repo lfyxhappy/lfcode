@@ -1,5 +1,6 @@
 import path from "path"
 import { existsSync } from "fs"
+import fs from "fs/promises"
 import { Slug } from "@mimo-ai/shared/util/slug"
 import { Glob } from "@mimo-ai/shared/util/glob"
 import { Global } from "../global"
@@ -271,7 +272,7 @@ export async function run(opts?: { force?: boolean }) {
       }
 
       const sessionId = existing ? existing.session_id : SessionID.descending()
-      const parsed = parse(await Bun.file(file).text(), sessionId)
+      const parsed = parse(await fs.readFile(file, "utf-8"), sessionId)
       if (!parsed || parsed.messages.length === 0) {
         stats.skipped++
         continue

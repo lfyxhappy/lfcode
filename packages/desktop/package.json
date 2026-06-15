@@ -1,7 +1,7 @@
 {
   "name": "@mimo-ai/desktop",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "license": "MIT",
   "homepage": "https://github.com/lfyxhappy/lfcode",
@@ -20,7 +20,7 @@
     "preview": "electron-vite preview",
     "package": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --config electron-builder.config.ts",
     "package:mac": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --mac --config electron-builder.config.ts",
-    "package:win": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --win --publish never --config electron-builder.config.ts",
+    "package:win": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --win --publish never --config electron-builder.config.ts && bun ./scripts/prune-win-dist.ts",
     "package:linux": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --linux --config electron-builder.config.ts",
     "native:build": "bun install --cwd native"
   },
