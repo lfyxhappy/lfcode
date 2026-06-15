@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   version:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     if: github.repository == 'lfyxhappy/lfcode'
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
@@ -66,7 +66,7 @@ jobs:
 
   build-cli:
     needs: version
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     if: github.repository == 'lfyxhappy/lfcode'
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
@@ -117,7 +117,7 @@ jobs:
     needs:
       - build-cli
       - version
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-latest
     if: github.repository == 'lfyxhappy/lfcode'
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -230,7 +230,7 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: "blacksmith-4vcpu-windows-2025"
+          - host: "windows-latest"
             target: x86_64-pc-windows-msvc
             platform_flag: --win
     runs-on: ${{ matrix.settings.host }}
@@ -334,7 +334,7 @@ jobs:
       - sign-cli-windows
       - build-electron
     if: always() && !failure() && !cancelled()
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
 
