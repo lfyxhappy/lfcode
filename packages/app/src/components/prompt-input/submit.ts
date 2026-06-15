@@ -42,6 +42,7 @@ type FollowupSendInput = {
   sync: ReturnType<typeof useSync>
   draft: FollowupDraft
   messageID?: string
+  initialPrompt?: boolean
   optimisticBusy?: boolean
   before?: () => Promise<boolean> | boolean
 }
@@ -152,14 +153,25 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    await input.client.session.promptAsync({
-      sessionID: input.draft.sessionID,
-      agent: input.draft.agent,
-      model: input.draft.model,
-      messageID,
-      parts: requestParts,
-      variant: input.draft.variant,
-    })
+    const sendPrompt = input.initialPrompt
+      ? input.client.session.prompt({
+          sessionID: input.draft.sessionID,
+          agent: input.draft.agent,
+          model: input.draft.model,
+          messageID,
+          parts: requestParts,
+          variant: input.draft.variant,
+        })
+      : input.client.session.promptAsync({
+          sessionID: input.draft.sessionID,
+          agent: input.draft.agent,
+          model: input.draft.model,
+          messageID,
+          parts: requestParts,
+          variant: input.draft.variant,
+        })
+
+    await sendPrompt
     return true
   } catch (err) {
     batch(() => {
@@ -560,6 +572,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       globalSync,
       draft,
       messageID,
+      initialPrompt: isNewSession,
       optimisticBusy: sessionDirectory === projectDirectory,
       before: waitForWorktree,
     }).catch((err) => {

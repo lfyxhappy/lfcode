@@ -1,4 +1,4 @@
-import * as fs from "fs/promises"
+import fs from "fs/promises"
 import path from "path"
 import { Database, eq } from "../storage"
 import { Log } from "../util"
@@ -57,7 +57,11 @@ export async function indexFromDisk(
   const fingerprint = `${stat.size}-${stat.mtimeMs}`
   if (oldFingerprint === fingerprint) return "hit"
 
-  const body = await Bun.file(absPath).text()
+  const body = await fs.readFile(absPath, "utf-8").catch((e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT") return undefined
+    throw e
+  })
+  if (body === undefined) return "skipped"
 
   // For CC files, derive type from frontmatter; mimo files keep loc.type from path.
   const finalType =

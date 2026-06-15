@@ -20,6 +20,8 @@ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
+const sentPrompt: string[] = []
+const sentPromptAsync: string[] = []
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
@@ -44,8 +46,14 @@ const clientFor = (directory: string) => {
         sentShell.push(directory)
         return { data: undefined }
       },
-      prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
+      promptAsync: async () => {
+        sentPromptAsync.push(directory)
+        return { data: undefined }
+      },
+      prompt: async () => {
+        sentPrompt.push(directory)
+        return { data: undefined }
+      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -210,6 +218,8 @@ beforeEach(() => {
   promoted.length = 0
   params = {}
   sentShell.length = 0
+  sentPrompt.length = 0
+  sentPromptAsync.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
@@ -341,5 +351,63 @@ describe("prompt submit worktree selection", () => {
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
+  })
+
+  test("sends the first prompt for a new session via prompt", async () => {
+    const submit = createPromptSubmit({
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPrompt).toEqual(["/repo/worktree-a"])
+    expect(sentPromptAsync).toEqual([])
+  })
+
+  test("sends followups for existing sessions via promptAsync", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync).toEqual(["/repo/main"])
   })
 })
