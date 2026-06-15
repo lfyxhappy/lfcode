@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 import type { App } from "electron"
 
 const CONFIG_FILES = ["opencode.jsonc", "opencode.json", "config.json"] as const
+const MANAGED_ROOT_DIR = ".lfcode"
 
 type RootEnv = {
   readonly OPENCODE_CONFIG_DIR: string
@@ -42,6 +43,7 @@ export type DesktopBootstrapState = {
   readonly migration?: MigrationSummary
   readonly mode: "legacy" | "root"
   readonly notes: readonly string[]
+  readonly rootKind?: "managed" | "portable"
   readonly userDataDir: string
 }
 
@@ -50,6 +52,7 @@ type BootstrapTargetInput = {
   readonly appName: string
   readonly legacyUserDataDir: string
   readonly root: string | undefined
+  readonly rootKind?: "managed" | "portable"
   readonly rootWritable: boolean
 }
 
@@ -57,9 +60,10 @@ type DesktopBootstrapInput = {
   readonly appId: string
   readonly appName: string
   readonly execPath: string
+  readonly homeDir?: string
   readonly isPackaged: boolean
   readonly legacyUserDataDir: string
-  readonly migrationSources?: Partial<MigrationSources>
+  readonly migrationSources?: readonly Partial<MigrationSources>[]
   readonly platform: string
   readonly portableRoot?: string
 }
@@ -86,7 +90,7 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
 }
 
 export async function canWriteDirectory(directory: string) {
-  const probe = join(directory, `.opencode-write-test-${process.pid}-${Date.now()}`)
+  const probe = join(resolveProbeDirectory(directory), `.opencode-write-test-${process.pid}-${Date.now()}`)
   const wrote = await writeFile(probe, "").then(
     () => true,
     () => false,
@@ -115,7 +119,7 @@ export function getBootstrapState() {
 }
 
 export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBootstrapState {
-  if (!input.root) {
+  if (!input.root || !input.rootKind) {
     return {
       appId: input.appId,
       appName: input.appName,
@@ -131,7 +135,7 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
       appId: input.appId,
       appName: input.appName,
       env: {},
-      fallbackReason: `program root is not writable: ${input.root}`,
+      fallbackReason: `desktop root is not writable: ${input.root}`,
       mode: "legacy",
       notes: [`desktop bootstrap falling back to legacy user directory mode: ${input.root}`],
       userDataDir: input.legacyUserDataDir,
@@ -150,29 +154,43 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
     },
     layout,
     mode: "root",
-    notes: [`desktop bootstrap using program root mode: ${layout.root}`],
+    notes: [
+      input.rootKind === "portable"
+        ? `desktop bootstrap using portable root mode: ${layout.root}`
+        : `desktop bootstrap using managed root mode: ${layout.root}`,
+    ],
+    rootKind: input.rootKind,
     userDataDir: layout.userDataDir,
   }
 }
 
-export function resolveWindowsRootDirectory(input: {
+export function resolveManagedRootDirectory(input: {
+  readonly homeDir?: string
+  readonly isPackaged: boolean
+  readonly platform: string
+}) {
+  if (input.platform !== "win32" || !input.isPackaged) return
+  return join(input.homeDir ?? homedir(), MANAGED_ROOT_DIR)
+}
+
+function resolveInstalledWindowsRootDirectory(input: {
   readonly execPath: string
   readonly isPackaged: boolean
   readonly platform: string
-  readonly portableRoot?: string
 }) {
-  if (input.portableRoot) return input.portableRoot
   if (input.platform !== "win32" || !input.isPackaged) return
   return dirname(input.execPath)
 }
 
 export function resolveDesktopBootstrap(input: DesktopBootstrapInput) {
-  const root = resolveWindowsRootDirectory(input)
+  const rootKind = input.portableRoot ? "portable" : "managed"
+  const root = input.portableRoot ?? resolveManagedRootDirectory(input)
   return resolveBootstrapTarget({
     appId: input.appId,
     appName: input.appName,
     legacyUserDataDir: input.legacyUserDataDir,
     root,
+    rootKind,
     rootWritable: root ? canWriteDirectorySync(root) : false,
   })
 }
@@ -187,7 +205,7 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
   await ensureRootLayout(state.layout)
   const migration = await migrateRootLayout(state.layout, {
     appId: input.appId,
-    sources: input.migrationSources,
+    sources: getMigrationSources(input, state),
   })
   await ensureRootConfigFile(state.layout)
   const next = {
@@ -206,7 +224,7 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
 
 export async function migrateRootLayout(
   layout: RootLayout,
-  input: { readonly appId: string; readonly sources?: Partial<MigrationSources> },
+  input: { readonly appId: string; readonly sources?: readonly Partial<MigrationSources>[] },
 ): Promise<MigrationSummary> {
   await mkdir(layout.stateDir, { recursive: true })
   const markerExists = await pathExists(layout.migrationMarker)
@@ -220,18 +238,18 @@ export async function migrateRootLayout(
     }
   }
 
-  const sources = {
-    ...getLegacyMigrationSources(input.appId),
-    ...input.sources,
-  }
+  const sources = input.sources?.length ? input.sources : [getLegacyMigrationSources(input.appId)]
   const copied: string[] = []
   const preserved: string[] = []
 
-  await copyConfigDirectory(sources.configDir, layout, copied, preserved)
-  await copyMissingPath(sources.dataDir, layout.dataDir, copied, preserved)
-  await copyMissingPath(sources.stateDir, layout.stateDir, copied, preserved)
-  await copyMissingPath(sources.cacheDir, layout.cacheDir, copied, preserved)
-  await copyMissingPath(sources.userDataDir, layout.userDataDir, copied, preserved)
+  for (const source of sources) {
+    if (!source) continue
+    if (source.configDir) await copyConfigDirectory(source.configDir, layout, copied, preserved)
+    if (source.dataDir) await copyMissingPath(source.dataDir, layout.dataDir, copied, preserved)
+    if (source.stateDir) await copyMissingPath(source.stateDir, layout.stateDir, copied, preserved)
+    if (source.cacheDir) await copyMissingPath(source.cacheDir, layout.cacheDir, copied, preserved)
+    if (source.userDataDir) await copyMissingPath(source.userDataDir, layout.userDataDir, copied, preserved)
+  }
 
   await writeFile(
     layout.migrationMarker,
@@ -335,9 +353,7 @@ async function findLegacyConfigFile(directory: string) {
   }
 }
 
-function getLegacyMigrationSources(appId: string): MigrationSources {
-  const home = homedir()
-  const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming")
+function getLegacyMigrationSources(appId: string, home = homedir(), appData = process.env.APPDATA ?? join(home, "AppData", "Roaming")): MigrationSources {
   return {
     configDir: join(home, ".config", "opencode"),
     dataDir: join(home, ".local", "share", "opencode"),
@@ -347,14 +363,50 @@ function getLegacyMigrationSources(appId: string): MigrationSources {
   }
 }
 
+function getMigrationSources(input: DesktopBootstrapInput, state: DesktopBootstrapState) {
+  const defaults = input.migrationSources?.length
+    ? input.migrationSources
+    : [getLegacyMigrationSources(input.appId, input.homeDir, input.homeDir ? join(input.homeDir, "AppData", "Roaming") : undefined)]
+  if (state.mode !== "root" || !state.layout) return [...defaults]
+  if (state.rootKind !== "managed") return [...defaults]
+
+  const installedRoot = resolveInstalledWindowsRootDirectory(input)
+  const priorRoot =
+    installedRoot && installedRoot !== state.layout.root ? createRootLayout(installedRoot, input.appId) : undefined
+  const priorRootSource = priorRoot
+    ? {
+        configDir: priorRoot.configDir,
+        dataDir: priorRoot.dataDir,
+        stateDir: priorRoot.stateDir,
+        cacheDir: priorRoot.cacheDir,
+        userDataDir: priorRoot.userDataDir,
+      }
+    : undefined
+  return [priorRootSource, ...defaults].filter(
+    (source): source is Partial<MigrationSources> => !!source,
+  )
+}
+
 function canWriteDirectorySync(directory: string) {
-  const probe = join(directory, `.opencode-write-test-${process.pid}-${Date.now()}`)
+  const probe = join(resolveProbeDirectory(directory), `.opencode-write-test-${process.pid}-${Date.now()}`)
   try {
     writeFileSync(probe, "")
     unlinkSync(probe)
     return true
   } catch {
     return false
+  }
+}
+
+function resolveProbeDirectory(directory: string) {
+  let current = directory
+  while (true) {
+    try {
+      if (statSync(current).isDirectory()) return current
+    } catch {}
+    const parent = dirname(current)
+    if (parent === current) return current
+    current = parent
   }
 }
 

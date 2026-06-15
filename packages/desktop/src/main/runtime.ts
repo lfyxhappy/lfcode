@@ -413,7 +413,7 @@ function setupAutoUpdater() {
 }
 
 function ensurePortableWindowsShortcuts() {
-  if (process.platform !== "win32" || !app.isPackaged || bootstrapState?.mode !== "root") return
+  if (process.platform !== "win32" || !app.isPackaged || bootstrapState?.rootKind !== "portable") return
 
   const shortcut = {
     target: process.execPath,

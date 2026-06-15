@@ -1,16 +1,28 @@
 import { useFilteredList } from "@mimo-ai/ui/hooks"
 import { ProviderIcon } from "@mimo-ai/ui/provider-icon"
+import { Select } from "@mimo-ai/ui/select"
 import { Switch } from "@mimo-ai/ui/switch"
 import { Icon } from "@mimo-ai/ui/icon"
 import { IconButton } from "@mimo-ai/ui/icon-button"
 import { TextField } from "@mimo-ai/ui/text-field"
-import { type Component, For, Show } from "solid-js"
+import { showToast } from "@mimo-ai/ui/toast"
+import { type Component, createMemo, createSignal, For, type JSX, Show } from "solid-js"
+import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
+import { formatServerError } from "@/utils/server-errors"
 import { SettingsList } from "./settings-list"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
+type ConfigModelField = "model" | "small_model"
+type ModelOption = {
+  value: string
+  label: string
+  provider: string
+  providerID?: string
+  custom?: boolean
+}
 
 const ListLoadingState: Component<{ label: string }> = (props) => {
   return (
@@ -31,9 +43,100 @@ const ListEmptyState: Component<{ message: string; filter: string }> = (props) =
   )
 }
 
+const SettingsRow: Component<{ title: string; description: string | JSX.Element; children: JSX.Element }> = (props) => {
+  return (
+    <div class="flex flex-wrap items-center gap-4 py-3 border-b border-border-weak-base last:border-none sm:flex-nowrap">
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span class="text-14-medium text-text-strong">{props.title}</span>
+        <span class="text-12-regular text-text-weak">{props.description}</span>
+      </div>
+      <div class="flex w-full justify-end sm:w-auto sm:shrink-0">{props.children}</div>
+    </div>
+  )
+}
+
 export const SettingsModels: Component = () => {
   const language = useLanguage()
   const models = useModels()
+  const globalSync = useGlobalSync()
+  const [saving, setSaving] = createSignal<ConfigModelField>()
+
+  const modelValue = (item: ModelItem) => `${item.provider.id}/${item.id}`
+
+  const baseOptions = createMemo<ModelOption[]>(() =>
+    models
+      .list()
+      .map((item) => ({
+        value: modelValue(item),
+        label: item.name,
+        provider: item.provider.name,
+        providerID: item.provider.id,
+      }))
+      .sort((a, b) => {
+        const aIndex = popularProviders.indexOf(a.providerID ?? "")
+        const bIndex = popularProviders.indexOf(b.providerID ?? "")
+        const aPopular = aIndex >= 0
+        const bPopular = bIndex >= 0
+
+        if (aPopular && !bPopular) return -1
+        if (!aPopular && bPopular) return 1
+        if (aPopular && bPopular && aIndex !== bIndex) return aIndex - bIndex
+        if (a.provider !== b.provider) return a.provider.localeCompare(b.provider)
+        return a.label.localeCompare(b.label)
+      }),
+  )
+
+  const options = createMemo<ModelOption[]>(() => {
+    const seen = new Set(baseOptions().map((item) => item.value))
+    const current = [globalSync.data.config.model, globalSync.data.config.small_model]
+      .filter((value): value is string => !!value && !seen.has(value))
+      .map((value) => ({
+        value,
+        label: value,
+        provider: language.t("settings.models.group.currentConfig"),
+        custom: true,
+      }) satisfies ModelOption)
+    return [...current, ...baseOptions()]
+  })
+
+  const currentOption = (field: ConfigModelField) => {
+    const value = globalSync.data.config[field]
+    if (!value) return
+    return options().find((item) => item.value === value) ?? {
+      value,
+      label: value,
+      provider: language.t("settings.models.group.currentConfig"),
+      custom: true,
+    }
+  }
+
+  const saveModel = async (field: ConfigModelField, option: ModelOption | undefined) => {
+    if (!option) return
+    if (globalSync.data.config[field] === option.value) return
+    if (saving()) return
+
+    setSaving(field)
+    await globalSync
+      .updateConfig({ [field]: option.value })
+      .then(() => {
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.models.toast.updated.title"),
+          description:
+            field === "model"
+              ? language.t("settings.models.toast.default.description", { model: option.label })
+              : language.t("settings.models.toast.small.description", { model: option.label }),
+        })
+      })
+      .catch((err: unknown) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: formatServerError(err, language.t, language.t("common.requestFailed")),
+        })
+      })
+      .finally(() => setSaving(undefined))
+  }
 
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
@@ -61,7 +164,10 @@ export const SettingsModels: Component = () => {
     <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
         <div class="flex flex-col gap-4 pt-6 pb-6 max-w-[720px]">
-          <h2 class="text-16-medium text-text-strong">{language.t("settings.models.title")}</h2>
+          <div>
+            <h2 class="text-16-medium text-text-strong">{language.t("settings.models.title")}</h2>
+            <p class="pt-1 text-14-regular text-text-weak">{language.t("settings.models.description")}</p>
+          </div>
           <div class="flex items-center gap-2 px-3 h-9 rounded-lg bg-surface-base">
             <Icon name="magnifying-glass" class="text-icon-weak-base flex-shrink-0" />
             <TextField
@@ -84,6 +190,72 @@ export const SettingsModels: Component = () => {
       </div>
 
       <div class="flex flex-col gap-8 max-w-[720px]">
+        <div class="flex flex-col gap-1">
+          <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.models.section.defaults")}</h3>
+          <SettingsList>
+            <SettingsRow
+              title={language.t("settings.models.default.title")}
+              description={language.t("settings.models.default.description")}
+            >
+              <Select
+                data-action="settings-default-model"
+                options={options()}
+                current={currentOption("model")}
+                value={(item) => item.value}
+                label={(item) => item.label}
+                groupBy={(item) => item.provider}
+                onSelect={(item) => void saveModel("model", item)}
+                placeholder={language.t("settings.models.default.placeholder")}
+                disabled={saving() !== undefined || options().length === 0}
+                variant="secondary"
+                size="small"
+                triggerVariant="settings"
+                triggerStyle={{ "min-width": "260px", "max-width": "360px" }}
+                valueClass="truncate"
+              >
+                {(item) => (
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Show when={item?.providerID}>
+                      {(providerID) => <ProviderIcon id={providerID()} class="size-4 shrink-0 icon-weak-base" />}
+                    </Show>
+                    <span class="truncate">{item?.label}</span>
+                  </div>
+                )}
+              </Select>
+            </SettingsRow>
+            <SettingsRow
+              title={language.t("settings.models.small.title")}
+              description={language.t("settings.models.small.description")}
+            >
+              <Select
+                data-action="settings-small-model"
+                options={options()}
+                current={currentOption("small_model")}
+                value={(item) => item.value}
+                label={(item) => item.label}
+                groupBy={(item) => item.provider}
+                onSelect={(item) => void saveModel("small_model", item)}
+                placeholder={language.t("settings.models.small.placeholder")}
+                disabled={saving() !== undefined || options().length === 0}
+                variant="secondary"
+                size="small"
+                triggerVariant="settings"
+                triggerStyle={{ "min-width": "260px", "max-width": "360px" }}
+                valueClass="truncate"
+              >
+                {(item) => (
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Show when={item?.providerID}>
+                      {(providerID) => <ProviderIcon id={providerID()} class="size-4 shrink-0 icon-weak-base" />}
+                    </Show>
+                    <span class="truncate">{item?.label}</span>
+                  </div>
+                )}
+              </Select>
+            </SettingsRow>
+          </SettingsList>
+        </div>
+
         <Show
           when={!list.grouped.loading}
           fallback={

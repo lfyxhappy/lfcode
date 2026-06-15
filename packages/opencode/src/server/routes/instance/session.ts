@@ -1030,6 +1030,11 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
+        await runRequest(
+          "SessionRoutes.prompt_async.assertNotBusy",
+          c,
+          SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+        )
         void runRequest(
           "SessionRoutes.prompt_async",
           c,

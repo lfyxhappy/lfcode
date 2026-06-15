@@ -5,6 +5,7 @@ import path from "node:path"
 import { resolveChannel } from "./utils"
 
 const channel = resolveChannel()
+const opencodeDir = path.resolve(import.meta.dir, "../../opencode")
 const pkg = await Bun.file("./package.json").json()
 const rootPkg = await Bun.file(path.resolve(import.meta.dir, "../../../package.json")).json()
 if (pkg.version !== rootPkg.version) {
@@ -15,8 +16,7 @@ if (pkg.version !== rootPkg.version) {
 
 await $`bun ./scripts/copy-icons.ts ${channel}`
 
-await $`bun script/build-node.ts`
-  .cwd("../opencode")
+await $`bun ${path.join(opencodeDir, "script/build-node.ts")}`
   .env({
     ...process.env,
     OPENCODE_CHANNEL: channel,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "node:path"
-import { createRootLayout, migrateRootLayout, prepareDesktopBootstrap, resolveBootstrapTarget, resolveWindowsRootDirectory } from "./bootstrap"
+import { createRootLayout, migrateRootLayout, prepareDesktopBootstrap, resolveBootstrapTarget, resolveManagedRootDirectory } from "./bootstrap"
 
 async function tmpdir() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-desktop-bootstrap-"))
@@ -15,24 +15,14 @@ async function tmpdir() {
 }
 
 describe("desktop bootstrap paths", () => {
-  test("resolves the packaged win-unpacked root from process.execPath", () => {
+  test("resolves the managed packaged root under the user home directory", () => {
     expect(
-      resolveWindowsRootDirectory({
-        execPath: "C:\\Lfcode\\win-unpacked\\Lfcode Dev.exe",
+      resolveManagedRootDirectory({
+        homeDir: "C:\\Users\\liangfeng",
         isPackaged: true,
         platform: "win32",
       }),
-    ).toBe("C:\\Lfcode\\win-unpacked")
-  })
-
-  test("resolves the installed executable root from process.execPath", () => {
-    expect(
-      resolveWindowsRootDirectory({
-        execPath: "C:\\Program Files\\Lfcode\\Lfcode.exe",
-        isPackaged: true,
-        platform: "win32",
-      }),
-    ).toBe("C:\\Program Files\\Lfcode")
+    ).toBe("C:\\Users\\liangfeng\\.lfcode")
   })
 
   test("maps a Windows program root to root-level config and data directories", () => {
@@ -48,18 +38,19 @@ describe("desktop bootstrap paths", () => {
     })
   })
 
-  test("falls back to legacy mode when the program root is not writable", () => {
+  test("falls back to legacy mode when the managed desktop root is not writable", () => {
     const state = resolveBootstrapTarget({
       appId: "com.lfyxhappy.lfcode.dev",
       appName: "Lfcode Dev",
       legacyUserDataDir: "C:\\Users\\liangfeng\\AppData\\Roaming\\com.lfyxhappy.lfcode.dev",
-      root: "C:\\Program Files\\Lfcode",
+      root: "C:\\Users\\liangfeng\\.lfcode",
+      rootKind: "managed",
       rootWritable: false,
     })
 
     expect(state.mode).toBe("legacy")
     expect(state.userDataDir).toBe("C:\\Users\\liangfeng\\AppData\\Roaming\\com.lfyxhappy.lfcode.dev")
-    expect(state.fallbackReason).toBe("program root is not writable: C:\\Program Files\\Lfcode")
+    expect(state.fallbackReason).toBe("desktop root is not writable: C:\\Users\\liangfeng\\.lfcode")
   })
 
   test("copies missing legacy files into the root layout without overwriting existing files", async () => {
@@ -91,7 +82,7 @@ describe("desktop bootstrap paths", () => {
 
     const migration = await migrateRootLayout(layout, {
       appId: "com.lfyxhappy.lfcode.dev",
-      sources,
+      sources: [sources],
     })
 
     expect(migration.performed).toBe(true)
@@ -122,7 +113,7 @@ describe("desktop bootstrap paths", () => {
 
     const migration = await migrateRootLayout(layout, {
       appId: "com.lfyxhappy.lfcode.dev",
-      sources,
+      sources: [sources],
     })
 
     expect(migration.performed).toBe(false)
@@ -150,9 +141,10 @@ describe("desktop bootstrap paths", () => {
       appId: "com.lfyxhappy.lfcode.dev",
       appName: "Lfcode Dev",
       execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
-      migrationSources,
+      migrationSources: [migrationSources],
       platform: "win32",
       portableRoot: root,
     })
@@ -160,6 +152,41 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(await fs.readFile(path.join(root, "opencode.jsonc"), "utf8")).toBe(
       '{\n  "$schema": "https://opencode.ai/config.json"\n}\n',
+    )
+  })
+
+  test("migrates an existing installed-root layout into the managed home root", async () => {
+    await using tmp = await tmpdir()
+    const home = path.join(tmp.path, "home")
+    const installedRoot = path.join(tmp.path, "Program Files", "Lfcode")
+    const execPath = path.join(installedRoot, "Lfcode.exe")
+    const managedRoot = path.join(home, ".lfcode")
+
+    await fs.mkdir(home, { recursive: true })
+    await fs.mkdir(path.join(installedRoot, "data"), { recursive: true })
+    await fs.mkdir(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev"), { recursive: true })
+    await fs.writeFile(path.join(installedRoot, "opencode.jsonc"), "{\"providers\":{\"root\":true}}")
+    await fs.writeFile(path.join(installedRoot, "data", "auth.json"), "legacy-root-data")
+    await fs.writeFile(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "{\"from\":\"root\"}")
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath,
+      homeDir: home,
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+    })
+
+    expect(state.mode).toBe("root")
+    expect(state.rootKind).toBe("managed")
+    expect(state.layout?.root).toBe(managedRoot)
+    expect(await fs.readFile(path.join(managedRoot, "opencode.jsonc"), "utf8")).toBe("{\"providers\":{\"root\":true}}")
+    expect(await fs.readFile(path.join(managedRoot, "data", "auth.json"), "utf8")).toBe("legacy-root-data")
+    expect(await fs.readFile(path.join(managedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "utf8")).toBe(
+      "{\"from\":\"root\"}",
     )
   })
 })
