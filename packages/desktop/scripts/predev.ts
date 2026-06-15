@@ -1,10 +1,10 @@
 import { $ } from "bun"
 import { existsSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 await $`bun ./scripts/copy-icons.ts ${process.env.OPENCODE_CHANNEL ?? "stable"}`
 
-await $`cd ../opencode && bun script/build-node.ts`
+await $`bun ${join(resolve(import.meta.dir, "../../opencode"), "script/build-node.ts")}`
 
 const electronBinary = join(
   process.cwd(),
