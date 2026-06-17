@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@mimo-ai/sdk/v2/client"
+import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@lfcode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -117,7 +117,7 @@ describe("applyGlobalEvent", () => {
     expect(refreshCount).toBe(1)
   })
 
-  test("handles server.connected by triggering refresh", () => {
+  test("ignores server.connected without triggering refresh", () => {
     let refreshCount = 0
     applyGlobalEvent({
       event: { type: "server.connected" },
@@ -128,7 +128,7 @@ describe("applyGlobalEvent", () => {
       setGlobalProject() {},
     })
 
-    expect(refreshCount).toBe(1)
+    expect(refreshCount).toBe(0)
   })
 })
 

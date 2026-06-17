@@ -8,8 +8,8 @@ const BROWSER_TAB_PREFIX = "browser://"
 export const DEFAULT_BROWSER_URL = "https://"
 const ALLOWED_BROWSER_PROTOCOLS = new Set(["http:", "https:", "file:"])
 
-export const BROWSER_REQUEST_OPEN_EVENT = "opencode:browser-request-open"
-export const BROWSER_COMMAND_EVENT = "opencode:browser-command"
+export const BROWSER_REQUEST_OPEN_EVENT = "lfcode:browser-request-open"
+export const BROWSER_COMMAND_EVENT = "lfcode:browser-command"
 
 export const isBrowserTab = (tab: string) => tab.startsWith(BROWSER_TAB_PREFIX)
 

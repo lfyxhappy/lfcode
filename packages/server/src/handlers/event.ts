@@ -1,5 +1,5 @@
-import { EventV2 } from "@opencode-ai/core/event"
-import { Location } from "@opencode-ai/core/location"
+import { EventV2 } from "@lfcode-ai/core/event"
+import { Location } from "@lfcode-ai/core/location"
 import { Effect, Stream } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"

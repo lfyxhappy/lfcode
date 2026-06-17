@@ -1,4 +1,4 @@
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@lfcode-ai/core/global"
 
 process.stdout.write(
   JSON.stringify({

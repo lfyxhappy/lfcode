@@ -1,6 +1,6 @@
 import type {
   Config,
-  OpencodeClient,
+  LfcodeClient,
   Path,
   PermissionRequest,
   Project,
@@ -9,16 +9,17 @@ import type {
   QuestionRequest,
   Session,
   Todo,
-} from "@mimo-ai/sdk/v2/client"
-import { showToast } from "@mimo-ai/ui/toast"
-import { getFilename } from "@mimo-ai/shared/util/path"
-import { retry } from "@mimo-ai/shared/util/retry"
+} from "@lfcode-ai/sdk/v2/client"
+import { showToast } from "@lfcode-ai/ui/toast"
+import { getFilename } from "@lfcode-ai/shared/util/path"
+import { retry } from "@lfcode-ai/shared/util/retry"
 import { batch } from "solid-js"
 import { reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type { State, VcsCache } from "./types"
 import { cmp, normalizeAgentList, normalizeProviderList } from "./utils"
 import { formatServerError } from "@/utils/server-errors"
-import { QueryClient, queryOptions, skipToken } from "@tanstack/solid-query"
+import { QueryClient, queryOptions, skipToken, type UndefinedInitialDataOptions } from "@tanstack/solid-query"
+import { normalizeWorkspacePath } from "@/utils/persist"
 
 type GlobalStore = {
   ready: boolean
@@ -57,6 +58,9 @@ function errors(list: PromiseSettledResult<unknown>[]) {
 }
 
 const providerRev = new Map<string, number>()
+type GlobalQueryKey = readonly unknown[]
+type NullQueryOptions = ReturnType<UndefinedInitialDataOptions<null, Error, null, GlobalQueryKey>>
+type PathQueryOptions = ReturnType<UndefinedInitialDataOptions<Path, Error, Path, GlobalQueryKey>>
 
 export function clearProviderRev(directory: string) {
   providerRev.delete(directory)
@@ -67,7 +71,7 @@ function runAll(list: Array<() => Promise<unknown>>) {
 }
 
 export async function bootstrapGlobal(input: {
-  globalSDK: OpencodeClient
+  globalSDK: LfcodeClient
   requestFailedTitle: string
   translate: (key: string, vars?: Record<string, string | number>) => string
   formatMoreCount: (count: number) => string
@@ -106,7 +110,7 @@ export async function bootstrapGlobal(input: {
         input.globalSDK.project.list().then((x) => {
           const projects = (x.data ?? [])
             .filter((p) => !!p?.id)
-            .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
+            .filter((p) => !!p.worktree && !p.worktree.includes("lfcode-test") && !p.worktree.includes("opencode-test"))
             .slice()
             .sort((a, b) => cmp(a.id, b.id))
           input.setGlobalStore("project", projects)
@@ -142,7 +146,12 @@ function groupBySession<T extends { id: string; sessionID: string }>(input: T[])
 }
 
 function projectID(directory: string, projects: Project[]) {
-  return projects.find((project) => project.worktree === directory || project.sandboxes?.includes(directory))?.id
+  const key = normalizeWorkspacePath(directory)
+  return projects.find(
+    (project) =>
+      normalizeWorkspacePath(project.worktree) === key ||
+      project.sandboxes?.some((sandbox) => normalizeWorkspacePath(sandbox) === key),
+  )?.id
 }
 
 function mergeSession(setStore: SetStoreFunction<State>, session: Session) {
@@ -163,7 +172,7 @@ function warmSessions(input: {
   ids: string[]
   store: Store<State>
   setStore: SetStoreFunction<State>
-  sdk: OpencodeClient
+  sdk: LfcodeClient
 }) {
   const known = new Set(input.store.session.map((item) => item.id))
   const ids = [...new Set(input.ids)].filter((id) => !!id && !known.has(id))
@@ -179,33 +188,31 @@ function warmSessions(input: {
   ).then(() => undefined)
 }
 
-export const loadProvidersQuery = (directory: string | null) =>
+export const loadProvidersQuery = (directory: string | null): NullQueryOptions =>
   queryOptions<null>({ queryKey: [directory, "providers"], queryFn: skipToken })
 
 export const loadAgentsQuery = (
   directory: string | null,
-  sdk?: OpencodeClient,
-  transform?: (x: Awaited<ReturnType<OpencodeClient["app"]["agents"]>>) => void,
-) =>
+  sdk?: LfcodeClient,
+  transform?: (x: unknown) => void,
+): NullQueryOptions =>
   queryOptions<null>({
     queryKey: [directory, "agents"],
     queryFn:
       sdk && transform
         ? () =>
-            retry(() =>
-              sdk.app
-                .agents()
-                .then(transform)
-                .then(() => null),
-            )
+            retry(() => sdk.app.agents()).then((x) => {
+              transform(x.data)
+              return null
+            })
         : skipToken,
   })
 
 export const loadPathQuery = (
   directory: string | null,
-  sdk?: OpencodeClient,
-  transform?: (x: Awaited<ReturnType<OpencodeClient["path"]["get"]>>) => void,
-) =>
+  sdk?: LfcodeClient,
+  transform?: (x: Path) => void,
+): PathQueryOptions =>
   queryOptions<Path>({
     queryKey: [directory, "path"],
     queryFn:
@@ -213,7 +220,7 @@ export const loadPathQuery = (
         ? () =>
             retry(() =>
               sdk.path.get().then(async (x) => {
-                transform(x)
+                if (x.data) transform(x.data)
                 return x.data!
               }),
             )
@@ -222,7 +229,7 @@ export const loadPathQuery = (
 
 export async function bootstrapDirectory(input: {
   directory: string
-  sdk: OpencodeClient
+  sdk: LfcodeClient
   store: Store<State>
   setStore: SetStoreFunction<State>
   vcsCache: VcsCache
@@ -263,7 +270,7 @@ export async function bootstrapDirectory(input: {
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
         input.queryClient.ensureQueryData(
-          loadAgentsQuery(input.directory, input.sdk, (x) => input.setStore("agent", normalizeAgentList(x.data))),
+          loadAgentsQuery(input.directory, input.sdk, (x) => input.setStore("agent", normalizeAgentList(x))),
         ),
       () => retry(() => input.sdk.config.get().then((x) => input.setStore("config", x.data!))),
       () => retry(() => input.sdk.session.status().then((x) => input.setStore("session_status", x.data!))),
@@ -273,7 +280,7 @@ export async function bootstrapDirectory(input: {
         (() =>
           input.queryClient.ensureQueryData(
             loadPathQuery(input.directory, input.sdk, (x) => {
-              const next = projectID(x.data?.directory ?? input.directory, input.global.project)
+              const next = projectID(x.directory ?? input.directory, input.global.project)
               if (next) input.setStore("project", next)
             }),
           )),

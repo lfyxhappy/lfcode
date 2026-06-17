@@ -1,18 +1,19 @@
 import { createStore, produce } from "solid-js/store"
 import { batch, createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
-import { createSimpleContext } from "@mimo-ai/ui/context"
+import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useGlobalSync } from "./global-sync"
 import { useGlobalSDK } from "./global-sdk"
 import { useServer } from "./server"
 import { usePlatform } from "./platform"
-import { Project } from "@mimo-ai/sdk/v2"
+import { Project } from "@lfcode-ai/sdk/v2"
 import { Persist, persisted, removePersisted } from "@/utils/persist"
 import { decode64 } from "@/utils/base64"
 import { same } from "@/utils/same"
 import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
 import { browserTab, DEFAULT_BROWSER_URL, isBrowserTab, normalizeBrowserURL } from "@/pages/session/helpers"
+import { workspaceKey } from "@/pages/layout/helpers"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
@@ -576,7 +577,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       const projectID = childStore.project
       const metadata = projectID
         ? globalSync.data.project.find((x) => x.id === projectID)
-        : globalSync.data.project.find((x) => x.worktree === project.worktree)
+        : globalSync.data.project.find((x) => workspaceKey(x.worktree) === workspaceKey(project.worktree))
 
       const local = childStore.projectMeta
       const localOverride =
@@ -646,18 +647,19 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     createEffect(() => {
       const projects = server.projects.list()
-      const seen = new Set(projects.map((project) => project.worktree))
+      const seen = new Set(projects.map((project) => workspaceKey(project.worktree)))
 
       batch(() => {
         for (const project of projects) {
           const root = rootFor(project.worktree)
-          if (root === project.worktree) continue
+          const rootKey = workspaceKey(root)
+          if (rootKey === workspaceKey(project.worktree)) continue
 
           server.projects.close(project.worktree)
 
-          if (!seen.has(root)) {
+          if (!seen.has(rootKey)) {
             server.projects.open(root)
-            seen.add(root)
+            seen.add(rootKey)
           }
 
           if (project.expanded) server.projects.expand(root)
@@ -739,9 +741,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         sessionTimer = window.setTimeout(() => {
           sessionTimer = undefined
           void Promise.all(
-            server.projects.list().map((project) => {
-              return globalSync.project.loadSessions(project.worktree)
-            }),
+            Array.from(new Set(server.projects.list().map((project) => workspaceKey(project.worktree)))).map((root) =>
+              globalSync.project.loadSessions(root),
+            ),
           )
         }, 0)
       })
@@ -768,7 +770,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         list,
         open(directory: string) {
           const root = rootFor(directory)
-          if (server.projects.list().find((x) => x.worktree === root)) return
+          if (server.projects.list().find((x) => workspaceKey(x.worktree) === workspaceKey(root))) return
           void globalSync.project.loadSessions(root)
           server.projects.open(root)
         },

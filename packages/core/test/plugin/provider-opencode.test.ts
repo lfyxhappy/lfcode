@@ -1,14 +1,14 @@
 import { describe, expect } from "bun:test"
 import { DateTime, Effect, Layer, Option } from "effect"
-import { Catalog } from "@opencode-ai/core/catalog"
-import { Credential } from "@opencode-ai/core/credential"
-import { EventV2 } from "@opencode-ai/core/event"
-import { Location } from "@opencode-ai/core/location"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { OpencodePlugin } from "@opencode-ai/core/plugin/provider/opencode"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Catalog } from "@lfcode-ai/core/catalog"
+import { Credential } from "@lfcode-ai/core/credential"
+import { EventV2 } from "@lfcode-ai/core/event"
+import { Location } from "@lfcode-ai/core/location"
+import { ModelV2 } from "@lfcode-ai/core/model"
+import { PluginV2 } from "@lfcode-ai/core/plugin"
+import { OpencodePlugin } from "@lfcode-ai/core/plugin/provider/opencode"
+import { ProviderV2 } from "@lfcode-ai/core/provider"
+import { AbsolutePath } from "@lfcode-ai/core/schema"
 import { location } from "../fixture/location"
 import { it, model, provider, withEnv } from "./provider-helper"
 
@@ -20,7 +20,7 @@ const locationLayer = Layer.succeed(
 
 describe("OpencodePlugin", () => {
   it.effect("uses a public key and disables paid models without credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -34,14 +34,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...paid.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBe("public")
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("paid"))).enabled).toBe(false)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBe("public")
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("paid"))).enabled).toBe(false)
       }),
     ),
   )
 
   it.effect("keeps free models without credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -55,14 +55,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...free.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBe("public")
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("free"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBe("public")
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("free"))).enabled).toBe(true)
       }),
     ),
   )
 
   it.effect("treats output-only cost as free without credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -76,14 +76,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...outputOnly.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBe("public")
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("output-only"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBe("public")
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("output-only"))).enabled).toBe(true)
       }),
     ),
   )
 
-  it.effect("uses OPENCODE_API_KEY as credentials", () =>
-    withEnv({ OPENCODE_API_KEY: "secret" }, () =>
+  it.effect("uses LFCODE_API_KEY as credentials", () =>
+    withEnv({ LFCODE_API_KEY: "secret" }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -97,21 +97,21 @@ describe("OpencodePlugin", () => {
             draft.cost = [...paid.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBeUndefined()
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBeUndefined()
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("paid"))).enabled).toBe(true)
       }),
     ),
   )
 
   it.effect("uses configured provider env vars as credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined, CUSTOM_OPENCODE_API_KEY: "secret" }, () =>
+    withEnv({ LFCODE_API_KEY: undefined, CUSTOM_LFCODE_API_KEY: "secret" }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
         yield* plugin.add(OpencodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
-          const item = provider("opencode", { env: ["CUSTOM_OPENCODE_API_KEY"] })
+          const item = provider("opencode", { env: ["CUSTOM_LFCODE_API_KEY"] })
           catalog.provider.update(item.id, (draft) => {
             draft.env = [...item.env]
           })
@@ -120,14 +120,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...paid.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBeUndefined()
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBeUndefined()
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("paid"))).enabled).toBe(true)
       }),
     ),
   )
 
   it.effect("uses configured apiKey as credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -148,14 +148,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...paid.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBe("configured")
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBe("configured")
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("paid"))).enabled).toBe(true)
       }),
     ),
   )
 
   it.effect("uses auth-enabled providers as credentials", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -173,14 +173,14 @@ describe("OpencodePlugin", () => {
             draft.cost = [...paid.cost]
           })
         })
-        expect((yield* catalog.provider.get(ProviderV2.ID.opencode)).request.body.apiKey).toBeUndefined()
-        expect((yield* catalog.model.get(ProviderV2.ID.opencode, ModelV2.ID.make("paid"))).enabled).toBe(true)
+        expect((yield* catalog.provider.get(ProviderV2.ID.lfcode)).request.body.apiKey).toBeUndefined()
+        expect((yield* catalog.model.get(ProviderV2.ID.lfcode, ModelV2.ID.make("paid"))).enabled).toBe(true)
       }),
     ),
   )
 
   it.effect("ignores non-opencode providers and models", () =>
-    withEnv({ OPENCODE_API_KEY: undefined }, () =>
+    withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
@@ -203,7 +203,7 @@ describe("OpencodePlugin", () => {
   it.effect("prefers gpt-5-nano as the opencode small model", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const providerID = ProviderV2.ID.opencode
+      const providerID = ProviderV2.ID.lfcode
 
       const transform = yield* catalog.transform()
       yield* transform((catalog) => {

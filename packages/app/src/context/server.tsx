@@ -1,8 +1,9 @@
-import { createSimpleContext } from "@mimo-ai/ui/context"
+import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { type Accessor, batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 import { useCheckServerHealth } from "@/utils/server-health"
+import { normalizeWorkspacePath } from "@/utils/persist"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
@@ -26,6 +27,39 @@ function projectsKey(key: ServerConnection.Key) {
   if (key === "sidecar") return "local"
   if (isLocalHost(key)) return "local"
   return key
+}
+
+function normalizeStoredProject(project: StoredProject) {
+  return { ...project, worktree: normalizeWorkspacePath(project.worktree) }
+}
+
+function mergeStoredProjects(current: StoredProject[], legacy: StoredProject[]) {
+  const merged = new Map<string, StoredProject>()
+  for (const project of [...legacy, ...current]) {
+    merged.set(normalizeWorkspacePath(project.worktree), normalizeStoredProject(project))
+  }
+  return [...merged.values()]
+}
+
+function normalizeServerStore(value: unknown) {
+  if (!value || typeof value !== "object") return value
+  if (Array.isArray(value)) return value
+
+  const store = value as {
+    list?: StoredServer[]
+    projects?: Record<string, StoredProject[]>
+    lastProject?: Record<string, string>
+  }
+
+  return {
+    ...store,
+    projects: Object.fromEntries(
+      Object.entries(store.projects ?? {}).map(([key, projects]) => [key, mergeStoredProjects([], projects ?? [])]),
+    ),
+    lastProject: Object.fromEntries(
+      Object.entries(store.lastProject ?? {}).map(([key, directory]) => [key, normalizeWorkspacePath(directory)]),
+    ),
+  }
 }
 
 function isLocalHost(url: string) {
@@ -102,7 +136,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const checkServerHealth = useCheckServerHealth()
 
     const [store, setStore, _, ready] = persisted(
-      Persist.global("server", ["server.v3"]),
+      Persist.global("server", ["server.v3"], normalizeServerStore),
       createStore({
         list: [] as StoredServer[],
         projects: {} as Record<string, StoredProject[]>,
@@ -249,40 +283,41 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          if (current.find((x) => x.worktree === directory)) return
-          setStore("projects", key, [{ worktree: directory, expanded: true }, ...current])
+          const normalized = normalizeWorkspacePath(directory)
+          if (current.find((x) => normalizeWorkspacePath(x.worktree) === normalized)) return
+          setStore("projects", key, [{ worktree: normalized, expanded: true }, ...current.map(normalizeStoredProject)])
         },
         close(directory: string) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          setStore(
-            "projects",
-            key,
-            current.filter((x) => x.worktree !== directory),
-          )
+          const normalized = normalizeWorkspacePath(directory)
+          setStore("projects", key, current.filter((x) => normalizeWorkspacePath(x.worktree) !== normalized))
         },
         expand(directory: string) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const index = current.findIndex((x) => x.worktree === directory)
+          const normalized = normalizeWorkspacePath(directory)
+          const index = current.findIndex((x) => normalizeWorkspacePath(x.worktree) === normalized)
           if (index !== -1) setStore("projects", key, index, "expanded", true)
         },
         collapse(directory: string) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const index = current.findIndex((x) => x.worktree === directory)
+          const normalized = normalizeWorkspacePath(directory)
+          const index = current.findIndex((x) => normalizeWorkspacePath(x.worktree) === normalized)
           if (index !== -1) setStore("projects", key, index, "expanded", false)
         },
         move(directory: string, toIndex: number) {
           const key = origin()
           if (!key) return
           const current = store.projects[key] ?? []
-          const fromIndex = current.findIndex((x) => x.worktree === directory)
+          const normalized = normalizeWorkspacePath(directory)
+          const fromIndex = current.findIndex((x) => normalizeWorkspacePath(x.worktree) === normalized)
           if (fromIndex === -1 || fromIndex === toIndex) return
-          const result = [...current]
+          const result = current.map(normalizeStoredProject)
           const [item] = result.splice(fromIndex, 1)
           result.splice(toIndex, 0, item)
           setStore("projects", key, result)
@@ -295,7 +330,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         touch(directory: string) {
           const key = origin()
           if (!key) return
-          setStore("lastProject", key, directory)
+          setStore("lastProject", key, normalizeWorkspacePath(directory))
         },
       },
     }

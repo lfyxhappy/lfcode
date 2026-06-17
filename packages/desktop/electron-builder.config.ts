@@ -23,7 +23,7 @@ async function signWindows(configuration: { path: string }) {
 const channel = "stable"
 
 const localConfigDir = path.join(rootDir, "packages", "desktop", "local-config")
-const localConfigFiles = process.platform === "win32" ? [{ from: localConfigDir, to: ".", filter: ["opencode.jsonc"] }] : []
+const localConfigFiles = process.platform === "win32" ? [{ from: localConfigDir, to: ".", filter: ["lfcode.jsonc"] }] : []
 
 const getBase = (): Configuration => ({
   artifactName: "lfcode-${os}-${arch}.${ext}",
@@ -60,7 +60,7 @@ const getBase = (): Configuration => ({
   },
   protocols: {
     name: "Lfcode",
-    schemes: ["opencode"],
+    schemes: ["lfcode"],
   },
   win: {
     icon: `resources/icons/icon.ico`,
@@ -84,7 +84,7 @@ function getConfig() {
       ...base,
       appId: "com.lfyxhappy.lfcode",
       productName: "Lfcode",
-      protocols: { name: "Lfcode", schemes: ["opencode"] },
+      protocols: { name: "Lfcode", schemes: ["lfcode"] },
       publish: { provider: "github", owner: "lfyxhappy", repo: "lfcode", channel: "latest" },
     }
   }

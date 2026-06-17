@@ -1,13 +1,13 @@
-import { Button } from "@mimo-ai/ui/button"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { Dialog } from "@mimo-ai/ui/dialog"
-import { DropdownMenu } from "@mimo-ai/ui/dropdown-menu"
-import { Icon } from "@mimo-ai/ui/icon"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { List } from "@mimo-ai/ui/list"
-import { TextField } from "@mimo-ai/ui/text-field"
+import { Button } from "@lfcode-ai/ui/button"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { Dialog } from "@lfcode-ai/ui/dialog"
+import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { List } from "@lfcode-ai/ui/list"
+import { TextField } from "@lfcode-ai/ui/text-field"
 import { useMutation } from "@tanstack/solid-query"
-import { showToast } from "@mimo-ai/ui/toast"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { useNavigate } from "@solidjs/router"
 import { createEffect, createMemo, createResource, onCleanup, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
@@ -18,7 +18,7 @@ import { normalizeServerUrl, ServerConnection, useServer } from "@/context/serve
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { formatServerError } from "@/utils/server-errors"
 
-const DEFAULT_USERNAME = "opencode"
+const DEFAULT_USERNAME = "lfcode"
 
 interface ServerFormProps {
   value: string

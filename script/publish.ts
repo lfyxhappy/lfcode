@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { Script } from "@mimo-ai/script"
+import { Script } from "@lfcode-ai/script"
 import { $ } from "bun"
 import { fileURLToPath } from "url"
 
@@ -31,7 +31,7 @@ async function prepareReleaseFiles() {
 await prepareReleaseFiles()
 
 console.log("\n=== cli ===\n")
-await $`bun ./packages/opencode/script/publish.ts`
+await $`bun ./packages/lfcode/script/publish.ts`
 
 console.log("\n=== preview cli ===\n")
 await $`bun ./packages/cli/script/publish.ts`

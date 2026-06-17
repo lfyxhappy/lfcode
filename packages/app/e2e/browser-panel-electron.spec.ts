@@ -2,12 +2,13 @@ import { execFile } from "node:child_process"
 import { createServer } from "node:http"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { test, expect, _electron as electron } from "@playwright/test"
 
-const root = "C:/算法/小应用/知识库/10_Projects/opencode"
-const projectDirectory = "C:\\算法\\小应用\\知识库\\10_Projects\\opencode"
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..")
+const projectDirectory = root.replaceAll("/", "\\")
 const projectPattern = new RegExp(escapeRegExp(projectDirectory))
 const execFileAsync = promisify(execFile)
 
@@ -20,9 +21,9 @@ test("desktop browser handoff opens file:// content in a browser tab", async () 
     cwd: `${root}/packages/desktop`,
     env: {
       ...process.env,
-      OPENCODE_DESKTOP_HEADLESS: "1",
-      OPENCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-      OPENCODE_USER_DATA_DIR: appData,
+      LFCODE_DESKTOP_HEADLESS: "1",
+      LFCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+      LFCODE_USER_DATA_DIR: appData,
     },
   })
 
@@ -56,9 +57,9 @@ test("desktop session header opens a browser tab and loads a typed file url", as
     cwd: `${root}/packages/desktop`,
     env: {
       ...process.env,
-      OPENCODE_DESKTOP_HEADLESS: "1",
-      OPENCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-      OPENCODE_USER_DATA_DIR: appData,
+      LFCODE_DESKTOP_HEADLESS: "1",
+      LFCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+      LFCODE_USER_DATA_DIR: appData,
     },
   })
 
@@ -92,9 +93,9 @@ test("desktop browser handoff from popup opens a new right-side browser tab", as
     cwd: `${root}/packages/desktop`,
     env: {
       ...process.env,
-      OPENCODE_DESKTOP_HEADLESS: "1",
-      OPENCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-      OPENCODE_USER_DATA_DIR: appData,
+      LFCODE_DESKTOP_HEADLESS: "1",
+      LFCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+      LFCODE_USER_DATA_DIR: appData,
     },
   })
 
@@ -242,9 +243,9 @@ async function launchDesktop(appData: string) {
     cwd: `${root}/packages/desktop`,
     env: {
       ...process.env,
-      OPENCODE_DESKTOP_HEADLESS: "1",
-      OPENCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
-      OPENCODE_USER_DATA_DIR: appData,
+      LFCODE_DESKTOP_HEADLESS: "1",
+      LFCODE_DISABLE_SINGLE_INSTANCE_LOCK: "1",
+      LFCODE_USER_DATA_DIR: appData,
     },
   })
 }
@@ -331,9 +332,9 @@ async function countVisibleBrowserInputs(page: Awaited<ReturnType<typeof mainWin
 }
 
 async function createAppData() {
-  const appData = await mkdtemp(join(tmpdir(), "opencode-browser-"))
+  const appData = await mkdtemp(join(tmpdir(), "lfcode-browser-"))
   const project = {
-    id: "project-opencode",
+    id: "project-lfcode",
     worktree: projectDirectory,
     vcs: "git",
     time: {
@@ -345,7 +346,7 @@ async function createAppData() {
 
   await mkdir(appData, { recursive: true })
   await writeFile(
-    join(appData, "opencode.global.dat"),
+    join(appData, "lfcode.global.dat"),
     JSON.stringify({
       "globalSync.project": JSON.stringify({ value: [project] }),
     }),
@@ -354,7 +355,7 @@ async function createAppData() {
 }
 
 async function createTempFile(title = "Local Browser File", body = "local browser file", name = "browser-panel.html") {
-  const file = join(await mkdtemp(join(tmpdir(), "opencode-file-")), name)
+  const file = join(await mkdtemp(join(tmpdir(), "lfcode-file-")), name)
   await writeFile(file, `<!doctype html><title>${title}</title><body>${body}</body>`)
   return `file://${file.replace(/\\/g, "/")}`
 }

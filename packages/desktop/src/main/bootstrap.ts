@@ -5,14 +5,14 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import type { App } from "electron"
 
-const CONFIG_FILES = ["opencode.jsonc", "opencode.json", "config.json"] as const
+const CONFIG_FILES = ["lfcode.jsonc", "lfcode.json", "config.json"] as const
 const MANAGED_ROOT_DIR = ".lfcode"
 
 type RootEnv = {
-  readonly OPENCODE_CONFIG_DIR: string
-  readonly OPENCODE_DATA_DIR: string
-  readonly OPENCODE_STATE_DIR: string
-  readonly OPENCODE_CACHE_DIR: string
+  readonly LFCODE_CONFIG_DIR: string
+  readonly LFCODE_DATA_DIR: string
+  readonly LFCODE_STATE_DIR: string
+  readonly LFCODE_CACHE_DIR: string
 }
 
 export type RootLayout = {
@@ -90,7 +90,7 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
 }
 
 export async function canWriteDirectory(directory: string) {
-  const probe = join(resolveProbeDirectory(directory), `.opencode-write-test-${process.pid}-${Date.now()}`)
+  const probe = join(resolveProbeDirectory(directory), `.lfcode-write-test-${process.pid}-${Date.now()}`)
   const wrote = await writeFile(probe, "").then(
     () => true,
     () => false,
@@ -105,7 +105,7 @@ export function createRootLayout(root: string, appId: string): RootLayout {
   return {
     root,
     configDir: root,
-    configFile: join(root, "opencode.jsonc"),
+    configFile: join(root, "lfcode.jsonc"),
     dataDir: join(root, "data"),
     stateDir,
     cacheDir: join(root, "cache"),
@@ -147,10 +147,10 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
     appId: input.appId,
     appName: input.appName,
     env: {
-      OPENCODE_CONFIG_DIR: layout.configDir,
-      OPENCODE_DATA_DIR: layout.dataDir,
-      OPENCODE_STATE_DIR: layout.stateDir,
-      OPENCODE_CACHE_DIR: layout.cacheDir,
+      LFCODE_CONFIG_DIR: layout.configDir,
+      LFCODE_DATA_DIR: layout.dataDir,
+      LFCODE_STATE_DIR: layout.stateDir,
+      LFCODE_CACHE_DIR: layout.cacheDir,
     },
     layout,
     mode: "root",
@@ -331,7 +331,7 @@ async function ensureRootConfigFile(layout: RootLayout) {
     layout.configFile,
     `${JSON.stringify(
       {
-        $schema: "https://opencode.ai/config.json",
+        $schema: "https://lfcode.ai/config.json",
       },
       null,
       2,
@@ -355,10 +355,10 @@ async function findLegacyConfigFile(directory: string) {
 
 function getLegacyMigrationSources(appId: string, home = homedir(), appData = process.env.APPDATA ?? join(home, "AppData", "Roaming")): MigrationSources {
   return {
-    configDir: join(home, ".config", "opencode"),
-    dataDir: join(home, ".local", "share", "opencode"),
-    stateDir: join(home, ".local", "state", "opencode"),
-    cacheDir: join(home, ".cache", "opencode"),
+    configDir: join(home, ".config", "lfcode"),
+    dataDir: join(home, ".local", "share", "lfcode"),
+    stateDir: join(home, ".local", "state", "lfcode"),
+    cacheDir: join(home, ".cache", "lfcode"),
     userDataDir: join(appData, appId),
   }
 }
@@ -388,7 +388,7 @@ function getMigrationSources(input: DesktopBootstrapInput, state: DesktopBootstr
 }
 
 function canWriteDirectorySync(directory: string) {
-  const probe = join(resolveProbeDirectory(directory), `.opencode-write-test-${process.pid}-${Date.now()}`)
+  const probe = join(resolveProbeDirectory(directory), `.lfcode-write-test-${process.pid}-${Date.now()}`)
   try {
     writeFileSync(probe, "")
     unlinkSync(probe)

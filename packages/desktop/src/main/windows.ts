@@ -36,7 +36,7 @@ let relaunchHandler = () => {
 }
 
 function isHeadlessWindowMode() {
-  return process.env.OPENCODE_DESKTOP_HEADLESS === "1"
+  return process.env.LFCODE_DESKTOP_HEADLESS === "1"
 }
 
 export function setRelaunchHandler(handler: () => void) {
@@ -156,7 +156,7 @@ export function createMainWindow() {
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
     webPreferences.webSecurity = true
-    params.partition = "persist:opencode-browser"
+    params.partition = "persist:lfcode-browser"
     if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
       params.src = "about:blank"
     }

@@ -63,7 +63,7 @@ export interface Interface {
   readonly moveSession: (input: Input) => Effect.Effect<void, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/ControlPlaneMoveSession") {}
+export class Service extends Context.Service<Service, Interface>()("@lfcode/ControlPlaneMoveSession") {}
 
 export const layer = Layer.effect(
   Service,

@@ -1,7 +1,7 @@
 import { useNavigate } from "@solidjs/router"
 import { useCommand, type CommandOption } from "@/context/command"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { previewSelectedLines } from "@mimo-ai/ui/pierre/selection-bridge"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { useFile, selectionFromLines, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
@@ -13,11 +13,11 @@ import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
-import { showToast } from "@mimo-ai/ui/toast"
-import { findLast } from "@mimo-ai/shared/util/array"
+import { showToast } from "@lfcode-ai/ui/toast"
+import { findLast } from "@lfcode-ai/shared/util/array"
 import { BROWSER_COMMAND_EVENT, BROWSER_REQUEST_OPEN_EVENT, DEFAULT_BROWSER_URL, browserTab, browserTabID, createSessionTabs } from "@/pages/session/helpers"
 import { extractPromptFromParts } from "@/utils/prompt"
-import { UserMessage } from "@mimo-ai/sdk/v2"
+import { UserMessage } from "@lfcode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 
 export type SessionCommandContext = {
@@ -72,7 +72,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const closableTab = tabState.closableTab
   const shown = () =>
     platform.platform !== "desktop" ||
-    import.meta.env.VITE_OPENCODE_CHANNEL !== "beta" ||
+    import.meta.env.VITE_LFCODE_CHANNEL !== "beta" ||
     settings.general.showFileTree()
 
   const idle = { type: "idle" as const }

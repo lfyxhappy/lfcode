@@ -1,14 +1,14 @@
-import type { ProviderAuthAuthorization, ProviderAuthMethod } from "@mimo-ai/sdk/v2/client"
-import { Button } from "@mimo-ai/ui/button"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { Dialog } from "@mimo-ai/ui/dialog"
-import { Icon } from "@mimo-ai/ui/icon"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { List, type ListRef } from "@mimo-ai/ui/list"
-import { ProviderIcon } from "@mimo-ai/ui/provider-icon"
-import { Spinner } from "@mimo-ai/ui/spinner"
-import { TextField } from "@mimo-ai/ui/text-field"
-import { showToast } from "@mimo-ai/ui/toast"
+import type { ProviderAuthAuthorization, ProviderAuthMethod } from "@lfcode-ai/sdk/v2/client"
+import { Button } from "@lfcode-ai/ui/button"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { Dialog } from "@lfcode-ai/ui/dialog"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { List, type ListRef } from "@lfcode-ai/ui/list"
+import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
+import { Spinner } from "@lfcode-ai/ui/spinner"
+import { TextField } from "@lfcode-ai/ui/text-field"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { createEffect, createMemo, createResource, Match, onCleanup, onMount, Switch } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
@@ -17,7 +17,7 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 
-export function DialogConnectProvider(props: { provider: string }) {
+export function DialogConnectProvider(props: { provider: string; returnTo?: "models" }) {
   const dialog = useDialog()
   const globalSync = useGlobalSync()
   const globalSDK = useGlobalSDK()
@@ -26,7 +26,13 @@ export function DialogConnectProvider(props: { provider: string }) {
 
   const all = () => {
     void import("./dialog-select-provider").then((x) => {
-      dialog.show(() => <x.DialogSelectProvider />)
+      dialog.show(() => <x.DialogSelectProvider returnTo={props.returnTo} />)
+    })
+  }
+
+  const showModels = () => {
+    void import("./dialog-manage-models").then((x) => {
+      dialog.show(() => <x.DialogManageModels />)
     })
   }
 
@@ -332,8 +338,12 @@ export function DialogConnectProvider(props: { provider: string }) {
   })
 
   async function complete() {
-    await globalSDK.client.global.dispose()
-    dialog.close()
+    await globalSync.reloadProviders()
+    if (props.returnTo === "models") {
+      showModels()
+    } else {
+      dialog.close()
+    }
     showToast({
       variant: "success",
       icon: "circle-check",
@@ -422,16 +432,16 @@ export function DialogConnectProvider(props: { provider: string }) {
     return (
       <div class="flex flex-col gap-6">
         <Switch>
-          <Match when={provider().id === "opencode"}>
+          <Match when={provider().id === "lfcode"}>
             <div class="flex flex-col gap-4">
-              <div class="text-14-regular text-text-base">{language.t("provider.connect.opencodeZen.line1")}</div>
-              <div class="text-14-regular text-text-base">{language.t("provider.connect.opencodeZen.line2")}</div>
+              <div class="text-14-regular text-text-base">{language.t("provider.connect.lfcodeZen.line1")}</div>
+              <div class="text-14-regular text-text-base">{language.t("provider.connect.lfcodeZen.line2")}</div>
               <div class="text-14-regular text-text-base">
-                {language.t("provider.connect.opencodeZen.visit.prefix")}
-                <Link href="https://opencode.ai/zen" tabIndex={-1}>
-                  {language.t("provider.connect.opencodeZen.visit.link")}
+                {language.t("provider.connect.lfcodeZen.visit.prefix")}
+                <Link href="https://lfcode.ai/zen" tabIndex={-1}>
+                  {language.t("provider.connect.lfcodeZen.visit.link")}
                 </Link>
-                {language.t("provider.connect.opencodeZen.visit.suffix")}
+                {language.t("provider.connect.lfcodeZen.visit.suffix")}
               </div>
             </div>
           </Match>

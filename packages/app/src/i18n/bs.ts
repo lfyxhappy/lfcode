@@ -98,9 +98,9 @@ export const dict = {
   "dialog.provider.group.popular": "Popularno",
   "dialog.provider.group.other": "Ostalo",
   "dialog.provider.tag.recommended": "Preporučeno",
-  "dialog.provider.opencode.note": "Kurirani modeli uključujući Claude, GPT, Gemini i druge",
-  "dialog.provider.opencode.tagline": "Pouzdani optimizovani modeli",
-  "dialog.provider.opencodeGo.tagline": "Povoljna pretplata za sve",
+  "dialog.provider.lfcode.note": "Kurirani modeli uključujući Claude, GPT, Gemini i druge",
+  "dialog.provider.lfcode.tagline": "Pouzdani optimizovani modeli",
+  "dialog.provider.lfcodeGo.tagline": "Povoljna pretplata za sve",
   "dialog.provider.anthropic.note": "Direktan pristup Claude modelima, uključujući Pro i Max",
   "dialog.provider.copilot.note": "AI modeli za pomoć pri kodiranju putem GitHub Copilot",
   "dialog.provider.openai.note": "GPT modeli za brze, sposobne opšte AI zadatke",
@@ -132,13 +132,13 @@ export const dict = {
   "provider.connect.apiKey.label": "{{provider}} API ključ",
   "provider.connect.apiKey.placeholder": "API ključ",
   "provider.connect.apiKey.required": "API ključ je obavezan",
-  "provider.connect.opencodeZen.line1":
+  "provider.connect.lfcodeZen.line1":
     "Lfcode Zen ti daje pristup kuriranom skupu pouzdanih, optimizovanih modela za coding agente.",
-  "provider.connect.opencodeZen.line2":
+  "provider.connect.lfcodeZen.line2":
     "Sa jednim API ključem dobijaš pristup modelima kao što su Claude, GPT, Gemini, GLM i drugi.",
-  "provider.connect.opencodeZen.visit.prefix": "Posjeti ",
-  "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
-  "provider.connect.opencodeZen.visit.suffix": " da preuzmeš svoj API ključ.",
+  "provider.connect.lfcodeZen.visit.prefix": "Posjeti ",
+  "provider.connect.lfcodeZen.visit.link": "lfcode.ai/zen",
+  "provider.connect.lfcodeZen.visit.suffix": " da preuzmeš svoj API ključ.",
   "provider.connect.oauth.code.visit.prefix": "Posjeti ",
   "provider.connect.oauth.code.visit.link": "ovaj link",
   "provider.connect.oauth.code.visit.suffix":
@@ -295,7 +295,7 @@ export const dict = {
   "dialog.mcp.empty": "Nema konfigurisnih MCP-ova",
 
   "dialog.lsp.empty": "LSP-ovi se automatski otkrivaju prema tipu datoteke",
-  "dialog.plugins.empty": "Plugini su konfigurisani u opencode.json",
+  "dialog.plugins.empty": "Plugini su konfigurisani u lfcode.json",
 
   "mcp.status.connected": "povezano",
   "mcp.status.failed": "neuspjelo",
@@ -470,7 +470,7 @@ export const dict = {
   "error.chain.responseBody": "Tijelo odgovora:\n{{body}}",
   "error.chain.didYouMean": "Da li si mislio: {{suggestions}}",
   "error.chain.modelNotFound": "Model nije pronađen: {{provider}}/{{model}}",
-  "error.chain.checkConfig": "Provjeri konfiguraciju (opencode.json) provider/model names",
+  "error.chain.checkConfig": "Provjeri konfiguraciju (lfcode.json) provider/model names",
   "error.chain.mcpFailed": 'MCP server "{{name}}" nije uspio. Napomena: Lfcode još ne podržava MCP autentifikaciju.',
   "error.chain.providerAuthFailed": "Autentifikacija provajdera nije uspjela ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":

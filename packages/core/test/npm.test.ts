@@ -3,10 +3,10 @@ import path from "path"
 import { describe, expect, test } from "bun:test"
 import { NodeFileSystem } from "@effect/platform-node"
 import { Effect, Layer, Option } from "effect"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Global } from "@opencode-ai/core/global"
-import { Npm } from "@opencode-ai/core/npm"
-import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
+import { FSUtil } from "@lfcode-ai/core/fs-util"
+import { Global } from "@lfcode-ai/core/global"
+import { Npm } from "@lfcode-ai/core/npm"
+import { EffectFlock } from "@lfcode-ai/core/util/effect-flock"
 import { tmpdir } from "./fixture/tmpdir"
 
 const win = process.platform === "win32"
@@ -30,8 +30,8 @@ const npmLayer = (cache: string) =>
 
 describe("Npm.sanitize", () => {
   test("keeps normal scoped package specs unchanged", () => {
-    expect(Npm.sanitize("@opencode/acme")).toBe("@opencode/acme")
-    expect(Npm.sanitize("@opencode/acme@1.0.0")).toBe("@opencode/acme@1.0.0")
+    expect(Npm.sanitize("@lfcode/acme")).toBe("@lfcode/acme")
+    expect(Npm.sanitize("@lfcode/acme@1.0.0")).toBe("@lfcode/acme@1.0.0")
     expect(Npm.sanitize("prettier")).toBe("prettier")
   })
 

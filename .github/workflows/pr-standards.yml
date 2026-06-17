@@ -100,9 +100,9 @@ jobs:
             - \`refactor:\` or \`refactor(scope):\` code refactoring
             - \`test:\` or \`test(scope):\` adding or updating tests
 
-            Where \`scope\` is the package name (e.g., \`app\`, \`desktop\`, \`opencode\`).
+            Where \`scope\` is the package name (e.g., \`app\`, \`desktop\`, \`cli\`).
 
-            See [CONTRIBUTING.md](../blob/dev/CONTRIBUTING.md#pr-titles) for details.`);
+            See [AGENTS.md](../blob/dev/AGENTS.md#commits-and-pr-titles) for details.`);
               return;
             }
 
@@ -145,7 +145,7 @@ jobs:
             1. Open an issue describing the bug/feature (if one doesn't exist)
             2. Add \`Fixes #<number>\` or \`Closes #<number>\` to this PR description
 
-            See [CONTRIBUTING.md](../blob/dev/CONTRIBUTING.md#issue-first-policy) for details.`);
+            Update the PR body and include the linked issue in the `### Issue for this PR` section.`);
               return;
             }
 
@@ -293,7 +293,7 @@ jobs:
               const existing = comments.find(c => c.body.includes(marker));
 
               const body_text = `${marker}
-            This PR doesn't fully meet our [contributing guidelines](../blob/dev/CONTRIBUTING.md) and [PR template](../blob/dev/.github/pull_request_template.md).
+            This PR doesn't fully meet our [repo guidelines](../blob/dev/AGENTS.md#commits-and-pr-titles) and [PR template](../blob/dev/.github/pull_request_template.md).
 
             **What needs to be fixed:**
             ${issues.map(i => `- ${i}`).join('\n')}

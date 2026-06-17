@@ -24,8 +24,8 @@ import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useKV } from "./kv"
 import { useTuiConfig } from "../config"
-import { Global } from "@opencode-ai/core/global"
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Global } from "@lfcode-ai/core/global"
+import { Glob } from "@lfcode-ai/core/util/glob"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
@@ -38,7 +38,7 @@ const themeSource: ThemeSource = {
   async discover() {
     const directories = [Global.Path.config]
     for (let current = process.cwd(); ; current = path.dirname(current)) {
-      directories.push(path.join(current, ".opencode"))
+      directories.push(path.join(current, ".lfcode"))
       if (path.dirname(current) === current) break
     }
     return discoverThemes(directories)
@@ -93,9 +93,14 @@ const [store, setStore] = createStore<State>({
   themes: allThemes(),
   mode: "dark",
   lock: undefined,
-  active: "opencode",
+  active: "lfcode",
   ready: false,
 })
+
+function normalizeThemeName(value: unknown) {
+  if (value === "opencode") return "lfcode"
+  return typeof value === "string" ? value : "lfcode"
+}
 
 subscribeThemes((themes) => setStore("themes", themes))
 
@@ -118,8 +123,8 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         if (!lock && pick(kv.get("theme_mode")) !== undefined) kv.set("theme_mode", undefined)
         draft.mode = mode
         draft.lock = lock
-        const active = config.theme ?? kv.get("theme", "opencode")
-        draft.active = typeof active === "string" ? active : "opencode"
+        const active = config.theme ?? kv.get("theme", "lfcode")
+        draft.active = normalizeThemeName(active)
         draft.ready = false
       }),
     )
@@ -140,7 +145,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
             }, {}),
           )
         })
-        .catch(() => setStore("active", "opencode"))
+        .catch(() => setStore("active", "lfcode"))
     }
 
     onMount(() => {
@@ -159,7 +164,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           if (!colors.palette[0]) {
             if (hasResolvedSystemTheme) return
             setSystemTheme(undefined)
-            if (store.active === "system") setStore("active", "opencode")
+            if (store.active === "system") setStore("active", "lfcode")
             return
           }
           const next = store.lock ?? terminalMode(colors) ?? mode
@@ -174,7 +179,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         .catch(() => {
           if (hasResolvedSystemTheme) return
           setSystemTheme(undefined)
-          if (store.active === "system") setStore("active", "opencode")
+          if (store.active === "system") setStore("active", "lfcode")
         })
     }
 
@@ -257,13 +262,13 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       const active = store.themes[store.active]
       if (active) return resolveTheme(active, store.mode)
 
-      const saved = kv.get("theme")
+      const saved = normalizeThemeName(kv.get("theme"))
       if (typeof saved === "string") {
         const theme = store.themes[saved]
         if (theme) return resolveTheme(theme, store.mode)
       }
 
-      return resolveTheme(store.themes.opencode, store.mode)
+      return resolveTheme(store.themes.lfcode, store.mode)
     })
 
     createEffect(() => renderer.setBackgroundColor(values().background))

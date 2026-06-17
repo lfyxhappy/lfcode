@@ -17,23 +17,23 @@ import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { useLayout, LocalProject } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { Persist, persisted } from "@/utils/persist"
-import { base64Encode } from "@mimo-ai/shared/util/encode"
+import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import { decode64 } from "@/utils/base64"
-import { ResizeHandle } from "@mimo-ai/ui/resize-handle"
-import { Button } from "@mimo-ai/ui/button"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { Tooltip } from "@mimo-ai/ui/tooltip"
-import { DropdownMenu } from "@mimo-ai/ui/dropdown-menu"
-import { Dialog } from "@mimo-ai/ui/dialog"
-import { getFilename } from "@mimo-ai/shared/util/path"
-import { Session, type Message } from "@mimo-ai/sdk/v2/client"
+import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
+import { Button } from "@lfcode-ai/ui/button"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
+import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
+import { Dialog } from "@lfcode-ai/ui/dialog"
+import { getFilename } from "@lfcode-ai/shared/util/path"
+import { Session, type Message } from "@lfcode-ai/sdk/v2/client"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import { useProviders } from "@/hooks/use-providers"
-import { showToast, Toast, toaster } from "@mimo-ai/ui/toast"
+import { showToast, Toast, toaster } from "@lfcode-ai/ui/toast"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { clearWorkspaceTerminals } from "@/context/terminal"
 import { dropSessionCaches, pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
@@ -48,8 +48,8 @@ import {
 } from "@/context/global-sync/session-prefetch"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
-import { Binary } from "@mimo-ai/shared/util/binary"
-import { retry } from "@mimo-ai/shared/util/retry"
+import { Binary } from "@lfcode-ai/shared/util/binary"
+import { retry } from "@lfcode-ai/shared/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
 import { setNavigate } from "@/utils/notification-click"
@@ -58,8 +58,8 @@ import { setSessionHandoff } from "@/pages/session/handoff"
 import { BROWSER_REQUEST_OPEN_EVENT } from "@/pages/session/helpers"
 import { normalizeBrowserURL } from "@/pages/session/helpers"
 
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { useTheme, type ColorScheme } from "@mimo-ai/ui/theme/context"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { useTheme, type ColorScheme } from "@lfcode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { Titlebar } from "@/components/titlebar"
@@ -368,9 +368,8 @@ export default function Layout(props: ParentProps) {
   const useUpdatePolling = () =>
     onMount(() => {
       if (!platform.checkUpdate || !platform.update || !platform.restart) return
-
       let toastId: number | undefined
-      let interval: ReturnType<typeof setInterval> | undefined
+      let startupPolled = false
 
       const pollUpdate = () =>
         platform.checkUpdate!().then(({ updateAvailable, version }) => {
@@ -398,23 +397,11 @@ export default function Layout(props: ParentProps) {
         })
 
       createEffect(() => {
+        if (startupPolled) return
         if (!settings.ready()) return
-
-        if (!settings.updates.startup()) {
-          if (interval === undefined) return
-          clearInterval(interval)
-          interval = undefined
-          return
-        }
-
-        if (interval !== undefined) return
+        if (!settings.updates.startup()) return
+        startupPolled = true
         void pollUpdate()
-        interval = setInterval(pollUpdate, 10 * 60 * 1000)
-      })
-
-      onCleanup(() => {
-        if (interval === undefined) return
-        clearInterval(interval)
       })
     })
 
@@ -1498,7 +1485,7 @@ export default function Layout(props: ParentProps) {
       method: "DELETE",
       headers: current.http.password
         ? {
-            Authorization: `Basic ${btoa(`${current.http.username ?? "opencode"}:${current.http.password}`)}`,
+            Authorization: `Basic ${btoa(`${current.http.username ?? "lfcode"}:${current.http.password}`)}`,
           }
         : undefined,
     })
@@ -2466,7 +2453,7 @@ export default function Layout(props: ParentProps) {
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
-      onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+      onOpenHelp={() => platform.openLink("https://lfcode.ai/desktop-feedback")}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }

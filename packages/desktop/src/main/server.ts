@@ -31,14 +31,14 @@ export function setWslConfig(config: WslConfig) {
 
 export async function spawnLocalServer(hostname: string, port: number, password: string) {
   prepareServerEnv(password)
-  const { Log, Server } = await import("virtual:opencode-server")
+  const { Log, Server } = await import("virtual:lfcode-server")
   await Log.init({ level: "WARN" })
   const listener = await Server.listen({
     port,
     hostname,
-    username: "opencode",
+    username: "lfcode",
     password,
-    cors: ["oc://renderer"],
+    cors: ["lfcode://renderer"],
   })
 
   const wait = (async () => {
@@ -58,10 +58,10 @@ export async function spawnLocalServer(hostname: string, port: number, password:
 }
 
 const ROOT_ENV_KEYS = [
-  "OPENCODE_CONFIG_DIR",
-  "OPENCODE_DATA_DIR",
-  "OPENCODE_STATE_DIR",
-  "OPENCODE_CACHE_DIR",
+  "LFCODE_CONFIG_DIR",
+  "LFCODE_DATA_DIR",
+  "LFCODE_STATE_DIR",
+  "LFCODE_CACHE_DIR",
 ] as const
 
 function prepareServerEnv(password: string) {
@@ -70,11 +70,11 @@ function prepareServerEnv(password: string) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...shellEnv,
-    OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
-    OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
-    OPENCODE_CLIENT: "desktop",
-    OPENCODE_SERVER_USERNAME: "opencode",
-    OPENCODE_SERVER_PASSWORD: password,
+    LFCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
+    LFCODE_EXPERIMENTAL_FILEWATCHER: "true",
+    LFCODE_CLIENT: "desktop",
+    LFCODE_SERVER_USERNAME: "lfcode",
+    LFCODE_SERVER_PASSWORD: password,
   }
   for (const key of ROOT_ENV_KEYS) {
     const value = process.env[key]
@@ -94,7 +94,7 @@ export async function checkHealth(url: string, password?: string | null): Promis
 
   const headers = new Headers()
   if (password) {
-    const auth = Buffer.from(`opencode:${password}`).toString("base64")
+    const auth = Buffer.from(`lfcode:${password}`).toString("base64")
     headers.set("authorization", `Basic ${auth}`)
   }
 

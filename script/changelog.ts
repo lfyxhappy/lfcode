@@ -63,7 +63,7 @@ async function fallback() {
   process.exit(0)
 }
 
-if (!process.env.OPENCODE_API_KEY) await fallback()
+if (!process.env.LFCODE_API_KEY) await fallback()
 
 const quiet = values.quiet
 const cmd = ["opencode", "run"]

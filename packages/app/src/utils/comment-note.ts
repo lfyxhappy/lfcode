@@ -25,7 +25,7 @@ function selection(selection: unknown) {
 
 export function createCommentMetadata(input: PromptComment) {
   return {
-    opencodeComment: {
+    lfcodeComment: {
       path: input.path,
       selection: input.selection,
       comment: input.comment,
@@ -37,7 +37,8 @@ export function createCommentMetadata(input: PromptComment) {
 
 export function readCommentMetadata(value: unknown) {
   if (!value || typeof value !== "object") return
-  const meta = (value as { opencodeComment?: unknown }).opencodeComment
+  const meta = (value as { lfcodeComment?: unknown; opencodeComment?: unknown }).lfcodeComment
+    ?? (value as { lfcodeComment?: unknown; opencodeComment?: unknown }).opencodeComment
   if (!meta || typeof meta !== "object") return
   const path = (meta as { path?: unknown }).path
   const comment = (meta as { comment?: unknown }).comment

@@ -1,6 +1,6 @@
-import type { Project, UserMessage } from "@mimo-ai/sdk/v2"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { createQuery, skipToken, useMutation, useQueryClient } from "@tanstack/solid-query"
+import type { UserMessage } from "@lfcode-ai/sdk/v2"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { useMutation } from "@tanstack/solid-query"
 import {
   batch,
   onCleanup,
@@ -21,14 +21,13 @@ import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLocal } from "@/context/local"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { createStore } from "solid-js/store"
-import { ResizeHandle } from "@mimo-ai/ui/resize-handle"
-import { Select } from "@mimo-ai/ui/select"
-import { Tabs } from "@mimo-ai/ui/tabs"
-import { createAutoScroll } from "@mimo-ai/ui/hooks"
-import { previewSelectedLines } from "@mimo-ai/ui/pierre/selection-bridge"
-import { Button } from "@mimo-ai/ui/button"
-import { showToast } from "@mimo-ai/ui/toast"
-import { checksum } from "@mimo-ai/shared/util/encode"
+import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
+import { Select } from "@lfcode-ai/ui/select"
+import { Tabs } from "@lfcode-ai/ui/tabs"
+import { createAutoScroll } from "@lfcode-ai/ui/hooks"
+import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
+import { showToast } from "@lfcode-ai/ui/toast"
+import { checksum } from "@lfcode-ai/shared/util/encode"
 import { useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
@@ -73,8 +72,7 @@ type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
 
-type ChangeMode = "git" | "branch" | "turn"
-type VcsMode = "git" | "branch"
+type ReviewMode = "recent-1" | "recent-15" | "full"
 
 type SessionHistoryWindowInput = {
   sessionID: () => string | undefined
@@ -327,7 +325,6 @@ export default function Page() {
   const local = useLocal()
   const file = useFile()
   const sync = useSync()
-  const queryClient = useQueryClient()
   const dialog = useDialog()
   const language = useLanguage()
   const sdk = useSDK()
@@ -452,7 +449,6 @@ export default function Page() {
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
-  const diffs = createMemo(() => (params.id ? list(sync.data.session_diff[params.id]) : []))
   const canReview = createMemo(() => !!sync.project)
   const reviewTab = createMemo(() => isDesktop())
   const tabState = createSessionTabs({
@@ -533,7 +529,7 @@ export default function Page() {
   const [store, setStore] = createStore({
     messageId: undefined as string | undefined,
     mobileTab: "session" as "session" | "changes",
-    changes: "git" as ChangeMode,
+    changes: "recent-1" as ReviewMode,
     newSessionWorktree: "main",
     deferRender: false,
   })
@@ -585,68 +581,46 @@ export default function Page() {
     return open
   }, desktopReviewOpen())
 
-  const turnDiffs = createMemo(() => list(lastUserMessage()?.summary?.diffs))
-  const nogit = createMemo(() => !!sync.project && sync.project.vcs !== "git")
-  const changesOptions = createMemo<ChangeMode[]>(() => {
-    const list: ChangeMode[] = []
-    if (sync.project?.vcs === "git") list.push("git")
-    if (
-      sync.project?.vcs === "git" &&
-      sync.data.vcs?.branch &&
-      sync.data.vcs?.default_branch &&
-      sync.data.vcs.branch !== sync.data.vcs.default_branch
-    ) {
-      list.push("branch")
-    }
-    list.push("turn")
-    return list
-  })
   const mobileChanges = createMemo(() => !isDesktop() && store.mobileTab === "changes")
   const wantsReview = createMemo(() =>
     isDesktop()
       ? desktopFileTreeOpen() || (desktopReviewOpen() && activeTab() === "review")
       : store.mobileTab === "changes",
   )
-  const vcsMode = createMemo<VcsMode | undefined>(() => {
-    if (store.changes === "git" || store.changes === "branch") return store.changes
+  const reviewModeOptions = createMemo<ReviewMode[]>(() => ["recent-1", "recent-15", "full"])
+  const reviewWindowRequest = createMemo(() => {
+    const id = params.id
+    if (!id || !wantsReview()) return
+    if (store.changes === "full") return
+    return { sessionID: id, turns: store.changes === "recent-15" ? 15 : 1 }
   })
-  const vcsKey = createMemo(
-    () => ["session-vcs", sdk.directory, sync.data.vcs?.branch ?? "", sync.data.vcs?.default_branch ?? ""] as const,
-  )
-  const vcsQuery = createQuery(() => {
-    const mode = vcsMode()
-    const enabled = wantsReview() && sync.project?.vcs === "git"
-
-    return {
-      queryKey: [...vcsKey(), mode] as const,
-      enabled,
-      staleTime: Number.POSITIVE_INFINITY,
-      gcTime: 60 * 1000,
-      queryFn: mode
-        ? () =>
-            sdk.client.vcs
-              .diff({ mode })
-              .then((result) => list(result.data))
-              .catch((error) => {
-                console.debug("[session-review] failed to load vcs diff", { mode, error })
-                return []
-              })
-        : skipToken,
-    }
+  const [reviewWindowDiffs, { refetch: refetchReviewWindowDiffs }] = createResource(reviewWindowRequest, async (input) => {
+    return sdk.client.session
+      .diff({
+        sessionID: input.sessionID,
+        turns: input.turns,
+      })
+      .then((result) => list(result.data))
+      .catch((error) => {
+        console.debug("[session-review] failed to load session diff window", { sessionID: input.sessionID, turns: input.turns, error })
+        return []
+      })
   })
-  const refreshVcs = () => void queryClient.invalidateQueries({ queryKey: vcsKey() })
-  const reviewDiffs = () => {
-    if (store.changes === "git" || store.changes === "branch")
-      // avoids suspense
-      return vcsQuery.isFetched ? (vcsQuery.data ?? []) : []
-    return turnDiffs()
-  }
+  const reviewLoading = createMemo(() => {
+    const id = params.id
+    if (!id || !wantsReview()) return false
+    if (store.changes === "full") return sync.status === "loading" || sync.data.session_diff[id] === undefined
+    return reviewWindowDiffs.loading
+  })
+  const reviewReady = createMemo(() => !reviewLoading())
+  const reviewDiffs = createMemo(() => {
+    const id = params.id
+    if (!id || !wantsReview() || !reviewReady()) return []
+    if (store.changes === "full") return list(sync.data.session_diff[id])
+    return reviewWindowDiffs() ?? []
+  })
   const reviewCount = () => reviewDiffs().length
   const hasReview = () => reviewCount() > 0
-  const reviewReady = () => {
-    if (store.changes === "git" || store.changes === "branch") return !vcsQuery.isPending
-    return true
-  }
 
   const newSessionWorktree = createMemo(() => {
     if (store.newSessionWorktree === "create") return "create"
@@ -710,45 +684,6 @@ export default function Page() {
 
     autoScroll.pause()
     scrollToMessage(msgs[targetIndex], "auto")
-  }
-
-  function upsert(next: Project) {
-    const list = globalSync.data.project
-    sync.set("project", next.id)
-    const idx = list.findIndex((item) => item.id === next.id)
-    if (idx >= 0) {
-      globalSync.set(
-        "project",
-        list.map((item, i) => (i === idx ? { ...item, ...next } : item)),
-      )
-      return
-    }
-    const at = list.findIndex((item) => item.id > next.id)
-    if (at >= 0) {
-      globalSync.set("project", [...list.slice(0, at), next, ...list.slice(at)])
-      return
-    }
-    globalSync.set("project", [...list, next])
-  }
-
-  const gitMutation = useMutation(() => ({
-    mutationFn: () => sdk.client.project.initGit(),
-    onSuccess: (x) => {
-      if (!x.data) return
-      upsert(x.data)
-    },
-    onError: (err) => {
-      showToast({
-        variant: "error",
-        title: language.t("common.requestFailed"),
-        description: formatServerError(err, language.t),
-      })
-    },
-  }))
-
-  function initGit() {
-    if (gitMutation.isPending) return
-    gitMutation.mutate()
   }
 
   let inputRef!: HTMLDivElement
@@ -859,24 +794,12 @@ export default function Page() {
       sessionKey,
       () => {
         setStore("messageId", undefined)
-        setStore("changes", "git")
+        setStore("changes", "recent-1")
         setUi("pendingMessage", undefined)
       },
       { defer: true },
     ),
   )
-
-  const stopVcs = sdk.event.listen((evt) => {
-    if (evt.details.type !== "file.watcher.updated") return
-    const props =
-      typeof evt.details.properties === "object" && evt.details.properties
-        ? (evt.details.properties as Record<string, unknown>)
-        : undefined
-    const file = typeof props?.file === "string" ? props.file : undefined
-    if (!file || file.startsWith(".git/")) return
-    refreshVcs()
-  })
-  onCleanup(stopVcs)
 
   createEffect(
     on(
@@ -999,20 +922,40 @@ export default function Page() {
     }
   }
 
-  createEffect(() => {
-    const list = changesOptions()
-    if (list.includes(store.changes)) return
-    const next = list[0]
-    if (!next) return
-    setStore("changes", next)
-  })
-
   createEffect(
     on(
       () => sync.data.session_status[params.id ?? ""]?.type,
       (next, prev) => {
         if (next !== "idle" || prev === undefined || prev === "idle") return
-        refreshVcs()
+
+        const id = params.id
+        if (!id || !wantsReview()) return
+        if (store.changes === "full") {
+          void sync.session.diff(id, { force: true })
+          return
+        }
+
+        void refetchReviewWindowDiffs()
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      revertMessageID,
+      (_, prev) => {
+        if (prev === undefined) return
+
+        const id = params.id
+        if (!id || !wantsReview()) return
+        if ((sync.data.session_status[id]?.type ?? "idle") !== "idle") return
+        if (store.changes === "full") {
+          void sync.session.diff(id, { force: true })
+          return
+        }
+
+        void refetchReviewWindowDiffs()
       },
       { defer: true },
     ),
@@ -1071,15 +1014,15 @@ export default function Page() {
       return null
     }
 
-    const label = (option: ChangeMode) => {
-      if (option === "git") return language.t("ui.sessionReview.title.git")
-      if (option === "branch") return language.t("ui.sessionReview.title.branch")
+    const label = (option: ReviewMode) => {
+      if (option === "recent-15") return language.t("ui.sessionReview.title.lastFifteenTurns")
+      if (option === "full") return language.t("ui.sessionReview.title.fullSession")
       return language.t("ui.sessionReview.title.lastTurn")
     }
 
     return (
       <Select
-        options={changesOptions()}
+        options={reviewModeOptions()}
         current={store.changes}
         label={label}
         onSelect={(option) => option && setStore("changes", option)}
@@ -1096,44 +1039,11 @@ export default function Page() {
     </div>
   )
 
-  const createGit = (input: { emptyClass: string }) => (
-    <div class={input.emptyClass}>
-      <div class="flex flex-col gap-3">
-        <div class="text-14-medium text-text-strong">{language.t("session.review.noVcs.createGit.title")}</div>
-        <div class="text-14-regular text-text-base max-w-md" style={{ "line-height": "var(--line-height-normal)" }}>
-          {language.t("session.review.noVcs.createGit.description")}
-        </div>
-      </div>
-      <Button size="large" disabled={gitMutation.isPending} onClick={initGit}>
-        {gitMutation.isPending
-          ? language.t("session.review.noVcs.createGit.actionLoading")
-          : language.t("session.review.noVcs.createGit.action")}
-      </Button>
-    </div>
-  )
-
-  const reviewEmptyText = createMemo(() => {
-    if (store.changes === "git") return language.t("session.review.noUncommittedChanges")
-    if (store.changes === "branch") return language.t("session.review.noBranchChanges")
-    return language.t("session.review.noChanges")
-  })
+  const reviewEmptyText = createMemo(() => language.t("session.review.noChanges"))
 
   const reviewEmpty = (input: { loadingClass: string; emptyClass: string }) => {
-    if (store.changes === "git" || store.changes === "branch") {
-      if (!reviewReady()) return <div class={input.loadingClass}>{language.t("session.review.loadingChanges")}</div>
-      return empty(reviewEmptyText())
-    }
-
-    if (store.changes === "turn") {
-      if (nogit()) return createGit(input)
-      return empty(reviewEmptyText())
-    }
-
-    return (
-      <div class={input.emptyClass}>
-        <div class="text-14-regular text-text-weak max-w-56">{reviewEmptyText()}</div>
-      </div>
-    )
+    if (!reviewReady()) return <div class={input.loadingClass}>{language.t("session.review.loadingChanges")}</div>
+    return empty(reviewEmptyText())
   }
 
   const reviewContent = (input: {
@@ -1280,6 +1190,7 @@ export default function Page() {
     if (!id) return
 
     if (!wantsReview()) return
+    if (store.changes !== "full") return
     if (sync.data.session_diff[id] !== undefined) return
     if (sync.status === "loading") return
 
@@ -1288,8 +1199,8 @@ export default function Page() {
 
   createEffect(
     on(
-      () => [sessionKey(), wantsReview()] as const,
-      ([key, wants]) => {
+      () => [sessionKey(), wantsReview(), store.changes] as const,
+      ([key, wants, mode]) => {
         if (diffFrame !== undefined) cancelAnimationFrame(diffFrame)
         if (diffTimer !== undefined) window.clearTimeout(diffTimer)
         diffFrame = undefined
@@ -1298,6 +1209,7 @@ export default function Page() {
 
         const id = params.id
         if (!id) return
+        if (mode !== "full") return
         if (!untrack(() => sync.data.session_diff[id] !== undefined)) return
 
         diffFrame = requestAnimationFrame(() => {

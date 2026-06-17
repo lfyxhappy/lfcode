@@ -9,11 +9,11 @@ try {
   process.chdir(homedir())
 } catch {}
 
-process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
+process.env.LFCODE_DISABLE_EMBEDDED_WEB_UI = "true"
 
 const APP_NAME = "Lfcode"
 const APP_ID = "com.lfyxhappy.lfcode"
-const rawChannel = import.meta.env.OPENCODE_CHANNEL
+const rawChannel = import.meta.env.LFCODE_CHANNEL
 const channel = rawChannel === "stable" ? rawChannel : "stable"
 
 async function start() {
@@ -27,7 +27,7 @@ async function start() {
     isPackaged: app.isPackaged,
     legacyUserDataDir: join(app.getPath("appData"), appId),
     platform: process.platform,
-    portableRoot: process.env.OPENCODE_PORTABLE_ROOT,
+    portableRoot: process.env.LFCODE_PORTABLE_ROOT,
   }
   applyBootstrapState(app, resolveDesktopBootstrap(input))
   await prepareDesktopBootstrap(input)

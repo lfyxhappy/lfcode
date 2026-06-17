@@ -9,7 +9,7 @@ import { app, BrowserWindow, dialog, shell } from "electron"
 import pkg from "electron-updater"
 import contextMenu from "electron-context-menu"
 import { drizzle } from "drizzle-orm/node-sqlite/driver"
-import type { Server } from "virtual:opencode-server"
+import type { Server } from "virtual:lfcode-server"
 import type { InitStep, ServerReadyData, SqliteMigrationProgress, WslConfig } from "../preload/types"
 import { checkAppExists, resolveAppPath, wslPath } from "./apps"
 import { getBootstrapState } from "./bootstrap"
@@ -40,6 +40,7 @@ let server: Server.Listener | null = null
 let recoveryPromptOpen = false
 let shuttingDown = false
 let updateReady = false
+let updateCheck: Promise<{ updateAvailable: boolean; version?: string; failed?: boolean }> | undefined
 const loadingComplete = defer<void>()
 const pendingDeepLinks: string[] = []
 const serverReady = defer<ServerReadyData>()
@@ -60,13 +61,13 @@ function setupApp() {
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   setRelaunchHandler(relaunchApp)
 
-  if (process.env.OPENCODE_DISABLE_SINGLE_INSTANCE_LOCK !== "1" && !app.requestSingleInstanceLock()) {
+  if (process.env.LFCODE_DISABLE_SINGLE_INSTANCE_LOCK !== "1" && !app.requestSingleInstanceLock()) {
     app.quit()
     return
   }
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
-    const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    const urls = argv.filter((arg: string) => arg.startsWith("lfcode://"))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
@@ -116,7 +117,7 @@ function setupApp() {
 
   void app.whenReady()
     .then(async () => {
-      app.setAsDefaultProtocolClient("opencode")
+      app.setAsDefaultProtocolClient("lfcode")
       registerRendererProtocol()
       setDockIcon()
       ensurePortableWindowsShortcuts()
@@ -167,7 +168,7 @@ async function initialize() {
     })
 
     if (needsMigration) {
-      const { Database, JsonMigration } = await import("virtual:opencode-server")
+      const { Database, JsonMigration } = await import("virtual:lfcode-server")
       await JsonMigration.run(drizzle({ client: Database.Client().$client }), {
         progress: (event: { current: number; total: number }) => {
           const percent = Math.round(event.current / event.total) * 100
@@ -187,7 +188,7 @@ async function initialize() {
     server = listener
     serverReady.resolve({
       url,
-      username: "opencode",
+      username: "lfcode",
       password,
     })
 
@@ -336,7 +337,7 @@ async function showAppRecoveryDialog(message: string, detail: string, buttons: s
 }
 
 function isHeadlessWindowMode() {
-  return process.env.OPENCODE_DESKTOP_HEADLESS === "1"
+  return process.env.LFCODE_DESKTOP_HEADLESS === "1"
 }
 
 function formatError(error: unknown) {
@@ -366,7 +367,7 @@ function ensureLoopbackNoProxy() {
 }
 
 async function getSidecarPort() {
-  const fromEnv = process.env.OPENCODE_PORT
+  const fromEnv = process.env.LFCODE_PORT
   if (fromEnv) {
     const parsed = Number.parseInt(fromEnv, 10)
     if (!Number.isNaN(parsed)) return parsed
@@ -389,11 +390,11 @@ async function getSidecarPort() {
 }
 
 function sqliteFileExists() {
-  const dataDir = process.env.OPENCODE_DATA_DIR
-  if (dataDir) return existsSync(join(dataDir, "opencode.db"))
+  const dataDir = process.env.LFCODE_DATA_DIR
+  if (dataDir) return existsSync(join(dataDir, "lfcode.db")) || existsSync(join(dataDir, "opencode.db"))
   const xdg = process.env.XDG_DATA_HOME
   const base = xdg && xdg.length > 0 ? xdg : join(homedir(), ".local", "share")
-  return existsSync(join(base, "opencode", "opencode.db"))
+  return existsSync(join(base, "lfcode", "lfcode.db")) || existsSync(join(base, "lfcode", "opencode.db"))
 }
 
 function setupAutoUpdater() {
@@ -437,38 +438,44 @@ function ensurePortableWindowsShortcuts() {
 
 async function checkUpdate() {
   if (!UPDATER_ENABLED) return { updateAvailable: false }
+  if (updateCheck) return updateCheck
   updateReady = false
-  logger.log("checking for updates", {
-    allowDowngrade: autoUpdater.allowDowngrade,
-    allowPrerelease: autoUpdater.allowPrerelease,
-    channel: autoUpdater.channel,
-    currentVersion: app.getVersion(),
-  })
-  try {
-    const result = await autoUpdater.checkForUpdates()
-    const updateInfo = result?.updateInfo
-    logger.log("update metadata fetched", {
-      files: updateInfo?.files?.map((file) => file.url) ?? [],
-      releaseDate: updateInfo?.releaseDate ?? null,
-      releaseName: updateInfo?.releaseName ?? null,
-      releaseVersion: updateInfo?.version ?? null,
+  updateCheck = (async () => {
+    logger.log("checking for updates", {
+      allowDowngrade: autoUpdater.allowDowngrade,
+      allowPrerelease: autoUpdater.allowPrerelease,
+      channel: autoUpdater.channel,
+      currentVersion: app.getVersion(),
     })
-    const version = result?.updateInfo?.version
-    if (result?.isUpdateAvailable === false || !version) {
-      logger.log("no update available", {
-        reason: "provider returned no newer version",
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      const updateInfo = result?.updateInfo
+      logger.log("update metadata fetched", {
+        files: updateInfo?.files?.map((file) => file.url) ?? [],
+        releaseDate: updateInfo?.releaseDate ?? null,
+        releaseName: updateInfo?.releaseName ?? null,
+        releaseVersion: updateInfo?.version ?? null,
       })
-      return { updateAvailable: false }
+      const version = result?.updateInfo?.version
+      if (result?.isUpdateAvailable === false || !version) {
+        logger.log("no update available", {
+          reason: "provider returned no newer version",
+        })
+        return { updateAvailable: false }
+      }
+      logger.log("update available", { version })
+      await autoUpdater.downloadUpdate()
+      logger.log("update download completed", { version })
+      updateReady = true
+      return { updateAvailable: true, version }
+    } catch (error) {
+      logger.error("update check failed", error)
+      return { updateAvailable: false, failed: true }
+    } finally {
+      updateCheck = undefined
     }
-    logger.log("update available", { version })
-    await autoUpdater.downloadUpdate()
-    logger.log("update download completed", { version })
-    updateReady = true
-    return { updateAvailable: true, version }
-  } catch (error) {
-    logger.error("update check failed", error)
-    return { updateAvailable: false, failed: true }
-  }
+  })()
+  return updateCheck
 }
 
 async function installUpdate() {

@@ -5,8 +5,8 @@ import {
   type LabUsageModelEntry,
   type ModelUsagePoint,
   type StatsLabData,
-} from "@opencode-ai/stats-core/domain/home"
-import { runtime } from "@opencode-ai/stats-core/runtime"
+} from "@lfcode-ai/stats-core/domain/home"
+import { runtime } from "@lfcode-ai/stats-core/runtime"
 import { createAsync, query, useParams } from "@solidjs/router"
 import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js"
 import { getRequestEvent } from "solid-js/web"
@@ -28,9 +28,9 @@ import {
   type ThemePreference,
 } from "../stats-shell"
 
-const statsCanonicalBaseUrl = "https://opencode.ai/data/"
+const statsCanonicalBaseUrl = "https://lfcode.ai/data/"
 const statsUnfurlPath = "banner.png"
-const statsUnfurlAlt = "OpenCode Data wordmark on a dark patterned background"
+const statsUnfurlAlt = "Lfcode Data wordmark on a dark patterned background"
 const statsUnfurlUrl = new URL(statsUnfurlPath, statsCanonicalBaseUrl).toString()
 const labHeaderLinks: readonly HeaderLink[] = [
   { href: "#overview", label: "Overview" },
@@ -72,7 +72,7 @@ export default function StatsLab() {
   const labTitle = createMemo(() => `${labName()} Models`)
   const labDescription = createMemo(
     () =>
-      `Explore ${labName()} models used in OpenCode, with recent token usage, context windows, release dates, and model-specific data.`,
+      `Explore ${labName()} models used in Lfcode, with recent token usage, context windows, release dates, and model-specific data.`,
   )
   const labUrl = createMemo(() => new URL(lab()?.id ?? labParam(), statsCanonicalBaseUrl).toString())
   const updateThemePreference = (preference: ThemePreference) => {
@@ -96,7 +96,7 @@ export default function StatsLab() {
       <Meta name="description" content={labDescription()} />
       <Link rel="canonical" href={labUrl()} />
       <Meta property="og:type" content="website" />
-      <Meta property="og:site_name" content="OpenCode" />
+      <Meta property="og:site_name" content="Lfcode" />
       <Meta property="og:title" content={labTitle()} />
       <Meta property="og:description" content={labDescription()} />
       <Meta property="og:url" content={labUrl()} />
@@ -144,7 +144,7 @@ function LabLoading() {
             Data
           </a>
           <h1>Model Lab</h1>
-          <p>Reading model availability and recent OpenCode usage.</p>
+          <p>Reading model availability and recent Lfcode usage.</p>
         </div>
       </div>
     </section>
@@ -187,7 +187,7 @@ function LabHero(props: { lab: ModelCatalogLab; stats: StatsLabData | null }) {
           <h1>{props.lab.name}</h1>
           <div data-slot="model-hero-pattern" aria-hidden="true" />
           <p>
-            Explore {props.lab.models.length} {props.lab.name} models used in OpenCode
+            Explore {props.lab.models.length} {props.lab.name} models used in Lfcode
             <Show when={featuredModels().length > 0}> including {formatList(featuredModels())}</Show>. Compare recent
             token usage, context windows, release dates, and model-specific data.
           </p>
@@ -197,7 +197,7 @@ function LabHero(props: { lab: ModelCatalogLab; stats: StatsLabData | null }) {
           <strong>{props.stats ? formatTokens(props.stats.totals.tokens) : "Pending"}</strong>
           <p>
             {props.stats
-              ? `${formatPercent(props.stats.tokenShare)} of recent OpenCode usage`
+              ? `${formatPercent(props.stats.tokenShare)} of recent Lfcode usage`
               : latest()
                 ? `Latest release ${formatCatalogDate(latest())}`
                 : "Usage appears after model activity lands"}
@@ -222,7 +222,7 @@ function LabUsageSection(props: { lab: ModelCatalogLab; data: StatsLabData | nul
     <section id="usage" data-section="model-panel">
       <p data-slot="section-title">
         <strong>{props.lab.name} token usage.</strong>{" "}
-        <span>Daily OpenCode token volume over the last two months.</span>
+        <span>Daily Lfcode token volume over the last two months.</span>
       </p>
       <Show
         when={usage().some((item) => item.tokens > 0)}

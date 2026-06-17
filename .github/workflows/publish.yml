@@ -42,10 +42,10 @@ jobs:
         id: committer
         uses: ./.github/actions/setup-git-committer
         with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
+          lfcode-app-id: ${{ vars.LFCODE_APP_ID }}
+          lfcode-app-secret: ${{ secrets.LFCODE_APP_SECRET }}
 
-      - name: Install OpenCode
+      - name: Install Lfcode
         if: inputs.bump || inputs.version
         run: bun i -g opencode-ai
 
@@ -54,9 +54,9 @@ jobs:
           bun ./script/version.ts
         env:
           GH_TOKEN: ${{ steps.committer.outputs.token }}
-          OPENCODE_BUMP: ${{ inputs.bump }}
-          OPENCODE_VERSION: ${{ inputs.version }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          LFCODE_BUMP: ${{ inputs.bump }}
+          LFCODE_VERSION: ${{ inputs.version }}
+          LFCODE_API_KEY: ${{ secrets.LFCODE_API_KEY }}
           GH_REPO: lfyxhappy/lfcode
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -105,15 +105,15 @@ jobs:
         id: committer
         uses: ./.github/actions/setup-git-committer
         with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
+          lfcode-app-id: ${{ vars.LFCODE_APP_ID }}
+          lfcode-app-secret: ${{ secrets.LFCODE_APP_SECRET }}
 
       - name: Prepare
         run: bun ./scripts/prepare.ts
         working-directory: packages/desktop
         env:
-          OPENCODE_VERSION: ${{ needs.version.outputs.version }}
-          OPENCODE_CHANNEL: stable
+          LFCODE_VERSION: ${{ needs.version.outputs.version }}
+          LFCODE_CHANNEL: stable
           RUST_TARGET: ${{ matrix.settings.target }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
@@ -122,7 +122,7 @@ jobs:
         run: bun run build
         working-directory: packages/desktop
         env:
-          OPENCODE_CHANNEL: stable
+          LFCODE_CHANNEL: stable
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ vars.WEB_SENTRY_PROJECT }}
@@ -137,7 +137,7 @@ jobs:
         working-directory: packages/desktop
         timeout-minutes: 60
         env:
-          OPENCODE_CHANNEL: stable
+          LFCODE_CHANNEL: stable
           GH_TOKEN: ${{ steps.committer.outputs.token }}
 
       - name: Package (no publish)
@@ -146,7 +146,7 @@ jobs:
         working-directory: packages/desktop
         timeout-minutes: 60
         env:
-          OPENCODE_CHANNEL: stable
+          LFCODE_CHANNEL: stable
 
       - name: Verify signed Windows Electron artifacts
         if: runner.os == 'Windows' && env.AZURE_TRUSTED_SIGNING_ENDPOINT != '' && env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME != '' && env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE != ''
@@ -155,7 +155,7 @@ jobs:
           $files = @()
           $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*.exe" | Select-Object -ExpandProperty FullName
           $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\*.exe" | Select-Object -ExpandProperty FullName
-          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\resources\opencode-cli.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+          $files += Get-ChildItem "${{ github.workspace }}\packages\desktop\dist\*unpacked\resources\lfcode-cli.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
 
           foreach ($file in $files | Select-Object -Unique) {
             $sig = Get-AuthenticodeSignature $file
@@ -203,8 +203,8 @@ jobs:
         id: committer
         uses: ./.github/actions/setup-git-committer
         with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
+          lfcode-app-id: ${{ vars.LFCODE_APP_ID }}
+          lfcode-app-secret: ${{ secrets.LFCODE_APP_SECRET }}
 
       - name: Upload desktop release assets
         if: needs.version.outputs.release

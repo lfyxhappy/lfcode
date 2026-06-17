@@ -30,7 +30,7 @@ const docsGithubHref = getRelativeLocaleUrl(locale, "github")
 
 const command = "curl -fsSL"
 const protocol = "https://"
-const url = "opencode.ai/install"
+const url = "github.com/lfyxhappy/lfcode/releases/latest/download/install"
 const bash = "| bash"
 
 let darkImage: ImageMetadata | undefined;
@@ -94,9 +94,9 @@ if (image) {
     <section class="alternatives">
       <div class="col1">
         <h3>npm</h3>
-        <button class="command" data-command="npm install -g opencode-ai">
+        <button class="command" data-command="npm install -g @lfcode-ai/cli">
           <code>
-            <span>npm install -g</span> <span class="highlight">opencode-ai</span>
+            <span>npm install -g</span> <span class="highlight">@lfcode-ai/cli</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -106,9 +106,9 @@ if (image) {
       </div>
       <div class="col2">
         <h3>Bun</h3>
-        <button class="command" data-command="bun install -g opencode-ai">
+        <button class="command" data-command="bun install -g @lfcode-ai/cli">
           <code>
-            <span>bun install -g</span> <span class="highlight">opencode-ai</span>
+            <span>bun install -g</span> <span class="highlight">@lfcode-ai/cli</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -117,10 +117,10 @@ if (image) {
         </button>
       </div>
       <div class="col3">
-        <h3>Homebrew</h3>
-        <button class="command" data-command="brew install opencode">
+        <h3>pnpm</h3>
+        <button class="command" data-command="pnpm add -g @lfcode-ai/cli">
           <code>
-            <span>brew install</span> <span class="highlight">opencode</span>
+            <span>pnpm add -g</span> <span class="highlight">@lfcode-ai/cli</span>
           </code>
           <span class="copy">
             <CopyIcon />
@@ -129,10 +129,10 @@ if (image) {
         </button>
       </div>
       <div class="col4">
-        <h3>Paru</h3>
-        <button class="command" data-command="paru -S opencode-bin">
+        <h3>Installer</h3>
+        <button class="command" data-command="curl -fsSL https://github.com/lfyxhappy/lfcode/releases/latest/download/install | bash">
           <code>
-            <span>paru -S</span> <span class="highlight">opencode-bin</span>
+            <span>curl -fsSL</span> <span class="highlight">github.com/lfyxhappy/lfcode/releases/latest/download/install</span> | bash
           </code>
           <span class="copy">
             <CopyIcon />
@@ -141,10 +141,10 @@ if (image) {
         </button>
       </div>
       <div class="col4">
-        <h3>Mise</h3>
-        <button class="command" data-command="mise use -g github:anomalyco/opencode">
+        <h3>GitHub</h3>
+        <button class="command" data-command="git clone https://github.com/lfyxhappy/lfcode">
           <code>
-            <span>mise use -g</span> <span class="highlight">github:anomalyco/opencode</span>
+            <span>git clone</span> <span class="highlight">https://github.com/lfyxhappy/lfcode</span>
           </code>
           <span class="copy">
             <CopyIcon />

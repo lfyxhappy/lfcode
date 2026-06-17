@@ -1,11 +1,11 @@
 import { describe, expect } from "bun:test"
 import { Effect, Option, Schema } from "effect"
-import { Catalog } from "@opencode-ai/core/catalog"
-import { Config } from "@opencode-ai/core/config"
-import { ConfigProviderPlugin } from "@opencode-ai/core/config/plugin/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { PluginV2 } from "@opencode-ai/core/plugin"
-import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Catalog } from "@lfcode-ai/core/catalog"
+import { Config } from "@lfcode-ai/core/config"
+import { ConfigProviderPlugin } from "@lfcode-ai/core/config/plugin/provider"
+import { ModelV2 } from "@lfcode-ai/core/model"
+import { PluginV2 } from "@lfcode-ai/core/plugin"
+import { ProviderV2 } from "@lfcode-ai/core/provider"
 import { it } from "../plugin/provider-helper"
 
 function request(headers: Record<string, string>, variant?: string) {
@@ -22,7 +22,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const plugin = yield* PluginV2.Service
-      const providerID = ProviderV2.ID.opencode
+      const providerID = ProviderV2.ID.lfcode
       const modelID = ModelV2.ID.make("alpha-gpt-next")
       const config = Config.Service.of({
         entries: () =>
@@ -81,7 +81,7 @@ describe("ConfigProviderPlugin.Plugin", () => {
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const plugin = yield* PluginV2.Service
-      const providerID = ProviderV2.ID.opencode
+      const providerID = ProviderV2.ID.lfcode
       const modelID = ModelV2.ID.make("alpha-gpt-next")
       const config = Config.Service.of({
         entries: () =>

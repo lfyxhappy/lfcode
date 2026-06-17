@@ -1,16 +1,16 @@
 import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
-import { Tabs } from "@mimo-ai/ui/tabs"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { TooltipKeybind } from "@mimo-ai/ui/tooltip"
-import { ResizeHandle } from "@mimo-ai/ui/resize-handle"
-import { Mark } from "@mimo-ai/ui/logo"
+import { Tabs } from "@lfcode-ai/ui/tabs"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { TooltipKeybind } from "@lfcode-ai/ui/tooltip"
+import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
+import { Mark } from "@lfcode-ai/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
-import type { SnapshotFileDiff, VcsFileDiff } from "@mimo-ai/sdk/v2"
+import type { SnapshotFileDiff, VcsFileDiff } from "@lfcode-ai/sdk/v2"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
 
 import FileTree from "@/components/file-tree"
 import { SessionContextUsage } from "@/components/session-context-usage"
@@ -22,7 +22,7 @@ import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
-import { showToast } from "@mimo-ai/ui/toast"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
 import {
@@ -69,7 +69,7 @@ export function SessionSidePanel(props: {
   const shown = createMemo(
     () =>
       platform.platform !== "desktop" ||
-      import.meta.env.VITE_OPENCODE_CHANNEL !== "beta" ||
+      import.meta.env.VITE_LFCODE_CHANNEL !== "beta" ||
       settings.general.showFileTree(),
   )
 
