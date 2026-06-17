@@ -1,20 +1,22 @@
-import { createOpencodeClient } from "@mimo-ai/sdk/v2/client"
+import { createLfcodeClient, type LfcodeClient } from "@lfcode-ai/sdk/v2/client"
 import type { ServerConnection } from "@/context/server"
+
+export type ServerSdkOptions = Omit<NonNullable<Parameters<typeof createLfcodeClient>[0]>, "baseUrl"> & {
+  server: ServerConnection.HttpBase
+}
 
 export function createSdkForServer({
   server,
   ...config
-}: Omit<NonNullable<Parameters<typeof createOpencodeClient>[0]>, "baseUrl"> & {
-  server: ServerConnection.HttpBase
-}) {
+}: ServerSdkOptions): LfcodeClient {
   const auth = (() => {
     if (!server.password) return
     return {
-      Authorization: `Basic ${btoa(`${server.username ?? "opencode"}:${server.password}`)}`,
+      Authorization: `Basic ${btoa(`${server.username ?? "lfcode"}:${server.password}`)}`,
     }
   })()
 
-  return createOpencodeClient({
+  return createLfcodeClient({
     ...config,
     headers: {
       ...(config.headers instanceof Headers ? Object.fromEntries(config.headers.entries()) : config.headers),

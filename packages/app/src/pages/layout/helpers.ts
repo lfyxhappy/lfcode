@@ -1,18 +1,13 @@
-import { getFilename } from "@mimo-ai/shared/util/path"
-import { type Session } from "@mimo-ai/sdk/v2/client"
+import { getFilename } from "@lfcode-ai/shared/util/path"
+import { type Session } from "@lfcode-ai/sdk/v2/client"
+import { normalizeWorkspacePath } from "@/utils/persist"
 
 type SessionStore = {
   session?: Session[]
   path: { directory: string }
 }
 
-export const workspaceKey = (directory: string) => {
-  const value = directory.replaceAll("\\", "/")
-  const drive = value.match(/^([A-Za-z]:)\/+$/)
-  if (drive) return `${drive[1]}/`
-  if (/^\/+$/i.test(value)) return "/"
-  return value.replace(/\/+$/, "")
-}
+export const workspaceKey = (directory: string) => normalizeWorkspacePath(directory)
 
 function sortSessions(now: number) {
   const oneMinuteAgo = now - 60 * 1000

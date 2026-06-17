@@ -1,4 +1,4 @@
-import { Credential } from "@opencode-ai/core/credential"
+import { Credential } from "@lfcode-ai/core/credential"
 import { Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"

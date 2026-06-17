@@ -85,7 +85,7 @@ export interface Interface {
   }
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Catalog") {}
+export class Service extends Context.Service<Service, Interface>()("@lfcode/v2/Catalog") {}
 
 enableMapSet()
 
@@ -297,7 +297,7 @@ export const layer = Layer.effect(
           if (!record) return Option.none<ModelV2.Info>()
           const provider = project(record.provider, yield* active())
 
-          if (providerID === ProviderV2.ID.opencode) {
+          if (providerID === ProviderV2.ID.lfcode) {
             const gpt5Nano = record.models.get(ModelV2.ID.make("gpt-5-nano"))
             if (gpt5Nano?.enabled && gpt5Nano.status === "active") return Option.some(resolve(gpt5Nano, provider))
           }

@@ -1,11 +1,11 @@
 name: "Setup Git Committer"
 description: "Create app token and configure git user"
 inputs:
-  opencode-app-id:
-    description: "OpenCode GitHub App ID"
+  lfcode-app-id:
+    description: "Lfcode GitHub App ID"
     required: false
-  opencode-app-secret:
-    description: "OpenCode GitHub App private key"
+  lfcode-app-secret:
+    description: "Lfcode GitHub App private key"
     required: false
 outputs:
   token:
@@ -19,11 +19,11 @@ runs:
   steps:
     - name: Create app token
       id: apptoken
-      if: ${{ inputs.opencode-app-id != '' && inputs.opencode-app-secret != '' }}
+      if: ${{ inputs.lfcode-app-id != '' && inputs.lfcode-app-secret != '' }}
       uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
       with:
-        app-id: ${{ inputs.opencode-app-id }}
-        private-key: ${{ inputs.opencode-app-secret }}
+        app-id: ${{ inputs.lfcode-app-id }}
+        private-key: ${{ inputs.lfcode-app-secret }}
         owner: ${{ github.repository_owner }}
 
     - name: Resolve auth token

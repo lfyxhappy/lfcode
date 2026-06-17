@@ -157,7 +157,7 @@ Affected schema:
 
 - Core-owned typed tool registry contract.
 - Canonical tool output content and structured settlement schemas.
-- Canonical tagged tool file sources in `@opencode-ai/llm`.
+- Canonical tagged tool file sources in `@lfcode-ai/llm`.
 - Durable tool called, progress, success, and failure events and projected assistant-tool states.
 
 Change:
@@ -187,7 +187,7 @@ Affected schema:
 
 Change:
 
-- Spill oversized model-facing tool text into globally unique files under OpenCode's shared tool-output directory.
+- Spill oversized model-facing tool text into globally unique files under Lfcode's shared tool-output directory.
 - Include the absolute file path in the bounded preview so ordinary `read`, `grep`, and `bash` operations can inspect it.
 
 Reason:
@@ -772,7 +772,7 @@ Change:
 - Retry Context Epoch preparation until stable after optimistic revision mismatches.
 - Clear the active Context Epoch when a Session moves so the destination initializes a complete baseline before promoting more input.
 - Fence Context Epoch initialization against the authoritative Session Location so a concurrent old-Location runner cannot recreate stale privileged context after a move.
-- Canonicalize ambient instruction traversal boundaries, honor `OPENCODE_DISABLE_PROJECT_CONFIG`, and make non-empty aggregate updates explicitly supersede previously loaded instructions.
+- Canonicalize ambient instruction traversal boundaries, honor `LFCODE_DISABLE_PROJECT_CONFIG`, and make non-empty aggregate updates explicitly supersede previously loaded instructions.
 
 Compatibility:
 

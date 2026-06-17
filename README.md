@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://opencode.ai">
+  <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
       <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
       <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
@@ -9,8 +9,7 @@
 </p>
 <p align="center">The open source AI coding agent.</p>
 <p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
@@ -39,91 +38,59 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
 
 ---
+
+> This README matches the current Lfcode repository state so download links, release assets, and compatibility notes stay accurate.
+
+Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
 
 ### Installation
 
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:lfyxhappy/lfcode for latest dev branch
-```
-
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
-
-### Desktop App (BETA)
-
-Lfcode is also available as a desktop application. Download directly from the [releases page](https://github.com/lfyxhappy/lfcode/releases) or [opencode.ai/download](https://opencode.ai/download).
-
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
+- Source: use Bun from the repo root for local development.
 
 ```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
+bun install
+bun run dev
+bun run dev:web
+bun run dev:desktop
 ```
 
-#### Installation Directory
+### Compatibility
 
-The install script respects the following priority order for the installation path:
+Several runtime identifiers still use the historical `opencode` name for compatibility.
 
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
+- CLI command: `opencode`
+- Config directory: `~/.lfcode`
+- Environment variables: `LFCODE_*`
+- Desktop protocol scheme: `lfcode://`
 
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
-```
+### Repository Layout
 
-### Agents
-
-Lfcode includes two built-in agents you can switch between with the `Tab` key.
-
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
-
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
-
-Learn more about [agents](https://opencode.ai/docs/agents).
+- `packages/lfcode`: core runtime and session engine
+- `packages/app`: web UI
+- `packages/desktop`: Electron desktop host
+- `packages/ui`: shared UI components
+- `packages/sdk/js`: JavaScript SDK
 
 ### Documentation
 
-For more info on how to configure Lfcode, [**head over to our docs**](https://opencode.ai/docs).
+The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Contributing
+### Validation
 
-If you're interested in contributing to Lfcode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+Run the main repository checks from the workspace root:
 
-### Building on Lfcode
+```bash
+bun run lint
+bun run typecheck
+```
 
-If you are working on a project that's related to Lfcode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the Lfcode team and is not affiliated with us in any way.
+### Support
 
----
-
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
+- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

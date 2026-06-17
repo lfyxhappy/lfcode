@@ -1,5 +1,5 @@
-name: "opencode GitHub Action"
-description: "Run opencode in GitHub Actions workflows"
+name: "Lfcode GitHub Action"
+description: "Run Lfcode in GitHub Actions workflows"
 branding:
   icon: "code"
   color: "orange"
@@ -14,7 +14,7 @@ inputs:
     required: false
 
   share:
-    description: "Share the opencode session (defaults to true for public repos)"
+    description: "Share the Lfcode session (defaults to true for public repos)"
     required: false
 
   prompt:
@@ -22,12 +22,12 @@ inputs:
     required: false
 
   use_github_token:
-    description: "Use GITHUB_TOKEN directly instead of OpenCode App token exchange. When true, skips OIDC and uses the GITHUB_TOKEN env var."
+    description: "Use GITHUB_TOKEN directly instead of Lfcode App token exchange. When true, skips OIDC and uses the GITHUB_TOKEN env var."
     required: false
     default: "false"
 
   mentions:
-    description: "Comma-separated list of trigger phrases (case-insensitive). Defaults to '/opencode,/oc'"
+    description: "Comma-separated list of trigger phrases (case-insensitive). Defaults to '/lfcode,/opencode,/oc'"
     required: false
 
   variant:
@@ -41,33 +41,33 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Get opencode version
+    - name: Get Lfcode version
       id: version
       shell: bash
       run: |
         VERSION=$(curl -sf https://api.github.com/repos/lfyxhappy/lfcode/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
         echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT
 
-    - name: Cache opencode
+    - name: Cache Lfcode
       id: cache
       uses: actions/cache@v4
       with:
-        path: ~/.opencode/bin
-        key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+        path: ~/.lfcode/bin
+        key: lfcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
 
-    - name: Install opencode
+    - name: Install Lfcode
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: curl -fsSL https://github.com/lfyxhappy/lfcode/releases/latest/download/install | bash
 
-    - name: Add opencode to PATH
+    - name: Add Lfcode to PATH
       shell: bash
-      run: echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+      run: echo "$HOME/.lfcode/bin" >> $GITHUB_PATH
 
-    - name: Run opencode
+    - name: Run Lfcode
       shell: bash
-      id: run_opencode
-      run: opencode github run
+      id: run_lfcode
+      run: lfcode github run
       env:
         MODEL: ${{ inputs.model }}
         AGENT: ${{ inputs.agent }}

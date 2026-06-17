@@ -1,10 +1,10 @@
-import { Button } from "@mimo-ai/ui/button"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { Icon } from "@mimo-ai/ui/icon"
-import { Switch } from "@mimo-ai/ui/switch"
-import { Tabs } from "@mimo-ai/ui/tabs"
+import { Button } from "@lfcode-ai/ui/button"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { Switch } from "@lfcode-ai/ui/switch"
+import { Tabs } from "@lfcode-ai/ui/tabs"
 import { useMutation } from "@tanstack/solid-query"
-import { showToast } from "@mimo-ai/ui/toast"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { useNavigate } from "@solidjs/router"
 import { type Accessor, createEffect, createMemo, For, type JSXElement, onCleanup, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
@@ -244,7 +244,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     (sync.data.config.plugin ?? []).map((item) => (typeof item === "string" ? item : item[0])),
   )
   const pluginCount = createMemo(() => plugins().length)
-  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "opencode.json"))
+  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "lfcode.json"))
 
   return (
     <div class="flex items-center gap-1 w-[360px] rounded-xl shadow-[var(--shadow-lg-border-base)]">

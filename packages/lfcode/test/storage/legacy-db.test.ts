@@ -1,0 +1,287 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+import { init } from "#db"
+import { mergeLegacyDatabases } from "../../src/storage/legacy-db"
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()
+    if (!dir) continue
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        await fs.rm(dir, { recursive: true, force: true })
+        break
+      } catch (error) {
+        if (attempt === 9) throw error
+        await Bun.sleep(100)
+      }
+    }
+  }
+})
+
+async function tempDir() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lfcode-legacy-db-"))
+  tempDirs.push(dir)
+  return dir
+}
+
+function createSchema(dbPath: string, variant: "target" | "mimocode" | "opencode") {
+  const db = init(dbPath)
+  try {
+    db.run(`
+      create table project (
+        id text primary key,
+        worktree text not null,
+        vcs text,
+        name text,
+        icon_url text,
+        icon_color text,
+        time_created integer not null,
+        time_updated integer not null,
+        time_initialized integer,
+        sandboxes text not null,
+        commands text
+      );
+    `)
+    db.run(`
+      create table session (
+        id text primary key,
+        project_id text not null,
+        parent_id text,
+        slug text not null,
+        directory text not null,
+        title text not null,
+        version text not null,
+        share_url text,
+        summary_additions integer,
+        summary_deletions integer,
+        summary_files integer,
+        summary_diffs text,
+        revert text,
+        permission text,
+        time_created integer not null,
+        time_updated integer not null,
+        time_compacting integer,
+        time_archived integer,
+        workspace_id text,
+        context_from text,
+        context_watermark text,
+        last_checkpoint_message_id text
+      );
+    `)
+    db.run(`
+      create table message (
+        id text primary key,
+        session_id text not null,
+        ${variant === "target" ? "agent_id text not null default 'main'," : ""}
+        time_created integer not null,
+        time_updated integer not null,
+        data text not null
+      );
+    `)
+    db.run(`
+      create table part (
+        id text primary key,
+        message_id text not null,
+        session_id text not null,
+        time_created integer not null,
+        time_updated integer not null,
+        data text not null
+      );
+    `)
+    db.run(`
+      create table todo (
+        session_id text not null,
+        content text not null,
+        status text not null,
+        ${variant === "opencode" ? "priority text not null," : ""}
+        position integer not null,
+        time_created integer not null,
+        time_updated integer not null,
+        primary key (session_id, position)
+      );
+    `)
+    db.run(
+      variant === "opencode"
+        ? `
+          create table permission (
+            id text primary key,
+            project_id text not null,
+            action text not null,
+            resource text not null,
+            time_created integer not null,
+            time_updated integer not null
+          );
+        `
+        : `
+          create table permission (
+            project_id text primary key,
+            time_created integer not null,
+            time_updated integer not null,
+            data text not null
+          );
+        `,
+    )
+  } finally {
+    ;(db.$client as { close?: () => void }).close?.()
+  }
+}
+
+function seedLegacy(dbPath: string, prefix: string, withPermission: boolean) {
+  const db = init(dbPath)
+  try {
+    db.run(`
+      insert into project values (
+        '${prefix}_proj',
+        'C:\\\\${prefix}',
+        'git',
+        '${prefix} project',
+        null,
+        null,
+        1,
+        2,
+        null,
+        '[]',
+        null
+      );
+    `)
+    db.run(`
+      insert into session values (
+        '${prefix}_ses',
+        '${prefix}_proj',
+        null,
+        '${prefix}-slug',
+        'C:\\\\${prefix}',
+        '${prefix} session',
+        'v1',
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        3,
+        4,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      );
+    `)
+    db.run(`
+      insert into message (${prefix === "target" ? "id,session_id,agent_id,time_created,time_updated,data" : "id,session_id,time_created,time_updated,data"}) values (
+        '${prefix}_msg',
+        '${prefix}_ses',
+        ${prefix === "target" ? "'assistant'," : ""}
+        5,
+        6,
+        '{"role":"assistant"}'
+      );
+    `)
+    db.run(`
+      insert into part values (
+        '${prefix}_part',
+        '${prefix}_msg',
+        '${prefix}_ses',
+        7,
+        8,
+        '{"type":"text","text":"${prefix}"}'
+      );
+    `)
+    db.run(
+      prefix === "open"
+        ? `
+          insert into todo values (
+            '${prefix}_ses',
+            '${prefix} todo',
+            'open',
+            'medium',
+            0,
+            9,
+            10
+          );
+        `
+        : `
+          insert into todo values (
+            '${prefix}_ses',
+            '${prefix} todo',
+            'open',
+            0,
+            9,
+            10
+          );
+        `,
+    )
+    if (withPermission) {
+      db.run(`
+        insert into permission values (
+          '${prefix}_proj',
+          11,
+          12,
+          '{"bash":"ask"}'
+        );
+      `)
+    }
+  } finally {
+    ;(db.$client as { close?: () => void }).close?.()
+  }
+}
+
+describe("mergeLegacyDatabases", () => {
+  test("merges both legacy databases and stays idempotent", async () => {
+    const dir = await tempDir()
+    const targetPath = path.join(dir, "lfcode.db")
+    const mimocodePath = path.join(dir, "mimocode.db")
+    const opencodePath = path.join(dir, "opencode.db")
+
+    createSchema(targetPath, "target")
+    createSchema(mimocodePath, "mimocode")
+    createSchema(opencodePath, "opencode")
+    seedLegacy(mimocodePath, "mimo", true)
+    seedLegacy(opencodePath, "open", false)
+
+    const target = init(targetPath)
+    try {
+      mergeLegacyDatabases(target, targetPath)
+      mergeLegacyDatabases(target, targetPath)
+
+      const counts = (table: string) =>
+        Number((target.$client as { query: (sqlText: string) => { all: () => Array<{ count: number }> } })
+          .query(`select count(*) as count from ${table}`)
+          .all()[0]?.count ?? 0)
+
+      expect(counts("project")).toBe(2)
+      expect(counts("session")).toBe(2)
+      expect(counts("message")).toBe(2)
+      expect(counts("part")).toBe(2)
+      expect(counts("todo")).toBe(2)
+      expect(counts("permission")).toBe(1)
+
+      const messages = (target.$client as {
+        query: (sqlText: string) => { all: () => Array<{ id: string; agent_id: string }> }
+      })
+        .query("select id, agent_id from message order by id")
+        .all()
+      expect(messages).toEqual([
+        { id: "mimo_msg", agent_id: "main" },
+        { id: "open_msg", agent_id: "main" },
+      ])
+
+      const permission = (target.$client as {
+        query: (sqlText: string) => { all: () => Array<{ data: string }> }
+      })
+        .query("select data from permission")
+        .all()
+      expect(permission).toEqual([{ data: '{"bash":"ask"}' }])
+    } finally {
+      ;(target.$client as { close?: () => void }).close?.()
+    }
+  })
+})

@@ -7,16 +7,16 @@ import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
 import { LayerNode } from "./effect/layer-node"
 
-const app = "opencode"
-const data = process.env.OPENCODE_DATA_DIR ?? path.join(xdgData!, app)
-const cache = process.env.OPENCODE_CACHE_DIR ?? path.join(xdgCache!, app)
-const config = process.env.OPENCODE_CONFIG_DIR ?? path.join(xdgConfig!, app)
-const state = process.env.OPENCODE_STATE_DIR ?? path.join(xdgState!, app)
+const app = "lfcode"
+const data = process.env.LFCODE_DATA_DIR ?? path.join(xdgData!, app)
+const cache = process.env.LFCODE_CACHE_DIR ?? path.join(xdgCache!, app)
+const config = process.env.LFCODE_CONFIG_DIR ?? path.join(xdgConfig!, app)
+const state = process.env.LFCODE_STATE_DIR ?? path.join(xdgState!, app)
 const tmp = path.join(os.tmpdir(), app)
 
 const paths = {
   get home() {
-    return process.env.OPENCODE_TEST_HOME ?? os.homedir()
+    return process.env.LFCODE_TEST_HOME ?? os.homedir()
   },
   data,
   bin: path.join(cache, "bin"),
@@ -42,7 +42,7 @@ await Promise.all([
   fs.mkdir(Path.repos, { recursive: true }),
 ])
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Global") {}
+export class Service extends Context.Service<Service, Interface>()("@lfcode/Global") {}
 
 export interface Interface {
   readonly home: string
@@ -61,7 +61,7 @@ export function make(input: Partial<Interface> = {}): Interface {
     home: Path.home,
     data,
     cache,
-    config: Flag.OPENCODE_CONFIG_DIR ?? Path.config,
+    config: Flag.LFCODE_CONFIG_DIR ?? Path.config,
     state,
     tmp: Path.tmp,
     bin: path.join(cache, "bin"),

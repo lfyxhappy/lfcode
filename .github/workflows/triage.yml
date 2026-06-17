@@ -19,18 +19,18 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
-      - name: Install opencode
+      - name: Install Lfcode
         run: curl -fsSL https://github.com/lfyxhappy/lfcode/releases/latest/download/install | bash
 
       - name: Triage issue
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          LFCODE_API_KEY: ${{ secrets.LFCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          opencode run --agent triage "The following issue was just opened, triage it:
+          lfcode run --agent triage "The following issue was just opened, triage it:
 
           Title: $ISSUE_TITLE
 

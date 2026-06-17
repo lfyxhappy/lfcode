@@ -29,7 +29,7 @@ describe("desktop bootstrap paths", () => {
     expect(createRootLayout("C:\\Lfcode\\win-unpacked", "com.lfyxhappy.lfcode.dev")).toEqual({
       root: "C:\\Lfcode\\win-unpacked",
       configDir: "C:\\Lfcode\\win-unpacked",
-      configFile: "C:\\Lfcode\\win-unpacked\\opencode.jsonc",
+      configFile: "C:\\Lfcode\\win-unpacked\\lfcode.jsonc",
       dataDir: "C:\\Lfcode\\win-unpacked\\data",
       stateDir: "C:\\Lfcode\\win-unpacked\\state",
       cacheDir: "C:\\Lfcode\\win-unpacked\\cache",
@@ -71,7 +71,7 @@ describe("desktop bootstrap paths", () => {
     await fs.mkdir(sources.userDataDir, { recursive: true })
     await fs.mkdir(layout.dataDir, { recursive: true })
     await fs.mkdir(layout.stateDir, { recursive: true })
-    await fs.writeFile(path.join(sources.configDir, "opencode.json"), "{\"providers\":{\"legacy\":true}}")
+    await fs.writeFile(path.join(sources.configDir, "lfcode.json"), "{\"providers\":{\"legacy\":true}}")
     await fs.writeFile(path.join(sources.configDir, "themes", "ocean.json"), "{\"name\":\"ocean\"}")
     await fs.writeFile(path.join(sources.dataDir, "auth.json"), "legacy-data")
     await fs.writeFile(path.join(sources.stateDir, "opencode.db"), "legacy-db")
@@ -150,8 +150,8 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(await fs.readFile(path.join(root, "opencode.jsonc"), "utf8")).toBe(
-      '{\n  "$schema": "https://opencode.ai/config.json"\n}\n',
+    expect(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).toBe(
+      '{\n  "$schema": "https://lfcode.ai/config.json"\n}\n',
     )
   })
 
@@ -165,7 +165,7 @@ describe("desktop bootstrap paths", () => {
     await fs.mkdir(home, { recursive: true })
     await fs.mkdir(path.join(installedRoot, "data"), { recursive: true })
     await fs.mkdir(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev"), { recursive: true })
-    await fs.writeFile(path.join(installedRoot, "opencode.jsonc"), "{\"providers\":{\"root\":true}}")
+    await fs.writeFile(path.join(installedRoot, "lfcode.jsonc"), "{\"providers\":{\"root\":true}}")
     await fs.writeFile(path.join(installedRoot, "data", "auth.json"), "legacy-root-data")
     await fs.writeFile(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "{\"from\":\"root\"}")
 
@@ -183,7 +183,7 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(state.rootKind).toBe("managed")
     expect(state.layout?.root).toBe(managedRoot)
-    expect(await fs.readFile(path.join(managedRoot, "opencode.jsonc"), "utf8")).toBe("{\"providers\":{\"root\":true}}")
+    expect(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8")).toBe("{\"providers\":{\"root\":true}}")
     expect(await fs.readFile(path.join(managedRoot, "data", "auth.json"), "utf8")).toBe("legacy-root-data")
     expect(await fs.readFile(path.join(managedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "utf8")).toBe(
       "{\"from\":\"root\"}",

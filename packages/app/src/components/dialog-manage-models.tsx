@@ -1,13 +1,16 @@
-import { Dialog } from "@mimo-ai/ui/dialog"
-import { List } from "@mimo-ai/ui/list"
-import { Switch } from "@mimo-ai/ui/switch"
-import { Tooltip } from "@mimo-ai/ui/tooltip"
-import { Button } from "@mimo-ai/ui/button"
+import { Dialog } from "@lfcode-ai/ui/dialog"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { List } from "@lfcode-ai/ui/list"
+import { Switch } from "@lfcode-ai/ui/switch"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
+import { Button } from "@lfcode-ai/ui/button"
 import type { Component } from "solid-js"
+import { Show } from "solid-js"
 import { useLocal } from "@/context/local"
 import { popularProviders } from "@/hooks/use-providers"
 import { useLanguage } from "@/context/language"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { DialogRemoveProvider } from "./dialog-delete-custom-provider"
 import { DialogSelectProvider } from "./dialog-select-provider"
 
 export const DialogManageModels: Component = () => {
@@ -16,7 +19,7 @@ export const DialogManageModels: Component = () => {
   const dialog = useDialog()
 
   const handleConnectProvider = () => {
-    dialog.show(() => <DialogSelectProvider />)
+    dialog.show(() => <DialogSelectProvider returnTo="models" />)
   }
   const providerRank = (id: string) => popularProviders.indexOf(id)
   const providerList = (providerID: string) => local.model.list().filter((x) => x.provider.id === providerID)
@@ -27,6 +30,8 @@ export const DialogManageModels: Component = () => {
       local.model.setVisibility({ modelID: x.id, providerID: x.provider.id }, checked)
     })
   }
+
+  const reopenModels = () => dialog.show(() => <DialogManageModels />)
 
   return (
     <Dialog
@@ -49,22 +54,44 @@ export const DialogManageModels: Component = () => {
         groupHeader={(group) => {
           const provider = group.items[0].provider
           return (
-            <>
-              <span>{provider.name}</span>
-              <Tooltip
-                placement="top"
-                value={language.t("dialog.model.manage.provider.toggle", { provider: provider.name })}
-              >
-                <Switch
-                  class="-mr-1"
-                  checked={providerVisible(provider.id)}
-                  onChange={(checked) => setProviderVisibility(provider.id, checked)}
-                  hideLabel
+            <div class="w-full flex items-center justify-between gap-3">
+              <span class="truncate">{provider.name}</span>
+              <div class="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <Tooltip
+                  placement="top"
+                  value={language.t("dialog.model.manage.provider.delete", { provider: provider.name })}
                 >
-                  {provider.name}
-                </Switch>
-              </Tooltip>
-            </>
+                  <IconButton
+                    tabIndex={-1}
+                    icon="trash"
+                    variant="ghost"
+                    aria-label={language.t("dialog.model.manage.provider.delete", { provider: provider.name })}
+                    onClick={() =>
+                      dialog.show(() => (
+                        <DialogRemoveProvider
+                          providerID={provider.id}
+                          providerName={provider.name}
+                          onClose={reopenModels}
+                        />
+                      ))
+                    }
+                  />
+                </Tooltip>
+                <Tooltip
+                  placement="top"
+                  value={language.t("dialog.model.manage.provider.toggle", { provider: provider.name })}
+                >
+                  <Switch
+                    class="-mr-1"
+                    checked={providerVisible(provider.id)}
+                    onChange={(checked) => setProviderVisibility(provider.id, checked)}
+                    hideLabel
+                  >
+                    {provider.name}
+                  </Switch>
+                </Tooltip>
+              </div>
+            </div>
           )
         }}
         sortGroupsBy={(a, b) => {

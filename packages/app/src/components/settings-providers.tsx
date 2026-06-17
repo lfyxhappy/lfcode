@@ -1,14 +1,15 @@
-import { Button } from "@mimo-ai/ui/button"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { ProviderIcon } from "@mimo-ai/ui/provider-icon"
-import { Tag } from "@mimo-ai/ui/tag"
-import { showToast } from "@mimo-ai/ui/toast"
+import { Button } from "@lfcode-ai/ui/button"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
+import { Tag } from "@lfcode-ai/ui/tag"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { formatServerError } from "@/utils/server-errors"
+import { isCustomProviderConfig } from "@/utils/custom-provider"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { DialogCustomProvider } from "./dialog-custom-provider"
@@ -18,8 +19,8 @@ type ProviderSource = "env" | "api" | "config" | "custom"
 type ProviderItem = ReturnType<ReturnType<typeof useProviders>["connected"]>[number]
 
 const PROVIDER_NOTES = [
-  { match: (id: string) => id === "opencode", key: "dialog.provider.opencode.note" },
-  { match: (id: string) => id === "opencode-go", key: "dialog.provider.opencodeGo.tagline" },
+  { match: (id: string) => id === "lfcode", key: "dialog.provider.lfcode.note" },
+  { match: (id: string) => id === "lfcode-go", key: "dialog.provider.lfcodeGo.tagline" },
   { match: (id: string) => id === "anthropic", key: "dialog.provider.anthropic.note" },
   { match: (id: string) => id.startsWith("github-copilot"), key: "dialog.provider.copilot.note" },
   { match: (id: string) => id === "openai", key: "dialog.provider.openai.note" },
@@ -38,7 +39,7 @@ export const SettingsProviders: Component = () => {
   const connected = createMemo(() => {
     return providers
       .connected()
-      .filter((p) => p.id !== "opencode" || Object.values(p.models).find((m) => m.cost?.input))
+      .filter((p) => p.id !== "lfcode" || Object.values(p.models).find((m) => m.cost?.input))
   })
 
   const popular = createMemo(() => {
@@ -63,24 +64,14 @@ export const SettingsProviders: Component = () => {
     if (current === "env") return language.t("settings.providers.tag.environment")
     if (current === "api") return language.t("provider.connect.method.apiKey")
     if (current === "config") {
-      if (isConfigCustom(item.id)) return language.t("settings.providers.tag.custom")
+      if (isCustomProviderConfig(globalSync.data.config, item.id)) return language.t("settings.providers.tag.custom")
       return language.t("settings.providers.tag.config")
     }
     if (current === "custom") return language.t("settings.providers.tag.custom")
     return language.t("settings.providers.tag.other")
   }
 
-  const canDisconnect = (item: ProviderItem) => source(item) !== "env"
-
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
-
-  const isConfigCustom = (providerID: string) => {
-    const provider = globalSync.data.config.provider?.[providerID]
-    if (!provider) return false
-    if (provider.npm !== "@ai-sdk/openai-compatible") return false
-    if (!provider.models || Object.keys(provider.models).length === 0) return false
-    return true
-  }
 
   const disableProvider = async (providerID: string, name: string) => {
     const before = globalSync.data.config.disabled_providers ?? []
@@ -107,7 +98,9 @@ export const SettingsProviders: Component = () => {
   }
 
   const disconnect = async (providerID: string, name: string) => {
-    if (isConfigCustom(providerID)) {
+    const provider = connected().find((item) => item.id === providerID)
+    const current = provider ? source(provider) : undefined
+    if (current === "env" || current === "config" || isCustomProviderConfig(globalSync.data.config, providerID)) {
       await globalSDK.client.auth.remove({ providerID }).catch(() => undefined)
       await disableProvider(providerID, name)
       return
@@ -115,7 +108,7 @@ export const SettingsProviders: Component = () => {
     await globalSDK.client.auth
       .remove({ providerID })
       .then(async () => {
-        await globalSDK.client.global.dispose()
+        await globalSync.reloadProviders()
         showToast({
           variant: "success",
           icon: "circle-check",
@@ -159,18 +152,9 @@ export const SettingsProviders: Component = () => {
                       <span class="text-14-medium text-text-strong truncate">{item.name}</span>
                       <Tag>{type(item)}</Tag>
                     </div>
-                    <Show
-                      when={canDisconnect(item)}
-                      fallback={
-                        <span class="text-14-regular text-text-base opacity-0 group-hover:opacity-100 transition-opacity duration-200 pr-3 cursor-default">
-                          {language.t("settings.providers.connected.environmentDescription")}
-                        </span>
-                      }
-                    >
-                      <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
-                        {language.t("common.disconnect")}
-                      </Button>
-                    </Show>
+                    <Button size="large" variant="ghost" onClick={() => void disconnect(item.id, item.name)}>
+                      {language.t("common.disconnect")}
+                    </Button>
                   </div>
                 )}
               </For>
@@ -188,10 +172,10 @@ export const SettingsProviders: Component = () => {
                     <div class="flex items-center gap-x-3">
                       <ProviderIcon id={item.id} class="size-5 shrink-0 icon-strong-base" />
                       <span class="text-14-medium text-text-strong">{item.name}</span>
-                      <Show when={item.id === "opencode"}>
+                      <Show when={item.id === "lfcode"}>
                         <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
                       </Show>
-                      <Show when={item.id === "opencode-go"}>
+                      <Show when={item.id === "lfcode-go"}>
                         <Tag>{language.t("dialog.provider.tag.recommended")}</Tag>
                       </Show>
                     </div>

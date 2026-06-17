@@ -1,11 +1,11 @@
-import { Button } from "@mimo-ai/ui/button"
-import { useDialog } from "@mimo-ai/ui/context/dialog"
-import { Dialog } from "@mimo-ai/ui/dialog"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { ProviderIcon } from "@mimo-ai/ui/provider-icon"
+import { Button } from "@lfcode-ai/ui/button"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { Dialog } from "@lfcode-ai/ui/dialog"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
 import { useMutation } from "@tanstack/solid-query"
-import { TextField } from "@mimo-ai/ui/text-field"
-import { showToast } from "@mimo-ai/ui/toast"
+import { TextField } from "@lfcode-ai/ui/text-field"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { batch, For } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
@@ -18,6 +18,7 @@ import { DialogSelectProvider } from "./dialog-select-provider"
 
 type Props = {
   back?: "providers" | "close"
+  returnTo?: "models"
 }
 
 export function DialogCustomProvider(props: Props) {
@@ -41,7 +42,13 @@ export function DialogCustomProvider(props: Props) {
       dialog.close()
       return
     }
-    dialog.show(() => <DialogSelectProvider />)
+    dialog.show(() => <DialogSelectProvider returnTo={props.returnTo} />)
+  }
+
+  const showModels = () => {
+    void import("./dialog-manage-models").then((x) => {
+      dialog.show(() => <x.DialogManageModels />)
+    })
   }
 
   const addModel = () => {
@@ -139,7 +146,11 @@ export function DialogCustomProvider(props: Props) {
       return result
     },
     onSuccess: (result) => {
-      dialog.close()
+      if (props.returnTo === "models") {
+        showModels()
+      } else {
+        dialog.close()
+      }
       showToast({
         variant: "success",
         icon: "circle-check",

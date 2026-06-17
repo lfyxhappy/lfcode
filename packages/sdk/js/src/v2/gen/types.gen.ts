@@ -627,7 +627,7 @@ export type QuestionInfo = {
    */
   key?: string
   /**
-   * Template parameters for i18n interpolation (e.g. { plan: '.mimocode/plans/...' })
+   * Template parameters for i18n interpolation (e.g. { plan: '.lfcode/plans/...' })
    */
   params?: {
     [key: string]: string
@@ -2191,7 +2191,7 @@ export type Config = {
   }
   memory?: {
     /**
-     * Index Claude Code memory (~/.claude/projects/<slug>/memory) and expose under scope='cc'. Default: false. Note: when enabled, every mimocode agent (build/explore/subagents) can search these memories via the builtin `memory` tool — including CC's `type: user` (your role/preferences) and `type: feedback` (your guidance) categories. CC originally writes them for future CC sessions; flipping this on widens the consumer set to mimocode agents on the same machine. Leave disabled (default) if you don't want personal context recallable from a prompt-injection-vulnerable agent.
+     * Index Claude Code memory (~/.claude/projects/<slug>/memory) and expose under scope='cc'. Default: false. Note: when enabled, every lfcode agent (build/explore/subagents) can search these memories via the builtin `memory` tool — including CC's `type: user` (your role/preferences) and `type: feedback` (your guidance) categories. CC originally writes them for future CC sessions; flipping this on widens the consumer set to lfcode agents on the same machine. Leave disabled (default) if you don't want personal context recallable from a prompt-injection-vulnerable agent.
      */
     cc_index?: boolean
   }
@@ -2902,6 +2902,35 @@ export type GlobalConfigUpdateResponses = {
 }
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
+
+export type GlobalConfigRemoveCustomProviderData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: never
+  url: "/global/config/custom-provider/{providerID}"
+}
+
+export type GlobalConfigRemoveCustomProviderErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalConfigRemoveCustomProviderError =
+  GlobalConfigRemoveCustomProviderErrors[keyof GlobalConfigRemoveCustomProviderErrors]
+
+export type GlobalConfigRemoveCustomProviderResponses = {
+  /**
+   * Successfully removed custom provider
+   */
+  200: Config
+}
+
+export type GlobalConfigRemoveCustomProviderResponse =
+  GlobalConfigRemoveCustomProviderResponses[keyof GlobalConfigRemoveCustomProviderResponses]
 
 export type GlobalDisposeData = {
   body?: never
@@ -4377,6 +4406,7 @@ export type SessionDiffData = {
     directory?: string
     workspace?: string
     messageID?: string
+    turns?: number
   }
   url: "/session/{sessionID}/diff"
 }
@@ -5976,7 +6006,7 @@ export type UsageGetData = {
     range?: "today" | "7d" | "30d" | "all"
     provider?: string
     model?: string
-    source?: "opencode"
+    source?: "lfcode"
     search?: string
     limit?: number
     cursor?: number

@@ -1,8 +1,8 @@
 import { Show, createEffect, createMemo, onCleanup } from "solid-js"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { TextField } from "@mimo-ai/ui/text-field"
-import { Tooltip } from "@mimo-ai/ui/tooltip"
-import { showToast } from "@mimo-ai/ui/toast"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { TextField } from "@lfcode-ai/ui/text-field"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import {
@@ -140,7 +140,7 @@ export function BrowserPanel(props: { tab: string }) {
       if (platform.platform === "desktop") return
       const next = (event as { url?: string; detail?: { url?: string } }).url ?? (event as CustomEvent<{ url?: string }>).detail?.url
       if (!next) return
-      window.dispatchEvent(new CustomEvent("opencode:browser-request-open", { detail: { url: next }, cancelable: true }))
+      window.dispatchEvent(new CustomEvent("lfcode:browser-request-open", { detail: { url: next }, cancelable: true }))
     }
 
     const onReady = () => {
@@ -315,7 +315,7 @@ export function BrowserPanel(props: { tab: string }) {
                   ref={webviewRef}
                   src={current().url}
                   class="size-full bg-background-base"
-                  partition="persist:opencode-browser"
+                  partition="persist:lfcode-browser"
                   allowpopups
                 />
                 <Show when={current().error}>

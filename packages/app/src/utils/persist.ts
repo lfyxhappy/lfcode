@@ -1,6 +1,6 @@
 import { Platform, usePlatform } from "@/context/platform"
 import { makePersisted, type AsyncStorage, type SyncStorage } from "@solid-primitives/storage"
-import { checksum } from "@mimo-ai/shared/util/encode"
+import { checksum } from "@lfcode-ai/shared/util/encode"
 import { createResource, type Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
 
@@ -20,8 +20,8 @@ type PersistTarget = {
 }
 
 const LEGACY_STORAGE = "default.dat"
-const GLOBAL_STORAGE = "opencode.global.dat"
-const LOCAL_PREFIX = "opencode."
+const GLOBAL_STORAGE = "lfcode.global.dat"
+const LOCAL_PREFIX = "lfcode."
 const fallback = new Map<string, boolean>()
 
 const CACHE_MAX_ENTRIES = 500
@@ -211,7 +211,7 @@ function normalize(defaults: unknown, raw: string, migrate?: (value: unknown) =>
 function workspaceStorage(dir: string) {
   const head = (dir.slice(0, 12) || "workspace").replace(/[^a-zA-Z0-9._-]/g, "-")
   const sum = checksum(dir) ?? "0"
-  return `opencode.workspace.${head}.${sum}.dat`
+  return `lfcode.workspace.${head}.${sum}.dat`
 }
 
 function localStorageWithPrefix(prefix: string): SyncStorage {
@@ -309,8 +309,8 @@ export const PersistTesting = {
 }
 
 export const Persist = {
-  global(key: string, legacy?: string[]): PersistTarget {
-    return { storage: GLOBAL_STORAGE, key, legacy }
+  global(key: string, legacy?: string[], migrate?: (value: unknown) => unknown): PersistTarget {
+    return { storage: GLOBAL_STORAGE, key, legacy, migrate }
   },
   workspace(dir: string, key: string, legacy?: string[]): PersistTarget {
     return { storage: workspaceStorage(dir), key: `workspace:${key}`, legacy }
@@ -473,4 +473,12 @@ export function persisted<T>(
       promise: init instanceof Promise ? init : undefined,
     }),
   ]
+}
+
+export function normalizeWorkspacePath(directory: string) {
+  const value = directory.replaceAll("\\", "/")
+  const drive = value.match(/^([A-Za-z]:)\/+$/)
+  if (drive) return `${drive[1]}/`
+  if (/^\/+$/i.test(value)) return "/"
+  return value.replace(/\/+$/, "")
 }

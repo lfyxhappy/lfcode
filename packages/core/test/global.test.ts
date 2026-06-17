@@ -98,9 +98,9 @@ describe("global paths", () => {
     const state = path.join(tmp.path, "state")
     const cache = path.join(tmp.path, "cache")
     const result = await runWorker({
-      OPENCODE_DATA_DIR: data,
-      OPENCODE_STATE_DIR: state,
-      OPENCODE_CACHE_DIR: cache,
+      LFCODE_DATA_DIR: data,
+      LFCODE_STATE_DIR: state,
+      LFCODE_CACHE_DIR: cache,
       XDG_DATA_HOME: path.join(tmp.path, "xdg-data"),
       XDG_STATE_HOME: path.join(tmp.path, "xdg-state"),
       XDG_CACHE_HOME: path.join(tmp.path, "xdg-cache"),

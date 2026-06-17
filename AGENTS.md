@@ -6,7 +6,7 @@
 
 - This repo is a Bun workspace monorepo rooted at `package.json`.
 - Most product code lives under `packages/`.
-- The core runtime and session engine live in `packages/opencode`.
+- The core runtime and session engine live in `packages/lfcode`.
 - The web UI lives in `packages/app`, and the Electron host lives in `packages/desktop`.
 - Shared packages such as `packages/ui`, `packages/plugin`, `packages/sdk`, and `packages/shared` support the app/runtime layers.
 - Cross-repo specs live in `specs/`.
@@ -18,8 +18,9 @@
 - Root validation commands are `bun run lint` and `bun run typecheck`.
 - The root `bun run test` command is a guard that intentionally fails; run tests from package directories instead.
 - After completing changes in this repo, always rerun the Windows desktop package build with `bun run package:win` from `packages/desktop` and verify the refreshed output under `packages/desktop/dist/win-unpacked`.
+- For desktop/runtime changes that the user will test in the local installed-use copy, do the development checks, rebuild the Windows desktop package, then sync the refreshed app into `C:\算法\小应用\Lfcode`; do not stop at dev-server validation. Report a short manual checklist for the user to test in the use copy.
 - Packaging must preserve persistent runtime data across rebuilds by backing it up before `bun run package:win` and restoring it afterward; `data`, `state`, `cache`, database files, snapshots, and other user data may live under `packages/desktop/dist/win-unpacked`, but the rebuild flow must round-trip them intact.
-- Packaged Windows root config is preserved through `packages/desktop/local-config/opencode.jsonc`; `packages/desktop/scripts/sync-local-config.ts` refreshes that template from the current `dist/win-unpacked/opencode.jsonc`, and `packages/desktop/electron-builder.config.ts` copies it back into the packaged app root via `extraFiles`.
+- Packaged Windows root config is preserved through `packages/desktop/local-config/lfcode.jsonc`; `packages/desktop/scripts/sync-local-config.ts` refreshes that template from the current `dist/win-unpacked/lfcode.jsonc`, and `packages/desktop/electron-builder.config.ts` copies it back into the packaged app root via `extraFiles`.
 
 ## Branch Names
 
@@ -76,7 +77,7 @@ const { a, b } = obj
 
 - Never alias imports. Do not use `import { foo as bar } from "..."` or renamed imports like `resolve as pathResolve`.
 - Never use star imports. Do not use `import * as Foo from "..."` or `import type * as Foo from "..."`.
-- If a namespace-style value is needed, import the module's own exported namespace by name, for example `import { Project } from "@opencode-ai/core/project"`, then reference `Project.ID`.
+- If a namespace-style value is needed, import the module's own exported namespace by name, for example `import { Project } from "@lfcode-ai/core/project"`, then reference `Project.ID`.
 - Prefer dynamic imports for heavy modules that are only needed in selected code paths, especially in startup-sensitive entrypoints. Destructure dynamic import bindings near the top of the narrowest scope that needs them so they read like normal imports. Avoid inline chains such as `await import("./module").then((mod) => mod.value())` or `(await import("./module")).value()`. Keep branch-specific imports inside the branch that needs them to preserve lazy loading.
 
 ### Variables
@@ -158,11 +159,11 @@ const table = sqliteTable("session", {
 
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
-- Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+- Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/lfcode`.
 
 ## Type Checking
 
-- Always run `bun typecheck` from package directories (e.g., `packages/opencode`), never `tsc` directly.
+- Always run `bun typecheck` from package directories (e.g., `packages/lfcode`), never `tsc` directly.
 
 ## V2 Session Core
 

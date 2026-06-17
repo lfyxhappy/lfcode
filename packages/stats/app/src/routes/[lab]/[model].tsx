@@ -1,6 +1,6 @@
 import "../index.css"
 import { Link, Meta, Title } from "@solidjs/meta"
-import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
+import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
 import { geoEquirectangular, geoPath } from "d3-geo"
 import { scaleSqrt } from "d3-scale"
 import countryCodesSource from "i18n-iso-countries/codes.json?raw"
@@ -13,8 +13,8 @@ import {
   type ModelUsagePoint,
   type StatsModelData,
   type UsageRange,
-} from "@opencode-ai/stats-core/domain/home"
-import { runtime } from "@opencode-ai/stats-core/runtime"
+} from "@lfcode-ai/stats-core/domain/home"
+import { runtime } from "@lfcode-ai/stats-core/runtime"
 import { createAsync, query, useParams } from "@solidjs/router"
 import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js"
 import { getRequestEvent } from "solid-js/web"
@@ -32,9 +32,9 @@ import {
   type ThemePreference,
 } from "../stats-shell"
 
-const statsCanonicalBaseUrl = "https://opencode.ai/data/"
+const statsCanonicalBaseUrl = "https://lfcode.ai/data/"
 const statsUnfurlPath = "banner.png"
-const statsUnfurlAlt = "OpenCode Data wordmark on a dark patterned background"
+const statsUnfurlAlt = "Lfcode Data wordmark on a dark patterned background"
 const statsUnfurlUrl = new URL(statsUnfurlPath, statsCanonicalBaseUrl).toString()
 const modelHeaderLinks: readonly HeaderLink[] = [
   { href: "#overview", label: "Overview" },
@@ -116,8 +116,8 @@ export default function StatsModel() {
   const modelTitle = createMemo(() => `${modelName()} Data`)
   const modelDescription = createMemo(() =>
     stats()
-      ? `${modelName()} usage, rank, token mix, cost, geo breakdown, and peer data across OpenCode.`
-      : `${modelName()} model facts, limits, and OpenCode usage availability.`,
+      ? `${modelName()} usage, rank, token mix, cost, geo breakdown, and peer data across Lfcode.`
+      : `${modelName()} model facts, limits, and Lfcode usage availability.`,
   )
   const modelUrl = createMemo(() =>
     new URL(
@@ -146,7 +146,7 @@ export default function StatsModel() {
       <Meta name="description" content={modelDescription()} />
       <Link rel="canonical" href={modelUrl()} />
       <Meta property="og:type" content="website" />
-      <Meta property="og:site_name" content="OpenCode" />
+      <Meta property="og:site_name" content="Lfcode" />
       <Meta property="og:title" content={modelTitle()} />
       <Meta property="og:description" content={modelDescription()} />
       <Meta property="og:url" content={modelUrl()} />
@@ -250,12 +250,12 @@ function ModelHero(props: { data: StatsModelData | null; catalog: ModelCatalogEn
           <Show
             when={props.data}
             fallback={
-              <p>Model facts from the shared model index. OpenCode usage appears once this model has activity.</p>
+              <p>Model facts from the shared model index. Lfcode usage appears once this model has activity.</p>
             }
           >
             {(data) => (
               <p>
-                Ranked #{data().rank} across recent OpenCode token usage with {formatPercent(data().tokenShare)} of
+                Ranked #{data().rank} across recent Lfcode token usage with {formatPercent(data().tokenShare)} of
                 observed volume.
               </p>
             )}
@@ -289,7 +289,7 @@ function ModelCatalogCallout(props: { catalog: ModelCatalogEntry | null }) {
     <div data-component="model-rank-panel">
       <span>Model Profile</span>
       <strong>{props.catalog?.releaseDate ? formatCatalogDate(props.catalog.releaseDate) : "Listed"}</strong>
-      <p>No OpenCode usage in the current data window.</p>
+      <p>No Lfcode usage in the current data window.</p>
     </div>
   )
 }
@@ -323,7 +323,7 @@ function ModelOverview(props: { data: StatsModelData | null }) {
       <SectionTitle title="Overview" description="Recent tokens, sessions, and market position." />
       <Show
         when={props.data}
-        fallback={<ModelEmptyState title="No usage summary" description="This model has no OpenCode usage rows yet." />}
+        fallback={<ModelEmptyState title="No usage summary" description="This model has no Lfcode usage rows yet." />}
       >
         {(data) => (
           <div data-component="model-metric-grid">

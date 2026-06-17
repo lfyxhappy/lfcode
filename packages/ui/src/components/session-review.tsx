@@ -11,11 +11,11 @@ import { Tooltip } from "./tooltip"
 import { ScrollView } from "./scroll-view"
 import { useFileComponent } from "../context/file"
 import { useI18n } from "../context/i18n"
-import { getDirectory, getFilename } from "@mimo-ai/shared/util/path"
-import { checksum } from "@mimo-ai/shared/util/encode"
+import { getDirectory, getFilename } from "@lfcode-ai/shared/util/path"
+import { checksum } from "@lfcode-ai/shared/util/encode"
 import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { type FileContent, type SnapshotFileDiff, type VcsFileDiff } from "@mimo-ai/sdk/v2"
+import { type FileContent, type SnapshotFileDiff, type VcsFileDiff } from "@lfcode-ai/sdk/v2"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
 import { type SelectedLineRange } from "@pierre/diffs"
 import { Dynamic } from "solid-js/web"
@@ -63,7 +63,7 @@ export type SessionReviewCommentActions = {
 export type SessionReviewFocus = { file: string; id: string }
 
 type ReviewDiff = (SnapshotFileDiff | VcsFileDiff) & { preloaded?: PreloadMultiFileDiffResult<any> }
-type Item = ViewDiff & { preloaded?: PreloadMultiFileDiffResult<any> }
+type NormalizedDiff = ViewDiff & { preloaded?: PreloadMultiFileDiffResult<any> }
 
 function diff(value: unknown): value is ReviewDiff {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
@@ -177,9 +177,7 @@ export const SessionReview = (props: SessionReviewProps) => {
   const opened = () => store.opened
 
   const open = () => props.open ?? store.open
-  const items = createMemo<Item[]>(() =>
-    list(props.diffs).map((diff) => ({ ...normalize(diff), preloaded: diff.preloaded })),
-  )
+  const items = createMemo(() => list(props.diffs))
   const files = createMemo(() => items().map((diff) => diff.file))
   const grouped = createMemo(() => {
     const next = new Map<string, SessionReviewComment[]>()
@@ -393,12 +391,15 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const expanded = createMemo(() => open().includes(file))
                     const mounted = createMemo(() => expanded() && (!!store.visible[file] || pinned(file)))
                     const force = () => !!store.force[file]
+                    const viewDiff = createMemo<NormalizedDiff | undefined>(() => {
+                      if (!expanded()) return
+                      if (!mounted()) return
+                      if (tooLarge()) return
+                      return { ...normalize(diff), preloaded: diff.preloaded }
+                    })
 
                     const comments = createMemo(() => grouped().get(file) ?? [])
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
-
-                    const beforeText = () => text(diff, "deletions")
-                    const afterText = () => text(diff, "additions")
                     const changedLines = () => diff.additions + diff.deletions
                     const mediaKind = createMemo(() => mediaKindFromPath(file))
 
@@ -409,10 +410,8 @@ export const SessionReview = (props: SessionReviewProps) => {
                       return changedLines() > MAX_DIFF_CHANGED_LINES
                     })
 
-                    const isAdded = () =>
-                      diff.status === "added" || (beforeText().length === 0 && afterText().length > 0)
-                    const isDeleted = () =>
-                      diff.status === "deleted" || (afterText().length === 0 && beforeText().length > 0)
+                    const isAdded = () => diff.status === "added" || (diff.deletions === 0 && diff.additions > 0)
+                    const isDeleted = () => diff.status === "deleted" || (diff.additions === 0 && diff.deletions > 0)
 
                     const selectedLines = createMemo(() => {
                       const current = selection()
@@ -446,20 +445,22 @@ export const SessionReview = (props: SessionReviewProps) => {
                       getSide: selectionSide,
                       clearSelectionOnSelectionEndNull: false,
                       onSubmit: ({ comment, selection }) => {
+                        const current = viewDiff()
                         props.onLineComment?.({
                           file,
                           selection,
                           comment,
-                          preview: selectionPreview(diff, selection),
+                          preview: current ? selectionPreview(current, selection) : undefined,
                         })
                       },
                       onUpdate: ({ id, comment, selection }) => {
+                        const current = viewDiff()
                         props.onLineCommentUpdate?.({
                           id,
                           file,
                           selection,
                           comment,
-                          preview: selectionPreview(diff, selection),
+                          preview: current ? selectionPreview(current, selection) : undefined,
                         })
                       },
                       onDelete: (comment) => {
@@ -605,32 +606,36 @@ export const SessionReview = (props: SessionReviewProps) => {
                                   </div>
                                 </Match>
                                 <Match when={true}>
-                                  <Dynamic
-                                    component={fileComponent}
-                                    mode="diff"
-                                    fileDiff={diff.fileDiff}
-                                    preloadedDiff={diff.preloaded}
-                                    diffStyle={diffStyle()}
-                                    onRendered={() => {
-                                      props.onDiffRendered?.()
-                                    }}
-                                    enableLineSelection={props.onLineComment != null}
-                                    enableHoverUtility={props.onLineComment != null}
-                                    onLineSelected={handleLineSelected}
-                                    onLineSelectionEnd={handleLineSelectionEnd}
-                                    onLineNumberSelectionEnd={commentsUi.onLineNumberSelectionEnd}
-                                    annotations={commentsUi.annotations()}
-                                    renderAnnotation={commentsUi.renderAnnotation}
-                                    renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
-                                    selectedLines={selectedLines()}
-                                    commentedLines={commentedLines()}
-                                    media={{
-                                      mode: "auto",
-                                      path: file,
-                                      deleted: diff.status === "deleted",
-                                      readFile: diff.status === "deleted" ? undefined : props.readFile,
-                                    }}
-                                  />
+                                  <Show when={viewDiff()}>
+                                    {(view) => (
+                                      <Dynamic
+                                        component={fileComponent}
+                                        mode="diff"
+                                        fileDiff={view().fileDiff}
+                                        preloadedDiff={view().preloaded}
+                                        diffStyle={diffStyle()}
+                                        onRendered={() => {
+                                          props.onDiffRendered?.()
+                                        }}
+                                        enableLineSelection={props.onLineComment != null}
+                                        enableHoverUtility={props.onLineComment != null}
+                                        onLineSelected={handleLineSelected}
+                                        onLineSelectionEnd={handleLineSelectionEnd}
+                                        onLineNumberSelectionEnd={commentsUi.onLineNumberSelectionEnd}
+                                        annotations={commentsUi.annotations()}
+                                        renderAnnotation={commentsUi.renderAnnotation}
+                                        renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
+                                        selectedLines={selectedLines()}
+                                        commentedLines={commentedLines()}
+                                        media={{
+                                          mode: "auto",
+                                          path: file,
+                                          deleted: diff.status === "deleted",
+                                          readFile: diff.status === "deleted" ? undefined : props.readFile,
+                                        }}
+                                      />
+                                    )}
+                                  </Show>
                                 </Match>
                               </Switch>
                             </Show>

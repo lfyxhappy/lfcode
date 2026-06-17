@@ -1,6 +1,6 @@
 import type {
   Event,
-  createOpencodeClient,
+  createLfcodeClient,
   Project,
   Model,
   Provider,
@@ -10,8 +10,8 @@ import type {
   Part,
   Auth,
   Config as SDKConfig,
-} from "@mimo-ai/sdk"
-import type { Provider as ProviderV2, Model as ModelV2 } from "@mimo-ai/sdk/v2"
+} from "@lfcode-ai/sdk"
+import type { Provider as ProviderV2, Model as ModelV2 } from "@lfcode-ai/sdk/v2"
 
 import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
@@ -55,7 +55,7 @@ export type WorkspaceAdaptor = {
 }
 
 export type PluginInput = {
-  client: ReturnType<typeof createOpencodeClient>
+  client: ReturnType<typeof createLfcodeClient>
   project: Project
   directory: string
   worktree: string

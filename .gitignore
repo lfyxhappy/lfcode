@@ -8,6 +8,7 @@ node_modules
 .vscode
 .codex
 .codex-temp/
+.codegraph/
 .playwright-mcp/
 *~
 playground
@@ -22,7 +23,7 @@ ts-dist
 /result
 refs
 Session.vim
-/opencode.json
+/lfcode.json
 a.out
 target
 .scripts

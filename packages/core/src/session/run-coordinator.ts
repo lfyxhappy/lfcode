@@ -268,7 +268,7 @@ export const make = <Key, A, E>(options: {
 
 export interface Interface extends Coordinator<SessionSchema.ID, void, SessionRunner.RunError> {}
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionRunCoordinator") {}
+export class Service extends Context.Service<Service, Interface>()("@lfcode/v2/SessionRunCoordinator") {}
 
 export const layer = Layer.effect(
   Service,

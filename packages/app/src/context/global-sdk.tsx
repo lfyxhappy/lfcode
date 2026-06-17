@@ -1,10 +1,10 @@
-import type { Event } from "@mimo-ai/sdk/v2/client"
-import { createSimpleContext } from "@mimo-ai/ui/context"
+import type { Event } from "@lfcode-ai/sdk/v2/client"
+import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { batch, onCleanup, onMount } from "solid-js"
 import z from "zod"
-import { createSdkForServer } from "@/utils/server"
+import { createSdkForServer, type ServerSdkOptions } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { useServer } from "./server"
@@ -13,9 +13,20 @@ const abortError = z.object({
   name: z.literal("AbortError"),
 })
 
-export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleContext({
+type GlobalSDKEventBus = ReturnType<typeof createGlobalEmitter<{ [key: string]: Event }>>
+
+export type GlobalSDKContext = {
+  url: string
+  client: ReturnType<typeof createSdkForServer>
+  event: Pick<GlobalSDKEventBus, "on" | "listen"> & {
+    start: () => Promise<void> | undefined
+  }
+  createClient(opts: Omit<ServerSdkOptions, "server">): ReturnType<typeof createSdkForServer>
+}
+
+export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleContext<GlobalSDKContext, {}>({
   name: "GlobalSDK",
-  init: () => {
+  init: (): GlobalSDKContext => {
     const language = useLanguage()
     const server = useServer()
     const platform = usePlatform()

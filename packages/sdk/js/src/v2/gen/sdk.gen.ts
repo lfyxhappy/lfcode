@@ -52,6 +52,8 @@ import type {
   FindTextResponses,
   FormatterStatusResponses,
   GlobalConfigGetResponses,
+  GlobalConfigRemoveCustomProviderErrors,
+  GlobalConfigRemoveCustomProviderResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
   GlobalDisposeResponses,
@@ -251,7 +253,7 @@ class HeyApiRegistry<T> {
   get(key?: string): T {
     const instance = this.instances.get(key ?? this.defaultKey)
     if (!instance) {
-      throw new Error(`No SDK client found. Create one with "new OpencodeClient()" to fix this error.`)
+      throw new Error(`No SDK client found. Create one with "new LfcodeClient()" to fix this error.`)
     }
     return instance
   }
@@ -297,6 +299,29 @@ export class Config extends HeyApiClient {
       },
     })
   }
+
+  /**
+   * Remove custom provider
+   *
+   * Delete a custom global provider configuration and its stored authentication.
+   */
+  public removeCustomProvider<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "providerID" }] }])
+    return (options?.client ?? this.client).delete<
+      GlobalConfigRemoveCustomProviderResponses,
+      GlobalConfigRemoveCustomProviderErrors,
+      ThrowOnError
+    >({
+      url: "/global/config/custom-provider/{providerID}",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Global extends HeyApiClient {
@@ -337,9 +362,9 @@ export class Global extends HeyApiClient {
   }
 
   /**
-   * Upgrade opencode
+   * Upgrade Lfcode
    *
-   * Upgrade opencode to the specified version or latest if not specified.
+   * Upgrade Lfcode to the specified version or latest if not specified.
    */
   public upgrade<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -2134,6 +2159,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       messageID?: string
+      turns?: number
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2146,6 +2172,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "messageID" },
+            { in: "query", key: "turns" },
           ],
         },
       ],
@@ -4025,7 +4052,7 @@ export class Usage extends HeyApiClient {
       range?: "today" | "7d" | "30d" | "all"
       provider?: string
       model?: string
-      source?: "opencode"
+      source?: "lfcode"
       search?: string
       limit?: number
       cursor?: number
@@ -4734,12 +4761,12 @@ export class Formatter extends HeyApiClient {
   }
 }
 
-export class OpencodeClient extends HeyApiClient {
-  public static readonly __registry = new HeyApiRegistry<OpencodeClient>()
+export class LfcodeClient extends HeyApiClient {
+  public static readonly __registry = new HeyApiRegistry<LfcodeClient>()
 
   constructor(args?: { client?: Client; key?: string }) {
     super(args)
-    OpencodeClient.__registry.set(this, args?.key)
+    LfcodeClient.__registry.set(this, args?.key)
   }
 
   private _global?: Global

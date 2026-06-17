@@ -1,7 +1,7 @@
 import { createInfiniteQuery, createQuery } from "@tanstack/solid-query"
-import { Icon } from "@mimo-ai/ui/icon"
-import { Select } from "@mimo-ai/ui/select"
-import { TextField } from "@mimo-ai/ui/text-field"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { Select } from "@lfcode-ai/ui/select"
+import { TextField } from "@lfcode-ai/ui/text-field"
 import { type Component, For, Show, createMemo, createSignal } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
@@ -156,7 +156,7 @@ export const SettingsUsage: Component = () => {
     provider: provider() || undefined,
     model: model() || undefined,
     search: search() || undefined,
-    source: "opencode" as const,
+    source: "lfcode" as const,
   }))
 
   const usageQuery = createQuery(() => ({

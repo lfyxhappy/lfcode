@@ -1,4 +1,4 @@
-import { Binary } from "@mimo-ai/shared/util/binary"
+import { Binary } from "@lfcode-ai/shared/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
   Message,
@@ -10,7 +10,7 @@ import type {
   SessionStatus,
   SnapshotFileDiff,
   Todo,
-} from "@mimo-ai/sdk/v2/client"
+} from "@lfcode-ai/sdk/v2/client"
 import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
@@ -24,7 +24,7 @@ export function applyGlobalEvent(input: {
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
   refresh: () => void
 }) {
-  if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
+  if (input.event.type === "global.disposed") {
     input.refresh()
     return
   }

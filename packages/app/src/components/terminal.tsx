@@ -1,8 +1,8 @@
-import { withAlpha } from "@mimo-ai/ui/theme/color"
-import { useTheme } from "@mimo-ai/ui/theme/context"
-import { resolveThemeVariant } from "@mimo-ai/ui/theme/resolve"
-import type { HexColor } from "@mimo-ai/ui/theme/types"
-import { showToast } from "@mimo-ai/ui/toast"
+import { withAlpha } from "@lfcode-ai/ui/theme/color"
+import { useTheme } from "@lfcode-ai/ui/theme/context"
+import { resolveThemeVariant } from "@lfcode-ai/ui/theme/resolve"
+import type { HexColor } from "@lfcode-ai/ui/theme/types"
+import { showToast } from "@lfcode-ai/ui/toast"
 import type { FitAddon, Ghostty, Terminal as Term } from "ghostty-web"
 import { type ComponentProps, createEffect, createMemo, onCleanup, onMount, splitProps } from "solid-js"
 import { SerializeAddon } from "@/addons/serialize"
@@ -171,7 +171,7 @@ export const Terminal = (props: TerminalProps) => {
   const client = sdk.client
   const url = sdk.url
   const auth = server.current?.http
-  const username = auth?.username ?? "opencode"
+  const username = auth?.username ?? "lfcode"
   const password = auth?.password ?? ""
   const sameOrigin = new URL(url, location.href).origin === location.origin
   let container!: HTMLDivElement

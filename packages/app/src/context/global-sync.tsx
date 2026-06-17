@@ -1,14 +1,15 @@
 import type {
   Config,
-  OpencodeClient,
+  LfcodeClient,
   Path,
   Project,
   ProviderAuthResponse,
   ProviderListResponse,
   Todo,
-} from "@mimo-ai/sdk/v2/client"
-import { showToast } from "@mimo-ai/ui/toast"
-import { getFilename } from "@mimo-ai/shared/util/path"
+} from "@lfcode-ai/sdk/v2/client"
+import { showToast } from "@lfcode-ai/ui/toast"
+import { getFilename } from "@lfcode-ai/shared/util/path"
+import { retry } from "@lfcode-ai/shared/util/retry"
 import { batch, createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile, unwrap } from "solid-js/store"
 import { useLanguage } from "@/context/language"
@@ -24,9 +25,10 @@ import { estimateRootSessionTotal, loadRootSessionsWithFallback } from "./global
 import { trimSessions } from "./global-sync/session-trim"
 import type { ProjectMeta } from "./global-sync/types"
 import { SESSION_RECENT_LIMIT } from "./global-sync/types"
-import { sanitizeProject } from "./global-sync/utils"
+import { normalizeProviderList, sanitizeProject } from "./global-sync/utils"
 import { formatServerError } from "@/utils/server-errors"
 import { queryOptions, skipToken, useQueryClient } from "@tanstack/solid-query"
+import { normalizeWorkspacePath } from "@/utils/persist"
 
 type GlobalStore = {
   ready: boolean
@@ -51,7 +53,7 @@ function createGlobalSync() {
   const owner = getOwner()
   if (!owner) throw new Error("GlobalSync must be created within owner")
 
-  const sdkCache = new Map<string, OpencodeClient>()
+  const sdkCache = new Map<string, LfcodeClient>()
   const booting = new Map<string, Promise<void>>()
   const sessionLoads = new Map<string, Promise<void>>()
   const sessionMeta = new Map<string, { limit: number }>()
@@ -178,6 +180,7 @@ function createGlobalSync() {
   }
 
   async function loadSessions(directory: string) {
+    directory = normalizeWorkspacePath(directory)
     const pending = sessionLoads.get(directory)
     if (pending) return pending
 
@@ -254,6 +257,7 @@ function createGlobalSync() {
   }
 
   async function bootstrapInstance(directory: string) {
+    directory = normalizeWorkspacePath(directory)
     if (!directory) return
     const pending = booting.get(directory)
     if (pending) return pending
@@ -291,7 +295,7 @@ function createGlobalSync() {
   }
 
   const unsub = globalSDK.event.listen((e) => {
-    const directory = e.name
+    const directory = e.name === "global" ? "global" : normalizeWorkspacePath(e.name)
     const event = e.details
     const recent = bootingRoot || Date.now() - bootedAt < 1500
 
@@ -305,12 +309,6 @@ function createGlobalSync() {
         },
         setGlobalProject: setProjects,
       })
-      if (event.type === "server.connected" || event.type === "global.disposed") {
-        if (recent) return
-        for (const directory of Object.keys(children.children)) {
-          queue.push(directory)
-        }
-      }
       return
     }
 
@@ -364,6 +362,36 @@ function createGlobalSync() {
     }
   }
 
+  async function refreshActiveProviders() {
+    await Promise.all(
+      Object.entries(children.children).map(([directory, [, setStore]]) => {
+        clearProviderRev(directory)
+        setStore("provider_ready", false)
+        return retry(() =>
+          sdkFor(directory)
+            .provider.list()
+            .then((x) => {
+              setStore("provider", normalizeProviderList(x.data!))
+              setStore("provider_ready", true)
+            }),
+        ).catch((err) => {
+          const project = getFilename(directory)
+          showToast({
+            variant: "error",
+            title: language.t("toast.project.reloadFailed.title", { project }),
+            description: formatServerError(err, language.t),
+          })
+        })
+      }),
+    )
+  }
+
+  async function reloadProviders() {
+    await globalSDK.client.global.dispose()
+    await bootstrap()
+    await refreshActiveProviders()
+  }
+
   onMount(() => {
     if (typeof requestAnimationFrame === "function") {
       eventFrame = requestAnimationFrame(() => {
@@ -396,7 +424,7 @@ function createGlobalSync() {
     setGlobalStore("reload", "pending")
     return globalSDK.client.global.config
       .update({ config })
-      .then(bootstrap)
+      .then(reloadProviders)
       .then(() => {
         queue.refresh()
         setGlobalStore("reload", undefined)
@@ -420,6 +448,7 @@ function createGlobalSync() {
     child: children.child,
     peek: children.peek,
     bootstrap,
+    reloadProviders,
     updateConfig,
     project: projectApi,
     todo: {

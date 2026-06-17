@@ -1,5 +1,5 @@
-import type { Event } from "@mimo-ai/sdk/v2/client"
-import { createSimpleContext } from "@mimo-ai/ui/context"
+import type { Event } from "@lfcode-ai/sdk/v2/client"
+import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js"
 import { useGlobalSDK } from "./global-sdk"
@@ -8,9 +8,17 @@ type SDKEventMap = {
   [key in Event["type"]]: Extract<Event, { type: key }>
 }
 
-export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
+type SDKContext = {
+  directory: string
+  client: ReturnType<ReturnType<typeof useGlobalSDK>["createClient"]>
+  event: ReturnType<typeof createGlobalEmitter<SDKEventMap>>
+  url: string
+  createClient: ReturnType<typeof useGlobalSDK>["createClient"]
+}
+
+export const { use: useSDK, provider: SDKProvider } = createSimpleContext<SDKContext, { directory: Accessor<string> }>({
   name: "SDK",
-  init: (props: { directory: Accessor<string> }) => {
+  init: (props): SDKContext => {
     const globalSDK = useGlobalSDK()
 
     const directory = createMemo(props.directory)

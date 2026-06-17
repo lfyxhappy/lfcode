@@ -1,4 +1,4 @@
-import { createOpencodeClient, createOpencodeServer } from "@mimo-ai/sdk"
+import { createOpencodeClient, createOpencodeServer } from "@lfcode-ai/sdk"
 import { pathToFileURL } from "bun"
 
 const server = await createOpencodeServer()

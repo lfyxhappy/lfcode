@@ -1,13 +1,13 @@
 import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Button } from "@mimo-ai/ui/button"
-import { Icon } from "@mimo-ai/ui/icon"
-import { Select } from "@mimo-ai/ui/select"
-import { Switch } from "@mimo-ai/ui/switch"
-import { TextField } from "@mimo-ai/ui/text-field"
-import { Tooltip } from "@mimo-ai/ui/tooltip"
-import { useTheme, type ColorScheme } from "@mimo-ai/ui/theme/context"
-import { showToast } from "@mimo-ai/ui/toast"
+import { Button } from "@lfcode-ai/ui/button"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { Select } from "@lfcode-ai/ui/select"
+import { Switch } from "@lfcode-ai/ui/switch"
+import { TextField } from "@lfcode-ai/ui/text-field"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
+import { useTheme, type ColorScheme } from "@lfcode-ai/ui/theme/context"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { useParams } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
@@ -710,7 +710,7 @@ export const SettingsGeneral: Component = () => {
           }}
         </Show>
 
-        <Show when={desktop() && import.meta.env.VITE_OPENCODE_CHANNEL === "beta"}>
+        <Show when={desktop() && import.meta.env.VITE_LFCODE_CHANNEL === "beta"}>
           <AdvancedSection />
         </Show>
       </div>

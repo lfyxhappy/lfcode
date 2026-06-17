@@ -108,9 +108,9 @@ export const dict = {
   "dialog.provider.group.popular": "Popular",
   "dialog.provider.group.other": "Other",
   "dialog.provider.tag.recommended": "Recommended",
-  "dialog.provider.opencode.note": "Curated models including Claude, GPT, Gemini and more",
-  "dialog.provider.opencode.tagline": "Reliable optimized models",
-  "dialog.provider.opencodeGo.tagline": "Low cost subscription for everyone",
+  "dialog.provider.lfcode.note": "Curated models including Claude, GPT, Gemini and more",
+  "dialog.provider.lfcode.tagline": "Reliable optimized models",
+  "dialog.provider.lfcodeGo.tagline": "Low cost subscription for everyone",
   "dialog.provider.anthropic.note": "Direct access to Claude models, including Pro and Max",
   "dialog.provider.copilot.note": "AI models for coding assistance via GitHub Copilot",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
@@ -124,6 +124,7 @@ export const dict = {
   "dialog.model.manage": "Manage models",
   "dialog.model.manage.description": "Customize which models appear in the model selector.",
   "dialog.model.manage.provider.toggle": "Toggle all {{provider}} models",
+  "dialog.model.manage.provider.delete": "Delete {{provider}}",
 
   "dialog.model.unpaid.freeModels.title": "Free models provided by Lfcode",
   "dialog.model.unpaid.addMore.title": "Add more models from popular providers",
@@ -142,13 +143,13 @@ export const dict = {
   "provider.connect.apiKey.label": "{{provider}} API key",
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
-  "provider.connect.opencodeZen.line1":
+  "provider.connect.lfcodeZen.line1":
     "Lfcode Zen gives you access to a curated set of reliable optimized models for coding agents.",
-  "provider.connect.opencodeZen.line2":
+  "provider.connect.lfcodeZen.line2":
     "With a single API key you'll get access to models such as Claude, GPT, Gemini, GLM and more.",
-  "provider.connect.opencodeZen.visit.prefix": "Visit ",
-  "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
-  "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
+  "provider.connect.lfcodeZen.visit.prefix": "Visit ",
+  "provider.connect.lfcodeZen.visit.link": "lfcode.ai/zen",
+  "provider.connect.lfcodeZen.visit.suffix": " to collect your API key.",
   "provider.connect.oauth.code.visit.prefix": "Visit ",
   "provider.connect.oauth.code.visit.link": "this link",
   "provider.connect.oauth.code.visit.suffix":
@@ -201,6 +202,20 @@ export const dict = {
   "provider.custom.error.baseURL.format": "Must start with http:// or https://",
   "provider.custom.error.required": "Required",
   "provider.custom.error.duplicate": "Duplicate",
+  "provider.custom.delete.title": "Delete custom provider",
+  "provider.custom.delete.confirm": 'Delete custom provider "{{provider}}"?',
+  "provider.custom.delete.description":
+    "This removes the provider configuration, stored authentication, and its models from the model list.",
+  "provider.custom.delete.button": "Delete provider",
+  "provider.custom.delete.toast.title": "{{provider}} deleted",
+  "provider.custom.delete.toast.description": "{{provider}} and its models were removed.",
+  "provider.remove.title": "Remove provider",
+  "provider.remove.confirm": 'Remove provider "{{provider}}"?',
+  "provider.remove.description":
+    "This removes the provider and its models from the model list. Built-in providers are disabled; custom providers have their saved configuration removed.",
+  "provider.remove.button": "Remove provider",
+  "provider.remove.toast.title": "{{provider}} removed",
+  "provider.remove.toast.description": "{{provider}} and its models were removed.",
 
   "provider.disconnect.toast.disconnected.title": "{{provider}} disconnected",
   "provider.disconnect.toast.disconnected.description": "{{provider}} models are no longer available.",
@@ -308,7 +323,7 @@ export const dict = {
   "dialog.mcp.empty": "No MCPs configured",
 
   "dialog.lsp.empty": "LSPs auto-detected from file types",
-  "dialog.plugins.empty": "Plugins configured in opencode.json",
+  "dialog.plugins.empty": "Plugins configured in lfcode.json",
 
   "mcp.status.connected": "connected",
   "mcp.status.failed": "failed",
@@ -507,7 +522,7 @@ export const dict = {
   "error.chain.responseBody": "Response body:\n{{body}}",
   "error.chain.didYouMean": "Did you mean: {{suggestions}}",
   "error.chain.modelNotFound": "Model not found: {{provider}}/{{model}}",
-  "error.chain.checkConfig": "Check your config (opencode.json) provider/model names",
+  "error.chain.checkConfig": "Check your config (lfcode.json) provider/model names",
   "error.chain.mcpFailed": 'MCP server "{{name}}" failed. Note, Lfcode does not support MCP authentication yet.',
   "error.chain.providerAuthFailed": "Provider authentication failed ({{provider}}): {{message}}",
   "error.chain.providerInitFailed":
@@ -550,6 +565,8 @@ export const dict = {
   "session.review.noVcs.createGit.action": "Create Git repository",
   "session.review.noSnapshot": "Snapshot tracking is disabled in config, so session changes are unavailable",
   "session.review.noChanges": "No changes",
+  "session.review.largeRepo":
+    "This repository currently has {{count}} Git changes, so full diff loading was skipped to keep the UI responsive. Narrow the change set or switch to another review mode.",
   "session.review.noUncommittedChanges": "No uncommitted changes yet",
   "session.review.noBranchChanges": "No branch changes yet",
 

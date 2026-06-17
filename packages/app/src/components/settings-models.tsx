@@ -1,17 +1,20 @@
-import { useFilteredList } from "@mimo-ai/ui/hooks"
-import { ProviderIcon } from "@mimo-ai/ui/provider-icon"
-import { Select } from "@mimo-ai/ui/select"
-import { Switch } from "@mimo-ai/ui/switch"
-import { Icon } from "@mimo-ai/ui/icon"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { TextField } from "@mimo-ai/ui/text-field"
-import { showToast } from "@mimo-ai/ui/toast"
+import { useFilteredList } from "@lfcode-ai/ui/hooks"
+import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
+import { Select } from "@lfcode-ai/ui/select"
+import { Switch } from "@lfcode-ai/ui/switch"
+import { Icon } from "@lfcode-ai/ui/icon"
+import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { TextField } from "@lfcode-ai/ui/text-field"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { type Component, createMemo, createSignal, For, type JSX, Show } from "solid-js"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { formatServerError } from "@/utils/server-errors"
+import { DialogRemoveProvider } from "./dialog-delete-custom-provider"
 import { SettingsList } from "./settings-list"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
@@ -57,11 +60,17 @@ const SettingsRow: Component<{ title: string; description: string | JSX.Element;
 
 export const SettingsModels: Component = () => {
   const language = useLanguage()
+  const dialog = useDialog()
   const models = useModels()
   const globalSync = useGlobalSync()
   const [saving, setSaving] = createSignal<ConfigModelField>()
 
   const modelValue = (item: ModelItem) => `${item.provider.id}/${item.id}`
+  const reopenSettingsModels = () => {
+    void import("./dialog-settings").then((x) => {
+      dialog.show(() => <x.DialogSettings defaultValue="models" />)
+    })
+  }
 
   const baseOptions = createMemo<ModelOption[]>(() =>
     models
@@ -90,24 +99,29 @@ export const SettingsModels: Component = () => {
     const seen = new Set(baseOptions().map((item) => item.value))
     const current = [globalSync.data.config.model, globalSync.data.config.small_model]
       .filter((value): value is string => !!value && !seen.has(value))
-      .map((value) => ({
-        value,
-        label: value,
-        provider: language.t("settings.models.group.currentConfig"),
-        custom: true,
-      }) satisfies ModelOption)
+      .map(
+        (value) =>
+          ({
+            value,
+            label: value,
+            provider: language.t("settings.models.group.currentConfig"),
+            custom: true,
+          }) satisfies ModelOption,
+      )
     return [...current, ...baseOptions()]
   })
 
   const currentOption = (field: ConfigModelField) => {
     const value = globalSync.data.config[field]
     if (!value) return
-    return options().find((item) => item.value === value) ?? {
-      value,
-      label: value,
-      provider: language.t("settings.models.group.currentConfig"),
-      custom: true,
-    }
+    return (
+      options().find((item) => item.value === value) ?? {
+        value,
+        label: value,
+        provider: language.t("settings.models.group.currentConfig"),
+        custom: true,
+      }
+    )
   }
 
   const saveModel = async (field: ConfigModelField, option: ModelOption | undefined) => {
@@ -269,9 +283,35 @@ export const SettingsModels: Component = () => {
             <For each={list.grouped.latest}>
               {(group) => (
                 <div class="flex flex-col gap-1">
-                  <div class="flex items-center gap-2 pb-2">
-                    <ProviderIcon id={group.category} class="size-5 shrink-0 icon-strong-base" />
-                    <span class="text-14-medium text-text-strong">{group.items[0].provider.name}</span>
+                  <div class="flex items-center justify-between gap-3 pb-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <ProviderIcon id={group.category} class="size-5 shrink-0 icon-strong-base" />
+                      <span class="text-14-medium text-text-strong truncate">{group.items[0].provider.name}</span>
+                    </div>
+                    <Tooltip
+                      placement="top"
+                      value={language.t("dialog.model.manage.provider.delete", {
+                        provider: group.items[0].provider.name,
+                      })}
+                    >
+                      <IconButton
+                        tabIndex={-1}
+                        icon="trash"
+                        variant="ghost"
+                        aria-label={language.t("dialog.model.manage.provider.delete", {
+                          provider: group.items[0].provider.name,
+                        })}
+                        onClick={() =>
+                          dialog.show(() => (
+                            <DialogRemoveProvider
+                              providerID={group.category}
+                              providerName={group.items[0].provider.name}
+                              onClose={reopenSettingsModels}
+                            />
+                          ))
+                        }
+                      />
+                    </Tooltip>
                   </div>
                   <SettingsList>
                     <For each={group.items}>
