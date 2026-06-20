@@ -4,6 +4,7 @@ import os from "os"
 import { Context, Effect, Layer } from "effect"
 
 const APP = "lfcode"
+const WINDOWS_HOME_ROOT = ".lfcode"
 
 export type ResolvedPaths = {
   mode: "lfcode_home" | "xdg"
@@ -20,6 +21,7 @@ export type ResolvedPaths = {
  *
  * If LFCODE_HOME is set and non-empty, the four paths are subdirectories
  * of it. Legacy OPENCODE_* and MIMOCODE_HOME values remain as fallbacks.
+ * On Windows, the default profile root is `%USERPROFILE%\\.lfcode`.
  * Otherwise, falls through to XDG Base Directory defaults.
  *
  * @throws if LFCODE_HOME is set but not an absolute path
@@ -52,7 +54,22 @@ export function resolveLfcodeHome(env: NodeJS.ProcessEnv = process.env): Resolve
     }
   }
 
-  const home = env.LFCODE_HOME ?? env.MIMOCODE_HOME
+  const home = chooseHome(env.LFCODE_HOME, env.MIMOCODE_HOME)
+  if (process.platform === "win32") {
+    const root = home ?? path.join(env.USERPROFILE ?? os.homedir(), WINDOWS_HOME_ROOT)
+    if (home && !path.isAbsolute(home)) {
+      throw new Error(`LFCODE_HOME must be an absolute path, got: ${JSON.stringify(home)}`)
+    }
+    return {
+      mode: "lfcode_home",
+      root,
+      data: path.join(root, "data"),
+      cache: path.join(root, "cache"),
+      config: path.join(root, "config"),
+      state: path.join(root, "state"),
+    }
+  }
+
   if (home) {
     if (!path.isAbsolute(home)) {
       throw new Error(`LFCODE_HOME must be an absolute path, got: ${JSON.stringify(home)}`)
@@ -73,6 +90,10 @@ export function resolveLfcodeHome(env: NodeJS.ProcessEnv = process.env): Resolve
     config: path.join(xdgConfig!, APP),
     state: path.join(xdgState!, APP),
   }
+}
+
+function chooseHome(...values: Array<string | undefined>) {
+  return values.find((value) => value !== undefined && value !== "")
 }
 
 export namespace Global {

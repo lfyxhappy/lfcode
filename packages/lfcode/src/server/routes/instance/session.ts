@@ -361,7 +361,7 @@ export const SessionRoutes = lazy(() =>
           permission: Permission.Ruleset.zod.optional(),
           time: z
             .object({
-              archived: z.number().optional(),
+              archived: z.number().nullable().optional(),
             })
             .optional(),
         }),
@@ -382,7 +382,7 @@ export const SessionRoutes = lazy(() =>
               permission: Permission.merge(current.permission ?? [], updates.permission),
             })
           }
-          if (updates.time?.archived !== undefined) {
+          if (updates.time && "archived" in updates.time) {
             yield* session.setArchived({ sessionID, time: updates.time.archived })
           }
 

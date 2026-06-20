@@ -106,7 +106,7 @@ export function DialogMimoLogin() {
               auth: { type: "api", key },
             })
             await sdk.client.global.config.update({
-              config: {
+              configPatch: {
                 provider: {
                   anthropic: { options: { baseURL: baseUrl || "https://api.anthropic.com/v1" } },
                 },
@@ -119,7 +119,7 @@ export function DialogMimoLogin() {
             if (anthropic) {
               if (preferredModel && !(preferredModel in anthropic.models)) {
                 await sdk.client.global.config.update({
-                  config: {
+                  configPatch: {
                     provider: {
                       anthropic: { models: { [preferredModel]: { name: preferredModel } } },
                     },

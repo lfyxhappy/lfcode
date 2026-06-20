@@ -5,6 +5,7 @@ import {
   ACCEPTED_FILE_TYPES,
   AppBaseProviders,
   AppInterface,
+  getDetachedSidePanelContext,
   handleNotificationClick,
   loadLocaleDict,
   normalizeLocale,
@@ -15,7 +16,8 @@ import {
   useCommand,
 } from "@lfcode-ai/app"
 import type { AsyncStorage } from "@solid-primitives/storage"
-import { MemoryRouter } from "@solidjs/router"
+import type { BaseRouterProps } from "@solidjs/router"
+import { MemoryRouter, createMemoryHistory } from "@solidjs/router"
 import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js"
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
@@ -251,7 +253,31 @@ const createPlatform = (): Platform => {
         type: "image/png",
       })
     },
+    createDetachedSidePanelWindow: async (input) => {
+      await window.api.createDetachedSidePanelWindow(input)
+    },
+    redockDetachedSidePanelWindow: async (detachedWindowID, placement) => {
+      await window.api.redockDetachedSidePanelWindow(detachedWindowID, placement)
+    },
+    setDetachedDockTarget: async (input) => {
+      await window.api.setDetachedDockTarget(input)
+    },
+    clearDetachedDockTarget: async () => {
+      await window.api.clearDetachedDockTarget()
+    },
+    onDetachedSidePanelEvent: (cb) => window.api.onDetachedSidePanelEvent(cb),
   }
+}
+
+function DetachedRouter(props: BaseRouterProps) {
+  const route = window.__LFCODE__?.detachedSidePanel?.route
+  const history = createMemoryHistory()
+  if (route) history.set({ value: route, replace: true, scroll: false })
+  return (
+    <MemoryRouter history={history} root={props.root}>
+      {props.children}
+    </MemoryRouter>
+  )
 }
 
 let menuTrigger = null as null | ((id: string) => void)
@@ -260,6 +286,8 @@ window.api.onMenuCommand((id) => {
 })
 listenForDeepLinks()
 window.api.onBrowserWindowOpen((url) => emitBrowserOpen(url))
+window.__LFCODE__ ??= {}
+window.__LFCODE__.detachedSidePanel = getDetachedSidePanelContext()
 
 render(() => {
   const platform = createPlatform()
@@ -354,7 +382,7 @@ render(() => {
               <AppInterface
                 defaultServer={defaultServer.latest ?? ServerConnection.Key.make("sidecar")}
                 servers={servers()}
-                router={MemoryRouter}
+                router={DetachedRouter}
               >
                 <Inner />
               </AppInterface>

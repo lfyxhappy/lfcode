@@ -1,11 +1,13 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "fs"
 import path from "path"
+import os from "os"
 import { type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
 import { Log } from "../util"
 import { init } from "#db"
 
 const log = Log.create({ service: "legacy-db" })
-const LEGACY_DB_FILENAMES = ["mimocode.db", "opencode.db"] as const
+const LEGACY_DB_FILENAMES = ["lfcode.db", "mimocode.db", "opencode.db"] as const
+const LEGACY_XDG_DATA_DIR = path.join(os.homedir(), ".local", "share", "lfcode")
 const LEGACY_DB_MARKER_SUFFIX = ".legacy-merge-v1.json"
 
 type RawStatement = {
@@ -275,10 +277,16 @@ function mergeSource(db: SQLiteBunDatabase, sourcePath: string, alias: string) {
   return inserted
 }
 
-export function mergeLegacyDatabases(db: SQLiteBunDatabase, targetPath: string) {
+export function mergeLegacyDatabases(
+  db: SQLiteBunDatabase,
+  targetPath: string,
+  options?: {
+    legacyDataDir?: string
+  },
+) {
   if (path.basename(targetPath) !== "lfcode.db") return
 
-  const sources = LEGACY_DB_FILENAMES.map((name) => path.join(path.dirname(targetPath), name))
+  const sources = legacyDatabaseSources(path.dirname(targetPath), options?.legacyDataDir)
     .map((candidate) => path.resolve(candidate))
     .filter((candidate) => candidate !== path.resolve(targetPath))
     .filter((candidate) => existsSync(candidate))
@@ -303,4 +311,10 @@ export function mergeLegacyDatabases(db: SQLiteBunDatabase, targetPath: string) 
   }
 
   writeMarker(markerPath, signatures)
+}
+
+export function legacyDatabaseSources(dataDir: string, legacyDataDir = LEGACY_XDG_DATA_DIR) {
+  return [...new Set([dataDir, legacyDataDir])].flatMap((dir) =>
+    LEGACY_DB_FILENAMES.map((name) => path.join(dir, name)),
+  )
 }

@@ -15,6 +15,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
+import { questionGuidanceSystem, type QuestionGuidance } from "@/utils/question-guidance"
 import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
@@ -34,6 +35,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  questionGuidance?: QuestionGuidance
 }
 
 type FollowupSendInput = {
@@ -161,6 +163,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
           messageID,
           parts: requestParts,
           variant: input.draft.variant,
+          system: questionGuidanceSystem(input.draft.questionGuidance),
         })
       : input.client.session.promptAsync({
           sessionID: input.draft.sessionID,
@@ -169,6 +172,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
           messageID,
           parts: requestParts,
           variant: input.draft.variant,
+          system: questionGuidanceSystem(input.draft.questionGuidance),
         })
 
     await sendPrompt
@@ -406,6 +410,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       providerID: currentModel.provider.id,
     }
     const agent = currentAgent.name
+    const questionGuidance = local.questionGuidance.current()
     const context = prompt.context.items().slice()
     const draft: FollowupDraft = {
       sessionID: session.id,
@@ -415,6 +420,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      questionGuidance,
     }
 
     const clearInput = () => {

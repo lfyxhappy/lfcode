@@ -19,6 +19,7 @@ import type {
   CommandListResponses,
   Config as Config3,
   ConfigGetResponses,
+  ConfigPatch,
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
@@ -73,9 +74,17 @@ import type {
   McpAuthRemoveResponses,
   McpAuthStartErrors,
   McpAuthStartResponses,
+  McpCatalogInstallErrors,
+  McpCatalogInstallResponses,
+  McpCatalogListResponses,
   McpConnectResponses,
   McpDisconnectResponses,
   McpLocalConfig,
+  McpManageDeleteErrors,
+  McpManageDeleteResponses,
+  McpManageListResponses,
+  McpManageUpdateErrors,
+  McpManageUpdateResponses,
   McpRemoteConfig,
   McpStatusResponses,
   OutputFormat,
@@ -92,6 +101,8 @@ import type {
   PermissionRespondResponses,
   PermissionRuleset,
   ProjectCurrentResponses,
+  ProjectDeleteSnapshotErrors,
+  ProjectDeleteSnapshotResponses,
   ProjectInitGitResponses,
   ProjectListResponses,
   ProjectUpdateErrors,
@@ -174,6 +185,21 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SkillsCreateErrors,
+  SkillsCreateResponses,
+  SkillsDirsResponses,
+  SkillsDiscoverInstallErrors,
+  SkillsDiscoverInstallResponses,
+  SkillsDiscoverResponses,
+  SkillsImportErrors,
+  SkillsImportResponses,
+  SkillsListResponses,
+  SkillsManageDeleteErrors,
+  SkillsManageDeleteResponses,
+  SkillsManageListResponses,
+  SkillsManageUpdateErrors,
+  SkillsManageUpdateResponses,
+  SkillsRefreshResponses,
   SubtaskPartInput,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
@@ -267,7 +293,7 @@ export class Config extends HeyApiClient {
   /**
    * Get global configuration
    *
-   * Retrieve the current global OpenCode configuration settings and preferences.
+   * Retrieve the current global Lfcode configuration settings and preferences.
    */
   public get<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GlobalConfigGetResponses, unknown, ThrowOnError>({
@@ -279,15 +305,15 @@ export class Config extends HeyApiClient {
   /**
    * Update global configuration
    *
-   * Update global OpenCode configuration settings and preferences.
+   * Update global Lfcode configuration settings and preferences.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {
-      config?: Config3
+      configPatch?: ConfigPatch
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ key: "config", map: "body" }] }])
+    const params = buildClientParams([parameters], [{ args: [{ key: "configPatch", map: "body" }] }])
     return (options?.client ?? this.client).patch<GlobalConfigUpdateResponses, GlobalConfigUpdateErrors, ThrowOnError>({
       url: "/global/config",
       ...options,
@@ -328,7 +354,7 @@ export class Global extends HeyApiClient {
   /**
    * Get health
    *
-   * Get health information about the OpenCode server.
+   * Get health information about the Lfcode server.
    */
   public health<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GlobalHealthResponses, unknown, ThrowOnError>({
@@ -340,7 +366,7 @@ export class Global extends HeyApiClient {
   /**
    * Get global events
    *
-   * Subscribe to global events from the OpenCode system using server-sent events.
+   * Subscribe to global events from the Lfcode system using server-sent events.
    */
   public event<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).sse.get<GlobalEventResponses, unknown, ThrowOnError>({
@@ -352,7 +378,7 @@ export class Global extends HeyApiClient {
   /**
    * Dispose instance
    *
-   * Clean up and dispose all OpenCode instances, releasing all resources.
+   * Clean up and dispose all Lfcode instances, releasing all resources.
    */
   public dispose<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).post<GlobalDisposeResponses, unknown, ThrowOnError>({
@@ -362,9 +388,9 @@ export class Global extends HeyApiClient {
   }
 
   /**
-   * Upgrade Lfcode
+   * Upgrade lfcode
    *
-   * Upgrade Lfcode to the specified version or latest if not specified.
+   * Upgrade lfcode to the specified version or latest if not specified.
    */
   public upgrade<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -496,7 +522,7 @@ export class App extends HeyApiClient {
   /**
    * List agents
    *
-   * Get a list of all available AI agents in the OpenCode system.
+   * Get a list of all available AI agents in the Lfcode system.
    */
   public agents<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -526,7 +552,7 @@ export class App extends HeyApiClient {
   /**
    * List skills
    *
-   * Get a list of all available skills in the OpenCode system.
+   * Get a list of all available skills in the Lfcode system.
    */
   public skills<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -843,7 +869,7 @@ export class Console extends HeyApiClient {
   /**
    * Switch active Console org
    *
-   * Persist a new active Console account/org selection for the current local OpenCode state.
+   * Persist a new active Console account/org selection for the current local Lfcode state.
    */
   public switchOrg<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -884,7 +910,7 @@ export class Session extends HeyApiClient {
   /**
    * List sessions
    *
-   * Get a list of all OpenCode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
+   * Get a list of all Lfcode sessions across projects, sorted by most recently updated. Archived sessions are excluded by default.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -982,7 +1008,7 @@ export class Project extends HeyApiClient {
   /**
    * List all projects
    *
-   * Get a list of projects that have been opened with OpenCode.
+   * Get a list of projects that have been opened with Lfcode.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1012,7 +1038,7 @@ export class Project extends HeyApiClient {
   /**
    * Get current project
    *
-   * Retrieve the currently active project that OpenCode is working with.
+   * Retrieve the currently active project that Lfcode is working with.
    */
   public current<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1034,6 +1060,42 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProjectCurrentResponses, unknown, ThrowOnError>({
       url: "/project/current",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete project snapshots
+   *
+   * Delete all stored snapshot data for a project without touching the real project files.
+   */
+  public deleteSnapshot<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      ProjectDeleteSnapshotResponses,
+      ProjectDeleteSnapshotErrors,
+      ThrowOnError
+    >({
+      url: "/project/{projectID}/snapshot",
       ...options,
       ...params,
     })
@@ -1126,7 +1188,7 @@ export class Pty extends HeyApiClient {
   /**
    * List PTY sessions
    *
-   * Get a list of all active pseudo-terminal (PTY) sessions managed by OpenCode.
+   * Get a list of all active pseudo-terminal (PTY) sessions managed by Lfcode.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1345,7 +1407,7 @@ export class Config2 extends HeyApiClient {
   /**
    * Get configuration
    *
-   * Retrieve the current OpenCode configuration settings and preferences.
+   * Retrieve the current Lfcode configuration settings and preferences.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1375,7 +1437,7 @@ export class Config2 extends HeyApiClient {
   /**
    * Update configuration
    *
-   * Update OpenCode configuration settings and preferences.
+   * Update Lfcode configuration settings and preferences.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1653,7 +1715,7 @@ export class Session2 extends HeyApiClient {
   /**
    * List sessions
    *
-   * Get a list of all OpenCode sessions, sorted by most recently updated.
+   * Get a list of all Lfcode sessions, sorted by most recently updated.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1691,7 +1753,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Create session
    *
-   * Create a new OpenCode session for interacting with AI assistants and managing conversations.
+   * Create a new Lfcode session for interacting with AI assistants and managing conversations.
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1800,7 +1862,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Get session
    *
-   * Retrieve detailed information about a specific OpenCode session.
+   * Retrieve detailed information about a specific Lfcode session.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters: {
@@ -1842,7 +1904,7 @@ export class Session2 extends HeyApiClient {
       title?: string
       permission?: PermissionRuleset
       time?: {
-        archived?: number
+        archived?: number | null
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -3764,6 +3826,585 @@ export class Event extends HeyApiClient {
   }
 }
 
+export class Manage extends HeyApiClient {
+  /**
+   * List local skills
+   *
+   * List skills directly from the local .lfcode/skills directory.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SkillsManageListResponses, unknown, ThrowOnError>({
+      url: "/skills/manage/list",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update a local skill
+   *
+   * Update the hidden frontmatter of a skill in .lfcode/skills.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters?: {
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
+      hidden?: boolean | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+            { in: "body", key: "hidden" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<SkillsManageUpdateResponses, SkillsManageUpdateErrors, ThrowOnError>({
+      url: "/skills/manage/update",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete a local skill
+   *
+   * Permanently delete a skill directory from .lfcode/skills.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SkillsManageDeleteResponses, SkillsManageDeleteErrors, ThrowOnError>(
+      {
+        url: "/skills/manage/delete",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+}
+
+export class Discover extends HeyApiClient {
+  /**
+   * Install a discovered skill
+   *
+   * Install a skill from a skills.sh repository into .lfcode/skills.
+   */
+  public install<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      url?: string
+      owner?: string
+      repo?: string
+      skill?: string
+      name?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "url" },
+            { in: "body", key: "owner" },
+            { in: "body", key: "repo" },
+            { in: "body", key: "skill" },
+            { in: "body", key: "name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SkillsDiscoverInstallResponses,
+      SkillsDiscoverInstallErrors,
+      ThrowOnError
+    >({
+      url: "/skills/discover/install",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Skills extends HeyApiClient {
+  /**
+   * List skills
+   *
+   * List skills from the local .lfcode/skills directory.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SkillsListResponses, unknown, ThrowOnError>({
+      url: "/skills",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Discover skills
+   *
+   * Discover skills from the public skills.sh directory.
+   */
+  public discover<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      source?: "skills.sh"
+      q?: string
+      repo?: string
+      status?: "all" | "installed" | "available"
+      page?: number
+      pageSize?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "source" },
+            { in: "query", key: "q" },
+            { in: "query", key: "repo" },
+            { in: "query", key: "status" },
+            { in: "query", key: "page" },
+            { in: "query", key: "pageSize" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SkillsDiscoverResponses, unknown, ThrowOnError>({
+      url: "/skills/discover",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List skill directories
+   *
+   * List the directories currently contributing skills.
+   */
+  public dirs<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SkillsDirsResponses, unknown, ThrowOnError>({
+      url: "/skills/dirs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Refresh skills
+   *
+   * Re-scan the local skill directories.
+   */
+  public refresh<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SkillsRefreshResponses, unknown, ThrowOnError>({
+      url: "/skills/refresh",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Import a skill directory
+   *
+   * Copy local skills into .lfcode/skills from a folder, zip file, or known external skill root.
+   */
+  public import<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      kind?: "folder" | "zip" | "claude" | "codex" | "agents"
+      source?: string
+      name?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "source" },
+            { in: "body", key: "name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SkillsImportResponses, SkillsImportErrors, ThrowOnError>({
+      url: "/skills/import",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create a new skill
+   *
+   * Create a new skill skeleton under .lfcode/skills.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      name?: string
+      description?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+            { in: "body", key: "description" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SkillsCreateResponses, SkillsCreateErrors, ThrowOnError>({
+      url: "/skills/create",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  private _manage?: Manage
+  get manage(): Manage {
+    return (this._manage ??= new Manage({ client: this.client }))
+  }
+
+  private _discover?: Discover
+  get discover2(): Discover {
+    return (this._discover ??= new Discover({ client: this.client }))
+  }
+}
+
+export class Manage2 extends HeyApiClient {
+  /**
+   * List managed MCP servers
+   *
+   * Return MCP config entries with runtime status and local managed metadata.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<McpManageListResponses, unknown, ThrowOnError>({
+      url: "/mcp/manage",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete MCP config
+   *
+   * Delete an MCP config entry and any managed local metadata.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<McpManageDeleteResponses, McpManageDeleteErrors, ThrowOnError>({
+      url: "/mcp/manage/{name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update MCP config
+   *
+   * Update an MCP config entry in its owning config file.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+      config?: McpLocalConfig | McpRemoteConfig
+      target?: "project" | "global"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "config" },
+            { in: "body", key: "target" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<McpManageUpdateResponses, McpManageUpdateErrors, ThrowOnError>({
+      url: "/mcp/manage/{name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Catalog extends HeyApiClient {
+  /**
+   * List MCP catalog items
+   *
+   * Return MCP discovery items from the official registry.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      q?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "q" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<McpCatalogListResponses, unknown, ThrowOnError>({
+      url: "/mcp/catalog",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Install MCP catalog item
+   *
+   * Install a supported MCP from the official registry into the current workspace.
+   */
+  public install<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      id?: string
+      target?: "project" | "global"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "id" },
+            { in: "body", key: "target" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<McpCatalogInstallResponses, McpCatalogInstallErrors, ThrowOnError>({
+      url: "/mcp/catalog/install",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Auth2 extends HeyApiClient {
   /**
    * Remove MCP OAuth
@@ -4031,6 +4672,16 @@ export class Mcp extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _manage?: Manage2
+  get manage(): Manage2 {
+    return (this._manage ??= new Manage2({ client: this.client }))
+  }
+
+  private _catalog?: Catalog
+  get catalog(): Catalog {
+    return (this._catalog ??= new Catalog({ client: this.client }))
   }
 
   private _auth?: Auth2
@@ -4541,7 +5192,7 @@ export class Instance extends HeyApiClient {
   /**
    * Dispose instance
    *
-   * Clean up and dispose the current OpenCode instance, releasing all resources.
+   * Clean up and dispose the current Lfcode instance, releasing all resources.
    */
   public dispose<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4573,7 +5224,7 @@ export class Path extends HeyApiClient {
   /**
    * Get paths
    *
-   * Retrieve the current working directory and related path information for the OpenCode instance.
+   * Retrieve the current working directory and related path information for the Lfcode instance.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4669,7 +5320,7 @@ export class Command extends HeyApiClient {
   /**
    * List commands
    *
-   * Get a list of all available commands in the OpenCode system.
+   * Get a list of all available commands in the Lfcode system.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4867,6 +5518,11 @@ export class LfcodeClient extends HeyApiClient {
   private _event?: Event
   get event(): Event {
     return (this._event ??= new Event({ client: this.client }))
+  }
+
+  private _skills?: Skills
+  get skills(): Skills {
+    return (this._skills ??= new Skills({ client: this.client }))
   }
 
   private _mcp?: Mcp

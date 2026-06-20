@@ -170,14 +170,14 @@ export const GlobalRoutes = lazy(() =>
             description: "Successfully updated global config",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.Patch),
               },
             },
           },
           ...errors(400),
         },
       }),
-      validator("json", Config.Info),
+      validator("json", Config.Patch),
       async (c) => {
         const config = c.req.valid("json")
         const next = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.updateGlobal(config)))

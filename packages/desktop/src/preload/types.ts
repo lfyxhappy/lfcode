@@ -19,6 +19,40 @@ export type WindowConfig = {
   updaterEnabled: boolean
 }
 
+export type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
+
+export type DetachedSidePanelRecord = {
+  detachedWindowID: string
+  sessionKey: string
+  tab: string
+  kind: DetachedSidePanelKind
+  sourceWindowID: number
+  title?: string
+}
+
+export type DetachedSidePanelEvent =
+  | {
+      type: "sync"
+      records: DetachedSidePanelRecord[]
+    }
+  | {
+      type: "dock-target"
+      detachedWindowID: string
+      active: boolean
+    }
+  | {
+      type: "prepare-redock"
+      detachedWindowID: string
+    }
+  | {
+      type: "redock"
+      detachedWindowID: string
+      placement?: {
+        afterTab?: string
+        beforeTab?: string
+      }
+    }
+
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
   installCli: () => Promise<string>
@@ -41,12 +75,33 @@ export type ElectronAPI = {
   storeClear: (name: string) => Promise<void>
   storeKeys: (name: string) => Promise<string[]>
   storeLength: (name: string) => Promise<number>
+  createDetachedSidePanelWindow: (input: {
+    detachedWindowID: string
+    route: string
+    sessionKey: string
+    tab: string
+    kind: DetachedSidePanelKind
+    title?: string
+  }) => Promise<void>
+  redockDetachedSidePanelWindow: (
+    detachedWindowID: string,
+    placement?: {
+      afterTab?: string
+      beforeTab?: string
+    },
+  ) => Promise<void>
+  setDetachedDockTarget: (input: {
+    sessionKey: string
+    rect: { x: number; y: number; width: number; height: number }
+  }) => Promise<void>
+  clearDetachedDockTarget: () => Promise<void>
 
   getWindowCount: () => Promise<number>
   onSqliteMigrationProgress: (cb: (progress: SqliteMigrationProgress) => void) => () => void
   onMenuCommand: (cb: (id: string) => void) => () => void
   onDeepLink: (cb: (urls: string[]) => void) => () => void
   onBrowserWindowOpen: (cb: (url: string) => void) => () => void
+  onDetachedSidePanelEvent: (cb: (event: DetachedSidePanelEvent) => void) => () => void
 
   openDirectoryPicker: (opts?: {
     multiple?: boolean

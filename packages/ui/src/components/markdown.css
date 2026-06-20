@@ -55,6 +55,19 @@
     text-underline-offset: 2px;
   }
 
+  .file-reference,
+  [data-kind="file-ref"] {
+    color: var(--text-interactive-base);
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .file-reference:hover,
+  [data-kind="file-ref"]:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   /* Lists */
   ul,
   ol {

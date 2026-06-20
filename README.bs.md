@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> Ovaj lokalizirani README prati trenutno stanje Lfcode repozitorija kako bi linkovi za preuzimanje, release asseti i napomene o kompatibilnosti ostali tacni.
+> Ovaj README odražava trenutno stanje Lfcode repozitorija kako bi linkovi za preuzimanje, release asseti i napomene o kompatibilnosti ostali tačni.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Pregled
 
-### Installation
+Lfcode je Bun workspace monorepo koji je nastao iz opencode-a. Zadržava istorijsku kompatibilnost i isporučuje Lfcode brend, desktop aplikaciju, web UI, SDK i GitHub Action podršku.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Istaknuto
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Potpunije upravljanje sesijama: lista, status, kreiranje, ažuriranje, brisanje, fork, dijeljenje, ukidanje dijeljenja, sažetak, kompakcija, diff, revert i unrevert.
+- Više načina interakcije: slanje poruka, asinhroni `prompt`, `shell`, komande i predviđanje sljedećeg prompta.
+- Upravljanje Skillsima: lokalna lista Skillsa, otkrivanje, instalacija, import, kreiranje, osvježavanje i provjera direktorija.
+- GitHub Action integracija: pokrenite automatizirani rad iz issue ili PR komentara pomoću `/lfcode`, `/opencode` ili `/oc`.
+- Istorijska kompatibilnost: zadržani su `opencode` CLI naredba, `LFCODE_*` environment varijable i `lfcode://` protokol.
+
+### Instalacija
+
+Javni downloadi se objavljuju na stranici [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+
+- Desktop: trenutni release pipeline objavljuje Windows installer pod imenom `lfcode-win-x64.exe`.
+- Source: za lokalni razvoj koristite Bun iz korijena repozitorija.
 
 ```bash
 bun install
@@ -60,37 +70,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Kompatibilnost
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Neki runtime identifikatori i dalje koriste historijsko ime `opencode` zbog kompatibilnosti.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- CLI naredba: `opencode`
+- Konfiguracioni direktorij: `~/.lfcode`
+- Environment varijable: `LFCODE_*`
+- Desktop protokol: `lfcode://`
 
-### Repository Layout
+### Struktura repozitorija
 
-- `packages/lfcode`: core runtime and session engine
+- `packages/lfcode`: core runtime i session engine
 - `packages/app`: web UI
 - `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/ui`: zajedničke UI komponente
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### Dokumentacija
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+Trenutni izvor dokumentacije je u [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Provjera
 
-Run the main repository checks from the workspace root:
+Pokrenite glavne provjere iz korijena workspace-a:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### Podrška
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

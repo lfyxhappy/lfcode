@@ -13,6 +13,7 @@ import { Spinner } from "@lfcode-ai/ui/spinner"
 import { SessionTurn } from "@lfcode-ai/ui/session-turn"
 import { ScrollView } from "@lfcode-ai/ui/scroll-view"
 import { TextField } from "@lfcode-ai/ui/text-field"
+import type { FileReferenceContextValue } from "@lfcode-ai/ui/context/file-reference"
 import type { AssistantMessage, Message as MessageType, Part, TextPart, UserMessage } from "@lfcode-ai/sdk/v2"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { Binary } from "@lfcode-ai/shared/util/binary"
@@ -30,6 +31,7 @@ import { useSettings } from "@/context/settings"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
+import { isSessionWorking } from "@/utils/session-status"
 import { sessionTitle } from "@/utils/session-title"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { makeTimer } from "@solid-primitives/timer"
@@ -228,7 +230,11 @@ export function MessageTimeline(props: {
   historyLoading: boolean
   onLoadEarlier: () => void
   renderedUserMessages: UserMessage[]
+  viewAgentID: string
+  sessionActors: { actorID: string; mode: string; status: string; time: { created: number } }[]
+  onViewAgentChange: (agentID: string) => void
   anchor: (id: string) => string
+  fileReferences?: FileReferenceContextValue
 }) {
   let touchGesture: number | undefined
 
@@ -249,6 +255,15 @@ export function MessageTimeline(props: {
     if (!id) return emptyMessages
     return sync.data.message[id] ?? emptyMessages
   })
+  const viewMessages = createMemo(() => {
+    const id = sessionID()
+    if (!id) return emptyMessages
+    const agentID = props.viewAgentID
+    const list = sessionMessages().filter((message) => (message.agentID ?? "main") === agentID)
+    return list.length > 0 || agentID === "main"
+      ? list
+      : sessionMessages().filter((message) => (message.agentID ?? "main") === "main")
+  })
   const pending = createMemo(() =>
     sessionMessages().findLast(
       (item): item is AssistantMessage => item.role === "assistant" && typeof item.time.completed !== "number",
@@ -259,8 +274,8 @@ export function MessageTimeline(props: {
     if (!id) return idle
     return sync.data.session_status[id] ?? idle
   })
-  const working = createMemo(() => !!pending() || sessionStatus().type !== "idle")
-  const tint = createMemo(() => messageAgentColor(sessionMessages(), sync.data.agent))
+  const working = createMemo(() => isSessionWorking(sessionStatus()))
+  const tint = createMemo(() => messageAgentColor(viewMessages(), sync.data.agent))
 
   const [timeoutDone, setTimeoutDone] = createSignal(true)
 
@@ -278,7 +293,7 @@ export function MessageTimeline(props: {
   })
 
   const activeMessageID = createMemo(() => {
-    const parentID = pending()?.parentID
+    const parentID = working() ? pending()?.parentID : undefined
     if (parentID) {
       const messages = sessionMessages()
       const result = Binary.search(messages, parentID, (message) => message.id)
@@ -286,8 +301,7 @@ export function MessageTimeline(props: {
       if (message && message.role === "user") return message.id
     }
 
-    const status = sessionStatus()
-    if (status.type !== "idle") {
+    if (working()) {
       const messages = sessionMessages()
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === "user") return messages[i].id
@@ -1104,6 +1118,7 @@ export function MessageTimeline(props: {
                           content: "flex flex-col justify-between !overflow-visible",
                           container: "w-full px-4 md:px-5",
                         }}
+                        fileReferences={props.fileReferences}
                       />
                     </div>
                   )

@@ -33,7 +33,7 @@ function dir(input: ParseSource) {
 export async function substitute(input: SubstituteInput) {
   const missing = input.missing ?? "error"
   let text = input.text.replace(/\{env:([^}]+)\}/g, (_, varName) => {
-    return process.env[varName] || ""
+    return JSON.stringify(process.env[varName] ?? "").slice(1, -1)
   })
 
   const fileMatches = Array.from(text.matchAll(/\{file:[^}]+\}/g))

@@ -12,6 +12,7 @@ interface SessionStats {
   totalSessions: number
   totalMessages: number
   totalCost: number
+  overheadCost: number
   totalTokens: {
     input: number
     output: number
@@ -20,12 +21,14 @@ interface SessionStats {
       read: number
       write: number
     }
+    overhead: number
   }
   toolUsage: Record<string, number>
   modelUsage: Record<
     string,
     {
       messages: number
+      overheadCost: number
       tokens: {
         input: number
         output: number
@@ -33,6 +36,7 @@ interface SessionStats {
           read: number
           write: number
         }
+        overhead: number
       }
       cost: number
     }
@@ -128,6 +132,7 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
     totalSessions: filteredSessions.length,
     totalMessages: 0,
     totalCost: 0,
+    overheadCost: 0,
     totalTokens: {
       input: 0,
       output: 0,
@@ -136,6 +141,7 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
         read: 0,
         write: 0,
       },
+      overhead: 0,
     },
     toolUsage: {},
     modelUsage: {},
@@ -173,12 +179,14 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
       )
 
       let sessionCost = 0
-      let sessionTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      let sessionOverheadCost = 0
+      let sessionTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, overhead: 0 }
       let sessionToolUsage: Record<string, number> = {}
       let sessionModelUsage: Record<
         string,
         {
           messages: number
+          overheadCost: number
           tokens: {
             input: number
             output: number
@@ -186,58 +194,72 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
               read: number
               write: number
             }
+            overhead: number
           }
           cost: number
         }
       > = {}
 
       for (const message of messages) {
-        if (message.info.role === "assistant") {
-          sessionCost += message.info.cost || 0
-
-          const modelKey = `${message.info.providerID}/${message.info.modelID}`
-          if (!sessionModelUsage[modelKey]) {
-            sessionModelUsage[modelKey] = {
-              messages: 0,
-              tokens: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-              cost: 0,
-            }
-          }
-          sessionModelUsage[modelKey].messages++
-          sessionModelUsage[modelKey].cost += message.info.cost || 0
-
-          if (message.info.tokens) {
-            sessionTokens.input += message.info.tokens.input || 0
-            sessionTokens.output += message.info.tokens.output || 0
-            sessionTokens.reasoning += message.info.tokens.reasoning || 0
-            sessionTokens.cache.read += message.info.tokens.cache?.read || 0
-            sessionTokens.cache.write += message.info.tokens.cache?.write || 0
-
-            sessionModelUsage[modelKey].tokens.input += message.info.tokens.input || 0
-            sessionModelUsage[modelKey].tokens.output +=
-              (message.info.tokens.output || 0) + (message.info.tokens.reasoning || 0)
-            sessionModelUsage[modelKey].tokens.cache.read += message.info.tokens.cache?.read || 0
-            sessionModelUsage[modelKey].tokens.cache.write += message.info.tokens.cache?.write || 0
-          }
-        }
-
         for (const part of message.parts) {
           if (part.type === "tool" && part.tool) {
             sessionToolUsage[part.tool] = (sessionToolUsage[part.tool] || 0) + 1
           }
+        }
+
+        if (message.info.role !== "assistant") continue
+
+        const modelKey = `${message.info.providerID}/${message.info.modelID}`
+        if (!sessionModelUsage[modelKey]) {
+          sessionModelUsage[modelKey] = {
+            messages: 0,
+            overheadCost: 0,
+            tokens: { input: 0, output: 0, cache: { read: 0, write: 0 }, overhead: 0 },
+            cost: 0,
+          }
+        }
+
+        for (const part of message.parts) {
+          if (part.type !== "step-finish") continue
+          const overheadCost = part.overhead?.cost ?? 0
+          const overheadTokens =
+            (part.overhead?.tokens.input ?? 0) +
+            (part.overhead?.tokens.output ?? 0) +
+            (part.overhead?.tokens.reasoning ?? 0) +
+            (part.overhead?.tokens.cache.read ?? 0) +
+            (part.overhead?.tokens.cache.write ?? 0)
+
+          sessionCost += part.cost + overheadCost
+          sessionOverheadCost += overheadCost
+          sessionTokens.input += part.tokens.input || 0
+          sessionTokens.output += part.tokens.output || 0
+          sessionTokens.reasoning += part.tokens.reasoning || 0
+          sessionTokens.cache.read += part.tokens.cache?.read || 0
+          sessionTokens.cache.write += part.tokens.cache?.write || 0
+
+          sessionModelUsage[modelKey].messages++
+          sessionModelUsage[modelKey].cost += part.cost + overheadCost
+          sessionModelUsage[modelKey].overheadCost += overheadCost
+          sessionModelUsage[modelKey].tokens.input += part.tokens.input || 0
+          sessionModelUsage[modelKey].tokens.output += (part.tokens.output || 0) + (part.tokens.reasoning || 0)
+          sessionModelUsage[modelKey].tokens.cache.read += part.tokens.cache?.read || 0
+          sessionModelUsage[modelKey].tokens.cache.write += part.tokens.cache?.write || 0
+          sessionModelUsage[modelKey].tokens.overhead += overheadTokens
         }
       }
 
       return {
         messageCount: messages.length,
         sessionCost,
+        sessionOverheadCost,
         sessionTokens,
         sessionTotalTokens:
           sessionTokens.input +
           sessionTokens.output +
           sessionTokens.reasoning +
           sessionTokens.cache.read +
-          sessionTokens.cache.write,
+          sessionTokens.cache.write +
+          sessionTokens.overhead,
         sessionToolUsage,
         sessionModelUsage,
         earliestTime: cutoffTime > 0 ? session.time.updated : session.time.created,
@@ -254,11 +276,13 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
 
       stats.totalMessages += result.messageCount
       stats.totalCost += result.sessionCost
+      stats.overheadCost += result.sessionOverheadCost
       stats.totalTokens.input += result.sessionTokens.input
       stats.totalTokens.output += result.sessionTokens.output
       stats.totalTokens.reasoning += result.sessionTokens.reasoning
       stats.totalTokens.cache.read += result.sessionTokens.cache.read
       stats.totalTokens.cache.write += result.sessionTokens.cache.write
+      stats.totalTokens.overhead += result.sessionTokens.overhead
 
       for (const [tool, count] of Object.entries(result.sessionToolUsage)) {
         stats.toolUsage[tool] = (stats.toolUsage[tool] || 0) + count
@@ -268,15 +292,18 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
         if (!stats.modelUsage[model]) {
           stats.modelUsage[model] = {
             messages: 0,
-            tokens: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+            overheadCost: 0,
+            tokens: { input: 0, output: 0, cache: { read: 0, write: 0 }, overhead: 0 },
             cost: 0,
           }
         }
         stats.modelUsage[model].messages += usage.messages
+        stats.modelUsage[model].overheadCost += usage.overheadCost
         stats.modelUsage[model].tokens.input += usage.tokens.input
         stats.modelUsage[model].tokens.output += usage.tokens.output
         stats.modelUsage[model].tokens.cache.read += usage.tokens.cache.read
         stats.modelUsage[model].tokens.cache.write += usage.tokens.cache.write
+        stats.modelUsage[model].tokens.overhead += usage.tokens.overhead
         stats.modelUsage[model].cost += usage.cost
       }
     }
@@ -295,7 +322,8 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
     stats.totalTokens.output +
     stats.totalTokens.reasoning +
     stats.totalTokens.cache.read +
-    stats.totalTokens.cache.write
+    stats.totalTokens.cache.write +
+    stats.totalTokens.overhead
   stats.tokensPerSession = filteredSessions.length > 0 ? totalTokens / filteredSessions.length : 0
   sessionTotalTokens.sort((a, b) => a - b)
   const mid = Math.floor(sessionTotalTokens.length / 2)
@@ -345,6 +373,8 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
   console.log(renderRow("Output", formatNumber(stats.totalTokens.output)))
   console.log(renderRow("Cache Read", formatNumber(stats.totalTokens.cache.read)))
   console.log(renderRow("Cache Write", formatNumber(stats.totalTokens.cache.write)))
+  console.log(renderRow("Overhead Tokens", formatNumber(stats.totalTokens.overhead)))
+  console.log(renderRow("Overhead Cost", `$${stats.overheadCost.toFixed(4)}`))
   console.log("└────────────────────────────────────────────────────────┘")
   console.log()
 
@@ -364,6 +394,8 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
       console.log(renderRow("  Output Tokens", formatNumber(usage.tokens.output)))
       console.log(renderRow("  Cache Read", formatNumber(usage.tokens.cache.read)))
       console.log(renderRow("  Cache Write", formatNumber(usage.tokens.cache.write)))
+      console.log(renderRow("  Overhead Tokens", formatNumber(usage.tokens.overhead)))
+      console.log(renderRow("  Overhead Cost", `$${usage.overheadCost.toFixed(4)}`))
       console.log(renderRow("  Cost", `$${usage.cost.toFixed(4)}`))
       console.log("├────────────────────────────────────────────────────────┤")
     }

@@ -1,6 +1,6 @@
 import z from "zod"
 import { Database, and, desc, eq, gte, like, lt, or, sql, type SQL } from "@/storage"
-import { MessageTable, SessionTable } from "./session.sql"
+import { MessageTable, PartTable, SessionTable } from "./session.sql"
 
 export const UsageRange = z.enum(["today", "7d", "30d", "all"])
 
@@ -20,9 +20,11 @@ const UsageSummary = z.object({
   outputTokens: z.number(),
   cacheCreateTokens: z.number(),
   cacheHitTokens: z.number(),
+  overheadTokens: z.number(),
   cacheHitRatio: z.union([z.number(), z.null()]),
   requestCount: z.number(),
   totalCost: z.number(),
+  overheadCost: z.number(),
 })
 
 const UsageTrendPoint = z.object({
@@ -47,6 +49,8 @@ const UsageLog = z.object({
   reasoning: z.number(),
   cacheRead: z.number(),
   cacheWrite: z.number(),
+  overheadTokens: z.number(),
+  overheadCost: z.number(),
   totalTokens: z.number(),
   cost: z.number(),
   duration: z.number().nullable(),
@@ -143,9 +147,9 @@ function groupByKey<T>(rows: T[], getKey: (row: T) => string, getValue: (row: T)
 }
 
 function usageConditions(query: z.infer<typeof UsageQuery>, start: number | undefined, cursor?: number) {
-  const conditions: SQL[] = [sql`json_extract(${MessageTable.data}, '$.role') = 'assistant'`]
-  if (start != null) conditions.push(gte(MessageTable.time_created, start))
-  if (cursor != null) conditions.push(lt(MessageTable.time_created, cursor))
+  const conditions: SQL[] = [sql`json_extract(${PartTable.data}, '$.type') = 'step-finish'`]
+  if (start != null) conditions.push(gte(PartTable.time_created, start))
+  if (cursor != null) conditions.push(lt(PartTable.time_created, cursor))
   if (query.provider) conditions.push(sql`json_extract(${MessageTable.data}, '$.providerID') = ${query.provider}`)
   if (query.model) conditions.push(sql`json_extract(${MessageTable.data}, '$.modelID') = ${query.model}`)
   if (query.search) {
@@ -159,17 +163,19 @@ function selectUsageRows(conditions: SQL[], limit?: number) {
   return Database.use((db) => {
     const query = db
       .select({
-        id: MessageTable.id,
+        id: PartTable.id,
         sessionID: MessageTable.session_id,
-        time: MessageTable.time_created,
+        time: PartTable.time_created,
         sessionTitle: SessionTable.title,
         directory: SessionTable.directory,
-        data: MessageTable.data,
+        messageData: MessageTable.data,
+        partData: PartTable.data,
       })
-      .from(MessageTable)
+      .from(PartTable)
+      .innerJoin(MessageTable, eq(MessageTable.id, PartTable.message_id))
       .innerJoin(SessionTable, eq(SessionTable.id, MessageTable.session_id))
       .where(and(...conditions))
-      .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+      .orderBy(desc(PartTable.time_created), desc(PartTable.id))
 
     if (limit != null) return query.limit(limit).all()
     return query.all()
@@ -182,16 +188,24 @@ function toUsageLog(row: {
   time: number
   sessionTitle: string
   directory: string
-  data: unknown
+  messageData: unknown
+  partData: unknown
 }) {
-  const provider = jsonString(row.data, ["providerID"])
-  const model = jsonString(row.data, ["modelID"])
-  const input = jsonNumber(row.data, ["tokens", "input"])
-  const output = jsonNumber(row.data, ["tokens", "output"])
-  const reasoning = jsonNumber(row.data, ["tokens", "reasoning"])
-  const cacheRead = jsonNumber(row.data, ["tokens", "cache", "read"])
-  const cacheWrite = jsonNumber(row.data, ["tokens", "cache", "write"])
-  const cost = jsonNumber(row.data, ["cost"])
+  const provider = jsonString(row.messageData, ["providerID"])
+  const model = jsonString(row.messageData, ["modelID"])
+  const input = jsonNumber(row.partData, ["tokens", "input"])
+  const output = jsonNumber(row.partData, ["tokens", "output"])
+  const reasoning = jsonNumber(row.partData, ["tokens", "reasoning"])
+  const cacheRead = jsonNumber(row.partData, ["tokens", "cache", "read"])
+  const cacheWrite = jsonNumber(row.partData, ["tokens", "cache", "write"])
+  const cost = jsonNumber(row.partData, ["cost"])
+  const overheadTokens =
+    jsonNumber(row.partData, ["overhead", "tokens", "input"]) +
+    jsonNumber(row.partData, ["overhead", "tokens", "output"]) +
+    jsonNumber(row.partData, ["overhead", "tokens", "reasoning"]) +
+    jsonNumber(row.partData, ["overhead", "tokens", "cache", "read"]) +
+    jsonNumber(row.partData, ["overhead", "tokens", "cache", "write"])
+  const overheadCost = jsonNumber(row.partData, ["overhead", "cost"])
   return {
     id: row.id,
     sessionID: row.sessionID,
@@ -205,8 +219,10 @@ function toUsageLog(row: {
     reasoning,
     cacheRead,
     cacheWrite,
-    totalTokens: input + output + reasoning + cacheRead + cacheWrite,
-    cost,
+    overheadTokens,
+    overheadCost,
+    totalTokens: input + output + reasoning + cacheRead + cacheWrite + overheadTokens,
+    cost: cost + overheadCost,
     duration: null,
     ttft: null,
     status: "completed",
@@ -222,8 +238,10 @@ function summarize(logs: UsageLog[]) {
       acc.outputTokens += row.output + row.reasoning
       acc.cacheCreateTokens += row.cacheWrite
       acc.cacheHitTokens += row.cacheRead
+      acc.overheadTokens += row.overheadTokens
       acc.requestCount += 1
       acc.totalCost += row.cost
+      acc.overheadCost += row.overheadCost
       return acc
     },
     {
@@ -232,8 +250,10 @@ function summarize(logs: UsageLog[]) {
       outputTokens: 0,
       cacheCreateTokens: 0,
       cacheHitTokens: 0,
+      overheadTokens: 0,
       requestCount: 0,
       totalCost: 0,
+      overheadCost: 0,
     },
   )
 }
@@ -303,6 +323,7 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
         summary.inputTokens + summary.cacheCreateTokens + summary.cacheHitTokens > 0
           ? (summary.cacheHitTokens / (summary.inputTokens + summary.cacheCreateTokens + summary.cacheHitTokens)) * 100
           : null,
+      totalTokens: summary.inputTokens + summary.outputTokens + summary.cacheCreateTokens + summary.cacheHitTokens + summary.overheadTokens,
     },
     trend,
     logs,

@@ -98,6 +98,36 @@ describe("Memory.search", () => {
     ),
   )
 
+  it.live("filters by path_prefix without disturbing result ordering", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const memory = yield* Memory.Service
+        const root = yield* memory.root()
+        yield* Effect.promise(() => fs.rm(root, { recursive: true, force: true }))
+        yield* Effect.promise(() => fs.mkdir(path.join(root, "projects/global"), { recursive: true }))
+        yield* Effect.promise(() => fs.mkdir(path.join(root, "global"), { recursive: true }))
+        yield* Effect.promise(() =>
+          fs.writeFile(path.join(root, "projects/global", "MEMORY-provider.md"), "provider normalization model alias routing"),
+        )
+        yield* Effect.promise(() =>
+          fs.writeFile(path.join(root, "projects/global", "MEMORY-desktop.md"), "desktop packaging sync use copy"),
+        )
+        yield* Effect.promise(() => fs.writeFile(path.join(root, "global", "auth.md"), "provider normalization secrets"))
+
+        const results = yield* memory.search({
+          query: "provider normalization",
+          scope: "projects",
+          scope_id: "global",
+          path_prefix: path.join(root, "projects", "global") + path.sep,
+          limit: 5,
+        })
+        expect(results.length).toBeGreaterThanOrEqual(1)
+        expect(results.every((item) => item.path.startsWith(path.join(root, "projects", "global") + path.sep))).toBe(true)
+        expect(results[0].path).toContain("MEMORY-provider.md")
+      }),
+    ),
+  )
+
   it.live("does not crash on FTS5 special chars in query", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

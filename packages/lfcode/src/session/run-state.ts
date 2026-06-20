@@ -39,11 +39,18 @@ export const layer = Layer.effect(
         const runners = new Map<string, Runner.Runner<MessageV2.WithParts>>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
+            const mainSessionIDs = [...runners.keys()]
+              .filter((key) => key.endsWith(":main"))
+              .map((key) => SessionID.make(key.slice(0, -":main".length)))
             yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
               concurrency: "unbounded",
               discard: true,
             })
             runners.clear()
+            yield* Effect.forEach(mainSessionIDs, (sessionID) => status.set(sessionID, { type: "idle" }), {
+              concurrency: "unbounded",
+              discard: true,
+            })
           }),
         )
         return { runners, scope }

@@ -15,7 +15,7 @@ import { InstallationChannel } from "../installation/version"
 import { InstanceState } from "@/effect"
 import { iife } from "@/util/iife"
 import { init } from "#db"
-import { mergeLegacyDatabases } from "./legacy-db"
+import { legacyDatabaseSources, mergeLegacyDatabases } from "./legacy-db"
 
 declare const LFCODE_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
 
@@ -27,8 +27,6 @@ export const NotFoundError = NamedError.create(
 )
 
 const log = Log.create({ service: "db" })
-const LEGACY_DB_FILENAMES = ["mimocode.db", "opencode.db"] as const
-
 export function getChannelPath() {
   if (["latest", "beta", "prod"].includes(InstallationChannel) || Flag.LFCODE_DISABLE_CHANNEL_DB)
     return path.join(Global.Path.data, "lfcode.db")
@@ -96,7 +94,7 @@ function adoptLegacyDatabaseIfNeeded(target: string) {
   if (path.basename(target) === "lfcode.db") {
     const current = inspectUserData(target)
     if (current.projectCount > 0 || current.sessionCount > 0) return
-    const source = LEGACY_DB_FILENAMES.map((name) => path.join(path.dirname(target), name))
+    const source = legacyDatabaseSources(path.dirname(target))
       .filter((candidate) => candidate !== target)
       .map((candidate) => ({ path: candidate, ...inspectUserData(candidate) }))
       .filter((candidate) => candidate.projectCount > 0 || candidate.sessionCount > 0)

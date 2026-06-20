@@ -16,6 +16,7 @@ import { Config } from "@/config"
 import { Metrics } from "@/metrics"
 import { Memory } from "@/memory"
 import { WriterService, BackfillService } from "@/history"
+import { Session } from "@/session"
 
 export const InstanceBootstrap = Effect.gen(function* () {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -23,6 +24,14 @@ export const InstanceBootstrap = Effect.gen(function* () {
   yield* Config.Service.use((svc) => svc.get())
   // Plugin can mutate config so it has to be initialized before anything else.
   yield* Plugin.Service.use((svc) => svc.init())
+  yield* Effect.sync(() =>
+    Session.clearOrphanAssistants({
+      directory: Instance.directory,
+      limit: 10_000,
+      minAgeMs: 0,
+      message: "Interrupted: previous request was stopped because Lfcode restarted",
+    }),
+  )
   yield* Effect.all(
     [
       LSP.Service,

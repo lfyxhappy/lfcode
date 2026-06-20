@@ -3,6 +3,7 @@ const key = (directory: string, sessionID: string) => `${directory}\n${sessionID
 export const SESSION_PREFETCH_TTL = 15_000
 
 type Meta = {
+  scope?: "all"
   limit: number
   cursor?: string
   complete: boolean
@@ -10,8 +11,9 @@ type Meta = {
 }
 
 export function shouldSkipSessionPrefetch(input: { message: boolean; info?: Meta; chunk: number; now?: number }) {
+  if (input.info?.scope !== "all") return false
+
   if (input.message) {
-    if (!input.info) return true
     if (input.info.complete) return true
     if (input.info.limit > input.chunk) return true
   } else {
@@ -65,12 +67,14 @@ export function runSessionPrefetch(input: {
 export function setSessionPrefetch(input: {
   directory: string
   sessionID: string
+  scope: "all"
   limit: number
   cursor?: string
   complete: boolean
   at?: number
 }) {
   cache.set(key(input.directory, input.sessionID), {
+    scope: input.scope,
     limit: input.limit,
     cursor: input.cursor,
     complete: input.complete,

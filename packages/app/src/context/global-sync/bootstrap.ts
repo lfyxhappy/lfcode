@@ -154,6 +154,30 @@ function projectID(directory: string, projects: Project[]) {
   )?.id
 }
 
+function bucketMessages<M extends { id: string; agentID?: string | null }>(input: M[]) {
+  return input.reduce<Record<string, M[]>>((acc, message) => {
+    const key = message.agentID ?? "main"
+    const list = acc[key]
+    if (list) {
+      list.push(message)
+      return acc
+    }
+    acc[key] = [message]
+    return acc
+  }, {})
+}
+
+type ActorEntry = {
+  actorID: string
+  sessionID: string
+  mode: string
+  status: string
+  description: string
+  time: { created: number }
+  agent?: string
+  parentActorID?: string
+}
+
 function mergeSession(setStore: SetStoreFunction<State>, session: Session) {
   setStore("session", (list) => {
     const next = list.slice()
@@ -345,14 +369,16 @@ export async function bootstrapDirectory(input: {
             )
           }),
         ),
-      () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
-        retry(() =>
-          input.sdk.mcp.status().then((x) => {
-            input.setStore("mcp", x.data!)
-            input.setStore("mcp_ready", true)
-          }),
+        Promise.all(
+          input.store.session.map((session) =>
+            retry(() => input.sdk.session.actors({ sessionID: session.id })).then((x) => {
+              const list = (x.data ?? []) as ActorEntry[]
+              input.setStore("actor", session.id, list.toSorted((a, b) => a.time.created - b.time.created))
+            }),
+          ),
         ),
+      () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
         input.queryClient.ensureQueryData({
           ...loadProvidersQuery(input.directory),

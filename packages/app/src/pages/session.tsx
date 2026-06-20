@@ -16,10 +16,10 @@ import {
   createResource,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { createMediaQuery } from "@solid-primitives/media"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLocal } from "@/context/local"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
+import { encodeFilePath } from "@/context/file/path"
 import { createStore } from "solid-js/store"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Select } from "@lfcode-ai/ui/select"
@@ -27,6 +27,7 @@ import { Tabs } from "@lfcode-ai/ui/tabs"
 import { createAutoScroll } from "@lfcode-ai/ui/hooks"
 import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@lfcode-ai/ui/toast"
+import type { FileReferenceApp } from "@lfcode-ai/ui/context/file-reference"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
@@ -35,6 +36,7 @@ import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { usePlatform } from "@/context/platform"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
@@ -58,14 +60,20 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
+import { DetachedSidePanelView } from "@/pages/session/detached-side-panel-view"
+import { getDetachedSidePanelContext } from "@/pages/session/detached-side-panel"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
+import { decode64 } from "@/utils/base64"
 import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
+import { getParentPath, inferFileReferenceKind, resolveFileReferencePath } from "@/utils/file-reference"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
 import { formatServerError } from "@/utils/server-errors"
+import { isSessionWorking } from "@/utils/session-status"
+import { LINUX_APPS, MAC_APPS, WINDOWS_APPS } from "@/components/session/session-open-apps"
 
 const emptyUserMessages: UserMessage[] = []
 type FollowupItem = FollowupDraft & { id: string }
@@ -327,13 +335,15 @@ export default function Page() {
   const sync = useSync()
   const dialog = useDialog()
   const language = useLanguage()
+  const platform = usePlatform()
   const sdk = useSDK()
   const settings = useSettings()
   const prompt = usePrompt()
   const comments = useComments()
   const terminal = useTerminal()
-  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string; agentID?: string }>()
   const { params, sessionKey, tabs, view } = useSessionLayout()
+  const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -342,7 +352,7 @@ export default function Page() {
       const text = searchParams.prompt
       if (!text) return
       prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-      setSearchParams({ ...searchParams, prompt: undefined })
+      setSearchParams({ prompt: undefined })
     })
   })
 
@@ -358,6 +368,27 @@ export default function Page() {
   })
 
   const composer = createSessionComposerState()
+  const sessionActors = createMemo(() => (params.id ? (sync.data.actor ?? {})[params.id] ?? [] : []))
+  const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent"))
+  const selectedViewAgentID = createMemo(() => {
+    const agentID = searchParams.agentID ?? "main"
+    if (agentID === "main") return "main"
+    if (subagents().some((actor) => actor.actorID === agentID)) return agentID
+    return "main"
+  })
+
+  createEffect(
+    on(
+      () => [params.id, selectedViewAgentID()] as const,
+      () => {
+        const agentID = selectedViewAgentID()
+        if (!params.id) return
+        if (agentID === (searchParams.agentID ?? "main")) return
+        setSearchParams({ agentID: agentID === "main" ? undefined : agentID })
+      },
+      { defer: true },
+    ),
+  )
 
   const workspaceKey = createMemo(() => params.dir ?? "")
   const workspaceTabs = createMemo(() => layout.tabs(workspaceKey))
@@ -414,7 +445,7 @@ export default function Page() {
     setSessionHandoff(sessionKey(), { browser: undefined })
   })
 
-  const isDesktop = createMediaQuery("(min-width: 768px)")
+  const isDesktop = createMemo(() => platform.platform === "desktop")
   const size = createSizing()
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const desktopFileTreeOpen = createMemo(() => isDesktop() && layout.fileTree.opened())
@@ -477,16 +508,32 @@ export default function Page() {
     if (!id) return false
     return sync.session.history.loading(id)
   })
-  const userMessages = createMemo(
-    () => messages().filter((m) => m.role === "user") as UserMessage[],
+  const mainUserMessages = createMemo(
+    () => messages().filter((m) => (m.agentID ?? "main") === "main" && m.role === "user") as UserMessage[],
     emptyUserMessages,
     { equals: same },
   )
   const visibleUserMessages = createMemo(
     () => {
       const revert = revertMessageID()
-      if (!revert) return userMessages()
-      return userMessages().filter((m) => m.id < revert)
+      if (!revert) return mainUserMessages()
+      return mainUserMessages().filter((m) => m.id < revert)
+    },
+    emptyUserMessages,
+    {
+      equals: same,
+    },
+  )
+  const viewUserMessages = createMemo(
+    () => {
+      const agentID = selectedViewAgentID()
+      const list =
+        agentID === "main"
+          ? messages().filter((m) => (m.agentID ?? "main") === "main")
+          : messages().filter((m) => (m.agentID ?? "main") === agentID)
+      const user = list.filter((m) => m.role === "user") as UserMessage[]
+      const revert = revertMessageID()
+      return revert ? user.filter((m) => m.id < revert) : user
     },
     emptyUserMessages,
     {
@@ -1009,6 +1056,113 @@ export default function Page() {
     loadFile: file.load,
   })
 
+  const openWithCandidates = createMemo(() => {
+    if (platform.os === "macos") return MAC_APPS
+    if (platform.os === "windows") return WINDOWS_APPS
+    return LINUX_APPS
+  })
+  const [availableOpenApps, setAvailableOpenApps] = createStore<FileReferenceApp[]>([])
+
+  createEffect(() => {
+    if (platform.platform !== "desktop" || !platform.checkAppExists) {
+      setAvailableOpenApps([])
+      return
+    }
+
+    void Promise.all(
+      openWithCandidates().map((app) =>
+        Promise.resolve(platform.checkAppExists?.(app.openWith))
+          .then((ok) =>
+            ok ? { id: app.id, label: language.t(app.label), icon: app.icon, openWith: app.openWith } : undefined,
+          )
+          .catch(() => undefined),
+      ),
+    ).then((items) => {
+      const next: FileReferenceApp[] = []
+      for (const item of items) {
+        if (!item) continue
+        next.push(item)
+      }
+      setAvailableOpenApps(next)
+    })
+  })
+
+  const showPathError = (path: string, err: unknown) => {
+    showToast({
+      variant: "error",
+      title: language.t("common.requestFailed"),
+      description: typeof err === "string" ? err : formatServerError(err, language.t, path),
+    })
+  }
+
+  const openConversationPath = (path: string, app?: string) => {
+    if (platform.platform !== "desktop" || !platform.openPath) return Promise.resolve()
+    return platform.openPath(path, app).catch((err) => showPathError(path, err))
+  }
+
+  const htmlPreviewable = (path: string) => /\.(?:html?|xhtml)$/iu.test(path)
+
+  const openBrowserPreview = (path: string) => {
+    const browserID = createBrowserTabID()
+    const tab = browserTab(browserID)
+    const url = `file://${encodeFilePath(path)}`
+    tabs().open(tab)
+    tabs().setActive(tab)
+    openReviewPanel()
+    layout.view(sessionKey()).browser.open(browserID, url, file.normalize(path))
+  }
+
+  const previewConversationPath = (path: string) => {
+    const normalized = file.normalize(path)
+    openReviewPanel()
+    if (htmlPreviewable(normalized)) {
+      openBrowserPreview(normalized)
+      return
+    }
+    const tab = file.tab(normalized)
+    tabs().open(tab)
+    tabs().setActive(tab)
+    void file.load(normalized)
+  }
+
+  const copyConversationPath = (path: string) =>
+    navigator.clipboard.writeText(path).catch((err) => {
+      showPathError(path, err)
+    })
+
+  const fileReferences = createMemo(() => ({
+    baseDir: projectDirectory(),
+    canOpenPaths: true,
+    canExternalOpenPaths: platform.platform === "desktop" && !!platform.openPath,
+    enableMarkdownDecorations: true,
+    allowContextMenu: true,
+    resolvePath: (value: string, baseDir?: string) => resolveFileReferencePath(value, baseDir ?? projectDirectory()),
+    openWithApps: availableOpenApps,
+    inferKind: inferFileReferenceKind,
+    onPreviewPath: (path: string) => {
+      previewConversationPath(path)
+    },
+    onOpenDefaultApp: (path: string) => {
+      void openConversationPath(path)
+    },
+    onOpenFolder: (path: string) => {
+      const parent = getParentPath(path)
+      if (!parent) return
+      void openConversationPath(parent)
+    },
+    onOpenWith: (path: string, app: string) => {
+      void openConversationPath(path, app)
+    },
+    onCopyPath: (path: string) => {
+      void copyConversationPath(path)
+    },
+    onReviewPath: (path: string) => {
+      openReviewPanel()
+      focusReviewDiff(file.normalize(path))
+      openReviewFile(file.normalize(path))
+    },
+  }))
+
   const changesTitle = () => {
     if (!canReview()) {
       return null
@@ -1091,6 +1245,8 @@ export default function Page() {
       </div>
     </div>
   )
+
+  const detachedContext = createMemo(() => window.__LFCODE__?.detachedSidePanel ?? getDetachedSidePanelContext())
 
   createEffect(
     on(
@@ -1337,8 +1493,8 @@ export default function Page() {
   const historyWindow = createSessionHistoryWindow({
     sessionID: () => params.id,
     messagesReady,
-    loaded: () => messages().length,
-    visibleUserMessages,
+    loaded: () => viewUserMessages().length,
+    visibleUserMessages: viewUserMessages,
     historyMore,
     historyLoading,
     loadMore: (sessionID) => sync.session.history.loadMore(sessionID),
@@ -1374,7 +1530,7 @@ export default function Page() {
           historyMore(),
           historyLoading(),
           autoScroll.userScrolled(),
-          visibleUserMessages().length,
+          viewUserMessages().length,
         ] as const,
       ([id, ready, start, more, loading, scrolled]) => {
         if (!id || !ready || loading || scrolled) return
@@ -1427,12 +1583,7 @@ export default function Page() {
       return out
     })
 
-  const busy = (sessionID: string) => {
-    if ((sync.data.session_status[sessionID] ?? { type: "idle" as const }).type !== "idle") return true
-    return (sync.data.message[sessionID] ?? []).some(
-      (item) => item.role === "assistant" && typeof item.time.completed !== "number",
-    )
-  }
+  const busy = (sessionID: string) => isSessionWorking(sync.data.session_status[sessionID])
 
   const queuedFollowups = createMemo(() => {
     const id = params.id
@@ -1580,7 +1731,7 @@ export default function Page() {
       const sessionID = params.id
       if (!sessionID) return
 
-      const next = userMessages().find((item) => item.id > id)
+      const next = mainUserMessages().find((item) => item.id > id)
       const prev = prompt.current().slice()
       const last = info()?.revert
 
@@ -1632,7 +1783,7 @@ export default function Page() {
   const rolled = createMemo(() => {
     const id = revertMessageID()
     if (!id) return []
-    return userMessages()
+    return mainUserMessages()
       .filter((item) => item.id >= id)
       .map((item) => ({ id: item.id, text: line(item.id) }))
   })
@@ -1681,7 +1832,7 @@ export default function Page() {
     sessionKey,
     sessionID: () => params.id,
     messagesReady,
-    visibleUserMessages,
+    visibleUserMessages: viewUserMessages,
     historyMore,
     historyLoading,
     loadMore: (sessionID) => sync.session.history.loadMore(sessionID),
@@ -1723,11 +1874,21 @@ export default function Page() {
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
   })
 
+  if (detachedContext()) {
+    return <DetachedSidePanelView context={detachedContext()!} reviewPanel={reviewPanel} />
+  }
+
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
       {sessionSync() ?? ""}
       <SessionHeader />
-      <div class="flex-1 min-h-0 flex flex-col md:flex-row">
+      <div
+        class="flex-1 min-h-0 flex"
+        classList={{
+          "flex-row": isDesktop(),
+          "flex-col": !isDesktop(),
+        }}
+      >
         <Show when={!isDesktop() && !!params.id}>
           <Tabs value={store.mobileTab} class="h-auto">
             <Tabs.List>
@@ -1806,7 +1967,11 @@ export default function Page() {
                       void historyWindow.loadAndReveal()
                     }}
                     renderedUserMessages={historyWindow.renderedUserMessages()}
+                    viewAgentID={selectedViewAgentID()}
+                    sessionActors={sessionActors()}
+                    onViewAgentChange={(agentID) => setSearchParams({ agentID: agentID === "main" ? undefined : agentID })}
                     anchor={anchor}
+                    fileReferences={fileReferences()}
                   />
                 </Show>
               </Match>

@@ -409,6 +409,8 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         // (5) MEMORY.md exception still present
         expect(allSys).toContain("MEMORY.md")
         expect(allSys).toContain("User states a project-level rule")
+        expect(allSys).toContain("Relevant topic memory")
+        expect(allSys).toContain("were not auto-injected")
       },
     })
   })

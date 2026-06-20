@@ -25,15 +25,25 @@ export const SidebarContent = (props: {
   openProjectKeybind: Accessor<string | undefined>
   onOpenProject: () => void
   renderProjectOverlay: () => JSX.Element
+  settingsOpen: Accessor<boolean>
   settingsLabel: Accessor<string>
   settingsKeybind: Accessor<string | undefined>
   onOpenSettings: () => void
+  onCloseSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
   const placement = () => (props.mobile ? "bottom" : "right")
+  const settingsIcon = createMemo(() => (props.settingsOpen() ? "arrow-left" : "settings-gear"))
+  const toggleSettings = () => {
+    if (props.settingsOpen()) {
+      props.onCloseSettings()
+      return
+    }
+    props.onOpenSettings()
+  }
   let panel: HTMLDivElement | undefined
 
   createEffect(() => {
@@ -90,12 +100,16 @@ export const SidebarContent = (props: {
           </DragDropProvider>
         </div>
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
-          <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
+          <TooltipKeybind
+            placement={placement()}
+            title={props.settingsLabel()}
+            keybind={props.settingsOpen() ? "" : (props.settingsKeybind() ?? "")}
+          >
             <IconButton
-              icon="settings-gear"
+              icon={settingsIcon()}
               variant="ghost"
               size="large"
-              onClick={props.onOpenSettings}
+              onClick={toggleSettings}
               aria-label={props.settingsLabel()}
             />
           </TooltipKeybind>

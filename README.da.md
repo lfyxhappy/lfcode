@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> Denne lokaliserede README følger den aktuelle tilstand i Lfcode-repositoriet, sa downloadlinks, release-filer og kompatibilitetsnoter forbliver korrekte.
+> Denne README afspejler den nuværende tilstand i Lfcode-repositoriet, så downloadlinks, release-artefakter og kompatibilitetsnoter forbliver korrekte.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Oversigt
+
+Lfcode er et Bun workspace-monorepo, der er vokset ud af opencode. Det bevarer den historiske kompatibilitet og leverer stadig Lfcode-branding, en desktop-app, en web-UI, et SDK og GitHub Action-support.
+
+### Højdepunkter
+
+- Mere komplet sessionsstyring: liste, status, oprette, opdatere, slette, forgrene, dele, fjerne deling, opsummere, komprimere, diff, revert og unrevert.
+- Flere interaktionsformer: afsendelse af beskeder, asynkron `prompt`, `shell`, kommandoer og forudsigelse af næste prompt.
+- Skills-administration: lokale Skills-lister, opdagelse, installation, import, oprettelse, opdatering og mappekontrol.
+- GitHub Action-integration: start automatiseret arbejde fra issue- eller PR-kommentarer med `/lfcode`, `/opencode` eller `/oc`.
+- Historisk kompatibilitet: behold `opencode` CLI-kommandoen, `LFCODE_*` miljøvariablerne og `lfcode://`-protokollen.
 
 ### Installation
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+Offentlige downloads publiceres på [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases)-siden.
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Desktop: den nuværende release-pipeline udgiver et Windows-installationsprogram med navnet `lfcode-win-x64.exe`.
+- Kilde: brug Bun fra repoets rod til lokal udvikling.
 
 ```bash
 bun install
@@ -60,30 +70,30 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Kompatibilitet
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Nogle runtime-identifikatorer bruger stadig det historiske navn `opencode` af hensyn til kompatibilitet.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- CLI-kommando: `opencode`
+- Konfigurationsmappe: `~/.lfcode`
+- Miljøvariabler: `LFCODE_*`
+- Desktop-protokolskema: `lfcode://`
 
-### Repository Layout
+### Repositoriets struktur
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/lfcode`: kerneruntime og sessionsmotor
+- `packages/app`: web-UI
+- `packages/desktop`: Electron desktop-host
+- `packages/ui`: delte UI-komponenter
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### Dokumentation
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+Den aktuelle dokumentationskilde ligger i [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Validering
 
-Run the main repository checks from the workspace root:
+Kør de vigtigste kontroller fra workspace-roden:
 
 ```bash
 bun run lint

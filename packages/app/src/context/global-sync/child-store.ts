@@ -196,6 +196,8 @@ export function createChildStoreManager(input: {
             vcs: vcsStore.value,
             limit: 5,
             message: {},
+            messageByAgent: {},
+            actor: {},
             part: {},
           })
           children[directory] = child

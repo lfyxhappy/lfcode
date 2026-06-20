@@ -1,8 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import path from "path"
+import os from "os"
 import { resolveLfcodeHome } from "@lfcode-ai/shared/global"
 
 describe("resolveLfcodeHome", () => {
+  test("on Windows without overrides, defaults to the .lfcode profile root", () => {
+    const result = resolveLfcodeHome({
+      USERPROFILE: "C:\\Users\\liangfeng",
+    })
+    expect(result.mode).toBe("lfcode_home")
+    expect(result.root).toBe("C:\\Users\\liangfeng\\.lfcode")
+    expect(result.config).toBe("C:\\Users\\liangfeng\\.lfcode\\config")
+    expect(result.data).toBe("C:\\Users\\liangfeng\\.lfcode\\data")
+    expect(result.state).toBe("C:\\Users\\liangfeng\\.lfcode\\state")
+    expect(result.cache).toBe("C:\\Users\\liangfeng\\.lfcode\\cache")
+  })
+
   test("with LFCODE_* final directories set, resolves directly to those directories", () => {
     const result = resolveLfcodeHome({
       LFCODE_CONFIG_DIR: "C:\\Lfcode\\lfcode-root",
@@ -41,6 +54,11 @@ describe("resolveLfcodeHome", () => {
 
   test("without LFCODE_HOME, falls through to xdg mode", () => {
     const result = resolveLfcodeHome({})
+    if (process.platform === "win32") {
+      expect(result.mode).toBe("lfcode_home")
+      expect(result.root).toBe(path.join(os.homedir(), ".lfcode"))
+      return
+    }
     expect(result.mode).toBe("xdg")
     expect(result.root).toBeUndefined()
     expect(result.config.endsWith(path.join("", "lfcode"))).toBe(true)
@@ -51,6 +69,11 @@ describe("resolveLfcodeHome", () => {
 
   test("empty LFCODE_HOME string is treated as unset (xdg mode)", () => {
     const result = resolveLfcodeHome({ LFCODE_HOME: "" })
+    if (process.platform === "win32") {
+      expect(result.mode).toBe("lfcode_home")
+      expect(result.root).toBe(path.join(os.homedir(), ".lfcode"))
+      return
+    }
     expect(result.mode).toBe("xdg")
   })
 
@@ -73,5 +96,18 @@ describe("resolveLfcodeHome", () => {
     expect(() => resolveLfcodeHome({ LFCODE_HOME: "./relative" })).toThrow(
       /\.\/relative/,
     )
+  })
+
+  test("explicit empty LFCODE_HOME falls back to the Windows default root", () => {
+    const result = resolveLfcodeHome({
+      LFCODE_HOME: "",
+      USERPROFILE: "C:\\Users\\liangfeng",
+    })
+    if (process.platform === "win32") {
+      expect(result.mode).toBe("lfcode_home")
+      expect(result.root).toBe("C:\\Users\\liangfeng\\.lfcode")
+      return
+    }
+    expect(result.mode).toBe("xdg")
   })
 })

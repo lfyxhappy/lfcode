@@ -8,6 +8,14 @@ import { lazy } from "@/util/lazy"
 import { Filesystem } from "../util"
 import { Flock } from "@lfcode-ai/shared/util/flock"
 import { Hash } from "@lfcode-ai/shared/util/hash"
+import {
+  VOLCENGINE_CODING_PLAN_BASE_URL,
+  VOLCENGINE_CODING_PLAN_ENV,
+  VOLCENGINE_CODING_PLAN_MODELS,
+  VOLCENGINE_CODING_PLAN_NAME,
+  VOLCENGINE_CODING_PLAN_OUTPUT_LIMIT,
+  VOLCENGINE_CODING_PLAN_PROVIDER_ID,
+} from "@lfcode-ai/shared/volcengine-coding-plan"
 
 // Try to import bundled snapshot (generated at build time)
 // Falls back to undefined in dev mode when snapshot doesn't exist
@@ -107,6 +115,40 @@ export const Provider = z.object({
 
 export type Provider = z.infer<typeof Provider>
 
+export function builtin(): Record<string, Provider> {
+  return {
+    [VOLCENGINE_CODING_PLAN_PROVIDER_ID]: {
+      api: VOLCENGINE_CODING_PLAN_BASE_URL,
+      name: VOLCENGINE_CODING_PLAN_NAME,
+      env: VOLCENGINE_CODING_PLAN_ENV,
+      id: VOLCENGINE_CODING_PLAN_PROVIDER_ID,
+      npm: "@ai-sdk/openai-compatible",
+      models: Object.fromEntries(
+        VOLCENGINE_CODING_PLAN_MODELS.map((model) => [
+          model.id,
+          {
+            id: model.id,
+            name: model.id,
+            release_date: "",
+            attachment: model.image,
+            reasoning: false,
+            temperature: true,
+            tool_call: true,
+            limit: {
+              context: model.context,
+              output: VOLCENGINE_CODING_PLAN_OUTPUT_LIMIT,
+            },
+            modalities: {
+              input: model.image ? ["text", "image"] : ["text"],
+              output: ["text"],
+            },
+          },
+        ]),
+      ),
+    },
+  }
+}
+
 function url() {
   return Flag.LFCODE_MODELS_URL || "https://models.dev"
 }
@@ -149,9 +191,12 @@ export const Data = lazy(async () => {
   })
 })
 
-export async function get() {
+export async function get(): Promise<Record<string, Provider>> {
   const result = await Data()
-  return result as Record<string, Provider>
+  return {
+    ...(result as Record<string, Provider>),
+    ...builtin(),
+  }
 }
 
 export async function refresh(force = false) {

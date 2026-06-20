@@ -3,6 +3,8 @@ import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } f
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 
 import type {
+  DetachedSidePanelEvent,
+  DetachedSidePanelRecord,
   InitStep,
   ServerReadyData,
   SqliteMigrationProgress,
@@ -10,6 +12,7 @@ import type {
   WindowConfig,
   WslConfig,
 } from "../preload/types"
+import { openExternal } from "./external"
 import { getStore } from "./store"
 import { setTitlebar } from "./windows"
 
@@ -38,6 +41,30 @@ type Deps = {
   checkUpdate: () => Promise<{ updateAvailable: boolean; version?: string }>
   installUpdate: () => Promise<void> | void
   setBackgroundColor: (color: string) => void
+  createDetachedSidePanelWindow: (input: {
+    detachedWindowID: string
+    route: string
+    sessionKey: string
+    tab: string
+    kind: "file" | "browser" | "review" | "context"
+    title?: string
+    sourceWindowID: number
+  }) => Promise<void> | void
+  redockDetachedSidePanelWindow: (
+    detachedWindowID: string,
+    placement?: {
+      afterTab?: string
+      beforeTab?: string
+    },
+  ) => Promise<void> | void
+  setDetachedDockTarget: (
+    senderWindowID: number,
+    input: {
+      sessionKey: string
+      rect: { x: number; y: number; width: number; height: number }
+    },
+  ) => Promise<void> | void
+  clearDetachedDockTarget: (senderWindowID: number) => Promise<void> | void
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -69,6 +96,33 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("check-update", () => deps.checkUpdate())
   ipcMain.handle("install-update", () => deps.installUpdate())
   ipcMain.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
+  ipcMain.handle(
+    "create-detached-side-panel-window",
+    (event: IpcMainInvokeEvent, input: Omit<DetachedSidePanelRecord, "sourceWindowID"> & { route: string }) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return deps.createDetachedSidePanelWindow({
+        ...input,
+        route: input.route,
+        sourceWindowID: win?.id ?? -1,
+      })
+    },
+  )
+  ipcMain.handle(
+    "redock-detached-side-panel-window",
+    (_event: IpcMainInvokeEvent, detachedWindowID: string, placement?: { afterTab?: string; beforeTab?: string }) =>
+      deps.redockDetachedSidePanelWindow(detachedWindowID, placement),
+  )
+  ipcMain.handle(
+    "set-detached-dock-target",
+    (event: IpcMainInvokeEvent, input: { sessionKey: string; rect: { x: number; y: number; width: number; height: number } }) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return deps.setDetachedDockTarget(win?.id ?? -1, input)
+    },
+  )
+  ipcMain.handle("clear-detached-dock-target", (event: IpcMainInvokeEvent) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return deps.clearDetachedDockTarget(win?.id ?? -1)
+  })
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     const store = getStore(name)
     const value = store.get(key)
@@ -141,7 +195,7 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   ipcMain.on("open-external-link", (_event: IpcMainEvent, url: string) => {
-    void shell.openExternal(url)
+    void openExternal(url)
   })
 
   ipcMain.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
@@ -206,4 +260,8 @@ export function sendMenuCommand(win: BrowserWindow, id: string) {
 
 export function sendDeepLinks(win: BrowserWindow, urls: string[]) {
   win.webContents.send("deep-link", urls)
+}
+
+export function sendDetachedSidePanelEvent(win: BrowserWindow, event: DetachedSidePanelEvent) {
+  win.webContents.send("detached-side-panel-event", event)
 }

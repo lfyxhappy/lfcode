@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -24,6 +25,17 @@ const channel = "stable"
 
 const localConfigDir = path.join(rootDir, "packages", "desktop", "local-config")
 const localConfigFiles = process.platform === "win32" ? [{ from: localConfigDir, to: ".", filter: ["lfcode.jsonc"] }] : []
+const windowsComputerUseBundleDir = path.join(rootDir, ".windows-computer-use-mcp", "bundle")
+const windowsComputerUseResources =
+  process.platform === "win32" && existsSync(windowsComputerUseBundleDir)
+    ? [
+        {
+          from: windowsComputerUseBundleDir,
+          to: "mcp/windows-computer-use-mcp/bundle",
+          filter: ["**/*"],
+        },
+      ]
+    : []
 
 const getBase = (): Configuration => ({
   artifactName: "lfcode-${os}-${arch}.${ext}",
@@ -44,6 +56,7 @@ const getBase = (): Configuration => ({
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
+    ...windowsComputerUseResources,
   ],
   mac: {
     category: "public.app-category.developer-tools",

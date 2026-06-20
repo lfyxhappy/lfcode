@@ -34,6 +34,9 @@ export const sortedRootSessions = (store: SessionStore, now: number) => roots(st
 export const latestRootSession = (stores: SessionStore[], now: number) =>
   stores.flatMap(roots).sort(sortSessions(now))[0]
 
+export const startupProjectRoot = (last: string | undefined, projects: { worktree: string }[]) =>
+  projects.find((project) => project.worktree === last)?.worktree ?? projects[0]?.worktree ?? last
+
 export function hasProjectPermissions<T>(
   request: Record<string, T[] | undefined> | undefined,
   include: (item: T) => boolean = () => true,

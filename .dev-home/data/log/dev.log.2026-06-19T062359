@@ -1,0 +1,238 @@
+INFO  2026-06-18T17:27:17 +129ms service=server method=GET path=/session request
+INFO  2026-06-18T17:27:17 +1ms service=server status=started method=GET path=/session request
+INFO  2026-06-18T17:27:17 +4ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode creating instance
+INFO  2026-06-18T17:27:17 +9ms service=server method=GET path=/config/providers request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/config/providers request
+INFO  2026-06-18T17:27:17 +1ms service=server method=GET path=/provider request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-18T17:27:17 +0ms service=server method=GET path=/experimental/console request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/experimental/console request
+INFO  2026-06-18T17:27:17 +1ms service=server method=GET path=/agent request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/agent request
+INFO  2026-06-18T17:27:17 +1ms service=server method=GET path=/config request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/config request
+INFO  2026-06-18T17:27:17 +1ms service=server method=GET path=/path request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-18T17:27:17 +0ms service=server method=GET path=/project/current request
+INFO  2026-06-18T17:27:17 +0ms service=server status=started method=GET path=/project/current request
+INFO  2026-06-18T17:27:17 +179ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db opening database
+INFO  2026-06-18T17:27:17 +7ms service=db count=34 mode=dev applying migrations
+INFO  2026-06-18T17:27:17 +3ms service=legacy-db reason=marker matches targetPath=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db legacy db merge skipped
+INFO  2026-06-18T17:27:17 +22ms service=file init
+INFO  2026-06-18T17:27:17 +12ms service=actor.registry orphan recovery complete
+INFO  2026-06-18T17:27:17 +16ms service=inbox inbox gc-on-init complete
+INFO  2026-06-18T17:27:17 +52ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode bootstrapping
+INFO  2026-06-18T17:27:17 +14ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-18T17:27:17 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.json loading
+INFO  2026-06-18T17:27:17 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.jsonc loading
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.json loading
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.jsonc loading
+DEBUG 2026-06-18T17:27:17 +19ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json
+INFO  2026-06-18T17:27:17 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T17:27:17 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc loading
+DEBUG 2026-06-18T17:27:17 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T17:27:17 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc loading
+DEBUG 2026-06-18T17:27:17 +29ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T17:27:17 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-06-18T17:27:17 +9ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T17:27:17 +5ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-06-18T17:27:17 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-06-18T17:27:17 +8ms service=config skipped Claude Code MCP server "markitdown"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T17:27:17 +0ms service=config skipped Claude Code MCP server "codegraph"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T17:27:17 +0ms service=config skipped Claude Code MCP server "playwright"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T17:27:17 +4ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +1ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +1ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-18T17:27:17 +1ms service=bus type=* subscribing
+INFO  2026-06-18T17:27:17 +4ms service=bus type=command.executed subscribing
+INFO  2026-06-18T17:27:17 +3ms service=lsp all LSPs are disabled
+INFO  2026-06-18T17:27:17 +1ms service=bus type=session.updated subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=session.diff subscribing
+INFO  2026-06-18T17:27:17 +1ms service=bus type=session.deleted subscribing
+INFO  2026-06-18T17:27:17 +0ms service=format all formatters are disabled
+INFO  2026-06-18T17:27:17 +0ms service=format init
+INFO  2026-06-18T17:27:17 +4ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode init
+INFO  2026-06-18T17:27:17 +3ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode platform=win32 backend=windows watcher backend
+INFO  2026-06-18T17:27:17 +4ms service=bus type=message.part.updated subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=message.part.removed subscribing
+INFO  2026-06-18T17:27:17 +7ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-18T17:27:17 +0ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-18T17:27:17 +6ms service=provider status=started state
+INFO  2026-06-18T17:27:18 +11ms service=server status=completed duration=431 method=GET path=/path request
+INFO  2026-06-18T17:27:18 +0ms service=server status=completed duration=431 method=GET path=/project/current request
+INFO  2026-06-18T17:27:18 +0ms service=server status=completed duration=434 method=GET path=/experimental/console request
+INFO  2026-06-18T17:27:18 +0ms service=server status=completed duration=432 method=GET path=/config request
+INFO  2026-06-18T17:27:18 +0ms service=server status=completed duration=448 method=GET path=/session request
+INFO  2026-06-18T17:27:18 +96ms service=provider init
+WARN  2026-06-18T17:27:18 +1ms service=provider providerID=coderelay modelID=grok-4.3 defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.coderelay.models.grok-4.3 limit.context not configured and not found in models.dev
+INFO  2026-06-18T17:27:18 +67ms service=skill.lfcode root=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode-skills\local extracted lfcode skills
+INFO  2026-06-18T17:27:18 +65ms service=provider providerID=coderelay found
+INFO  2026-06-18T17:27:18 +0ms service=provider providerID=mimo found
+INFO  2026-06-18T17:27:18 +0ms service=provider providerID=xiaomi found
+INFO  2026-06-18T17:27:18 +0ms service=provider status=completed duration=240 state
+INFO  2026-06-18T17:27:18 +84ms service=server status=completed duration=747 method=GET path=/provider request
+INFO  2026-06-18T17:27:18 +0ms service=server status=completed duration=748 method=GET path=/config/providers request
+INFO  2026-06-18T17:27:18 +112ms service=skill.compose root=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\compose\local extracted compose skills
+INFO  2026-06-18T17:27:18 +8ms service=server status=completed duration=866 method=GET path=/agent request
+INFO  2026-06-18T17:27:18 +1ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-18T17:27:18 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-18T17:27:18 +96ms service=server method=GET path=/command request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/command request
+INFO  2026-06-18T17:27:18 +4ms service=mcp key=playwright type=local found
+INFO  2026-06-18T17:27:18 +1ms service=mcp key=markitdown type=local found
+INFO  2026-06-18T17:27:18 +127ms service=mcp key=codegraph type=local found
+INFO  2026-06-18T17:27:18 +41ms service=server method=GET path=/lsp request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/lsp request
+INFO  2026-06-18T17:27:18 +2ms service=server status=completed duration=1 method=GET path=/lsp request
+INFO  2026-06-18T17:27:18 +0ms service=server method=GET path=/mcp request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/mcp request
+INFO  2026-06-18T17:27:18 +1ms service=server method=GET path=/experimental/resource request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/experimental/resource request
+INFO  2026-06-18T17:27:18 +2ms service=server method=GET path=/formatter request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/formatter request
+INFO  2026-06-18T17:27:18 +2ms service=server status=completed duration=2 method=GET path=/formatter request
+INFO  2026-06-18T17:27:18 +1ms service=server method=GET path=/session/status request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/session/status request
+INFO  2026-06-18T17:27:18 +1ms service=server status=completed duration=1 method=GET path=/session/status request
+INFO  2026-06-18T17:27:18 +0ms service=server method=GET path=/provider/auth request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/provider/auth request
+INFO  2026-06-18T17:27:18 +5ms service=server status=completed duration=5 method=GET path=/provider/auth request
+INFO  2026-06-18T17:27:18 +1ms service=server method=GET path=/vcs request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/vcs request
+INFO  2026-06-18T17:27:18 +2ms service=server status=completed duration=2 method=GET path=/vcs request
+INFO  2026-06-18T17:27:18 +1ms service=server method=GET path=/experimental/workspace request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/experimental/workspace request
+INFO  2026-06-18T17:27:18 +1ms service=server status=completed duration=1 method=GET path=/experimental/workspace request
+INFO  2026-06-18T17:27:18 +2ms service=server method=GET path=/experimental/workspace/status request
+INFO  2026-06-18T17:27:18 +0ms service=server status=started method=GET path=/experimental/workspace/status request
+INFO  2026-06-18T17:27:18 +1ms service=server status=completed duration=1 method=GET path=/experimental/workspace/status request
+INFO  2026-06-18T17:27:18 +265ms service=mcp key=codegraph toolCount=8 create() successfully created client
+INFO  2026-06-18T17:27:19 +794ms service=mcp key=codegraph mcp stderr: [CodeGraph MCP] Attached to shared daemon on \\.\pipe\codegraph-cfcbd3c1e6e7e2bf (pid 87256, v0.9.9).
+
+INFO  2026-06-18T17:27:20 +655ms service=mcp key=markitdown mcp stderr: Processing request of type ListToolsRequest
+
+INFO  2026-06-18T17:27:20 +1ms service=mcp key=markitdown toolCount=1 create() successfully created client
+WARN  2026-06-18T17:27:28 +8173ms service=mcp key=playwright endpoint=http://127.0.0.1:9222 playwright MCP embedded browser endpoint is not ready; falling back to external browser
+INFO  2026-06-18T17:27:30 +1999ms service=history.backfill sessions=146 backfill complete
+INFO  2026-06-18T17:27:39 +8380ms service=mcp key=playwright toolCount=23 create() successfully created client
+INFO  2026-06-18T17:27:39 +0ms service=server status=completed duration=20287 method=GET path=/mcp request
+INFO  2026-06-18T17:27:39 +1ms service=mcp key=markitdown mcp stderr: Processing request of type ListResourcesRequest
+
+INFO  2026-06-18T17:27:39 +1ms service=mcp key=markitdown mcp stderr: Processing request of type ListPromptsRequest
+
+INFO  2026-06-18T17:27:39 +2ms service=server status=completed duration=20290 method=GET path=/experimental/resource request
+INFO  2026-06-18T17:27:39 +6ms service=skill count=17 init
+INFO  2026-06-18T17:27:39 +1ms service=server status=completed duration=20473 method=GET path=/command request
+INFO  2026-06-18T17:29:20 +101904ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T17:29:20 +72ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T18:46:02 +4601392ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T18:46:02 +72ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T18:49:51 +228770ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T18:49:51 +64ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:02:19 +748673ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:02:20 +60ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:02:27 +7854ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:02:27 +55ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:33:11 +1843874ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:33:11 +71ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:42:11 +539503ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:42:11 +75ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:42:40 +29110ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T19:42:40 +61ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T05:54:19 +36698506ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T05:54:19 +73ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T05:56:46 +147684ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T05:56:46 +74ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:02:36 +349347ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:02:36 +85ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:08:32 +355707ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:08:32 +69ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:19:17 +645829ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:19:18 +67ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:34:05 +887008ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:34:05 +62ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:35:01 +56846ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T06:35:02 +67ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T07:30:30 +3328083ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T07:30:30 +61ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:29:16 +3526139ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:29:16 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:29:22 +6359ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:29:22 +61ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:36:46 +443274ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:36:46 +64ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:47:14 +628467ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T08:47:14 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T09:26:17 +2342443ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T09:26:17 +68ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T09:26:57 +40615ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T09:26:57 +66ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T10:20:27 +3209627ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T10:20:27 +71ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T10:50:31 +1803549ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T10:50:31 +75ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T11:24:23 +2032595ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T11:24:23 +75ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:24:32 +7208204ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:24:32 +52ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:26:01 +89372ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:26:01 +59ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:55:10 +1748495ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T13:55:10 +53ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T14:30:24 +2114820ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T14:30:24 +68ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T16:51:40 +8475359ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T16:51:40 +43ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:10:02 +1102562ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:10:03 +70ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:20:00 +597810ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:20:00 +7ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:41:32 +1291975ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T17:41:32 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T19:06:32 +5099240ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T19:06:32 +100ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T19:41:07 +2074833ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T19:41:07 +75ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T20:52:33 +4286857ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T20:52:34 +79ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T20:53:09 +35175ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T20:53:09 +67ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T21:07:33 +864109ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-19T21:07:33 +72ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T07:46:17 +38323598ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T07:46:17 +68ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:17:18 +5461669ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:17:18 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:22:26 +307744ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:22:26 +68ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:50:21 +1675288ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T09:50:22 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T12:57:57 +11255605ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T12:57:57 +75ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:21:45 +1428093ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:21:45 +65ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:48:05 +1579999ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:48:05 +67ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:54:28 +382836ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T13:54:28 +71ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T15:12:33 +4684732ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T15:12:33 +60ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T15:29:22 +1008638ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-20T15:29:22 +93ms service=bus type=file.watcher.updated publishing

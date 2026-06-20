@@ -1,0 +1,294 @@
+INFO  2026-06-15T15:49:13 +60ms service=server-proxy version=local args=["serve","--port","4096"] process_role=main run_id=b10238b1-c4ac-44a9-a564-f8ffd3d368e6 mimocode
+INFO  2026-06-15T15:49:13 +9ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\mimocode.db opening database
+INFO  2026-06-15T15:49:13 +10ms service=db count=34 mode=dev applying migrations
+INFO  2026-06-15T15:49:13 +40ms service=file init
+INFO  2026-06-15T15:49:13 +7ms service=actor.registry orphan recovery complete
+INFO  2026-06-15T15:49:13 +7ms service=inbox inbox gc-on-init complete
+INFO  2026-06-15T15:49:13 +28ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-15T15:49:13 +4ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.json loading
+INFO  2026-06-15T15:49:13 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.jsonc loading
+INFO  2026-06-15T15:49:13 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.json loading
+INFO  2026-06-15T15:49:13 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.jsonc loading
+INFO  2026-06-15T15:49:13 +155ms service=server method=GET path=/global/event request
+INFO  2026-06-15T15:49:13 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-15T15:49:13 +0ms service=server global event connected
+INFO  2026-06-15T15:49:13 +4ms service=server status=completed duration=4 method=GET path=/global/event request
+INFO  2026-06-15T15:49:13 +250ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:49:13 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:49:13 +4ms service=server status=completed duration=4 method=GET path=/global/config request
+INFO  2026-06-15T15:49:13 +6ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:49:13 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:49:13 +2ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode creating instance
+INFO  2026-06-15T15:49:13 +1ms service=project directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode fromDirectory
+INFO  2026-06-15T15:49:13 +64ms service=server method=GET path=/path request
+INFO  2026-06-15T15:49:13 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:49:13 +51ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode bootstrapping
+INFO  2026-06-15T15:49:13 +27ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +1ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-15T15:49:13 +1ms service=bus type=* subscribing
+INFO  2026-06-15T15:49:13 +1ms service=bus type=command.executed subscribing
+INFO  2026-06-15T15:49:13 +2ms service=lsp all LSPs are disabled
+INFO  2026-06-15T15:49:13 +0ms service=bus type=session.updated subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=session.diff subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=session.deleted subscribing
+INFO  2026-06-15T15:49:13 +1ms service=format all formatters are disabled
+INFO  2026-06-15T15:49:13 +0ms service=format init
+INFO  2026-06-15T15:49:13 +2ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode init
+INFO  2026-06-15T15:49:13 +1ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode platform=win32 backend=windows watcher backend
+INFO  2026-06-15T15:49:13 +2ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:49:13 +1ms service=bus type=message.part.removed subscribing
+INFO  2026-06-15T15:49:13 +4ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-15T15:49:13 +0ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-15T15:49:13 +3ms service=server status=completed duration=97 method=GET path=/path request
+INFO  2026-06-15T15:49:13 +21ms service=provider status=started state
+INFO  2026-06-15T15:49:13 +18ms service=provider init
+INFO  2026-06-15T15:49:13 +7ms service=server method=GET path=/project request
+INFO  2026-06-15T15:49:13 +1ms service=server status=started method=GET path=/project request
+INFO  2026-06-15T15:49:13 +1ms service=server status=completed duration=1 method=GET path=/project request
+INFO  2026-06-15T15:49:13 +125ms service=provider providerID=github-models found
+INFO  2026-06-15T15:49:13 +0ms service=provider providerID=github-copilot found
+INFO  2026-06-15T15:49:13 +0ms service=provider providerID=mimo found
+INFO  2026-06-15T15:49:13 +0ms service=provider providerID=xiaomi found
+INFO  2026-06-15T15:49:13 +0ms service=provider status=completed duration=152 state
+INFO  2026-06-15T15:49:14 +37ms service=server status=completed duration=374 method=GET path=/provider request
+INFO  2026-06-15T15:49:14 +6ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-15T15:49:14 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-15T15:49:25 +11130ms service=history.backfill sessions=146 backfill complete
+INFO  2026-06-15T15:49:41 +16802ms service=server method=GET path=/path request
+INFO  2026-06-15T15:49:41 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:49:41 +1ms service=server status=completed duration=1 method=GET path=/path request
+INFO  2026-06-15T15:50:01 +19487ms service=server global event disconnected
+INFO  2026-06-15T15:50:01 +368ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:50:01 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:50:01 +1ms service=server status=completed duration=1 method=GET path=/global/config request
+INFO  2026-06-15T15:50:01 +178ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:50:01 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:50:02 +35ms service=server status=completed duration=35 method=GET path=/provider request
+INFO  2026-06-15T15:50:02 +0ms service=server method=GET path=/path request
+INFO  2026-06-15T15:50:02 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:50:02 +2ms service=server status=completed duration=1 method=GET path=/path request
+INFO  2026-06-15T15:50:02 +1ms service=server method=GET path=/project request
+INFO  2026-06-15T15:50:02 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-15T15:50:02 +2ms service=server status=completed duration=2 method=GET path=/project request
+INFO  2026-06-15T15:50:02 +430ms service=server method=GET path=/global/event request
+INFO  2026-06-15T15:50:02 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-15T15:50:02 +0ms service=server global event connected
+INFO  2026-06-15T15:50:02 +0ms service=server status=completed duration=0 method=GET path=/global/event request
+INFO  2026-06-15T15:53:15 +192578ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:53:15 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:53:15 +34ms service=server status=completed duration=34 method=GET path=/provider request
+INFO  2026-06-15T15:53:38 +23367ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:53:38 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:53:38 +35ms service=server status=completed duration=35 method=GET path=/provider request
+INFO  2026-06-15T15:53:50 +11579ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:53:50 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:53:50 +36ms service=server status=completed duration=36 method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +55991ms service=server method=OPTIONS path=/global/config request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=OPTIONS path=/global/config request
+INFO  2026-06-15T15:54:46 +1ms service=server status=completed duration=1 method=OPTIONS path=/global/config request
+INFO  2026-06-15T15:54:46 +1ms service=server method=PATCH path=/global/config request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=PATCH path=/global/config request
+INFO  2026-06-15T15:54:46 +5ms service=server-proxy disposing all instances
+INFO  2026-06-15T15:54:46 +0ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode disposing instance
+INFO  2026-06-15T15:54:46 +1ms service=bus type=* unsubscribing
+INFO  2026-06-15T15:54:46 +1ms service=bus type=message.part.updated unsubscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.updated unsubscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=message.updated unsubscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.diff unsubscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.deleted unsubscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=file.watcher.updated unsubscribing
+INFO  2026-06-15T15:54:46 +3ms service=server status=completed duration=10 method=PATCH path=/global/config request
+INFO  2026-06-15T15:54:46 +54ms service=server method=POST path=/global/dispose request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=POST path=/global/dispose request
+INFO  2026-06-15T15:54:46 +0ms service=server-proxy disposing all instances
+INFO  2026-06-15T15:54:46 +1ms service=server status=completed duration=1 method=POST path=/global/dispose request
+INFO  2026-06-15T15:54:46 +3ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-15T15:54:46 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.json loading
+INFO  2026-06-15T15:54:46 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.jsonc loading
+INFO  2026-06-15T15:54:46 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.json loading
+INFO  2026-06-15T15:54:46 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.jsonc loading
+INFO  2026-06-15T15:54:46 +2ms service=server status=completed duration=3 method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +72ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +0ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode creating instance
+INFO  2026-06-15T15:54:46 +0ms service=project directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode fromDirectory
+INFO  2026-06-15T15:54:46 +97ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode bootstrapping
+INFO  2026-06-15T15:54:46 +7ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +1ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-15T15:54:46 +0ms service=bus type=* subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=command.executed subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-15T15:54:46 +1ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-15T15:54:46 +0ms service=provider status=started state
+INFO  2026-06-15T15:54:46 +10ms service=provider init
+INFO  2026-06-15T15:54:46 +1ms service=lsp all LSPs are disabled
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.updated subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.diff subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=session.deleted subscribing
+INFO  2026-06-15T15:54:46 +0ms service=format all formatters are disabled
+INFO  2026-06-15T15:54:46 +0ms service=format init
+INFO  2026-06-15T15:54:46 +1ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode init
+INFO  2026-06-15T15:54:46 +0ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode platform=win32 backend=windows watcher backend
+INFO  2026-06-15T15:54:46 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:54:46 +0ms service=bus type=message.part.removed subscribing
+INFO  2026-06-15T15:54:46 +52ms service=provider providerID=github-copilot found
+INFO  2026-06-15T15:54:46 +0ms service=provider providerID=mimo found
+INFO  2026-06-15T15:54:46 +0ms service=provider providerID=xiaomi found
+INFO  2026-06-15T15:54:46 +0ms service=provider status=completed duration=64 state
+INFO  2026-06-15T15:54:46 +37ms service=server status=completed duration=207 method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +34ms service=server method=GET path=/path request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:54:46 +1ms service=server status=completed duration=1 method=GET path=/path request
+INFO  2026-06-15T15:54:46 +1ms service=server method=GET path=/project request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-15T15:54:46 +2ms service=server status=completed duration=2 method=GET path=/project request
+INFO  2026-06-15T15:54:46 +14ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-15T15:54:46 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-15T15:54:46 +193ms service=server method=OPTIONS path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=OPTIONS path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +0ms service=server status=completed duration=0 method=OPTIONS path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +0ms service=server method=DELETE path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +1ms service=server status=started method=DELETE path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +1ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +1ms service=server status=completed duration=1 method=GET path=/global/config request
+INFO  2026-06-15T15:54:46 +1ms service=server status=completed duration=3 method=DELETE path=/auth/github-models request
+INFO  2026-06-15T15:54:46 +120ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +45ms service=server status=completed duration=45 method=GET path=/provider request
+INFO  2026-06-15T15:54:46 +7ms service=server method=GET path=/path request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:54:46 +2ms service=server status=completed duration=2 method=GET path=/path request
+INFO  2026-06-15T15:54:46 +0ms service=server method=GET path=/project request
+INFO  2026-06-15T15:54:46 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-15T15:54:46 +2ms service=server status=completed duration=2 method=GET path=/project request
+INFO  2026-06-15T15:54:57 +10824ms service=history.backfill sessions=146 backfill complete
+INFO  2026-06-15T15:55:05 +8246ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:55:05 +1ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:55:05 +0ms service=server status=completed duration=0 method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +43915ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +1ms service=server status=completed duration=1 method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +51ms service=server method=PATCH path=/global/config request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=PATCH path=/global/config request
+INFO  2026-06-15T15:55:49 +2ms service=server-proxy disposing all instances
+INFO  2026-06-15T15:55:49 +0ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode disposing instance
+INFO  2026-06-15T15:55:49 +1ms service=bus type=* unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=message.part.updated unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=session.updated unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=message.updated unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=session.diff unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=session.deleted unsubscribing
+INFO  2026-06-15T15:55:49 +0ms service=bus type=file.watcher.updated unsubscribing
+INFO  2026-06-15T15:55:49 +2ms service=server status=completed duration=5 method=PATCH path=/global/config request
+INFO  2026-06-15T15:55:49 +4ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-15T15:55:49 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.json loading
+INFO  2026-06-15T15:55:49 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.jsonc loading
+INFO  2026-06-15T15:55:49 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.json loading
+INFO  2026-06-15T15:55:49 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.jsonc loading
+INFO  2026-06-15T15:55:49 +6ms service=server status=completed duration=7 method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +24ms service=server method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +1ms service=server status=completed duration=1 method=GET path=/global/config request
+INFO  2026-06-15T15:55:49 +6ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:55:49 +1ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode creating instance
+INFO  2026-06-15T15:55:49 +0ms service=project directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode fromDirectory
+INFO  2026-06-15T15:55:49 +0ms service=server method=GET path=/path request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:55:49 +1ms service=server method=GET path=/project request
+INFO  2026-06-15T15:55:49 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-15T15:55:50 +90ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode bootstrapping
+INFO  2026-06-15T15:55:50 +12ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-15T15:55:50 +0ms service=bus type=* subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=command.executed subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-15T15:55:50 +1ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-15T15:55:50 +0ms service=provider status=started state
+INFO  2026-06-15T15:55:50 +10ms service=provider init
+INFO  2026-06-15T15:55:50 +2ms service=server status=completed duration=116 method=GET path=/path request
+INFO  2026-06-15T15:55:50 +0ms service=server status=completed duration=115 method=GET path=/project request
+INFO  2026-06-15T15:55:50 +1ms service=lsp all LSPs are disabled
+INFO  2026-06-15T15:55:50 +0ms service=bus type=session.updated subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=session.diff subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=session.deleted subscribing
+INFO  2026-06-15T15:55:50 +0ms service=format all formatters are disabled
+INFO  2026-06-15T15:55:50 +0ms service=format init
+INFO  2026-06-15T15:55:50 +0ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode init
+INFO  2026-06-15T15:55:50 +0ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode platform=win32 backend=windows watcher backend
+INFO  2026-06-15T15:55:50 +1ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:55:50 +0ms service=bus type=message.part.removed subscribing
+INFO  2026-06-15T15:55:50 +45ms service=provider providerID=github-models found
+INFO  2026-06-15T15:55:50 +0ms service=provider providerID=github-copilot found
+INFO  2026-06-15T15:55:50 +0ms service=provider providerID=mimo found
+INFO  2026-06-15T15:55:50 +0ms service=provider providerID=xiaomi found
+INFO  2026-06-15T15:55:50 +0ms service=provider status=completed duration=59 state
+INFO  2026-06-15T15:55:50 +35ms service=server status=completed duration=199 method=GET path=/provider request
+INFO  2026-06-15T15:55:50 +55ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-15T15:55:50 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-15T15:56:01 +11100ms service=history.backfill sessions=146 backfill complete
+INFO  2026-06-15T15:56:02 +846ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:56:02 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:56:02 +35ms service=server status=completed duration=35 method=GET path=/provider request
+INFO  2026-06-15T16:14:22 +1100033ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T16:14:22 +61ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T16:15:29 +67320ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T16:15:29 +62ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T16:34:19 +1129935ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T16:34:19 +71ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:06:08 +1908574ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:06:08 +70ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:19:21 +793181ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:19:21 +63ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:21:19 +118111ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:21:19 +72ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:25:39 +259352ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:25:39 +236ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:27:16 +96782ms service=server global event disconnected
+INFO  2026-06-15T17:29:40 +144107ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:29:40 +500ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:39:15 +574633ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:39:15 +60ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:41:22 +126968ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-15T17:41:22 +509ms service=bus type=file.watcher.updated publishing

@@ -14,6 +14,7 @@ import {
   errorMessage,
   hasProjectPermissions,
   latestRootSession,
+  startupProjectRoot,
   workspaceKey,
 } from "./helpers"
 
@@ -143,6 +144,18 @@ describe("layout workspace helpers", () => {
     )
 
     expect(result?.id).toBe("workspace")
+  })
+
+  test("prefers the last project at startup when it is still listed", () => {
+    expect(startupProjectRoot("/last", [{ worktree: "/current" }, { worktree: "/last" }])).toBe("/last")
+  })
+
+  test("falls back to the first project when the last project is stale", () => {
+    expect(startupProjectRoot("/last", [{ worktree: "/current" }])).toBe("/current")
+  })
+
+  test("falls back to the first project when there is no last project", () => {
+    expect(startupProjectRoot(undefined, [{ worktree: "/current" }, { worktree: "/other" }])).toBe("/current")
   })
 
   test("detects project permissions with a filter", () => {

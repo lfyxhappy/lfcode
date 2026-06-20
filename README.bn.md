@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> এই স্থানীয়কৃত README বর্তমান Lfcode রিপোজিটরির অবস্থার সাথে মিলিয়ে রাখা হয়েছে, যাতে ডাউনলোড লিংক, রিলিজ অ্যাসেট এবং সামঞ্জস্য নোট সঠিক থাকে।
+> এই README Lfcode রিপোজিটরির বর্তমান অবস্থা প্রতিফলিত করে, যাতে ডাউনলোড লিংক, রিলিজ অ্যাসেট এবং সামঞ্জস্য নোট সঠিক থাকে।
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### পরিচিতি
 
-### Installation
+Lfcode হলো একটি Bun workspace monorepo, যা opencode থেকে বিকশিত হয়েছে। এটি ঐতিহাসিক compatibility surface বজায় রেখে Lfcode ব্র্যান্ড, ডেস্কটপ অ্যাপ, ওয়েব UI, SDK, এবং GitHub Action সমর্থন দেয়।
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### বৈশিষ্ট্য
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- আরও পূর্ণাঙ্গ session management: তালিকা, status, create, update, delete, fork, share, unshare, summarize, compact, diff, revert, এবং unrevert সমর্থন।
+- একাধিক interaction mode: message পাঠানো, asynchronous `prompt`, `shell`, commands, এবং next-prompt prediction।
+- Skills management: local Skills তালিকা, discover, install, import, create, refresh, এবং directory inspection।
+- GitHub Action integration: issue বা PR comment থেকে `/lfcode`, `/opencode`, বা `/oc` ব্যবহার করে automated কাজ শুরু।
+- ঐতিহাসিক compatibility: `opencode` CLI command, `LFCODE_*` environment variables, এবং `lfcode://` protocol বজায় রাখা।
+
+### ইনস্টলেশন
+
+Public download গুলো [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) পেজে প্রকাশিত হয়।
+
+- Desktop: বর্তমান release pipeline `lfcode-win-x64.exe` নামের Windows installer প্রকাশ করে।
+- Source: local development-এর জন্য repository root থেকে Bun ব্যবহার করুন।
 
 ```bash
 bun install
@@ -60,18 +70,18 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### সামঞ্জস্য
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+কিছু runtime identifier compatibility-এর জন্য এখনো ঐতিহাসিক `opencode` নাম ব্যবহার করে।
 
 - CLI command: `opencode`
 - Config directory: `~/.lfcode`
 - Environment variables: `LFCODE_*`
 - Desktop protocol scheme: `lfcode://`
 
-### Repository Layout
+### Repository structure
 
-- `packages/lfcode`: core runtime and session engine
+- `packages/lfcode`: core runtime এবং session engine
 - `packages/app`: web UI
 - `packages/desktop`: Electron desktop host
 - `packages/ui`: shared UI components
@@ -79,11 +89,11 @@ Several runtime identifiers still use the historical `opencode` name for compati
 
 ### Documentation
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+বর্তমান documentation source আছে [packages/web/src/content/docs](packages/web/src/content/docs)-এ।
 
 ### Validation
 
-Run the main repository checks from the workspace root:
+Workspace root থেকে মূল checks চালান:
 
 ```bash
 bun run lint

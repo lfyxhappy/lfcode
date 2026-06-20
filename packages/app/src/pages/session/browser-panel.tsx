@@ -5,19 +5,20 @@ import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { useFile } from "@/context/file"
 import {
   BROWSER_COMMAND_EVENT,
-  DEFAULT_BROWSER_URL,
   browserTabID,
   normalizeBrowserURL,
 } from "@/pages/session/helpers"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { usePlatform } from "@/context/platform"
 
-export function BrowserPanel(props: { tab: string }) {
+export function BrowserPanel(props: { tab: string; visible?: boolean }) {
   const language = useLanguage()
   const layout = useLayout()
   const platform = usePlatform()
+  const file = useFile()
   const { sessionKey, view } = useSessionLayout()
   let webviewRef: any
   let inputRef: HTMLInputElement | HTMLTextAreaElement | undefined
@@ -89,7 +90,6 @@ export function BrowserPanel(props: { tab: string }) {
     const current = state()
     const webview = webviewRef
     if (!current || !webview) return
-    if (current.url === "https://") return
     if (!ready) {
       lastLoadedURL = current.url
       return
@@ -194,6 +194,25 @@ export function BrowserPanel(props: { tab: string }) {
     window.open(current.url, "_blank", "noopener,noreferrer")
   }
 
+  const currentFilePath = createMemo(() => {
+    const current = state()
+    if (!current) return
+    if (!current.url.startsWith("file://")) return
+    return file.normalize(current.url)
+  })
+
+  const openSource = () => {
+    const current = currentFilePath()
+    if (!current) return
+    layout.view(sessionKey()).reviewPanel.open()
+    layout.fileTree.open()
+    void file.load(current).then(() => {
+      const tab = file.tab(current)
+      layout.tabs(sessionKey()).open(tab)
+      layout.tabs(sessionKey()).setActive(tab)
+    })
+  }
+
   return (
     <div class="size-full flex flex-col min-h-0 bg-background-base">
       <div class="shrink-0 border-b border-border-weaker-base px-3 py-2 flex items-center gap-2">
@@ -222,7 +241,7 @@ export function BrowserPanel(props: { tab: string }) {
               aria-label={language.t("common.goForward")}
             />
           </Tooltip>
-          <Tooltip value={language.t("common.open")} placement="bottom">
+          <Tooltip value={browser()?.loading ? language.t("common.stop") : language.t("command.browser.reload")} placement="bottom">
             <IconButton
               icon={browser()?.loading ? "stop" : "reset"}
               variant="ghost"
@@ -234,7 +253,7 @@ export function BrowserPanel(props: { tab: string }) {
                 }
                 runCommand("reload")
               }}
-              aria-label={browser()?.loading ? language.t("common.stop") : language.t("common.open")}
+              aria-label={browser()?.loading ? language.t("common.stop") : language.t("command.browser.reload")}
             />
           </Tooltip>
         </div>
@@ -259,11 +278,22 @@ export function BrowserPanel(props: { tab: string }) {
               layout.view(sessionKey()).browser.update(id, { input: event.currentTarget.value })
             }}
             class="h-8 flex-1 min-w-0 rounded-md"
-            placeholder="https://"
+            placeholder={language.t("browser.address.placeholder")}
           />
         </form>
 
         <div class="flex items-center gap-1">
+          <Show when={currentFilePath()}>
+            <Tooltip value={language.t("browser.openSource")} placement="bottom">
+              <IconButton
+                icon="code"
+                variant="ghost"
+                class="size-7 rounded-md"
+                onClick={openSource}
+                aria-label={language.t("browser.openSource")}
+              />
+            </Tooltip>
+          </Show>
           <Tooltip value={language.t("session.header.open.copyPath")} placement="bottom">
             <IconButton icon="copy" variant="ghost" class="size-7 rounded-md" onClick={copy} aria-label={language.t("session.header.open.copyPath")} />
           </Tooltip>
@@ -299,35 +329,29 @@ export function BrowserPanel(props: { tab: string }) {
           fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("common.loading")}</div>}
         >
           {(current) => (
-            <Show
-              when={current().url !== DEFAULT_BROWSER_URL}
-              fallback={
-                <div class="size-full flex items-center justify-center px-6 text-center">
-                  <div class="max-w-96 space-y-2">
-                    <div class="text-13-medium text-text-base">https://</div>
-                    <div class="text-12-regular text-text-weak break-words">{state()?.input ?? DEFAULT_BROWSER_URL}</div>
+            <div class="relative size-full">
+              <webview
+                ref={webviewRef}
+                src={current().url}
+                class="size-full bg-background-base"
+                style={{ display: props.visible === false ? "none" : undefined }}
+                partition="persist:lfcode-browser"
+                allowpopups
+              />
+              <Show when={current().loading}>
+                <div class="pointer-events-none absolute left-3 top-3 rounded-md border border-border-weak-base bg-surface-raised-stronger-non-alpha px-2.5 py-1 text-12-regular text-text-weak shadow-sm">
+                  {language.t("browser.loading")}
+                </div>
+              </Show>
+              <Show when={current().error}>
+                <div class="absolute inset-0 flex items-center justify-center px-6 text-center bg-background-base/70 backdrop-blur-[1px]">
+                  <div class="max-w-96 rounded-md border border-border-weak-base bg-surface-raised-stronger-non-alpha px-4 py-3 shadow-sm space-y-2">
+                    <div class="text-13-medium text-text-base">{language.t("browser.error.title")}</div>
+                    <div class="text-12-regular text-text-weak break-words">{current().error}</div>
                   </div>
                 </div>
-              }
-            >
-              <div class="relative size-full">
-                <webview
-                  ref={webviewRef}
-                  src={current().url}
-                  class="size-full bg-background-base"
-                  partition="persist:lfcode-browser"
-                  allowpopups
-                />
-                <Show when={current().error}>
-                  <div class="absolute inset-0 flex items-center justify-center px-6 text-center bg-background-base/90">
-                    <div class="max-w-96 space-y-2">
-                      <div class="text-13-medium text-text-base">{language.t("browser.error.title")}</div>
-                      <div class="text-12-regular text-text-weak break-words">{current().error}</div>
-                    </div>
-                  </div>
-                </Show>
-              </div>
-            </Show>
+              </Show>
+            </div>
           )}
         </Show>
       </div>

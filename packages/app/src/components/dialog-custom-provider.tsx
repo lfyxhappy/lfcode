@@ -1,4 +1,6 @@
 import { Button } from "@lfcode-ai/ui/button"
+import { RadioGroup } from "@lfcode-ai/ui/radio-group"
+import { Select } from "@lfcode-ai/ui/select"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { Dialog } from "@lfcode-ai/ui/dialog"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
@@ -13,12 +15,56 @@ import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { formatServerError } from "@/utils/server-errors"
-import { type FormState, headerRow, modelRow, validateCustomProvider } from "./dialog-custom-provider-form"
+import {
+  CAPABILITY_KEYS,
+  type CapabilityKey,
+  CUSTOM_PROVIDER_PRESETS,
+  CUSTOM_PROVIDER_PRESET_OPTIONS,
+  type CustomProviderPresetID,
+  inferCapabilities,
+  type FormState,
+  headerRow,
+  modelRow,
+  presetModelRow,
+  PROTOCOLS,
+  validateCustomProvider,
+} from "./dialog-custom-provider-form"
 import { DialogSelectProvider } from "./dialog-select-provider"
+import { Icon } from "@lfcode-ai/ui/icon"
 
 type Props = {
   back?: "providers" | "close"
   returnTo?: "models"
+  preset?: CustomProviderPresetID
+}
+
+function initialFormState(presetID?: CustomProviderPresetID): FormState {
+  const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.id === presetID)
+  if (preset) {
+    return {
+      preset: "custom",
+      protocol: preset.protocol,
+      providerID: preset.providerID,
+      name: preset.name,
+      baseURL: preset.baseURL,
+      apiKey: "",
+      models: preset.models.map((model) => presetModelRow(model)),
+      headers: [headerRow()],
+      err: {},
+    }
+  }
+
+  return {
+    preset: "custom",
+    protocol: "openai-chat",
+    providerID: "",
+    name: "",
+    baseURL: "",
+    apiKey: "",
+    models: [modelRow()],
+    headers: [headerRow()],
+    err: {},
+  }
 }
 
 export function DialogCustomProvider(props: Props) {
@@ -27,15 +73,7 @@ export function DialogCustomProvider(props: Props) {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
 
-  const [form, setForm] = createStore<FormState>({
-    providerID: "",
-    name: "",
-    baseURL: "",
-    apiKey: "",
-    models: [modelRow()],
-    headers: [headerRow()],
-    err: {},
-  })
+  const [form, setForm] = createStore<FormState>(initialFormState(props.preset))
 
   const goBack = () => {
     if (props.back === "close") {
@@ -52,6 +90,7 @@ export function DialogCustomProvider(props: Props) {
   }
 
   const addModel = () => {
+    setForm("preset", "custom")
     setForm(
       "models",
       produce((rows) => {
@@ -62,6 +101,7 @@ export function DialogCustomProvider(props: Props) {
 
   const removeModel = (index: number) => {
     if (form.models.length <= 1) return
+    setForm("preset", "custom")
     setForm(
       "models",
       produce((rows) => {
@@ -92,13 +132,89 @@ export function DialogCustomProvider(props: Props) {
   const setField = (key: "providerID" | "name" | "baseURL" | "apiKey", value: string) => {
     setForm(key, value)
     if (key === "apiKey") return
+    setForm("preset", "custom")
     setForm("err", key, undefined)
+  }
+
+  const applyCapabilityInference = (index: number, patch: Partial<{ id: string; name: string }> = {}) => {
+    const current = form.models[index]
+    if (!current) return
+    const next = inferCapabilities(
+      {
+        id: patch.id ?? current.id,
+        name: patch.name ?? current.name,
+        protocol: form.protocol,
+        current: current.capabilities,
+        manual: current.manual,
+      },
+    )
+    for (const key of CAPABILITY_KEYS) {
+      if (current.manual[key]) continue
+      setForm("models", index, "capabilities", key, next[key])
+    }
   }
 
   const setModel = (index: number, key: "id" | "name", value: string) => {
     batch(() => {
+      setForm("preset", "custom")
       setForm("models", index, key, value)
       setForm("models", index, "err", key, undefined)
+      applyCapabilityInference(index, { [key]: value })
+    })
+  }
+
+  const setModelLimit = (index: number, key: "context" | "output", value: string) => {
+    batch(() => {
+      setForm("preset", "custom")
+      setForm("models", index, "limit", key, value)
+      setForm("models", index, "err", key, undefined)
+    })
+  }
+
+  const toggleCapability = (index: number, key: CapabilityKey, checked: boolean) => {
+    batch(() => {
+      setForm("preset", "custom")
+      setForm("models", index, "capabilities", key, checked)
+      setForm("models", index, "manual", key, true)
+    })
+  }
+
+  const setProtocol = (value: FormState["protocol"]) => {
+    batch(() => {
+      setForm("preset", "custom")
+      setForm("protocol", value)
+      for (const [index, model] of form.models.entries()) {
+        const next = inferCapabilities({
+          id: model.id,
+          name: model.name,
+          protocol: value,
+          current: model.capabilities,
+          manual: model.manual,
+        })
+        for (const key of CAPABILITY_KEYS) {
+          if (model.manual[key]) continue
+          setForm("models", index, "capabilities", key, next[key])
+        }
+      }
+    })
+  }
+
+  const setPreset = (value: CustomProviderPresetID) => {
+    if (value === "custom") {
+      setForm("preset", "custom")
+      return
+    }
+    const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.id === value)
+    if (!preset) return
+
+    batch(() => {
+      setForm("preset", preset.id)
+      setForm("protocol", preset.protocol)
+      setForm("providerID", preset.providerID)
+      setForm("name", preset.name)
+      setForm("baseURL", preset.baseURL)
+      setForm("models", preset.models.map((model) => presetModelRow(model)))
+      setForm("err", {})
     })
   }
 
@@ -204,6 +320,39 @@ export function DialogCustomProvider(props: Props) {
           </p>
 
           <div class="flex flex-col gap-4">
+            <div class="flex flex-col gap-2">
+              <label class="text-12-medium text-text-weak">{language.t("provider.custom.field.preset.label")}</label>
+              <Select
+                options={CUSTOM_PROVIDER_PRESET_OPTIONS}
+                current={form.preset ?? "custom"}
+                value={(value) => value}
+                label={(value) => language.t(`provider.custom.field.preset.option.${value}`)}
+                onSelect={(value) => {
+                  if (!value) return
+                  setPreset(value)
+                }}
+                size="small"
+                variant="secondary"
+                class="w-full"
+                valueClass="truncate"
+              />
+            </div>
+            <div class="flex flex-col gap-2">
+              <label class="text-12-medium text-text-weak">{language.t("provider.custom.field.protocol.label")}</label>
+              <RadioGroup
+                options={[...PROTOCOLS]}
+                current={form.protocol}
+                value={(value) => value}
+                label={(value) => language.t(`provider.custom.field.protocol.option.${value}`)}
+                onSelect={(value) => {
+                  if (!value) return
+                  setProtocol(value)
+                }}
+                size="small"
+                fill
+                pad="normal"
+              />
+            </div>
             <TextField
               autofocus
               label={language.t("provider.custom.field.providerID.label")}
@@ -243,38 +392,87 @@ export function DialogCustomProvider(props: Props) {
             <label class="text-12-medium text-text-weak">{language.t("provider.custom.models.label")}</label>
             <For each={form.models}>
               {(m, i) => (
-                <div class="flex gap-2 items-start" data-row={m.row}>
-                  <div class="flex-1">
-                    <TextField
-                      label={language.t("provider.custom.models.id.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.id.placeholder")}
-                      value={m.id}
-                      onChange={(v) => setModel(i(), "id", v)}
-                      validationState={m.err.id ? "invalid" : undefined}
-                      error={m.err.id}
+                <div class="flex flex-col gap-3 rounded-lg border border-border-weak-base p-3" data-row={m.row}>
+                  <div class="flex gap-2 items-start">
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.id.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.id.placeholder")}
+                        value={m.id}
+                        onChange={(v) => setModel(i(), "id", v)}
+                        validationState={m.err.id ? "invalid" : undefined}
+                        error={m.err.id}
+                      />
+                    </div>
+                    <div class="flex-1">
+                      <TextField
+                        label={language.t("provider.custom.models.name.label")}
+                        hideLabel
+                        placeholder={language.t("provider.custom.models.name.placeholder")}
+                        value={m.name}
+                        onChange={(v) => setModel(i(), "name", v)}
+                        validationState={m.err.name ? "invalid" : undefined}
+                        error={m.err.name}
+                      />
+                    </div>
+                    <IconButton
+                      type="button"
+                      icon="trash"
+                      variant="ghost"
+                      class="mt-1.5"
+                      onClick={() => removeModel(i())}
+                      disabled={form.models.length <= 1}
+                      aria-label={language.t("provider.custom.models.remove")}
                     />
                   </div>
-                  <div class="flex-1">
+                  <div class="grid gap-2 sm:grid-cols-2">
                     <TextField
-                      label={language.t("provider.custom.models.name.label")}
-                      hideLabel
-                      placeholder={language.t("provider.custom.models.name.placeholder")}
-                      value={m.name}
-                      onChange={(v) => setModel(i(), "name", v)}
-                      validationState={m.err.name ? "invalid" : undefined}
-                      error={m.err.name}
+                      label={language.t("provider.custom.models.limit.context.label")}
+                      placeholder={language.t("provider.custom.models.limit.context.placeholder")}
+                      value={m.limit?.context ?? ""}
+                      inputMode="numeric"
+                      onChange={(v) => setModelLimit(i(), "context", v)}
+                      validationState={m.err.context ? "invalid" : undefined}
+                      error={m.err.context}
+                    />
+                    <TextField
+                      label={language.t("provider.custom.models.limit.output.label")}
+                      placeholder={language.t("provider.custom.models.limit.output.placeholder")}
+                      value={m.limit?.output ?? ""}
+                      inputMode="numeric"
+                      onChange={(v) => setModelLimit(i(), "output", v)}
+                      validationState={m.err.output ? "invalid" : undefined}
+                      error={m.err.output}
                     />
                   </div>
-                  <IconButton
-                    type="button"
-                    icon="trash"
-                    variant="ghost"
-                    class="mt-1.5"
-                    onClick={() => removeModel(i())}
-                    disabled={form.models.length <= 1}
-                    aria-label={language.t("provider.custom.models.remove")}
-                  />
+                  <div class="grid gap-2 sm:grid-cols-3 xl:grid-cols-5">
+                    <For each={CAPABILITY_KEYS}>
+                      {(key) => (
+                        <button
+                          type="button"
+                          aria-pressed={m.capabilities[key]}
+                          title={language.t(`provider.custom.models.capability.${key}.description`)}
+                          class="min-w-0 h-7 w-full inline-flex items-center gap-1.5 rounded-md border px-2 text-12-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus"
+                          classList={{
+                            "border-border-base bg-surface-raised-base text-text-strong": m.capabilities[key],
+                            "border-border-weak-base bg-transparent text-text-base hover:bg-surface-base-hover":
+                              !m.capabilities[key],
+                          }}
+                          onClick={() => toggleCapability(i(), key, !m.capabilities[key])}
+                        >
+                          <Icon
+                            name={m.capabilities[key] ? "check-small" : "plus-small"}
+                            size="small"
+                            class="shrink-0 text-icon-base"
+                          />
+                          <span class="min-w-0 truncate">
+                            {language.t(`provider.custom.models.capability.${key}.label`)}
+                          </span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
                 </div>
               )}
             </For>

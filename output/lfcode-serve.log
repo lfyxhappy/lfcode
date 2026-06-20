@@ -1,0 +1,2 @@
+Warning: LFCODE_SERVER_PASSWORD is not set; server is unsecured.
+lfcode server listening on http://127.0.0.1:4096

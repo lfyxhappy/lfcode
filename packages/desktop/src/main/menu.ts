@@ -1,6 +1,7 @@
-import { Menu, shell } from "electron"
+import { Menu } from "electron"
 
 import { UPDATER_ENABLED } from "./constants"
+import { openExternal } from "./external"
 import { createMainWindow } from "./windows"
 
 type Deps = {
@@ -115,17 +116,17 @@ export function createMenu(deps: Deps) {
     {
       label: "Help",
       submenu: [
-        { label: "Lfcode Repository", click: () => shell.openExternal("https://github.com/lfyxhappy/lfcode") },
-        { label: "Lfcode Releases", click: () => shell.openExternal("https://github.com/lfyxhappy/lfcode/releases") },
+        { label: "Lfcode Repository", click: () => void openExternal("https://github.com/lfyxhappy/lfcode") },
+        { label: "Lfcode Releases", click: () => void openExternal("https://github.com/lfyxhappy/lfcode/releases") },
         { type: "separator" },
         { type: "separator" },
         {
           label: "Share Feedback",
-          click: () => shell.openExternal("https://github.com/lfyxhappy/lfcode/issues/new?template=feature-request.yml"),
+          click: () => void openExternal("https://github.com/lfyxhappy/lfcode/issues/new?template=feature-request.yml"),
         },
         {
           label: "Report a Bug",
-          click: () => shell.openExternal("https://github.com/lfyxhappy/lfcode/issues/new?template=bug-report.yml"),
+          click: () => void openExternal("https://github.com/lfyxhappy/lfcode/issues/new?template=bug-report.yml"),
         },
       ],
     },

@@ -1,0 +1,20 @@
+INFO  2026-06-15T15:47:08 +89ms service=server-proxy version=local args=[] process_role=main run_id=5c1ee001-5dfb-441e-878c-0d5158c79ca2 mimocode
+INFO  2026-06-15T15:47:08 +4ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\mimocode.db opening database
+INFO  2026-06-15T15:47:08 +26ms service=db count=34 mode=dev applying migrations
+INFO  2026-06-15T15:47:08 +33ms service=json-migration storage directory does not exist, skipping migration
+INFO  2026-06-15T15:47:11 +2796ms service=claude-import scanned=150 imported=146 resynced=0 skipped=4 errors=0 claude import
+INFO  2026-06-15T15:47:25 +14285ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode creating instance
+INFO  2026-06-15T15:47:25 +4ms service=project directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode fromDirectory
+INFO  2026-06-15T15:47:25 +196ms service=tui.plugin id=internal:home-footer loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:home-tips loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-context loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-cwd loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-instructions loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-mcp loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-lsp loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-goal loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-task loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-todo loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-files loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:sidebar-footer loading internal tui plugin
+INFO  2026-06-15T15:47:25 +0ms service=tui.plugin id=internal:plugin-manager loading internal tui plugin

@@ -18,6 +18,9 @@ const svc = {
   create(input?: SessionNs.CreateInput) {
     return run(SessionNs.Service.use((svc) => svc.create(input)))
   },
+  setArchived(input: { sessionID: SessionID; time?: number | null }) {
+    return run(SessionNs.Service.use((svc) => svc.setArchived(input)))
+  },
   remove(id: SessionID) {
     return run(SessionNs.Service.use((svc) => svc.remove(id)))
   },
@@ -41,6 +44,28 @@ describe("session action routes", () => {
 
         expect(res.status).toBe(200)
         expect(await res.json()).toBe(true)
+
+        await svc.remove(session.id)
+      },
+    })
+  })
+
+  test("update route clears archived time with null", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await svc.create({})
+        await svc.setArchived({ sessionID: session.id, time: Date.now() })
+
+        const res = await Server.Default().app.request(`/session/${session.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ time: { archived: null } }),
+        })
+
+        expect(res.status).toBe(200)
+        expect(((await res.json()) as SessionNs.Info).time.archived).toBeUndefined()
 
         await svc.remove(session.id)
       },

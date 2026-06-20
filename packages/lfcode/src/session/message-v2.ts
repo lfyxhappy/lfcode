@@ -282,6 +282,21 @@ export const StepFinishPart = PartBase.extend({
       write: z.number(),
     }),
   }),
+  overhead: z
+    .object({
+      cost: z.number(),
+      tokens: z.object({
+        total: z.number().optional(),
+        input: z.number(),
+        output: z.number(),
+        reasoning: z.number(),
+        cache: z.object({
+          read: z.number(),
+          write: z.number(),
+        }),
+      }),
+    })
+    .optional(),
 }).meta({
   ref: "StepFinishPart",
 })

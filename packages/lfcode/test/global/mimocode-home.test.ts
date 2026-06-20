@@ -136,6 +136,11 @@ describe("LFCODE_HOME end-to-end", () => {
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
+    if (process.platform === "win32") {
+      expect(result.paths.config).toBe(path.join(os.homedir(), ".lfcode", "config"))
+      expect(result.paths.data).toBe(path.join(os.homedir(), ".lfcode", "data"))
+      return
+    }
     // Paths should reflect XDG layout (ends with "/lfcode"), not LFCODE_HOME layout
     expect(result.paths.config).toBe(path.join(tmp.path, "config", "lfcode"))
     expect(result.paths.data).toBe(path.join(tmp.path, "data", "lfcode"))

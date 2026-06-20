@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> Este README localizado sigue el estado actual del repositorio de Lfcode para que los enlaces de descarga, los archivos de release y las notas de compatibilidad sigan siendo correctos.
+> Este README refleja el estado actual del repositorio de Lfcode para que los enlaces de descarga, los artefactos de publicación y las notas de compatibilidad sigan siendo correctos.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Descripción general
 
-### Installation
+Lfcode es un monorepo de Bun workspace que evolucionó a partir de opencode. Conserva la superficie de compatibilidad histórica y sigue ofreciendo la marca Lfcode, una app de escritorio, una interfaz web, un SDK y soporte para GitHub Actions.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Aspectos destacados
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Gestión de sesiones más completa: listar, estado, crear, actualizar, eliminar, bifurcar, compartir, quitar el uso compartido, resumir, compactar, diff, revertir y restaurar.
+- Más modos de interacción: envío de mensajes, `prompt` asíncrono, `shell`, comandos y predicción del siguiente prompt.
+- Gestión de Skills: listar, descubrir, instalar, importar, crear, actualizar y revisar directorios de Skills locales.
+- Integración con GitHub Actions: activa trabajo automatizado desde comentarios en issues o PRs con `/lfcode`, `/opencode` o `/oc`.
+- Compatibilidad histórica: conserva el comando CLI `opencode`, las variables de entorno `LFCODE_*` y el protocolo `lfcode://`.
+
+### Instalación
+
+Las descargas públicas se publican en la página de [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+
+- Escritorio: la canalización de publicación actual genera un instalador de Windows llamado `lfcode-win-x64.exe`.
+- Código fuente: usa Bun desde la raíz del repositorio para el desarrollo local.
 
 ```bash
 bun install
@@ -60,37 +70,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Compatibilidad
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Varios identificadores en tiempo de ejecución siguen usando el nombre histórico `opencode` por compatibilidad.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- Comando CLI: `opencode`
+- Directorio de configuración: `~/.lfcode`
+- Variables de entorno: `LFCODE_*`
+- Esquema de protocolo de escritorio: `lfcode://`
 
-### Repository Layout
+### Estructura del repositorio
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
-- `packages/sdk/js`: JavaScript SDK
+- `packages/lfcode`: núcleo de ejecución y motor de sesiones
+- `packages/app`: interfaz web
+- `packages/desktop`: host de escritorio Electron
+- `packages/ui`: componentes de UI compartidos
+- `packages/sdk/js`: SDK de JavaScript
 
-### Documentation
+### Documentación
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+La fuente actual de documentación está en [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Validación
 
-Run the main repository checks from the workspace root:
+Ejecuta las comprobaciones principales del repositorio desde la raíz del workspace:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### Soporte
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

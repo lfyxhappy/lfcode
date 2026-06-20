@@ -1,0 +1,255 @@
+INFO  2026-06-15T15:47:13 +66ms service=server method=GET path=/session request
+INFO  2026-06-15T15:47:13 +1ms service=server status=started method=GET path=/session request
+INFO  2026-06-15T15:47:13 +3ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode creating instance
+INFO  2026-06-15T15:47:13 +4ms service=project directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode fromDirectory
+INFO  2026-06-15T15:47:13 +1ms service=server method=GET path=/config/providers request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/config/providers request
+INFO  2026-06-15T15:47:13 +1ms service=server method=GET path=/provider request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-15T15:47:13 +1ms service=server method=GET path=/experimental/console request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/experimental/console request
+INFO  2026-06-15T15:47:13 +1ms service=server method=GET path=/agent request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/agent request
+INFO  2026-06-15T15:47:13 +0ms service=server method=GET path=/config request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/config request
+INFO  2026-06-15T15:47:13 +1ms service=server method=GET path=/path request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-15T15:47:13 +0ms service=server method=GET path=/project/current request
+INFO  2026-06-15T15:47:13 +0ms service=server status=started method=GET path=/project/current request
+INFO  2026-06-15T15:47:13 +132ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\mimocode.db opening database
+INFO  2026-06-15T15:47:13 +28ms service=db count=34 mode=dev applying migrations
+INFO  2026-06-15T15:47:13 +17ms service=file init
+INFO  2026-06-15T15:47:13 +9ms service=actor.registry orphan recovery complete
+INFO  2026-06-15T15:47:13 +8ms service=inbox inbox gc-on-init complete
+INFO  2026-06-15T15:47:13 +40ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode bootstrapping
+INFO  2026-06-15T15:47:13 +5ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-15T15:47:13 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.json loading
+INFO  2026-06-15T15:47:13 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\mimocode.jsonc loading
+INFO  2026-06-15T15:47:13 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.json loading
+INFO  2026-06-15T15:47:13 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\opencode.jsonc loading
+INFO  2026-06-15T15:47:13 +30ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +1ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-15T15:47:13 +1ms service=bus type=* subscribing
+INFO  2026-06-15T15:47:13 +1ms service=bus type=command.executed subscribing
+INFO  2026-06-15T15:47:13 +2ms service=lsp all LSPs are disabled
+INFO  2026-06-15T15:47:13 +1ms service=bus type=session.updated subscribing
+INFO  2026-06-15T15:47:13 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-15T15:47:13 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:47:13 +0ms service=bus type=session.diff subscribing
+INFO  2026-06-15T15:47:13 +0ms service=bus type=session.deleted subscribing
+INFO  2026-06-15T15:47:13 +1ms service=format all formatters are disabled
+INFO  2026-06-15T15:47:13 +0ms service=format init
+INFO  2026-06-15T15:47:13 +2ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode init
+INFO  2026-06-15T15:47:13 +8ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\opencode platform=win32 backend=windows watcher backend
+INFO  2026-06-15T15:47:13 +4ms service=bus type=message.part.updated subscribing
+INFO  2026-06-15T15:47:13 +0ms service=bus type=message.part.removed subscribing
+INFO  2026-06-15T15:47:24 +11379ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-15T15:47:24 +1ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-15T15:47:24 +0ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-15T15:47:24 +7ms service=provider status=started state
+INFO  2026-06-15T15:47:24 +12ms service=server status=completed duration=11691 method=GET path=/path request
+INFO  2026-06-15T15:47:24 +0ms service=server status=completed duration=11691 method=GET path=/project/current request
+INFO  2026-06-15T15:47:24 +0ms service=server status=completed duration=11693 method=GET path=/experimental/console request
+INFO  2026-06-15T15:47:24 +0ms service=server status=completed duration=11692 method=GET path=/config request
+INFO  2026-06-15T15:47:24 +0ms service=server status=completed duration=11703 method=GET path=/session request
+INFO  2026-06-15T15:47:25 +53ms service=provider init
+INFO  2026-06-15T15:47:25 +103ms service=provider providerID=github-models found
+INFO  2026-06-15T15:47:25 +0ms service=provider providerID=github-copilot found
+INFO  2026-06-15T15:47:25 +0ms service=provider providerID=mimo found
+INFO  2026-06-15T15:47:25 +0ms service=provider providerID=xiaomi found
+INFO  2026-06-15T15:47:25 +0ms service=provider status=completed duration=168 state
+INFO  2026-06-15T15:47:25 +67ms service=server status=completed duration=11917 method=GET path=/provider request
+INFO  2026-06-15T15:47:25 +0ms service=server status=completed duration=11918 method=GET path=/config/providers request
+INFO  2026-06-15T15:47:25 +90ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-15T15:47:25 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-15T15:47:25 +61ms service=skill.compose root=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\compose\local extracted compose skills
+INFO  2026-06-15T15:47:25 +67ms service=server status=completed duration=12133 method=GET path=/agent request
+INFO  2026-06-15T15:47:25 +107ms service=server method=GET path=/command request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/command request
+INFO  2026-06-15T15:47:25 +10ms service=server method=GET path=/lsp request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/lsp request
+INFO  2026-06-15T15:47:25 +7ms service=server status=completed duration=7 method=GET path=/lsp request
+INFO  2026-06-15T15:47:25 +0ms service=server method=GET path=/mcp request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/mcp request
+INFO  2026-06-15T15:47:25 +2ms service=server status=completed duration=2 method=GET path=/mcp request
+INFO  2026-06-15T15:47:25 +0ms service=server method=GET path=/experimental/resource request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/experimental/resource request
+INFO  2026-06-15T15:47:25 +2ms service=server status=completed duration=2 method=GET path=/experimental/resource request
+INFO  2026-06-15T15:47:25 +1ms service=server method=GET path=/formatter request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/formatter request
+INFO  2026-06-15T15:47:25 +2ms service=server status=completed duration=2 method=GET path=/formatter request
+INFO  2026-06-15T15:47:25 +0ms service=server method=GET path=/session/status request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/session/status request
+INFO  2026-06-15T15:47:25 +2ms service=server status=completed duration=2 method=GET path=/session/status request
+INFO  2026-06-15T15:47:25 +1ms service=server method=GET path=/provider/auth request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/provider/auth request
+INFO  2026-06-15T15:47:25 +5ms service=server status=completed duration=5 method=GET path=/provider/auth request
+INFO  2026-06-15T15:47:25 +1ms service=server method=GET path=/vcs request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/vcs request
+INFO  2026-06-15T15:47:25 +1ms service=server status=completed duration=1 method=GET path=/vcs request
+INFO  2026-06-15T15:47:25 +0ms service=server method=GET path=/experimental/workspace request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/experimental/workspace request
+INFO  2026-06-15T15:47:25 +2ms service=server status=completed duration=2 method=GET path=/experimental/workspace request
+WARN  2026-06-15T15:47:25 +21ms service=skill name=manuscript-writing-review existing=C:\Users\liangfeng\.claude\skills\sciwrite\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\sciwrite\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +2ms service=skill name=plot-structure existing=C:\Users\liangfeng\.claude\skills\plot-structure\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\plot-structure\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=sts2-modding existing=C:\Users\liangfeng\.claude\skills\sts2-modding\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\sts2-modding\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=worldbuilding existing=C:\Users\liangfeng\.claude\skills\worldbuilding\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\worldbuilding\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=sentry existing=C:\Users\liangfeng\.claude\skills\sentry__sentry\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sentry__sentry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=website-cookie-store existing=C:\Users\liangfeng\.claude\skills\website-cookie-store\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\website-cookie-store\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=skill-installer existing=C:\Users\liangfeng\.claude\skills\system__skill-installer\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\system__skill-installer\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=story-init existing=C:\Users\liangfeng\.claude\skills\story-init\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\story-init\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=publish-github-release existing=C:\Users\liangfeng\.claude\skills\publish-github-release\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\publish-github-release\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=three-webgl-game existing=C:\Users\liangfeng\.claude\skills\game-studio__three-webgl-game\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__three-webgl-game\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=novel-analyzer existing=C:\Users\liangfeng\.claude\skills\novel-analyzer\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\novel-analyzer\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=security-best-practices existing=C:\Users\liangfeng\.claude\skills\security-best-practices\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\security-best-practices\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=web-3d-asset-pipeline existing=C:\Users\liangfeng\.claude\skills\game-studio__web-3d-asset-pipeline\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__web-3d-asset-pipeline\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=microsoft-foundry existing=C:\Users\liangfeng\.agents\skills\microsoft-foundry\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\microsoft-foundry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=pdf existing=C:\Users\liangfeng\.claude\skills\pdf\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\pdf\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sandbox-sdk existing=C:\Users\liangfeng\.claude\skills\cloudflare__sandbox-sdk\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare__sandbox-sdk\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sprite-pipeline existing=C:\Users\liangfeng\.claude\skills\game-studio__sprite-pipeline\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__sprite-pipeline\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=phaser-2d-game existing=C:\Users\liangfeng\.claude\skills\game-studio__phaser-2d-game\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__phaser-2d-game\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=game-ui-frontend existing=C:\Users\liangfeng\.claude\skills\game-studio__game-ui-frontend\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__game-ui-frontend\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=remotion-best-practices existing=C:\Users\liangfeng\.claude\skills\remotion__remotion\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\remotion__remotion\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=godot-ai-project-setup existing=C:\Users\liangfeng\.claude\skills\godot-ai-project-setup\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\godot-ai-project-setup\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=define-goal existing=C:\Users\liangfeng\.claude\skills\define-goal\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\define-goal\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=react-three-fiber-game existing=C:\Users\liangfeng\.claude\skills\game-studio__react-three-fiber-game\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__react-three-fiber-game\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=manuscript-writing-review existing=C:\Users\liangfeng\.agents\skills\sciwrite\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sciwrite\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=gh-address-comments existing=C:\Users\liangfeng\.claude\skills\gh-address-comments\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\gh-address-comments\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=circleci-builds existing=C:\Users\liangfeng\.claude\skills\circleci__builds\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\circleci__builds\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=notion-meeting-intelligence existing=C:\Users\liangfeng\.claude\skills\notion-meeting-intelligence\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\notion-meeting-intelligence\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=playwright existing=C:\Users\liangfeng\.claude\skills\playwright\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\playwright\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=web-game-foundations existing=C:\Users\liangfeng\.codex\skills\game-studio__web-game-foundations\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\game-studio__web-game-foundations\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=gh-fix-ci existing=C:\Users\liangfeng\.claude\skills\gh-fix-ci\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\gh-fix-ci\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=aspnet-core existing=C:\Users\liangfeng\.claude\skills\aspnet-core\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\aspnet-core\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=preset existing=C:\Users\liangfeng\.agents\skills\microsoft-foundry\models\deploy-model\preset\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\microsoft-foundry\models\deploy-model\preset\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=humanizer existing=C:\Users\liangfeng\.claude\skills\humanizer\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\humanizer\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=evaluate-skill existing=C:\Users\liangfeng\.claude\skills\plugin-eval__evaluate-skill\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\plugin-eval__evaluate-skill\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=baidu-netdisk-automation existing=C:\Users\liangfeng\.claude\skills\baidu-netdisk-automation\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\baidu-netdisk-automation\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=durable-objects existing=C:\Users\liangfeng\.claude\skills\cloudflare__durable-objects\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare__durable-objects\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=jiangnan-wenfeng existing=C:\Users\liangfeng\.claude\skills\jiangnan-wenfeng\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\jiangnan-wenfeng\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=jupyter-notebook existing=C:\Users\liangfeng\.claude\skills\jupyter-notebook\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\jupyter-notebook\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=security-ownership-map existing=C:\Users\liangfeng\.claude\skills\security-ownership-map\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\security-ownership-map\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=jiangjie existing=C:\Users\liangfeng\.claude\skills\jiangjie\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\jiangjie\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=novel-update existing=C:\Users\liangfeng\.claude\skills\novel-update\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\novel-update\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=novel-status existing=C:\Users\liangfeng\.claude\skills\novel-status\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\novel-status\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=circleci-config existing=C:\Users\liangfeng\.claude\skills\circleci__config\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\circleci__config\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=plugin-creator existing=C:\Users\liangfeng\.claude\skills\system__plugin-creator\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\system__plugin-creator\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=cli-creator existing=C:\Users\liangfeng\.claude\skills\cli-creator\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cli-creator\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=novel-review existing=C:\Users\liangfeng\.claude\skills\novel-review\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\novel-review\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=academic-research-suite existing=C:\Users\liangfeng\.codex\skills\academic-research-suite\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\academic-research-suite\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=cloudflare-deploy existing=C:\Users\liangfeng\.claude\skills\cloudflare-deploy\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare-deploy\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=ios-app-intents existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__ios-app-intents\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__ios-app-intents\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=imagegen existing=C:\Users\liangfeng\.claude\skills\system__imagegen\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\system__imagegen\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=worldbuilding existing=C:\Users\liangfeng\.agents\skills\worldbuilding\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\worldbuilding\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=hyperframes-cli existing=C:\Users\liangfeng\.codex\skills\hyperframes__hyperframes-cli\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\hyperframes__hyperframes-cli\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=render-deploy existing=C:\Users\liangfeng\.claude\skills\render-deploy\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\render-deploy\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=chunk existing=C:\Users\liangfeng\.claude\skills\circleci__chunk\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\circleci__chunk\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=hatch-pet existing=C:\Users\liangfeng\.claude\skills\hatch-pet\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\hatch-pet\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sentry existing=C:\Users\liangfeng\.codex\skills\sentry__sentry\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\sentry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=workers-best-practices existing=C:\Users\liangfeng\.claude\skills\cloudflare__workers-best-practices\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare__workers-best-practices\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=netlify-deploy existing=C:\Users\liangfeng\.claude\skills\netlify-deploy\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\netlify-deploy\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=pdf existing=C:\Users\liangfeng\.codex\skills\pdf\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\pdf\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=ios-ettrace-performance existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__ios-ettrace-performance\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__ios-ettrace-performance\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=doc existing=C:\Users\liangfeng\.claude\skills\doc\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\doc\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=microsoft-foundry existing=C:\Users\liangfeng\.claude\skills\microsoft-foundry\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\microsoft-foundry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=deploy-model existing=C:\Users\liangfeng\.agents\skills\microsoft-foundry\models\deploy-model\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=speech existing=C:\Users\liangfeng\.claude\skills\speech\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\speech\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=hyperframes-registry existing=C:\Users\liangfeng\.claude\skills\hyperframes__hyperframes-registry\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\hyperframes__hyperframes-registry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=plot-structure existing=C:\Users\liangfeng\.agents\skills\plot-structure\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\plot-structure\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=web-perf existing=C:\Users\liangfeng\.claude\skills\cloudflare__web-perf\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare__web-perf\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=playwright existing=C:\Users\liangfeng\.agents\skills\playwright\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\playwright\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=hyperframes existing=C:\Users\liangfeng\.claude\skills\hyperframes__hyperframes\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\hyperframes__hyperframes\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=capacity existing=C:\Users\liangfeng\.claude\skills\microsoft-foundry\models\deploy-model\capacity\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\capacity\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma-create-new-file existing=C:\Users\liangfeng\.claude\skills\figma-create-new-file\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma-create-new-file\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=xilinx-suite existing=C:\Users\liangfeng\.claude\skills\xilinx-suite\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\xilinx-suite\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sora existing=C:\Users\liangfeng\.claude\skills\sora\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sora\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=gsap existing=C:\Users\liangfeng\.claude\skills\hyperframes__gsap\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\hyperframes__gsap\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=metric-pack-designer existing=C:\Users\liangfeng\.claude\skills\plugin-eval__metric-pack-designer\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\plugin-eval__metric-pack-designer\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=linear existing=C:\Users\liangfeng\.claude\skills\linear\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\linear\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=openai-docs existing=C:\Users\liangfeng\.claude\skills\system__openai-docs\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\.system\openai-docs\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=tauri existing=C:\Users\liangfeng\.claude\skills\tauri\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\tauri\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma existing=C:\Users\liangfeng\.claude\skills\figma\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=preset existing=C:\Users\liangfeng\.claude\skills\microsoft-foundry\models\deploy-model\preset\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\preset\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=openai-docs existing=C:\Users\liangfeng\.codex\skills\.system\openai-docs\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\system__openai-docs\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=imagegen existing=C:\Users\liangfeng\.codex\skills\system__imagegen\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\.system\imagegen\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=migrate-to-codex existing=C:\Users\liangfeng\.claude\skills\migrate-to-codex\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\migrate-to-codex\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=screenshot existing=C:\Users\liangfeng\.claude\skills\screenshot\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\screenshot\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=skill-installer existing=C:\Users\liangfeng\.codex\skills\system__skill-installer\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\.system\skill-installer\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=skill-creator existing=C:\Users\liangfeng\.claude\skills\system__skill-creator\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\.system\skill-creator\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=notion-research-documentation existing=C:\Users\liangfeng\.codex\skills\notion-research-documentation\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\notion-research-documentation\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=plugin-creator existing=C:\Users\liangfeng\.codex\skills\system__plugin-creator\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\.system\plugin-creator\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=notion-knowledge-capture existing=C:\Users\liangfeng\.claude\skills\notion-knowledge-capture\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\notion-knowledge-capture\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=security-threat-model existing=C:\Users\liangfeng\.claude\skills\security-threat-model\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\security-threat-model\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sora existing=C:\Users\liangfeng\.codex\skills\sora\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\sora\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=figma-code-connect-components existing=C:\Users\liangfeng\.claude\skills\figma-code-connect-components\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma-code-connect-components\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=customize existing=C:\Users\liangfeng\.agents\skills\microsoft-foundry\models\deploy-model\customize\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\customize\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sentry existing=C:\Users\liangfeng\.claude\skills\sentry\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sentry\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=sillytavern-translate existing=C:\Users\liangfeng\.claude\skills\sillytavern-translate\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sillytavern-translate\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma-use existing=C:\Users\liangfeng\.claude\skills\figma-use\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma-use\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=playwright-interactive existing=C:\Users\liangfeng\.claude\skills\playwright-interactive\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\playwright-interactive\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=ios-memgraph-leaks existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__ios-memgraph-leaks\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__ios-memgraph-leaks\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=formula-pdf-ocr existing=C:\Users\liangfeng\.claude\skills\formula-pdf-ocr\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\formula-pdf-ocr\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=ai-longform-writing-workflow existing=C:\Users\liangfeng\.codex\skills\ai-longform-writing-workflow\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\ai-longform-writing-workflow\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=frontend-app-builder existing=C:\Users\liangfeng\.claude\skills\build-web-apps__frontend-app-builder\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-web-apps__frontend-app-builder\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=wrangler existing=C:\Users\liangfeng\.claude\skills\cloudflare__wrangler\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\cloudflare__wrangler\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=figma-generate-design existing=C:\Users\liangfeng\.claude\skills\figma-generate-design\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma-generate-design\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=skill-creator existing=C:\Users\liangfeng\.codex\skills\.system\skill-creator\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\system__skill-creator\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=evaluate-plugin existing=C:\Users\liangfeng\.claude\skills\plugin-eval__evaluate-plugin\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\plugin-eval__evaluate-plugin\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=shadcn existing=C:\Users\liangfeng\.claude\skills\build-web-apps__shadcn-best-practices\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-web-apps__shadcn-best-practices\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=ios-debugger-agent existing=C:\Users\liangfeng\.codex\skills\build-ios-apps__ios-debugger-agent\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\build-ios-apps__ios-debugger-agent\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=chatgpt-apps existing=C:\Users\liangfeng\.claude\skills\chatgpt-apps\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\chatgpt-apps\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=cloudflare existing=C:\Users\liangfeng\.codex\skills\cloudflare__cloudflare\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\cloudflare__cloudflare\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=react-best-practices existing=C:\Users\liangfeng\.claude\skills\build-web-apps__react-best-practices\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-web-apps__react-best-practices\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=chapter-writing existing=C:\Users\liangfeng\.claude\skills\chapter-writing\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\chapter-writing\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=game-playtest existing=C:\Users\liangfeng\.claude\skills\game-studio__game-playtest\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__game-playtest\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=swiftui-liquid-glass existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__swiftui-liquid-glass\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__swiftui-liquid-glass\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma-generate-library existing=C:\Users\liangfeng\.codex\skills\figma-generate-library\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\figma-generate-library\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=building-ai-agent-on-cloudflare existing=C:\Users\liangfeng\.codex\skills\cloudflare__building-ai-agent-on-cloudflare\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\cloudflare__building-ai-agent-on-cloudflare\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=story-init existing=C:\Users\liangfeng\.agents\skills\story-init\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\story-init\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=publish-github-release existing=C:\Users\liangfeng\.agents\skills\publish-github-release\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\publish-github-release\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=frontend-testing-debugging existing=C:\Users\liangfeng\.claude\skills\build-web-apps__frontend-testing-debugging\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-web-apps__frontend-testing-debugging\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=notion-spec-to-implementation existing=C:\Users\liangfeng\.codex\skills\notion-spec-to-implementation\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\notion-spec-to-implementation\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=swiftui-view-refactor existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__swiftui-view-refactor\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__swiftui-view-refactor\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=plugin-eval existing=C:\Users\liangfeng\.claude\skills\plugin-eval__plugin-eval\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\plugin-eval__plugin-eval\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=tauri-v2 existing=C:\Users\liangfeng\.claude\skills\tauri-v2\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\tauri-v2\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=sts2-modding existing=C:\Users\liangfeng\.agents\skills\sts2-modding\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\sts2-modding\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=swiftui-ui-patterns existing=C:\Users\liangfeng\.claude\skills\build-ios-apps__swiftui-ui-patterns\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\build-ios-apps__swiftui-ui-patterns\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=website-cookie-store existing=C:\Users\liangfeng\.agents\skills\website-cookie-store\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\website-cookie-store\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=transcribe existing=C:\Users\liangfeng\.claude\skills\transcribe\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\transcribe\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=game-studio existing=C:\Users\liangfeng\.claude\skills\game-studio__game-studio\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\game-studio__game-studio\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=yeet existing=C:\Users\liangfeng\.claude\skills\yeet\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\yeet\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=android-emulator-qa existing=C:\Users\liangfeng\.claude\skills\test-android-apps__android-emulator-qa\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\test-android-apps__android-emulator-qa\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma-create-design-system-rules existing=C:\Users\liangfeng\.claude\skills\figma-create-design-system-rules\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\figma-create-design-system-rules\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=tauri-development existing=C:\Users\liangfeng\.claude\skills\tauri-development\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\tauri-development\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=android-performance existing=C:\Users\liangfeng\.claude\skills\test-android-apps__android-performance\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\test-android-apps__android-performance\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=winui-app existing=C:\Users\liangfeng\.claude\skills\winui-app\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\winui-app\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=website-to-hyperframes existing=C:\Users\liangfeng\.codex\skills\hyperframes__website-to-hyperframes\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\hyperframes__website-to-hyperframes\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=capacity existing=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\capacity\SKILL.md duplicate=C:\Users\liangfeng\.agents\skills\microsoft-foundry\models\deploy-model\capacity\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=vercel-deploy existing=C:\Users\liangfeng\.claude\skills\vercel-deploy\SKILL.md duplicate=C:\Users\liangfeng\.codex\skills\vercel-deploy\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=supabase-postgres-best-practices existing=C:\Users\liangfeng\.codex\skills\build-web-apps__supabase-best-practices\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\build-web-apps__supabase-best-practices\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=agents-sdk existing=C:\Users\liangfeng\.codex\skills\cloudflare__agents-sdk\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\cloudflare__agents-sdk\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=chatgpt-app-submission existing=C:\Users\liangfeng\.codex\skills\chatgpt-apps__chatgpt-app-submission\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\chatgpt-apps__chatgpt-app-submission\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=figma-implement-design existing=C:\Users\liangfeng\.codex\skills\figma-implement-design\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\figma-implement-design\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=build-chatgpt-app existing=C:\Users\liangfeng\.codex\skills\chatgpt-apps__build-chatgpt-app\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\chatgpt-apps__build-chatgpt-app\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=customize existing=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\customize\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\microsoft-foundry\models\deploy-model\customize\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=deploy-model existing=C:\Users\liangfeng\.codex\skills\microsoft-foundry\models\deploy-model\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\microsoft-foundry\models\deploy-model\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=swiftui-performance-audit existing=C:\Users\liangfeng\.codex\skills\build-ios-apps__swiftui-performance-audit\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\build-ios-apps__swiftui-performance-audit\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=circleci-cli existing=C:\Users\liangfeng\.codex\skills\circleci__cli\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\circleci__cli\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +1ms service=skill name=building-mcp-server-on-cloudflare existing=C:\Users\liangfeng\.codex\skills\cloudflare__building-mcp-server-on-cloudflare\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\cloudflare__building-mcp-server-on-cloudflare\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=improve-skill existing=C:\Users\liangfeng\.codex\skills\plugin-eval__improve-skill\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\plugin-eval__improve-skill\SKILL.md duplicate skill name
+WARN  2026-06-15T15:47:25 +0ms service=skill name=character-management existing=C:\Users\liangfeng\.codex\skills\character-management\SKILL.md duplicate=C:\Users\liangfeng\.claude\skills\character-management\SKILL.md duplicate skill name
+INFO  2026-06-15T15:47:25 +0ms service=skill count=161 init
+INFO  2026-06-15T15:47:25 +5ms service=server status=completed duration=93 method=GET path=/command request
+INFO  2026-06-15T15:47:25 +5ms service=server method=GET path=/experimental/workspace/status request
+INFO  2026-06-15T15:47:25 +0ms service=server status=started method=GET path=/experimental/workspace/status request
+INFO  2026-06-15T15:47:25 +1ms service=server status=completed duration=1 method=GET path=/experimental/workspace/status request
+INFO  2026-06-15T15:47:37 +11422ms service=history.backfill sessions=146 backfill complete

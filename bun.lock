@@ -29,7 +29,7 @@
     },
     "packages/app": {
       "name": "@lfcode-ai/app",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "dependencies": {
         "@kobalte/core": "catalog:",
         "@lfcode-ai/sdk": "workspace:*",
@@ -83,7 +83,7 @@
     },
     "packages/desktop": {
       "name": "@lfcode-ai/desktop",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "dependencies": {
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
@@ -425,7 +425,6 @@
     "gitlab-ai-provider@6.6.0": "patches/gitlab-ai-provider@6.6.0.patch",
   },
   "overrides": {
-    "@effect/platform-node-shared": "4.0.0-beta.48",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
   },

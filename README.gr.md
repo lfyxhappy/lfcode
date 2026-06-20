@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> Αυτό το τοπικοποιημένο README ακολουθεί την τρέχουσα κατάσταση του αποθετηρίου Lfcode ώστε οι σύνδεσμοι λήψης, τα release assets και οι σημειώσεις συμβατότητας να παραμένουν σωστά.
+> Αυτό το README αντικατοπτρίζει την τρέχουσα κατάσταση του αποθετηρίου Lfcode, ώστε οι σύνδεσμοι λήψης, τα release assets και οι σημειώσεις συμβατότητας να παραμένουν σωστά.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Επισκόπηση
 
-### Installation
+Το Lfcode είναι ένα monorepo Bun workspace που εξελίχθηκε από το opencode. Διατηρεί το ιστορικό compatibility surface και συνεχίζει να προσφέρει το brand Lfcode, εφαρμογή desktop, web UI, SDK και υποστήριξη GitHub Action.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Κύρια σημεία
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Πιο πλήρης διαχείριση συνεδριών: λίστα, κατάσταση, δημιουργία, ενημέρωση, διαγραφή, fork, share, unshare, σύνοψη, compact, diff, revert και unrevert.
+- Περισσότεροι τρόποι αλληλεπίδρασης: αποστολή μηνυμάτων, ασύγχρονο `prompt`, `shell`, εντολές και πρόβλεψη του επόμενου prompt.
+- Διαχείριση Skills: τοπική λίστα Skills, ανακάλυψη, εγκατάσταση, εισαγωγή, δημιουργία, ανανέωση και έλεγχος καταλόγων.
+- Ενσωμάτωση GitHub Action: εκκίνηση αυτοματοποιημένης εργασίας από σχόλια issue ή PR με `/lfcode`, `/opencode` ή `/oc`.
+- Ιστορική συμβατότητα: διατήρηση της CLI εντολής `opencode`, των μεταβλητών περιβάλλοντος `LFCODE_*` και του πρωτοκόλλου `lfcode://`.
+
+### Εγκατάσταση
+
+Τα δημόσια downloads δημοσιεύονται στη σελίδα [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+
+- Desktop: το τρέχον release pipeline δημοσιεύει installer για Windows με όνομα `lfcode-win-x64.exe`.
+- Πηγαίος κώδικας: χρησιμοποιήστε Bun από τη ρίζα του αποθετηρίου για τοπική ανάπτυξη.
 
 ```bash
 bun install
@@ -60,37 +70,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Συμβατότητα
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Ορισμένα runtime identifiers εξακολουθούν να χρησιμοποιούν το ιστορικό όνομα `opencode` για συμβατότητα.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- CLI εντολή: `opencode`
+- Κατάλογος ρυθμίσεων: `~/.lfcode`
+- Μεταβλητές περιβάλλοντος: `LFCODE_*`
+- Σχήμα πρωτοκόλλου desktop: `lfcode://`
 
-### Repository Layout
+### Δομή αποθετηρίου
 
-- `packages/lfcode`: core runtime and session engine
+- `packages/lfcode`: core runtime και session engine
 - `packages/app`: web UI
 - `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/ui`: κοινά UI components
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### Τεκμηρίωση
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+Η τρέχουσα πηγή τεκμηρίωσης βρίσκεται στο [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Επαλήθευση
 
-Run the main repository checks from the workspace root:
+Εκτελέστε τους κύριους ελέγχους από τη ρίζα του workspace:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### Υποστήριξη
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

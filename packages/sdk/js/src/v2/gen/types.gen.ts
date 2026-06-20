@@ -1208,6 +1208,19 @@ export type StepFinishPart = {
       write: number
     }
   }
+  overhead?: {
+    cost: number
+    tokens: {
+      total?: number
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+  }
 }
 
 export type SnapshotPart = {
@@ -1603,7 +1616,7 @@ export type ServerConfig = {
    */
   mdns?: boolean
   /**
-   * Custom domain name for mDNS service (default: opencode.local)
+   * Custom domain name for mDNS service (default: lfcode.local)
    */
   mdnsDomain?: string
   /**
@@ -1722,6 +1735,7 @@ export type AgentConfig = {
 export type ProviderConfig = {
   api?: string
   name?: string
+  protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
   env?: Array<string>
   id?: string
   npm?: string
@@ -1754,10 +1768,46 @@ export type ProviderConfig = {
       name?: string
       family?: string
       release_date?: string
+      protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
       attachment?: boolean
       reasoning?: boolean
       temperature?: boolean
       tool_call?: boolean
+      capabilities?: {
+        text?: boolean
+        audio?: boolean
+        image?: boolean
+        video?: boolean
+        pdf?: boolean
+        attachment?: boolean
+        reasoning?: boolean
+        temperature?: boolean
+        tool_call?: boolean
+        toolcall?: boolean
+        native_web?: boolean
+        input?:
+          | {
+              text?: boolean
+              audio?: boolean
+              image?: boolean
+              video?: boolean
+              pdf?: boolean
+            }
+          | Array<"text" | "audio" | "image" | "video" | "pdf">
+        output?:
+          | {
+              text?: boolean
+              audio?: boolean
+              image?: boolean
+              video?: boolean
+              pdf?: boolean
+            }
+          | Array<"text" | "audio" | "image" | "video" | "pdf">
+        modalities?: {
+          input?: Array<"text" | "audio" | "image" | "video" | "pdf">
+          output?: Array<"text" | "audio" | "image" | "video" | "pdf">
+        }
+      }
       interleaved?:
         | true
         | {
@@ -1793,6 +1843,7 @@ export type ProviderConfig = {
       provider?: {
         npm?: string
         api?: string
+        protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
       }
       options?: {
         [key: string]: unknown
@@ -1902,7 +1953,7 @@ export type Config = {
   logLevel?: LogLevel
   server?: ServerConfig
   /**
-   * Command configuration, see https://opencode.ai/docs/commands
+   * Command configuration, see https://lfcode.ai/docs/commands
    */
   command?: {
     [key: string]: {
@@ -1912,19 +1963,6 @@ export type Config = {
       model?: string
       subtask?: boolean
     }
-  }
-  /**
-   * Additional skill folder paths
-   */
-  skills?: {
-    /**
-     * Additional paths to skill folders
-     */
-    paths?: Array<string>
-    /**
-     * URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)
-     */
-    urls?: Array<string>
   }
   watcher?: {
     ignore?: Array<string>
@@ -1998,7 +2036,7 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
-   * Agent configuration, see https://opencode.ai/docs/agents
+   * Agent configuration, see https://lfcode.ai/docs/agents
    */
   agent?: {
     plan?: AgentConfig
@@ -2156,9 +2194,17 @@ export type Config = {
        */
       checkpoint?: number
       /**
-       * Token cap for the project memory section (MEMORY.md) of rebuild context. Default: 10000.
+       * Token cap for the project memory section (MEMORY.md) of rebuild context. Default: 16000.
        */
       memory?: number
+      /**
+       * Token cap for the total relevant topic memory spillover content auto-injected into rebuild context. Default: 4000.
+       */
+      memory_spillover_total?: number
+      /**
+       * Maximum number of project MEMORY-<topic>.md spillover files auto-injected into rebuild context. Default: 2.
+       */
+      memory_spillover_files?: number
       /**
        * Token cap for the session notes (notes.md) of rebuild context. Default: 6000.
        */
@@ -2283,6 +2329,10 @@ export type Config = {
   }
 }
 
+export type ConfigPatch = {
+  [key: string]: unknown
+}
+
 export type BadRequestError = {
   data: unknown
   errors: Array<{
@@ -2336,6 +2386,7 @@ export type NotFoundError = {
 export type Model = {
   id: string
   providerID: string
+  protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
   api: {
     id: string
     url: string
@@ -2348,6 +2399,7 @@ export type Model = {
     reasoning: boolean
     attachment: boolean
     toolcall: boolean
+    native_web?: boolean
     input: {
       text: boolean
       audio: boolean
@@ -2410,6 +2462,7 @@ export type Provider = {
   id: string
   name: string
   source: "env" | "config" | "custom" | "api"
+  protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
   env: Array<string>
   key?: string
   options: {
@@ -2879,7 +2932,7 @@ export type GlobalConfigGetResponses = {
 export type GlobalConfigGetResponse = GlobalConfigGetResponses[keyof GlobalConfigGetResponses]
 
 export type GlobalConfigUpdateData = {
-  body?: Config
+  body?: ConfigPatch
   path?: never
   query?: never
   url: "/global/config"
@@ -2898,7 +2951,7 @@ export type GlobalConfigUpdateResponses = {
   /**
    * Successfully updated global config
    */
-  200: Config
+  200: ConfigPatch
 }
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
@@ -3291,6 +3344,36 @@ export type ProjectCurrentResponses = {
 }
 
 export type ProjectCurrentResponse = ProjectCurrentResponses[keyof ProjectCurrentResponses]
+
+export type ProjectDeleteSnapshotData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/{projectID}/snapshot"
+}
+
+export type ProjectDeleteSnapshotErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectDeleteSnapshotError = ProjectDeleteSnapshotErrors[keyof ProjectDeleteSnapshotErrors]
+
+export type ProjectDeleteSnapshotResponses = {
+  /**
+   * Project snapshots deleted
+   */
+  200: boolean
+}
+
+export type ProjectDeleteSnapshotResponse = ProjectDeleteSnapshotResponses[keyof ProjectDeleteSnapshotResponses]
 
 export type ProjectInitGitData = {
   body?: never
@@ -4086,7 +4169,7 @@ export type SessionUpdateData = {
     title?: string
     permission?: PermissionRuleset
     time?: {
-      archived?: number
+      archived?: number | null
     }
   }
   path: {
@@ -5757,6 +5840,478 @@ export type EventSubscribeResponses = {
 
 export type EventSubscribeResponse = EventSubscribeResponses[keyof EventSubscribeResponses]
 
+export type SkillsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills"
+}
+
+export type SkillsListResponses = {
+  /**
+   * Skills
+   */
+  200: Array<{
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+  }>
+}
+
+export type SkillsListResponse = SkillsListResponses[keyof SkillsListResponses]
+
+export type SkillsManageListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/manage/list"
+}
+
+export type SkillsManageListResponses = {
+  /**
+   * Local skills
+   */
+  200: Array<{
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+    directory: string
+  }>
+}
+
+export type SkillsManageListResponse = SkillsManageListResponses[keyof SkillsManageListResponses]
+
+export type SkillsManageUpdateData = {
+  body?: {
+    directory: string
+    hidden?: boolean | null
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/manage/update"
+}
+
+export type SkillsManageUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SkillsManageUpdateError = SkillsManageUpdateErrors[keyof SkillsManageUpdateErrors]
+
+export type SkillsManageUpdateResponses = {
+  /**
+   * Updated local skill
+   */
+  200: {
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+    directory: string
+  }
+}
+
+export type SkillsManageUpdateResponse = SkillsManageUpdateResponses[keyof SkillsManageUpdateResponses]
+
+export type SkillsManageDeleteData = {
+  body?: {
+    directory: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/manage/delete"
+}
+
+export type SkillsManageDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SkillsManageDeleteError = SkillsManageDeleteErrors[keyof SkillsManageDeleteErrors]
+
+export type SkillsManageDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: boolean
+}
+
+export type SkillsManageDeleteResponse = SkillsManageDeleteResponses[keyof SkillsManageDeleteResponses]
+
+export type SkillsDiscoverData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    source?: "skills.sh"
+    q?: string
+    repo?: string
+    status?: "all" | "installed" | "available"
+    page?: number
+    pageSize?: number
+  }
+  url: "/skills/discover"
+}
+
+export type SkillsDiscoverResponses = {
+  /**
+   * Discovered skills
+   */
+  200: {
+    items: Array<{
+      source: "skills.sh"
+      owner: string
+      repo: string
+      repository: string
+      skill: string
+      name: string
+      description: string
+      url: string
+      install: string
+      installed: boolean
+    }>
+    repositories: Array<{
+      id: string
+      owner: string
+      repo: string
+      label: string
+      count: number
+    }>
+    total: number
+    page: number
+    pageSize: number
+  }
+}
+
+export type SkillsDiscoverResponse = SkillsDiscoverResponses[keyof SkillsDiscoverResponses]
+
+export type SkillsDiscoverInstallData = {
+  body?: {
+    url: string
+    owner: string
+    repo: string
+    skill: string
+    name?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/discover/install"
+}
+
+export type SkillsDiscoverInstallErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SkillsDiscoverInstallError = SkillsDiscoverInstallErrors[keyof SkillsDiscoverInstallErrors]
+
+export type SkillsDiscoverInstallResponses = {
+  /**
+   * Installed skill
+   */
+  200: {
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+  }
+}
+
+export type SkillsDiscoverInstallResponse = SkillsDiscoverInstallResponses[keyof SkillsDiscoverInstallResponses]
+
+export type SkillsDirsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/dirs"
+}
+
+export type SkillsDirsResponses = {
+  /**
+   * Skill directories
+   */
+  200: Array<string>
+}
+
+export type SkillsDirsResponse = SkillsDirsResponses[keyof SkillsDirsResponses]
+
+export type SkillsRefreshData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/refresh"
+}
+
+export type SkillsRefreshResponses = {
+  /**
+   * Refreshed
+   */
+  200: boolean
+}
+
+export type SkillsRefreshResponse = SkillsRefreshResponses[keyof SkillsRefreshResponses]
+
+export type SkillsImportData = {
+  body?: {
+    kind?: "folder" | "zip" | "claude" | "codex" | "agents"
+    source?: string
+    name?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/import"
+}
+
+export type SkillsImportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SkillsImportError = SkillsImportErrors[keyof SkillsImportErrors]
+
+export type SkillsImportResponses = {
+  /**
+   * Imported skills
+   */
+  200: Array<{
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+  }>
+}
+
+export type SkillsImportResponse = SkillsImportResponses[keyof SkillsImportResponses]
+
+export type SkillsCreateData = {
+  body?: {
+    name: string
+    description: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/skills/create"
+}
+
+export type SkillsCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SkillsCreateError = SkillsCreateErrors[keyof SkillsCreateErrors]
+
+export type SkillsCreateResponses = {
+  /**
+   * Created skill
+   */
+  200: {
+    name: string
+    description: string
+    location: string
+    content: string
+    hidden?: boolean
+  }
+}
+
+export type SkillsCreateResponse = SkillsCreateResponses[keyof SkillsCreateResponses]
+
+export type McpManageListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/manage"
+}
+
+export type McpManageListResponses = {
+  /**
+   * Managed MCP servers
+   */
+  200: Array<{
+    name: string
+    status: McpStatus
+    origin: {
+      type: string
+      source: string
+    } | null
+    managed: boolean
+    installable: boolean
+    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    manifest: {
+      id: string
+      serverName: string
+      title: string
+      source: "official-registry"
+      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      installedAt: string
+      configTarget: string
+      configName: string
+      payload?: {
+        kind: "none"
+      }
+      upstream: {
+        url?: string
+        version?: string
+      }
+    } | null
+    config: McpLocalConfig | McpRemoteConfig
+  }>
+}
+
+export type McpManageListResponse = McpManageListResponses[keyof McpManageListResponses]
+
+export type McpCatalogListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    q?: string
+  }
+  url: "/mcp/catalog"
+}
+
+export type McpCatalogListResponses = {
+  /**
+   * MCP catalog items
+   */
+  200: Array<{
+    id: string
+    serverName: string
+    title: string
+    description: string
+    source: "official-registry"
+    packageType: string
+    transportType: string
+    installable: boolean
+    installed: boolean
+    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    installReason?: string
+    official: boolean
+    version?: string
+  }>
+}
+
+export type McpCatalogListResponse = McpCatalogListResponses[keyof McpCatalogListResponses]
+
+export type McpCatalogInstallData = {
+  body?: {
+    id: string
+    target?: "project" | "global"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/catalog/install"
+}
+
+export type McpCatalogInstallErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type McpCatalogInstallError = McpCatalogInstallErrors[keyof McpCatalogInstallErrors]
+
+export type McpCatalogInstallResponses = {
+  /**
+   * Installed MCP
+   */
+  200: {
+    name: string
+    status: McpStatus
+    origin: {
+      type: string
+      source: string
+    } | null
+    managed: boolean
+    installable: boolean
+    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    manifest: {
+      id: string
+      serverName: string
+      title: string
+      source: "official-registry"
+      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      installedAt: string
+      configTarget: string
+      configName: string
+      payload?: {
+        kind: "none"
+      }
+      upstream: {
+        url?: string
+        version?: string
+      }
+    } | null
+    config: McpLocalConfig | McpRemoteConfig
+  }
+}
+
+export type McpCatalogInstallResponse = McpCatalogInstallResponses[keyof McpCatalogInstallResponses]
+
 export type McpStatusData = {
   body?: never
   path?: never
@@ -5976,6 +6531,107 @@ export type McpConnectResponses = {
 
 export type McpConnectResponse = McpConnectResponses[keyof McpConnectResponses]
 
+export type McpManageDeleteData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/manage/{name}"
+}
+
+export type McpManageDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type McpManageDeleteError = McpManageDeleteErrors[keyof McpManageDeleteErrors]
+
+export type McpManageDeleteResponses = {
+  /**
+   * Deleted MCP
+   */
+  200: {
+    success: true
+  }
+}
+
+export type McpManageDeleteResponse = McpManageDeleteResponses[keyof McpManageDeleteResponses]
+
+export type McpManageUpdateData = {
+  body?: {
+    config: McpLocalConfig | McpRemoteConfig
+    target?: "project" | "global"
+  }
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/mcp/manage/{name}"
+}
+
+export type McpManageUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type McpManageUpdateError = McpManageUpdateErrors[keyof McpManageUpdateErrors]
+
+export type McpManageUpdateResponses = {
+  /**
+   * Updated MCP list
+   */
+  200: {
+    name: string
+    status: McpStatus
+    origin: {
+      type: string
+      source: string
+    } | null
+    managed: boolean
+    installable: boolean
+    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    manifest: {
+      id: string
+      serverName: string
+      title: string
+      source: "official-registry"
+      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      installedAt: string
+      configTarget: string
+      configName: string
+      payload?: {
+        kind: "none"
+      }
+      upstream: {
+        url?: string
+        version?: string
+      }
+    } | null
+    config: McpLocalConfig | McpRemoteConfig
+  }
+}
+
+export type McpManageUpdateResponse = McpManageUpdateResponses[keyof McpManageUpdateResponses]
+
 export type McpDisconnectData = {
   body?: never
   path: {
@@ -6034,9 +6690,11 @@ export type UsageGetResponses = {
       outputTokens: number
       cacheCreateTokens: number
       cacheHitTokens: number
+      overheadTokens: number
       cacheHitRatio: number | null
       requestCount: number
       totalCost: number
+      overheadCost: number
     }
     trend: Array<{
       time: number
@@ -6059,6 +6717,8 @@ export type UsageGetResponses = {
       reasoning: number
       cacheRead: number
       cacheWrite: number
+      overheadTokens: number
+      overheadCost: number
       totalTokens: number
       cost: number
       duration: number | null

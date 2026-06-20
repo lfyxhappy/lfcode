@@ -1,4 +1,4 @@
-- To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
+- To regenerate the JavaScript SDK, run `bun run --cwd packages/sdk/js build`.
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
@@ -8,18 +8,25 @@
 - Most product code lives under `packages/`.
 - The core runtime and session engine live in `packages/lfcode`.
 - The web UI lives in `packages/app`, and the Electron host lives in `packages/desktop`.
-- Shared packages such as `packages/ui`, `packages/plugin`, `packages/sdk`, and `packages/shared` support the app/runtime layers.
+- Shared packages such as `packages/core`, `packages/ui`, `packages/plugin`, `packages/sdk/js`, `packages/shared`, and `packages/script` support the app/runtime layers.
 - Cross-repo specs live in `specs/`.
+- User-local project config and content under the repo root belong in `.lfcode/` (`agent/`, `command/`, `skills/`, `themes/`, `plugins/`, `tool/`, `glossary/`, plus `opencode.jsonc` and `tui.json`).
+- App settings surfaces now include `packages/app/src/components/settings-skills.tsx` and `packages/app/src/components/settings-archives.tsx`; skill-management and archive changes should be validated through those settings views, not only through server routes.
+- Instance-side skill APIs live under `packages/lfcode/src/server/routes/instance/skills.ts`; when changing local skill import, discovery, hiding, or deletion flows, keep the app settings UI and this route in sync.
 
 ## Build and Test
 
+- Package management is pinned to Bun (`packageManager: bun@1.3.11`); use Bun scripts rather than npm or yarn.
 - Use Bun workspace commands from the repo root unless a section below says otherwise.
 - Main dev entrypoints are `bun run dev`, `bun run dev:web`, and `bun run dev:desktop`.
 - Root validation commands are `bun run lint` and `bun run typecheck`.
 - The root `bun run test` command is a guard that intentionally fails; run tests from package directories instead.
+- From `packages/lfcode`, run targeted tests with `bun test path/to/test.ts` or the package suite with `bun test --timeout 30000`.
+- From `packages/app`, run unit tests with `bun run test:unit`; run Playwright coverage with `bun run test:e2e` when browser behavior is affected.
+- `packages/app` uses `happydom.ts` for unit tests; when adding narrow UI helpers, prefer package-local `bun test --preload ./happydom.ts ./src/...` over root-level test commands.
 - After completing changes in this repo, always rerun the Windows desktop package build with `bun run package:win` from `packages/desktop` and verify the refreshed output under `packages/desktop/dist/win-unpacked`.
-- For desktop/runtime changes that the user will test in the local installed-use copy, do the development checks, rebuild the Windows desktop package, then sync the refreshed app into `C:\算法\小应用\Lfcode`; do not stop at dev-server validation. Report a short manual checklist for the user to test in the use copy.
-- Packaging must preserve persistent runtime data across rebuilds by backing it up before `bun run package:win` and restoring it afterward; `data`, `state`, `cache`, database files, snapshots, and other user data may live under `packages/desktop/dist/win-unpacked`, but the rebuild flow must round-trip them intact.
+- For desktop/runtime changes that the user will test in the local installed-use copy, do the development checks, rebuild the Windows desktop package, then sync the refreshed app into `C:\算法\小应用\Lfcode` from `packages/desktop` with `$env:LFCODE_USE_COPY_DIR='C:\算法\小应用\Lfcode'; bun run sync:win-use-copy`; do not stop at dev-server validation. Close the use copy before syncing because running Electron files are locked. Without `LFCODE_USE_COPY_DIR`, the sync script defaults to `%USERPROFILE%\.lfcode`.
+- `bun run package:win` round-trips the current Windows runtime entries listed in `packages/desktop/scripts/preserve-win-runtime.ts`: `cache`, `data`, `state`, `config.json`, `lfcode.json`, `lfcode.jsonc`, and `opencode.jsonc`. Keep new persistent runtime data under those preserved entries, or update the preserve/restore scripts before relying on packaging.
 - Packaged Windows root config is preserved through `packages/desktop/local-config/lfcode.jsonc`; `packages/desktop/scripts/sync-local-config.ts` refreshes that template from the current `dist/win-unpacked/lfcode.jsonc`, and `packages/desktop/electron-builder.config.ts` copies it back into the packaged app root via `extraFiles`.
 
 ## Branch Names
@@ -163,7 +170,7 @@ const table = sqliteTable("session", {
 
 ## Type Checking
 
-- Always run `bun typecheck` from package directories (e.g., `packages/lfcode`), never `tsc` directly.
+- Run package-local type checks with `bun run typecheck`; never invoke `tsc` directly.
 
 ## V2 Session Core
 

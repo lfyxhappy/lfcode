@@ -79,6 +79,27 @@ describe("session.listGlobal", () => {
     expect(allIds).toContain(archived.id)
   })
 
+  test("clears archived time when restored", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    const archived = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => svc.create({ title: "restored-session" }),
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await svc.setArchived({ sessionID: archived.id, time: Date.now() })
+        await svc.setArchived({ sessionID: archived.id, time: null })
+      },
+    })
+
+    const ids = [...svc.listGlobal({ limit: 200 })].map((session) => session.id)
+
+    expect(ids).toContain(archived.id)
+  })
+
   test("supports cursor pagination", async () => {
     await using tmp = await tmpdir({ git: true })
 

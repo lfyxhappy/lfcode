@@ -1,4 +1,5 @@
 import { Show, createEffect, createMemo, onCleanup } from "solid-js"
+import { Portal } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { useSpring } from "@lfcode-ai/ui/motion-spring"
@@ -141,35 +142,40 @@ export function SessionComposerRegion(props: {
       data-component="session-prompt-dock"
       class="shrink-0 w-full pb-3 flex flex-col justify-center items-center bg-background-stronger pointer-events-none"
     >
+      <Show when={props.state.permissionRequest() || props.state.questionRequest()}>
+        <Portal>
+          <div data-component="session-request-overlay" role="dialog" aria-modal="true" aria-live="assertive">
+            <div data-slot="session-request-overlay-panel">
+              <Show
+                when={props.state.permissionRequest()}
+                keyed
+                fallback={
+                  <Show when={props.state.questionRequest()} keyed>
+                    {(request) => <SessionQuestionDock request={request} onSubmit={props.onResponseSubmit} />}
+                  </Show>
+                }
+              >
+                {(request) => (
+                  <SessionPermissionDock
+                    request={request}
+                    responding={props.state.permissionResponding()}
+                    onDecide={(response) => {
+                      props.onResponseSubmit()
+                      props.state.decide(response)
+                    }}
+                  />
+                )}
+              </Show>
+            </div>
+          </div>
+        </Portal>
+      </Show>
       <div
         classList={{
           "w-full px-3 pointer-events-auto": true,
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
         }}
       >
-        <Show when={props.state.questionRequest()} keyed>
-          {(request) => (
-            <div>
-              <SessionQuestionDock request={request} onSubmit={props.onResponseSubmit} />
-            </div>
-          )}
-        </Show>
-
-        <Show when={props.state.permissionRequest()} keyed>
-          {(request) => (
-            <div>
-              <SessionPermissionDock
-                request={request}
-                responding={props.state.permissionResponding()}
-                onDecide={(response) => {
-                  props.onResponseSubmit()
-                  props.state.decide(response)
-                }}
-              />
-            </div>
-          )}
-        </Show>
-
         <Show when={showComposer()}>
           <Show
             when={prompt.ready()}

@@ -15,6 +15,29 @@ async function tmpdir() {
 }
 
 describe("desktop bootstrap paths", () => {
+  const playwrightCdpCommand = [
+    "cmd",
+    "/c",
+    "npx",
+    "-y",
+    "@playwright/mcp@0.0.73",
+    "--cdp-endpoint=http://127.0.0.1:9222",
+  ]
+  const playwrightLegacyCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"]
+  const windowsComputerUseCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"]
+  const legacyWindowsComputerUseCommand = [
+    "cmd",
+    "/c",
+    "node",
+    "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
+  ]
+  const brokenWindowsComputerUseCommand = [
+    "cmd",
+    "/c",
+    "node",
+    "\"{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js\"",
+  ]
+
   test("resolves the managed packaged root under the user home directory", () => {
     expect(
       resolveManagedRootDirectory({
@@ -150,9 +173,233 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).toBe(
-      '{\n  "$schema": "https://lfcode.ai/config.json"\n}\n',
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+        mcp: {
+          playwright: {
+            type: "local",
+            command: playwrightCdpCommand,
+            enabled: true,
+          },
+          "windows-computer-use": {
+            type: "local",
+            command: windowsComputerUseCommand,
+            enabled: true,
+          },
+        },
+      })
+  })
+
+  test("upgrades the shipped mcp config without touching other MCPs", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify(
+        {
+          $schema: "https://lfcode.ai/config.json",
+          mcp: {
+            markitdown: {
+              type: "local",
+              command: ["C:\\tools\\markitdown-mcp\\.venv\\Scripts\\markitdown-mcp.exe"],
+              enabled: true,
+            },
+            codegraph: {
+              type: "local",
+              command: ["codegraph", "serve", "--mcp"],
+              enabled: true,
+            },
+            playwright: {
+              type: "local",
+              command: playwrightLegacyCommand,
+              enabled: true,
+            },
+          },
+        },
+        null,
+        2,
+      ),
     )
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        markitdown: {
+          type: "local",
+          command: ["C:\\tools\\markitdown-mcp\\.venv\\Scripts\\markitdown-mcp.exe"],
+          enabled: true,
+        },
+        codegraph: {
+          type: "local",
+          command: ["codegraph", "serve", "--mcp"],
+          enabled: true,
+        },
+        playwright: {
+          type: "local",
+          command: playwrightCdpCommand,
+          enabled: true,
+        },
+        "windows-computer-use": {
+          type: "local",
+          command: windowsComputerUseCommand,
+          enabled: true,
+        },
+      },
+    })
+  })
+
+  test("leaves a customized playwright config unchanged", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+    const customPlaywright = {
+      type: "local",
+      command: playwrightLegacyCommand,
+      enabled: true,
+      timeout: 12345,
+      environment: { DEBUG: "1" },
+    }
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify(
+        {
+          $schema: "https://lfcode.ai/config.json",
+          mcp: {
+            playwright: customPlaywright,
+          },
+        },
+        null,
+        2,
+      ),
+    )
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        playwright: customPlaywright,
+      },
+    })
+  })
+
+  test("upgrades a legacy windows-computer-use config to the bundled node launcher", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify(
+        {
+          $schema: "https://lfcode.ai/config.json",
+          mcp: {
+            "windows-computer-use": {
+              type: "local",
+              command: legacyWindowsComputerUseCommand,
+              enabled: true,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    )
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        "windows-computer-use": {
+          type: "local",
+          command: windowsComputerUseCommand,
+          enabled: true,
+        },
+      },
+    })
+  })
+
+  test("upgrades the broken cmd-wrapped windows-computer-use config", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify(
+        {
+          $schema: "https://lfcode.ai/config.json",
+          mcp: {
+            "windows-computer-use": {
+              type: "local",
+              command: brokenWindowsComputerUseCommand,
+              enabled: true,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    )
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        "windows-computer-use": {
+          type: "local",
+          command: windowsComputerUseCommand,
+          enabled: true,
+        },
+      },
+    })
   })
 
   test("migrates an existing installed-root layout into the managed home root", async () => {

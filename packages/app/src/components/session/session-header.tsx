@@ -11,6 +11,7 @@ import { getFilename } from "@lfcode-ai/shared/util/path"
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
+import { useSearchParams } from "@solidjs/router"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
@@ -27,91 +28,8 @@ import { formatServerError } from "@/utils/server-errors"
 import { Persist, persisted } from "@/utils/persist"
 import { StatusPopover } from "../status-popover"
 import { BROWSER_REQUEST_OPEN_EVENT, DEFAULT_BROWSER_URL } from "@/pages/session/helpers"
-
-const OPEN_APPS = [
-  "vscode",
-  "cursor",
-  "zed",
-  "textmate",
-  "antigravity",
-  "finder",
-  "terminal",
-  "iterm2",
-  "ghostty",
-  "warp",
-  "xcode",
-  "android-studio",
-  "powershell",
-  "sublime-text",
-] as const
-
-type OpenApp = (typeof OPEN_APPS)[number]
+import { LINUX_APPS, MAC_APPS, OPEN_APPS, type OpenApp, WINDOWS_APPS } from "./session-open-apps"
 type OS = "macos" | "windows" | "linux" | "unknown"
-
-const MAC_APPS = [
-  {
-    id: "vscode",
-    label: "session.header.open.app.vscode",
-    icon: "vscode",
-    openWith: "Visual Studio Code",
-  },
-  { id: "cursor", label: "session.header.open.app.cursor", icon: "cursor", openWith: "Cursor" },
-  { id: "zed", label: "session.header.open.app.zed", icon: "zed", openWith: "Zed" },
-  { id: "textmate", label: "session.header.open.app.textmate", icon: "textmate", openWith: "TextMate" },
-  {
-    id: "antigravity",
-    label: "session.header.open.app.antigravity",
-    icon: "antigravity",
-    openWith: "Antigravity",
-  },
-  { id: "terminal", label: "session.header.open.app.terminal", icon: "terminal", openWith: "Terminal" },
-  { id: "iterm2", label: "session.header.open.app.iterm2", icon: "iterm2", openWith: "iTerm" },
-  { id: "ghostty", label: "session.header.open.app.ghostty", icon: "ghostty", openWith: "Ghostty" },
-  { id: "warp", label: "session.header.open.app.warp", icon: "warp", openWith: "Warp" },
-  { id: "xcode", label: "session.header.open.app.xcode", icon: "xcode", openWith: "Xcode" },
-  {
-    id: "android-studio",
-    label: "session.header.open.app.androidStudio",
-    icon: "android-studio",
-    openWith: "Android Studio",
-  },
-  {
-    id: "sublime-text",
-    label: "session.header.open.app.sublimeText",
-    icon: "sublime-text",
-    openWith: "Sublime Text",
-  },
-] as const
-
-const WINDOWS_APPS = [
-  { id: "vscode", label: "session.header.open.app.vscode", icon: "vscode", openWith: "code" },
-  { id: "cursor", label: "session.header.open.app.cursor", icon: "cursor", openWith: "cursor" },
-  { id: "zed", label: "session.header.open.app.zed", icon: "zed", openWith: "zed" },
-  {
-    id: "powershell",
-    label: "session.header.open.app.powershell",
-    icon: "powershell",
-    openWith: "powershell",
-  },
-  {
-    id: "sublime-text",
-    label: "session.header.open.app.sublimeText",
-    icon: "sublime-text",
-    openWith: "Sublime Text",
-  },
-] as const
-
-const LINUX_APPS = [
-  { id: "vscode", label: "session.header.open.app.vscode", icon: "vscode", openWith: "code" },
-  { id: "cursor", label: "session.header.open.app.cursor", icon: "cursor", openWith: "cursor" },
-  { id: "zed", label: "session.header.open.app.zed", icon: "zed", openWith: "zed" },
-  {
-    id: "sublime-text",
-    label: "session.header.open.app.sublimeText",
-    icon: "sublime-text",
-    openWith: "Sublime Text",
-  },
-] as const
 
 const detectOS = (platform: ReturnType<typeof usePlatform>): OS => {
   if (platform.platform === "desktop" && platform.os) return platform.os
@@ -141,6 +59,15 @@ export function SessionHeader() {
   const sync = useSync()
   const terminal = useTerminal()
   const { params, view } = useSessionLayout()
+  const [searchParams, setSearchParams] = useSearchParams<{ agentID?: string }>()
+  const sessionActors = createMemo(() => (params.id ? sync.data.actor[params.id] ?? [] : []))
+  const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent").toSorted((a, b) => a.time.created - b.time.created))
+  const activeView = createMemo(() => {
+    const agentID = searchParams.agentID ?? "main"
+    if (agentID === "main") return "main"
+    if (subagents().some((actor) => actor.actorID === agentID)) return agentID
+    return "main"
+  })
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
   const project = createMemo(() => {
@@ -227,6 +154,7 @@ export function SessionHeader() {
 
   const [prefs, setPrefs] = persisted(Persist.global("open.app"), createStore({ app: "finder" as OpenApp }))
   const [menu, setMenu] = createStore({ open: false })
+  const [viewMenu, setViewMenu] = createStore({ open: false })
   const [openRequest, setOpenRequest] = createStore({
     app: undefined as OpenApp | undefined,
   })
@@ -278,6 +206,11 @@ export function SessionHeader() {
         })
       })
       .catch((err: unknown) => showRequestError(language, err))
+  }
+
+  const viewLabel = (agentID: string) => {
+    if (agentID === "main") return "返回主对话"
+    return subagents().find((actor) => actor.actorID === agentID)?.description ?? agentID
   }
 
   const [centerMount, setCenterMount] = createSignal<HTMLElement | null>(null)
@@ -437,6 +370,52 @@ export function SessionHeader() {
                 </div>
               </Show>
               <div class="flex items-center gap-1">
+                <Show when={params.id && sessionActors().length > 0}>
+                  <DropdownMenu gutter={4} placement="bottom-end" open={viewMenu.open} onOpenChange={(open) => setViewMenu("open", open)}>
+                    <DropdownMenu.Trigger
+                      as={Button}
+                      variant="ghost"
+                      class="h-6 max-w-[180px] gap-1.5 px-2 text-12-medium text-text-strong border border-border-weak-base bg-surface-panel shadow-none"
+                      aria-label={language.t("session.header.open.menu")}
+                    >
+                      <span class="truncate">{viewLabel(activeView())}</span>
+                      <Icon name="chevron-down" size="small" class="text-icon-weak" />
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content class="min-w-[220px]">
+                        <DropdownMenu.RadioGroup
+                          value={activeView()}
+                          onChange={(value) => {
+                            setSearchParams({ agentID: value === "main" ? undefined : `${value}` })
+                            setViewMenu("open", false)
+                          }}
+                        >
+                          <DropdownMenu.RadioItem value="main" class="font-medium">
+                            <DropdownMenu.ItemLabel>返回主对话</DropdownMenu.ItemLabel>
+                            <DropdownMenu.ItemIndicator>
+                              <Icon name="check-small" size="small" class="text-icon-weak" />
+                            </DropdownMenu.ItemIndicator>
+                          </DropdownMenu.RadioItem>
+                          <For each={subagents()}>
+                            {(actor) => (
+                              <DropdownMenu.RadioItem value={actor.actorID}>
+                                <div class="flex flex-col min-w-0">
+                                  <DropdownMenu.ItemLabel class="truncate">{actor.description}</DropdownMenu.ItemLabel>
+                                  <div class="text-11-regular text-text-weak">
+                                    {actor.actorID} · {actor.status}
+                                  </div>
+                                </div>
+                                <DropdownMenu.ItemIndicator>
+                                  <Icon name="check-small" size="small" class="text-icon-weak" />
+                                </DropdownMenu.ItemIndicator>
+                              </DropdownMenu.RadioItem>
+                            )}
+                          </For>
+                        </DropdownMenu.RadioGroup>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu>
+                </Show>
                 <Show when={status()}>
                   <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                     <StatusPopover />

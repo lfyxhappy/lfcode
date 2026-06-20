@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createMemo, createRoot } from "solid-js"
 import { createStore } from "solid-js/store"
 import {
+  BROWSER_HOME_URL,
   browserTab,
   browserTabID,
   createOpenReviewFile,
@@ -11,6 +12,7 @@ import {
   getTabReorderIndex,
   isBrowserTab,
   isAllowedBrowserURL,
+  normalizeBrowserRequestURL,
   normalizeBrowserURL,
   sanitizeBrowserURL,
   shouldFocusTerminalOnKeyDown,
@@ -215,6 +217,7 @@ describe("browser tab helpers", () => {
   })
 
   test("normalizes browser urls", () => {
+    expect(sanitizeBrowserURL("")).toBe(BROWSER_HOME_URL)
     expect(sanitizeBrowserURL("example.com")).toBe("https://example.com")
     expect(sanitizeBrowserURL("https://example.com")).toBe("https://example.com")
     expect(sanitizeBrowserURL("file:///C:/tmp/demo.txt")).toBe("file:///C:/tmp/demo.txt")
@@ -224,6 +227,7 @@ describe("browser tab helpers", () => {
 
   test("allows only supported embedded browser protocols", () => {
     expect(isAllowedBrowserURL("https://")).toBe(true)
+    expect(isAllowedBrowserURL(BROWSER_HOME_URL)).toBe(true)
     expect(isAllowedBrowserURL("https://example.com")).toBe(true)
     expect(isAllowedBrowserURL("http://example.com")).toBe(true)
     expect(isAllowedBrowserURL("file:///C:/tmp/demo.txt")).toBe(true)
@@ -232,11 +236,17 @@ describe("browser tab helpers", () => {
   })
 
   test("normalizes and rejects unsupported browser urls", () => {
-    expect(normalizeBrowserURL("")).toBe("https://")
-    expect(normalizeBrowserURL("https://")).toBe("https://")
+    expect(normalizeBrowserURL("")).toBe(BROWSER_HOME_URL)
+    expect(normalizeBrowserURL("https://")).toBe(BROWSER_HOME_URL)
     expect(normalizeBrowserURL("example.com")).toBe("https://example.com")
     expect(normalizeBrowserURL("file:///C:/tmp/demo.txt")).toBe("file:///C:/tmp/demo.txt")
     expect(normalizeBrowserURL("javascript:alert(1)")).toBeUndefined()
     expect(normalizeBrowserURL("custom-scheme://test")).toBeUndefined()
+  })
+
+  test("defaults browser open requests without a url to the home page", () => {
+    expect(normalizeBrowserRequestURL()).toBe(BROWSER_HOME_URL)
+    expect(normalizeBrowserRequestURL("")).toBe(BROWSER_HOME_URL)
+    expect(normalizeBrowserRequestURL("https://example.com")).toBe("https://example.com")
   })
 })

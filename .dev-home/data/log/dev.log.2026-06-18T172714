@@ -1,0 +1,131 @@
+INFO  2026-06-18T14:01:27 +64ms service=server-proxy version=local args=["serve"] process_role=main run_id=11e1c3eb-ed21-48e9-a00e-4e3c1a873a16 lfcode
+INFO  2026-06-18T14:01:27 +15ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db opening database
+INFO  2026-06-18T14:01:27 +5ms service=db count=34 mode=dev applying migrations
+INFO  2026-06-18T14:01:27 +2ms service=legacy-db reason=marker matches targetPath=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db legacy db merge skipped
+INFO  2026-06-18T14:01:27 +40ms service=file init
+INFO  2026-06-18T14:01:27 +7ms service=actor.registry orphan recovery complete
+INFO  2026-06-18T14:01:27 +8ms service=inbox inbox gc-on-init complete
+INFO  2026-06-18T14:01:27 +23ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\config.json loading
+INFO  2026-06-18T14:01:27 +9ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.json loading
+INFO  2026-06-18T14:01:27 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.jsonc loading
+INFO  2026-06-18T14:01:27 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.json loading
+INFO  2026-06-18T14:01:27 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\config\lfcode.jsonc loading
+INFO  2026-06-18T14:01:32 +5125ms service=server method=GET path=/global/event request
+INFO  2026-06-18T14:01:32 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-18T14:01:32 +1ms service=server global event connected
+INFO  2026-06-18T14:01:32 +3ms service=server status=completed duration=4 method=GET path=/global/event request
+INFO  2026-06-18T14:04:17 +164824ms service=server global event disconnected
+INFO  2026-06-18T14:04:25 +8108ms service=server method=GET path=/global/config request
+INFO  2026-06-18T14:04:25 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-18T14:04:25 +5ms service=server status=completed duration=5 method=GET path=/global/config request
+INFO  2026-06-18T14:04:25 +3ms service=server method=GET path=/global/event request
+INFO  2026-06-18T14:04:25 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-18T14:04:25 +0ms service=server global event connected
+INFO  2026-06-18T14:04:25 +1ms service=server status=completed duration=1 method=GET path=/global/event request
+INFO  2026-06-18T14:04:25 +59ms service=server method=GET path=/provider request
+INFO  2026-06-18T14:04:25 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-18T14:04:25 +3ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode creating instance
+INFO  2026-06-18T14:04:25 +131ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode bootstrapping
+DEBUG 2026-06-18T14:04:25 +35ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T14:04:25 +4ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc loading
+DEBUG 2026-06-18T14:04:25 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T14:04:25 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\.lfcode\lfcode.jsonc loading
+DEBUG 2026-06-18T14:04:25 +28ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T14:04:25 +3ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-06-18T14:04:25 +0ms service=server method=GET path=/path request
+INFO  2026-06-18T14:04:25 +0ms service=server status=started method=GET path=/path request
+DEBUG 2026-06-18T14:04:25 +7ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-06-18T14:04:25 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-06-18T14:04:25 +0ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-06-18T14:04:25 +1ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-06-18T14:04:25 +4ms service=config skipped Claude Code MCP server "markitdown"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T14:04:25 +0ms service=config skipped Claude Code MCP server "codegraph"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T14:04:25 +0ms service=config skipped Claude Code MCP server "playwright"; native lfcode MCP with same name already exists.
+INFO  2026-06-18T14:04:25 +6ms service=plugin name=MimoFreeAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=MimoAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +1ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=gitlabAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=PoeAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+INFO  2026-06-18T14:04:25 +1ms service=bus type=* subscribing
+INFO  2026-06-18T14:04:25 +2ms service=bus type=command.executed subscribing
+INFO  2026-06-18T14:04:25 +2ms service=lsp all LSPs are disabled
+INFO  2026-06-18T14:04:25 +0ms service=bus type=session.updated subscribing
+INFO  2026-06-18T14:04:25 +0ms service=bus type=message.updated subscribing
+INFO  2026-06-18T14:04:25 +0ms service=bus type=message.part.updated subscribing
+INFO  2026-06-18T14:04:25 +1ms service=bus type=session.diff subscribing
+INFO  2026-06-18T14:04:25 +0ms service=bus type=session.deleted subscribing
+INFO  2026-06-18T14:04:25 +0ms service=format all formatters are disabled
+INFO  2026-06-18T14:04:25 +0ms service=format init
+INFO  2026-06-18T14:04:25 +2ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode init
+INFO  2026-06-18T14:04:25 +2ms service=file.watcher directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode platform=win32 backend=windows watcher backend
+INFO  2026-06-18T14:04:25 +1ms service=bus type=message.part.updated subscribing
+INFO  2026-06-18T14:04:25 +1ms service=bus type=message.part.removed subscribing
+INFO  2026-06-18T14:04:25 +5ms service=bus type=metrics.model_call subscribing
+INFO  2026-06-18T14:04:25 +0ms service=bus type=metrics.tool_call subscribing
+INFO  2026-06-18T14:04:25 +0ms service=bus type=metrics.agent_request subscribing
+INFO  2026-06-18T14:04:25 +2ms service=server status=completed duration=38 method=GET path=/path request
+INFO  2026-06-18T14:04:25 +24ms service=provider status=started state
+INFO  2026-06-18T14:04:25 +32ms service=provider init
+WARN  2026-06-18T14:04:25 +0ms service=provider providerID=coderelay modelID=grok-4.3 defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.coderelay.models.grok-4.3 limit.context not configured and not found in models.dev
+INFO  2026-06-18T14:04:26 +39ms service=server method=GET path=/project request
+INFO  2026-06-18T14:04:26 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-18T14:04:26 +2ms service=server status=completed duration=2 method=GET path=/project request
+INFO  2026-06-18T14:04:26 +201ms service=provider providerID=coderelay found
+INFO  2026-06-18T14:04:26 +0ms service=provider providerID=mimo found
+INFO  2026-06-18T14:04:26 +1ms service=provider providerID=xiaomi found
+INFO  2026-06-18T14:04:26 +0ms service=provider status=completed duration=275 state
+INFO  2026-06-18T14:04:26 +51ms service=server status=completed duration=593 method=GET path=/provider request
+INFO  2026-06-18T14:04:26 +8ms service=vcs branch=dev default_branch=dev initialized
+INFO  2026-06-18T14:04:26 +0ms service=bus type=file.watcher.updated subscribing
+INFO  2026-06-18T14:04:37 +11222ms service=history.backfill sessions=146 backfill complete
+INFO  2026-06-18T14:05:11 +33710ms service=server global event disconnected
+INFO  2026-06-18T14:05:11 +255ms service=server method=GET path=/global/config request
+INFO  2026-06-18T14:05:11 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-18T14:05:11 +2ms service=server status=completed duration=2 method=GET path=/global/config request
+INFO  2026-06-18T14:05:11 +92ms service=server method=GET path=/provider request
+INFO  2026-06-18T14:05:11 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-18T14:05:11 +49ms service=server status=completed duration=49 method=GET path=/provider request
+INFO  2026-06-18T14:05:11 +1ms service=server method=GET path=/path request
+INFO  2026-06-18T14:05:11 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-18T14:05:11 +1ms service=server status=completed duration=1 method=GET path=/path request
+INFO  2026-06-18T14:05:11 +0ms service=server method=GET path=/project request
+INFO  2026-06-18T14:05:11 +1ms service=server status=started method=GET path=/project request
+INFO  2026-06-18T14:05:11 +1ms service=server status=completed duration=1 method=GET path=/project request
+INFO  2026-06-18T14:05:12 +605ms service=server method=GET path=/global/event request
+INFO  2026-06-18T14:05:12 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-18T14:05:12 +0ms service=server global event connected
+INFO  2026-06-18T14:05:12 +0ms service=server status=completed duration=0 method=GET path=/global/event request
+INFO  2026-06-18T14:05:54 +41852ms service=server global event disconnected
+INFO  2026-06-18T14:05:55 +964ms service=server method=GET path=/global/config request
+INFO  2026-06-18T14:05:55 +0ms service=server status=started method=GET path=/global/config request
+INFO  2026-06-18T14:05:55 +1ms service=server status=completed duration=1 method=GET path=/global/config request
+INFO  2026-06-18T14:05:55 +80ms service=server method=GET path=/provider request
+INFO  2026-06-18T14:05:55 +0ms service=server status=started method=GET path=/provider request
+INFO  2026-06-18T14:05:55 +47ms service=server status=completed duration=47 method=GET path=/provider request
+INFO  2026-06-18T14:05:55 +17ms service=server method=GET path=/path request
+INFO  2026-06-18T14:05:55 +0ms service=server status=started method=GET path=/path request
+INFO  2026-06-18T14:05:55 +1ms service=server status=completed duration=1 method=GET path=/path request
+INFO  2026-06-18T14:05:55 +5ms service=server method=GET path=/project request
+INFO  2026-06-18T14:05:55 +0ms service=server status=started method=GET path=/project request
+INFO  2026-06-18T14:05:55 +2ms service=server status=completed duration=2 method=GET path=/project request
+INFO  2026-06-18T14:05:55 +491ms service=server method=GET path=/global/event request
+INFO  2026-06-18T14:05:55 +0ms service=server status=started method=GET path=/global/event request
+INFO  2026-06-18T14:05:55 +0ms service=server global event connected
+INFO  2026-06-18T14:05:55 +0ms service=server status=completed duration=0 method=GET path=/global/event request
+INFO  2026-06-18T14:09:28 +212825ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T14:09:28 +69ms service=bus type=file.watcher.updated publishing
+INFO  2026-06-18T14:15:23 +355367ms service=server method=GET path=/provider/auth request
+INFO  2026-06-18T14:15:23 +0ms service=server status=started method=GET path=/provider/auth request
+INFO  2026-06-18T14:15:23 +4ms service=server status=completed duration=4 method=GET path=/provider/auth request

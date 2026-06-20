@@ -79,6 +79,11 @@ _Major design choices with rationale. The "why" matters more than the "what" for
 _Cross-task facts that survive across sessions. Promoted from session checkpoints' §7 when proven durable._
 
 (none yet)
+
+## Spillover index
+_Topic memory files that hold colder or larger durable themes. Keep one unique line per topic using: \`- <topic label> -> <filename> | keywords: <comma-separated keywords> | summary: <one-line summary>\`._
+
+(none yet)
 `
 
 /**
@@ -100,13 +105,14 @@ export const CHECKPOINT_SECTION_BUDGETS: Record<string, number> = {
 }
 
 /**
- * Section budgets for MEMORY.md (project-level). Total ~10K.
+ * Section budgets for MEMORY.md (project-level). Total ~16K.
  */
 export const MEMORY_SECTION_BUDGETS: Record<string, number> = {
   "Project context": 1000,
-  "Rules": 2000,
-  "Architecture decisions": 3000,
-  "Discovered durable knowledge": 4000,
+  "Rules": 3000,
+  "Architecture decisions": 4500,
+  "Discovered durable knowledge": 6500,
+  "Spillover index": 1000,
 }
 
 export const NOTES_TEMPLATE = `# Session notes

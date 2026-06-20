@@ -298,7 +298,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       before?: string
     }) => {
       const messages = await retry(() =>
-        input.client.session.messages({ sessionID: input.sessionID, limit: input.limit, before: input.before }),
+        input.client.session.messages({
+          sessionID: input.sessionID,
+          limit: input.limit,
+          before: input.before,
+          agent_id: "*",
+        }),
       )
       const items = (messages.data ?? []).filter((x) => !!x?.info?.id)
       const session = items.map((x) => clean(x.info)).sort((a, b) => cmp(a.id, b.id))
@@ -349,6 +354,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             setSessionPrefetch({
               directory: input.directory,
               sessionID: input.sessionID,
+              scope: "all",
               limit: message.length,
               cursor: next.cursor,
               complete: next.complete,
@@ -436,7 +442,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           touch(directory, setStore, sessionID)
 
           const seeded = getSessionPrefetch(directory, sessionID)
-          if (seeded && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
+          if (seeded?.scope === "all" && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
             batch(() => {
               setMeta("limit", key, seeded.limit)
               setMeta("cursor", key, seeded.cursor)
@@ -450,7 +456,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             if (pending) {
               await pending
               const seeded = getSessionPrefetch(directory, sessionID)
-              if (seeded && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
+              if (seeded?.scope === "all" && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
                 batch(() => {
                   setMeta("limit", key, seeded.limit)
                   setMeta("cursor", key, seeded.cursor)
@@ -464,39 +470,54 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             const cached = store.message[sessionID] !== undefined && meta.limit[key] !== undefined
             if (cached && hasSession && !opts?.force) return
 
-            const limit = meta.limit[key] ?? initialMessagePageSize
-            const sessionReq =
-              hasSession && !opts?.force
-                ? Promise.resolve()
-                : retry(() => client.session.get({ sessionID })).then((session) => {
-                    if (!tracked(directory, sessionID)) return
-                    const data = session.data
-                    if (!data) return
-                    setStore(
-                      "session",
-                      produce((draft) => {
-                        const match = Binary.search(draft, sessionID, (s) => s.id)
-                        if (match.found) {
-                          draft[match.index] = data
-                          return
-                        }
-                        draft.splice(match.index, 0, data)
-                      }),
-                    )
-                  })
+            const limit = Math.max(meta.limit[key] ?? 0, initialMessagePageSize)
+            const sessionReq = hasSession && !opts?.force
+              ? Promise.resolve()
+              : retry(() => client.session.get({ sessionID })).then((session) => {
+                  if (!tracked(directory, sessionID)) return
+                  const data = session.data
+                  if (!data) return
+                  setStore(
+                    "session",
+                    produce((draft) => {
+                      const match = Binary.search(draft, sessionID, (s) => s.id)
+                      if (match.found) {
+                        draft[match.index] = data
+                        return
+                      }
+                      draft.splice(match.index, 0, data)
+                    }),
+                  )
+                })
+            const actorReq = retry(() => client.session.actors({ sessionID }))
+            const messagesReq = cached && !opts?.force
+              ? Promise.resolve()
+              : loadMessages({
+                  directory,
+                  client,
+                  setStore,
+                  sessionID,
+                  limit,
+                })
 
-            const messagesReq =
-              cached && !opts?.force
-                ? Promise.resolve()
-                : loadMessages({
-                    directory,
-                    client,
-                    setStore,
-                    sessionID,
-                    limit,
-                  })
-
-            await Promise.all([sessionReq, messagesReq])
+            await Promise.all([
+              sessionReq,
+              actorReq.then((actors) => {
+                if (!tracked(directory, sessionID)) return
+                const list = (actors.data ?? []) as {
+                  actorID: string
+                  sessionID: string
+                  mode: string
+                  status: string
+                  description: string
+                  time: { created: number }
+                  agent?: string
+                  parentActorID?: string
+                }[]
+                setStore("actor", sessionID, list.sort((a, b) => a.time.created - b.time.created))
+              }),
+              messagesReq,
+            ])
           })
         },
         async diff(sessionID: string, opts?: { force?: boolean }) {

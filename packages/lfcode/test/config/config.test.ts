@@ -60,6 +60,8 @@ const it = testEffect(layer)
 const load = () => Effect.runPromise(Config.Service.use((svc) => svc.get()).pipe(Effect.scoped, Effect.provide(layer)))
 const save = (config: Config.Info) =>
   Effect.runPromise(Config.Service.use((svc) => svc.update(config)).pipe(Effect.scoped, Effect.provide(layer)))
+const saveGlobal = (config: Config.Patch) =>
+  Effect.runPromise(Config.Service.use((svc) => svc.updateGlobal(config)).pipe(Effect.scoped, Effect.provide(layer)))
 const removeGlobalCustomProvider = (providerID: string) =>
   Effect.runPromise(
     Config.Service.use((svc) => svc.removeGlobalCustomProvider(providerID)).pipe(Effect.scoped, Effect.provide(layer)),
@@ -133,6 +135,9 @@ test("loads config with defaults when no files exist", async () => {
     fn: async () => {
       const config = await load()
       expect(config.username).toBeDefined()
+      expect(config.checkpoint?.push_caps?.memory).toBeUndefined()
+      expect(config.checkpoint?.push_caps?.memory_spillover_total).toBeUndefined()
+      expect(config.checkpoint?.push_caps?.memory_spillover_files).toBeUndefined()
     },
   })
 })
@@ -343,6 +348,29 @@ test("ignores legacy tui keys in lfcode config", async () => {
   })
 })
 
+test("ignores legacy skills config in lfcode config", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        $schema: "https://lfcode.ai/config.json",
+        skills: {
+          paths: ["./skills"],
+          urls: ["https://example.com/.well-known/skills/"],
+        },
+        model: "test/model",
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await load()
+      expect(config.model).toBe("test/model")
+      expect((config as Record<string, unknown>).skills).toBeUndefined()
+    },
+  })
+})
+
 test("loads JSONC config file", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
@@ -415,6 +443,64 @@ test("loads global lfcode.jsonc from the configured global config directory", as
         )
       },
     })
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("updateGlobal merges subagent model patches and deletes null model keys", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      `{
+        "$schema": "https://lfcode.ai/config.json",
+        "enabled_providers": ["openai"],
+        "agent": {
+          "general": {
+            "prompt": "keep me"
+          }
+        }
+      }`,
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const written = await saveGlobal({
+          agent: {
+            general: {
+              model: "openai/gpt-5",
+            },
+          },
+        })
+        expect(written.enabled_providers).toEqual(["openai"])
+        expect(written.agent?.general?.model).toBe("openai/gpt-5")
+        expect(written.agent?.general?.prompt).toBe("keep me")
+
+        const cleared = await saveGlobal({
+          agent: {
+            general: {
+              model: null,
+            },
+          },
+        })
+        expect(cleared.enabled_providers).toEqual(["openai"])
+        expect(cleared.agent?.general?.model).toBeUndefined()
+        expect(cleared.agent?.general?.prompt).toBe("keep me")
+      },
+    })
+
+    const text = await fs.readFile(file, "utf-8")
+    expect(text).toContain('"prompt": "keep me"')
+    expect(text).not.toContain('"model": "openai/gpt-5"')
   } finally {
     await Instance.disposeAll()
     ;(Global.Path as { config: string }).config = prev
@@ -2654,6 +2740,47 @@ describe("LFCODE_CONFIG_CONTENT token substitution", () => {
         fn: async () => {
           const config = await load()
           expect(config.username).toBe("test_api_key_12345")
+        },
+      })
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env["LFCODE_CONFIG_CONTENT"] = originalEnv
+      } else {
+        delete process.env["LFCODE_CONFIG_CONTENT"]
+      }
+      if (originalTestVar !== undefined) {
+        process.env["TEST_CONFIG_VAR"] = originalTestVar
+      } else {
+        delete process.env["TEST_CONFIG_VAR"]
+      }
+    }
+  })
+
+  test("preserves windows paths in {env:} substitutions", async () => {
+    const originalEnv = process.env["LFCODE_CONFIG_CONTENT"]
+    const originalTestVar = process.env["TEST_CONFIG_VAR"]
+    process.env["TEST_CONFIG_VAR"] = "C:\\tools\\markitdown-mcp\\.venv\\Scripts\\markitdown-mcp.exe"
+    process.env["LFCODE_CONFIG_CONTENT"] = JSON.stringify({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        markitdown: {
+          type: "local",
+          command: ["{env:TEST_CONFIG_VAR}"],
+          enabled: true,
+        },
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir()
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const config = await load()
+          expect(config.mcp?.markitdown?.type).toBe("local")
+          expect(config.mcp?.markitdown?.command).toEqual([
+            "C:\\tools\\markitdown-mcp\\.venv\\Scripts\\markitdown-mcp.exe",
+          ])
         },
       })
     } finally {

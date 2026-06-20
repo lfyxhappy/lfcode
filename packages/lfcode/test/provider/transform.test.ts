@@ -1066,6 +1066,53 @@ describe("ProviderTransform.message - empty image handling", () => {
     headers: {},
   } as any
 
+  test("respects explicit image capability overrides for GPT and Claude models", () => {
+    const msgs = [
+      {
+        role: "user",
+        content: [{ type: "image", image: "data:image/png;base64,aGVsbG8=" }],
+      },
+    ] as any[]
+
+    const blockedGpt = ProviderTransform.message(
+      msgs,
+      {
+        ...mockModel,
+        id: ModelID.make("gpt-5-manual"),
+        providerID: ProviderID.make("custom-openai"),
+        api: {
+          id: "gpt-5-manual",
+          url: "https://api.example.com",
+          npm: "@ai-sdk/openai-compatible",
+        },
+        capabilities: {
+          ...mockModel.capabilities,
+          input: { ...mockModel.capabilities.input, image: false },
+        },
+      },
+      {},
+    )
+
+    expect((blockedGpt[0].content as any[])[0]).toEqual({
+      type: "text",
+      text: "ERROR: Cannot read image (this model does not support image input). Inform the user.",
+    })
+
+    const allowedClaude = ProviderTransform.message(
+      msgs,
+      {
+        ...mockModel,
+        capabilities: {
+          ...mockModel.capabilities,
+          input: { ...mockModel.capabilities.input, image: true },
+        },
+      },
+      {},
+    )
+
+    expect((allowedClaude[0].content as any[])[0]).toEqual(msgs[0].content[0])
+  })
+
   test("should replace empty base64 image with error text", () => {
     const msgs = [
       {

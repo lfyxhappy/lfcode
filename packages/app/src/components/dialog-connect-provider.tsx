@@ -16,6 +16,10 @@ import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
+import {
+  VOLCENGINE_CODING_PLAN_NAME,
+  VOLCENGINE_CODING_PLAN_PROVIDER_ID,
+} from "@lfcode-ai/shared/volcengine-coding-plan"
 
 export function DialogConnectProvider(props: { provider: string; returnTo?: "models" }) {
   const dialog = useDialog()
@@ -49,7 +53,22 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
   const provider = createMemo(
     () =>
       providers.all().find((x) => x.id === props.provider) ??
-      globalSync.data.provider.all.find((x) => x.id === props.provider)!,
+      globalSync.data.provider.all.find((x) => x.id === props.provider) ??
+      (props.provider === VOLCENGINE_CODING_PLAN_PROVIDER_ID
+        ? {
+            id: VOLCENGINE_CODING_PLAN_PROVIDER_ID,
+            name: VOLCENGINE_CODING_PLAN_NAME,
+            env: [],
+            options: {},
+            models: {},
+            source: "custom" as const,
+          }
+        : undefined)!,
+  )
+  const providerName = createMemo(() =>
+    props.provider === VOLCENGINE_CODING_PLAN_PROVIDER_ID
+      ? language.t("dialog.provider.volcengineCodingPlan.name")
+      : provider().name,
   )
   const fallback = createMemo<ProviderAuthMethod[]>(() => [
     {
@@ -338,7 +357,14 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
   })
 
   async function complete() {
-    await globalSync.reloadProviders()
+    const disabledProviders = globalSync.data.config.disabled_providers ?? []
+    if (disabledProviders.includes(props.provider)) {
+      await globalSync.updateConfig({
+        disabled_providers: disabledProviders.filter((providerID) => providerID !== props.provider),
+      })
+    } else {
+      await globalSync.reloadProviders()
+    }
     if (props.returnTo === "models") {
       showModels()
     } else {
@@ -347,8 +373,8 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
     showToast({
       variant: "success",
       icon: "circle-check",
-      title: language.t("provider.connect.toast.connected.title", { provider: provider().name }),
-      description: language.t("provider.connect.toast.connected.description", { provider: provider().name }),
+      title: language.t("provider.connect.toast.connected.title", { provider: providerName() }),
+      description: language.t("provider.connect.toast.connected.description", { provider: providerName() }),
     })
   }
 
@@ -372,7 +398,7 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
     return (
       <>
         <div class="text-14-regular text-text-base">
-          {language.t("provider.connect.selectMethod", { provider: provider().name })}
+          {language.t("provider.connect.selectMethod", { provider: providerName() })}
         </div>
         <div>
           <List
@@ -447,7 +473,7 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
           </Match>
           <Match when={true}>
             <div class="text-14-regular text-text-base">
-              {language.t("provider.connect.apiKey.description", { provider: provider().name })}
+              {language.t("provider.connect.apiKey.description", { provider: providerName() })}
             </div>
           </Match>
         </Switch>
@@ -455,7 +481,7 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
           <TextField
             autofocus
             type="text"
-            label={language.t("provider.connect.apiKey.label", { provider: provider().name })}
+            label={language.t("provider.connect.apiKey.label", { provider: providerName() })}
             placeholder={language.t("provider.connect.apiKey.placeholder")}
             name="apiKey"
             value={formStore.value}
@@ -605,7 +631,7 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
               <Match when={props.provider === "anthropic" && method()?.label?.toLowerCase().includes("max")}>
                 {language.t("provider.connect.title.anthropicProMax")}
               </Match>
-              <Match when={true}>{language.t("provider.connect.title", { provider: provider().name })}</Match>
+              <Match when={true}>{language.t("provider.connect.title", { provider: providerName() })}</Match>
             </Switch>
           </div>
         </div>

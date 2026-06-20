@@ -23,6 +23,7 @@ export interface Settings {
     autoSave: boolean
     releaseNotes: boolean
     followup: "queue" | "steer"
+    restrictExternalDirectories: boolean
     showFileTree: boolean
     showNavigation: boolean
     showSearch: boolean
@@ -40,6 +41,13 @@ export interface Settings {
     mono: string
     sans: string
     terminal: string
+    liquidGlass: {
+      blur: number
+      opacity: number
+      highlight: number
+      tint: number
+      saturation: number
+    }
   }
   keybinds: Record<string, string>
   permissions: {
@@ -52,6 +60,13 @@ export interface Settings {
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
+export const liquidGlassDefaults = {
+  blur: 24,
+  opacity: 68,
+  highlight: 76,
+  tint: 44,
+  saturation: 126,
+} as const
 
 const monoFallback =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
@@ -107,6 +122,7 @@ const defaultSettings: Settings = {
     autoSave: true,
     releaseNotes: true,
     followup: "steer",
+    restrictExternalDirectories: false,
     showFileTree: false,
     showNavigation: false,
     showSearch: false,
@@ -124,6 +140,7 @@ const defaultSettings: Settings = {
     mono: "",
     sans: "",
     terminal: "",
+    liquidGlass: { ...liquidGlassDefaults },
   },
   keybinds: {},
   permissions: {
@@ -185,6 +202,13 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         ),
         setFollowup(value: "queue" | "steer") {
           setStore("general", "followup", value === "queue" ? "steer" : value)
+        },
+        restrictExternalDirectories: withFallback(
+          () => store.general?.restrictExternalDirectories,
+          defaultSettings.general.restrictExternalDirectories,
+        ),
+        setRestrictExternalDirectories(value: boolean) {
+          setStore("general", "restrictExternalDirectories", value)
         },
         showFileTree: withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree),
         setShowFileTree(value: boolean) {
@@ -250,6 +274,40 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
+        },
+        liquidGlass: {
+          blur: withFallback(() => store.appearance?.liquidGlass?.blur, defaultSettings.appearance.liquidGlass.blur),
+          opacity: withFallback(
+            () => store.appearance?.liquidGlass?.opacity,
+            defaultSettings.appearance.liquidGlass.opacity,
+          ),
+          highlight: withFallback(
+            () => store.appearance?.liquidGlass?.highlight,
+            defaultSettings.appearance.liquidGlass.highlight,
+          ),
+          tint: withFallback(() => store.appearance?.liquidGlass?.tint, defaultSettings.appearance.liquidGlass.tint),
+          saturation: withFallback(
+            () => store.appearance?.liquidGlass?.saturation,
+            defaultSettings.appearance.liquidGlass.saturation,
+          ),
+          setBlur(value: number) {
+            setStore("appearance", "liquidGlass", "blur", value)
+          },
+          setOpacity(value: number) {
+            setStore("appearance", "liquidGlass", "opacity", value)
+          },
+          setHighlight(value: number) {
+            setStore("appearance", "liquidGlass", "highlight", value)
+          },
+          setTint(value: number) {
+            setStore("appearance", "liquidGlass", "tint", value)
+          },
+          setSaturation(value: number) {
+            setStore("appearance", "liquidGlass", "saturation", value)
+          },
+          reset() {
+            setStore("appearance", "liquidGlass", { ...defaultSettings.appearance.liquidGlass })
+          },
         },
       },
       keybinds: {

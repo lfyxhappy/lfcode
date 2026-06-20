@@ -1,8 +1,8 @@
 import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { Icon } from "@lfcode-ai/ui/icon"
 import { TooltipKeybind } from "@lfcode-ai/ui/tooltip"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Mark } from "@lfcode-ai/ui/logo"
@@ -32,11 +32,13 @@ import {
   createBrowserTabID,
   createOpenSessionFileTab,
   createSessionTabs,
+  formatBrowserTabLabel,
   getTabReorderIndex,
   isBrowserTab,
-  normalizeBrowserURL,
+  normalizeBrowserRequestURL,
   type Sizing,
 } from "@/pages/session/helpers"
+import { buildDetachedSidePanelRoute } from "@/pages/session/detached-side-panel"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { BrowserPanel } from "@/pages/session/browser-panel"
@@ -65,7 +67,7 @@ export function SessionSidePanel(props: {
   const dialog = useDialog()
   const { sessionKey, tabs, view } = useSessionLayout()
 
-  const isDesktop = createMediaQuery("(min-width: 768px)")
+  const isDesktop = createMemo(() => platform.platform === "desktop")
   const shown = createMemo(
     () =>
       platform.platform !== "desktop" ||
@@ -150,6 +152,7 @@ export function SessionSidePanel(props: {
     normalizeTab,
     review: reviewTab,
     hasReview: props.canReview,
+    detachedTabs: createMemo(() => layout.detachedPanels.listFor(sessionKey)().map((item) => item.tab)),
   })
   const contextOpen = tabState.contextOpen
   const openedTabs = tabState.openedTabs
@@ -159,10 +162,8 @@ export function SessionSidePanel(props: {
 
   onMount(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string }>).detail
-      const url = detail?.url
-      if (!url) return
-      const next = normalizeBrowserURL(url)
+      const detail = (event as CustomEvent<{ url?: string }>).detail
+      const next = normalizeBrowserRequestURL(detail?.url)
       if (!next) {
         showToast({
           title: language.t("toast.browser.invalidUrl.title"),
@@ -199,7 +200,74 @@ export function SessionSidePanel(props: {
 
   const [store, setStore] = createStore({
     activeDraggable: undefined as string | undefined,
+    dockTargetActive: false,
+    tabStripBounds: undefined as DOMRect | undefined,
+    detachPreview: undefined as
+      | {
+          tab: string
+          x: number
+          y: number
+          width: number
+          height: number
+          offsetX: number
+          offsetY: number
+        }
+      | undefined,
   })
+
+  const detachedForSession = createMemo(() => layout.detachedPanels.listFor(sessionKey)())
+
+  const tabKind = (tab: string) => {
+    if (tab === "review") return "review" as const
+    if (tab === "context") return "context" as const
+    if (isBrowserTab(tab)) return "browser" as const
+    return "file" as const
+  }
+
+  const tabTitle = (tab: string) => {
+    if (tab === "review") return language.t("session.tab.review")
+    if (tab === "context") return language.t("session.tab.context")
+    if (isBrowserTab(tab)) {
+      const id = browserTabID(tab)
+      const current = id ? view().browser.get(id) : undefined
+      return current ? formatBrowserTabLabel(current.title ?? current.url) : tab
+    }
+    const path = file.pathFromTab(tab)
+    return path ? path.split(/[\\/]/).pop() ?? path : tab
+  }
+
+  const detachTab = async (tab: string) => {
+    if (platform.platform !== "desktop" || !platform.createDetachedSidePanelWindow) return
+    if (detachedForSession().some((item) => item.tab === tab)) return
+    const kind = tabKind(tab)
+    const detachedWindowID = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const route = buildDetachedSidePanelRoute({
+      detachedWindowID,
+      sessionKey: sessionKey(),
+      tab,
+      kind,
+    })
+    layout.detachedPanels.detach({
+      detachedWindowID,
+      sessionKey: sessionKey(),
+      tab,
+      kind,
+      sourceWindowID: -1,
+      title: tabTitle(tab),
+    })
+    await platform
+      .createDetachedSidePanelWindow({
+        detachedWindowID,
+        route,
+        sessionKey: sessionKey(),
+        tab,
+        kind,
+        title: tabTitle(tab),
+      })
+      .catch(() => {
+        layout.detachedPanels.redock(detachedWindowID)
+      })
+  }
 
   const handleDragStart = (event: unknown) => {
     const id = getDraggableId(event)
@@ -219,6 +287,7 @@ export function SessionSidePanel(props: {
 
   const handleDragEnd = () => {
     setStore("activeDraggable", undefined)
+    setStore("detachPreview", undefined)
   }
 
   createEffect(() => {
@@ -242,6 +311,22 @@ export function SessionSidePanel(props: {
     })
   })
 
+  createEffect(() => {
+    if (!platform.onDetachedSidePanelEvent) return
+    return platform.onDetachedSidePanelEvent((event) => {
+      if (event.type === "sync") {
+        layout.detachedPanels.sync(event.records)
+        return
+      }
+      if (event.type === "redock") {
+        layout.detachedPanels.redock(event.detachedWindowID, event.placement)
+        return
+      }
+      if (event.type === "prepare-redock") return
+      setStore("dockTargetActive", event.active)
+    })
+  })
+
   return (
     <Show when={isDesktop()}>
       <aside
@@ -255,7 +340,7 @@ export function SessionSidePanel(props: {
           "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
             !props.size.active() && !props.reviewSnap,
         }}
-        style={{ width: panelWidth() }}
+        style={{ width: panelWidth(), display: open() ? undefined : "none" }}
       >
         <div class="size-full flex border-l border-border-weaker-base">
           <div
@@ -278,10 +363,30 @@ export function SessionSidePanel(props: {
                 <Tabs value={activeTab()} onChange={openTab}>
                   <div class="sticky top-0 shrink-0 flex">
                     <Tabs.List
+                      data-component="detached-dock-target"
+                      data-active={store.dockTargetActive ? "true" : "false"}
                       ref={(el: HTMLDivElement) => {
                         const stop = createFileTabListSync({ el, contextOpen })
                         onCleanup(stop)
+                        createEffect(() => {
+                          if (!platform.setDetachedDockTarget || !platform.clearDetachedDockTarget) return
+                          const rect = el.getBoundingClientRect()
+                          setStore("tabStripBounds", rect)
+                          void platform.setDetachedDockTarget({
+                            sessionKey: sessionKey(),
+                            rect: {
+                              x: rect.x,
+                              y: rect.y,
+                              width: rect.width,
+                              height: rect.height,
+                            },
+                          })
+                          onCleanup(() => {
+                            void platform.clearDetachedDockTarget?.()
+                          })
+                        })
                       }}
+                      classList={{ "ring-1 ring-border-info-base": store.dockTargetActive }}
                     >
                       <Show when={reviewTab() && props.canReview()}>
                         <Tabs.Trigger value="review">
@@ -327,6 +432,13 @@ export function SessionSidePanel(props: {
                             <SortableTab
                               tab={tab}
                               onTabClose={tabs().close}
+                              detachBounds={() => store.tabStripBounds}
+                              onDetachPreviewChange={(value) => {
+                                setStore("detachPreview", value)
+                              }}
+                              onDetach={(next) => {
+                                void detachTab(next)
+                              }}
                               onBrowserTabClose={(tabID) => {
                                 layout.view(sessionKey()).browser.close(tabID)
                                 tabs().close(browserTab(tabID))
@@ -398,23 +510,57 @@ export function SessionSidePanel(props: {
                         forceMount
                         style={{ display: activeTab() === tab ? undefined : "none" }}
                       >
-                        <BrowserPanel tab={tab} />
+                        <BrowserPanel tab={tab} visible={reviewOpen() && activeTab() === tab} />
                       </Tabs.Content>
                     )}
                   </For>
                 </Tabs>
                 <DragOverlay>
-                  <Show when={store.activeDraggable} keyed>
+                  <Show when={store.detachPreview ? undefined : store.activeDraggable} keyed>
                     {(tab) => {
                       const path = file.pathFromTab(tab)
                       return (
-                        <div data-component="tabs-drag-preview">
+                        <div data-component="detached-tab-drag-preview">
                           <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
                         </div>
                       )
                     }}
                   </Show>
                 </DragOverlay>
+                <Show when={store.detachPreview}>
+                  {(preview) => {
+                    const path = file.pathFromTab(preview().tab)
+                    const browserID = browserTabID(preview().tab)
+                    const browser = browserID ? view().browser.get(browserID) : undefined
+                    return (
+                      <div
+                        data-component="detached-tab-live-preview"
+                        style={{
+                          width: `${preview().width}px`,
+                          height: `${preview().height}px`,
+                          left: `${preview().x - preview().offsetX}px`,
+                          top: `${preview().y - preview().offsetY}px`,
+                        }}
+                      >
+                        <Show
+                          when={browser}
+                          fallback={<Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>}
+                        >
+                          {(value) => (
+                            <div class="flex items-center gap-1.5 min-w-0">
+                              <div class="flex size-4 shrink-0 items-center justify-center rounded-sm bg-surface-base">
+                                <Icon name="window-cursor" size="small" class="text-text-weak" />
+                              </div>
+                              <span class="text-14-medium truncate">
+                                {formatBrowserTabLabel(value().title ?? value().url)}
+                              </span>
+                            </div>
+                          )}
+                        </Show>
+                      </div>
+                    )
+                  }}
+                </Show>
               </DragDropProvider>
             </div>
           </div>

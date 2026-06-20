@@ -4,6 +4,7 @@ import { createSimpleContext } from "@lfcode-ai/ui/context"
 import type { PermissionRequest } from "@lfcode-ai/sdk/v2/client"
 import { Persist, persisted } from "@/utils/persist"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { useSettings } from "@/context/settings"
 import { useGlobalSync } from "./global-sync"
 import { useParams } from "@solidjs/router"
 import { decode64 } from "@/utils/base64"
@@ -50,6 +51,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
     const params = useParams()
     const globalSDK = useGlobalSDK()
     const globalSync = useGlobalSync()
+    const settings = useSettings()
 
     const permissionsEnabled = createMemo(() => {
       const directory = decode64(params.dir)
@@ -104,6 +106,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
     const RESPONDED_TTL_MS = 60 * 60 * 1000
     const responded = new Map<string, number>()
     const enableVersion = new Map<string, number>()
+    const pendingExternalDirectories = new Set<string>()
 
     function pruneResponded(now: number) {
       for (const [id, ts] of responded) {
@@ -149,8 +152,37 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
 
     function shouldAutoRespond(permission: PermissionRequest, directory?: string) {
       const session = directory ? globalSync.child(directory, { bootstrap: false })[0].session : []
-      return autoRespondsPermission(store.autoAccept, session, permission, directory)
+      return autoRespondsPermission(store.autoAccept, session, permission, directory, {
+        restrictExternalDirectories: !settings.ready() || settings.general.restrictExternalDirectories(),
+      })
     }
+
+    function respondExternalDirectoryRequests(directory: string) {
+      globalSDK.client.permission
+        .list({ directory })
+        .then((x) => {
+          for (const perm of x.data ?? []) {
+            if (!perm?.id) continue
+            if (perm.permission !== "external_directory") continue
+            if (!shouldAutoRespond(perm, directory)) continue
+            respondOnce(perm, directory)
+          }
+        })
+        .catch(() => undefined)
+    }
+
+    createEffect(() => {
+      if (!settings.ready()) return
+      if (settings.general.restrictExternalDirectories()) return
+      const directory = decode64(params.dir)
+      if (directory) pendingExternalDirectories.add(directory)
+
+      const directories = Array.from(pendingExternalDirectories)
+      pendingExternalDirectories.clear()
+      for (const directory of directories) {
+        respondExternalDirectoryRequests(directory)
+      }
+    })
 
     function bumpEnableVersion(sessionID: string, directory?: string) {
       const key = acceptKey(sessionID, directory)
@@ -164,6 +196,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       if (event?.type !== "permission.asked") return
 
       const perm = event.properties
+      if (perm.permission === "external_directory") pendingExternalDirectories.add(e.name)
       if (!shouldAutoRespond(perm, e.name)) return
 
       respondOnce(perm, e.name)

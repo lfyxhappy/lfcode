@@ -10,6 +10,10 @@ try {
 } catch {}
 
 process.env.LFCODE_DISABLE_EMBEDDED_WEB_UI = "true"
+if (process.platform === "win32") {
+  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1")
+  app.commandLine.appendSwitch("remote-debugging-port", "9222")
+}
 
 const APP_NAME = "Lfcode"
 const APP_ID = "com.lfyxhappy.lfcode"

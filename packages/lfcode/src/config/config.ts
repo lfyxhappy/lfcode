@@ -39,7 +39,6 @@ import { ConfigPermission } from "./permission"
 import { ConfigPlugin } from "./plugin"
 import { ConfigProvider } from "./provider"
 import { ConfigServer } from "./server"
-import { ConfigSkills } from "./skills"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@/npm"
 
@@ -57,12 +56,15 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
 function normalizeLoadedConfig(data: unknown, source: string) {
   if (!isRecord(data)) return data
   const copy = { ...data }
-  const hadLegacy = "theme" in copy || "keybinds" in copy || "tui" in copy
+  const hadLegacy = "theme" in copy || "keybinds" in copy || "tui" in copy || "skills" in copy
   if (!hadLegacy) return copy
   delete copy.theme
   delete copy.keybinds
   delete copy.tui
-  log.warn("tui keys in lfcode config are deprecated; move them to tui.json", { path: source })
+  delete copy.skills
+  log.warn("legacy keys in lfcode config are deprecated; move them to tui.json and .lfcode/skills/", {
+    path: source,
+  })
   return copy
 }
 
@@ -74,6 +76,14 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPlugin.Spec[] }>(
     config.plugin[i] = await ConfigPlugin.resolvePluginSpec(config.plugin[i], filepath)
   }
   return config
+}
+
+function localPluginDir() {
+  try {
+    return path.dirname(import.meta.resolve("@lfcode-ai/plugin/package.json"))
+  } catch {
+    return
+  }
 }
 
 export const Server = ConfigServer.Server.zod
@@ -102,7 +112,6 @@ const InfoSchema = Schema.Struct({
   command: Schema.optional(Schema.Record(Schema.String, ConfigCommand.Info)).annotate({
     description: "Command configuration, see https://lfcode.ai/docs/commands",
   }),
-  skills: Schema.optional(ConfigSkills.Info).annotate({ description: "Additional skill folder paths" }),
   watcher: Schema.optional(
     Schema.Struct({
       ignore: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
@@ -288,7 +297,15 @@ const InfoSchema = Schema.Struct({
               "Token cap for the session checkpoint section (checkpoint.md) of rebuild context. Default: 11000.",
           }),
           memory: Schema.optional(PositiveInt).annotate({
-            description: "Token cap for the project memory section (MEMORY.md) of rebuild context. Default: 10000.",
+            description: "Token cap for the project memory section (MEMORY.md) of rebuild context. Default: 16000.",
+          }),
+          memory_spillover_total: Schema.optional(PositiveInt).annotate({
+            description:
+              "Token cap for the total relevant topic memory spillover content auto-injected into rebuild context. Default: 4000.",
+          }),
+          memory_spillover_files: Schema.optional(PositiveInt).annotate({
+            description:
+              "Maximum number of project MEMORY-<topic>.md spillover files auto-injected into rebuild context. Default: 2.",
           }),
           notes: Schema.optional(PositiveInt).annotate({
             description: "Token cap for the session notes (notes.md) of rebuild context. Default: 6000.",
@@ -440,6 +457,9 @@ export type Info = z.output<typeof Info> & {
   mcp_origins?: Record<string, ConfigMCP.Origin>
 }
 
+export const Patch = z.object({}).catchall(z.any()).meta({ ref: "ConfigPatch" })
+export type Patch = z.infer<typeof Patch>
+
 type State = {
   config: Info
   directories: string[]
@@ -452,8 +472,14 @@ export interface Interface {
   readonly getGlobal: () => Effect.Effect<Info>
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
-  readonly updateGlobal: (config: Info) => Effect.Effect<Info>
+  readonly updateGlobal: (config: Patch) => Effect.Effect<Info>
   readonly removeGlobalCustomProvider: (providerID: string) => Effect.Effect<Info>
+  readonly upsertMcp: (
+    name: string,
+    config: ConfigMCP.Info,
+    options?: { target?: "auto" | "project" | "global" },
+  ) => Effect.Effect<Info>
+  readonly removeMcp: (name: string) => Effect.Effect<Info>
   readonly updateMcpEnabled: (name: string, enabled: boolean) => Effect.Effect<Info>
   readonly invalidate: (wait?: boolean) => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
@@ -509,6 +535,37 @@ function deleteJsoncPath(input: string, path: string[]) {
   return applyEdits(input, edits)
 }
 
+function collectNullPaths(input: unknown, path: string[] = []): string[][] {
+  if (input === null) return [path]
+  if (!isRecord(input)) return []
+  return Object.entries(input).flatMap(([key, value]) => collectNullPaths(value, [...path, key]))
+}
+
+function stripNulls(input: unknown): unknown {
+  if (input === null) return undefined
+  if (Array.isArray(input)) return input.map(stripNulls)
+  if (!isRecord(input)) return input
+  return Object.fromEntries(
+    Object.entries(input)
+      .filter(([, value]) => value !== null)
+      .map(([key, value]) => [key, stripNulls(value)]),
+  )
+}
+
+function deleteObjectPath(input: Record<string, unknown>, path: string[]) {
+  if (path.length === 0) return input
+  const [head, ...rest] = path
+  if (rest.length === 0) {
+    delete input[head]
+    return input
+  }
+  const next = input[head]
+  if (!isRecord(next)) return input
+  deleteObjectPath(next, rest)
+  if (Object.keys(next).length === 0) delete input[head]
+  return input
+}
+
 function writable(info: Info) {
   const { plugin_origins: _plugin_origins, mcp_origins: _mcp_origins, ...next } = info
   return next
@@ -516,7 +573,13 @@ function writable(info: Info) {
 
 function isCustomProviderConfig(config: ConfigProvider.Info | undefined) {
   if (!config) return false
-  if (config.npm !== "@ai-sdk/openai-compatible") return false
+  const knownCustomPackages = new Set([
+    "@ai-sdk/openai-compatible",
+    "@ai-sdk/openai",
+    "@ai-sdk/anthropic",
+    "@ai-sdk/google",
+  ])
+  if (config.npm && !knownCustomPackages.has(config.npm)) return false
   if (typeof config.options?.baseURL !== "string" || config.options.baseURL.length === 0) return false
   if (!config.models || Object.keys(config.models).length === 0) return false
   return true
@@ -826,6 +889,40 @@ export const layer = Layer.effect(
 
         for (const dir of directories) {
           if (dir.endsWith(".lfcode") || dir === Flag.LFCODE_CONFIG_DIR) {
+            const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
+            const pluginDir = localPluginDir()
+            if (list.length && pluginDir) {
+              // Only prepare dependencies for directories that actually ship local plugins.
+              // Most project config roots do not contain plugin code, so skipping the install
+              // avoids unnecessary npm resolution and registry traffic during project switches.
+              const dep = yield* npmSvc
+                .install(dir, {
+                  add: [
+                    {
+                      name: pluginDir,
+                    },
+                  ],
+                })
+                .pipe(
+                  Effect.exit,
+                  Effect.tap((exit) =>
+                    Exit.isFailure(exit)
+                      ? Effect.sync(() => {
+                          log.warn("background dependency install failed", { dir, error: String(exit.cause) })
+                        })
+                      : Effect.void,
+                  ),
+                  Effect.asVoid,
+                  Effect.forkDetach,
+                )
+              deps.push(dep)
+            }
+            if (list.length && !pluginDir) {
+              log.warn("skipped local plugin dependency bootstrap; bundled @lfcode-ai/plugin runtime is unavailable", {
+                dir,
+              })
+            }
+            yield* mergePluginOrigins(dir, list)
             for (const file of ["lfcode.json", "lfcode.jsonc", "lfcode.json", "lfcode.jsonc"]) {
               const source = path.join(dir, file)
               log.debug(`loading config from ${source}`)
@@ -838,35 +935,9 @@ export const layer = Layer.effect(
 
           yield* ensureGitignore(dir).pipe(Effect.orDie)
 
-          const dep = yield* npmSvc
-            .install(dir, {
-              add: [
-                {
-                  name: "@lfcode-ai/plugin",
-                },
-              ],
-            })
-            .pipe(
-              Effect.exit,
-              Effect.tap((exit) =>
-                Exit.isFailure(exit)
-                  ? Effect.sync(() => {
-                      log.warn("background dependency install failed", { dir, error: String(exit.cause) })
-                    })
-                  : Effect.void,
-              ),
-              Effect.asVoid,
-              Effect.forkDetach,
-            )
-          deps.push(dep)
-
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
-          // Auto-discovered plugins under `.lfcode/plugin(s)` are already local files, so ConfigPlugin.load
-          // returns normalized Specs and we only need to attach origin metadata here.
-          const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
-          yield* mergePluginOrigins(dir, list)
         }
 
         if (process.env.LFCODE_CONFIG_CONTENT) {
@@ -1046,6 +1117,12 @@ export const layer = Layer.effect(
       return path.join(dir, ".lfcode", "lfcode.jsonc")
     })
 
+    const resolveManagedMcpTarget = Effect.fnUntraced(function* (target: "auto" | "project" | "global" | undefined, name: string, current: Info) {
+      if (target === "project") return yield* resolveProjectOverrideFile()
+      if (target === "global") return globalConfigFile()
+      return yield* resolveMcpConfigTarget(name, current)
+    })
+
     const resolveMcpConfigTarget = Effect.fnUntraced(function* (name: string, current: Info) {
       const origin = current.mcp_origins?.[name]
       if (!origin) return yield* resolveProjectOverrideFile()
@@ -1056,6 +1133,60 @@ export const layer = Layer.effect(
       if (origin.source === Global.Path.config) return globalConfigFile()
       if (origin.source.startsWith("http://") || origin.source.startsWith("https://")) return globalConfigFile()
       return origin.source
+    })
+
+    const upsertMcp = Effect.fn("Config.upsertMcp")(function* (
+      name: string,
+      config: ConfigMCP.Info,
+      options?: { target?: "auto" | "project" | "global" },
+    ) {
+      const current = yield* get()
+      const target = yield* resolveManagedMcpTarget(options?.target, name, current)
+      yield* Effect.promise(() => fsNode.mkdir(path.dirname(target), { recursive: true }))
+      yield* updateConfigFile(target, { mcp: { [name]: config } })
+      if (path.dirname(target) === Global.Path.config) {
+        yield* invalidateGlobal
+      }
+      yield* InstanceState.invalidate(state)
+      return yield* get()
+    })
+
+    const removeMcp = Effect.fn("Config.removeMcp")(function* (name: string) {
+      const current = yield* get()
+      const mcp = current.mcp?.[name]
+      if (!mcp || !("type" in mcp)) throw new Error(`MCP server ${name} not found or invalid`)
+
+      const target = yield* resolveMcpConfigTarget(name, current)
+      const before =
+        (yield* Effect.promise(() =>
+          fsNode.readFile(target, "utf8").catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return undefined
+            throw error
+          }),
+        )) ?? "{}"
+
+      yield* Effect.promise(() => fsNode.mkdir(path.dirname(target), { recursive: true }))
+
+      if (!target.endsWith(".jsonc")) {
+        const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, target), target)
+        const next = mergeDeep({}, writable(existing))
+        if (next.mcp?.[name]) delete next.mcp[name]
+        if (next.mcp && Object.keys(next.mcp).length === 0) delete next.mcp
+        yield* Effect.promise(() => fsNode.writeFile(target, JSON.stringify(next, null, 2)))
+      } else {
+        let updated = deleteJsoncPath(before, ["mcp", name])
+        const parsed = ConfigParse.schema(Info, ConfigParse.jsonc(updated, target), target)
+        if (parsed.mcp && Object.keys(parsed.mcp).length === 0) {
+          updated = deleteJsoncPath(updated, ["mcp"])
+        }
+        yield* Effect.promise(() => fsNode.writeFile(target, updated))
+      }
+
+      if (path.dirname(target) === Global.Path.config) {
+        yield* invalidateGlobal
+      }
+      yield* InstanceState.invalidate(state)
+      return yield* get()
     })
 
     const updateMcpEnabled = Effect.fn("Config.updateMcpEnabled")(function* (name: string, enabled: boolean) {
@@ -1100,18 +1231,26 @@ export const layer = Layer.effect(
       else void task
     })
 
-    const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
+    const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Patch) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
+      const nullPaths = collectNullPaths(config)
+      const cleaned = stripNulls(config)
 
       let next: Info
       if (!file.endsWith(".jsonc")) {
         const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), writable(config))
+        const merged = mergeDeep(writable(existing), cleaned as Record<string, unknown>)
+        for (const item of nullPaths) {
+          deleteObjectPath(merged as Record<string, unknown>, item)
+        }
         yield* fs.writeFileString(file, JSON.stringify(merged, null, 2)).pipe(Effect.orDie)
-        next = merged
+        next = ConfigParse.schema(Info, merged, file)
       } else {
-        const updated = patchJsonc(before, writable(config))
+        let updated = patchJsonc(before, cleaned)
+        for (const item of nullPaths) {
+          updated = deleteJsoncPath(updated, item)
+        }
         next = ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
         yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
       }
@@ -1168,6 +1307,8 @@ export const layer = Layer.effect(
       update,
       updateGlobal,
       removeGlobalCustomProvider,
+      upsertMcp,
+      removeMcp,
       updateMcpEnabled,
       invalidate,
       directories,

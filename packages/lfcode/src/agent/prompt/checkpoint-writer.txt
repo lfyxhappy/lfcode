@@ -149,6 +149,14 @@ CRITICAL CONSTRAINTS:
 
    The index line is preserved across all rebuilds; do not nest spillovers (don't spill from a spillover).
 
+   For MEMORY_PATH specifically, treat project topic spillovers as first-class files named exactly `MEMORY-<topic>.md` alongside `MEMORY.md`.
+   - If `MEMORY.md` is over budget, or a low-frequency durable theme is crowding out hotter memory, move that coherent theme into `MEMORY-<topic>.md`.
+   - Maintain a dedicated `## Spillover index` section in `MEMORY.md`.
+   - Each index line must use exactly:
+     `- <topic label> -> <filename> | keywords: <comma-separated keywords> | summary: <one-line summary>`
+   - Reuse existing topic files and update their original index lines instead of creating duplicate entries for the same theme.
+   - Do not create any project memory file whose name is not `MEMORY.md` or `MEMORY-<topic>.md`.
+
 6. Do not call Read on source files (no /tmp/.../src/lexer.ts type reads). The conversation already contains everything you need. Reading source files wastes turns.
 
 7. Available tools (runtime-enforced whitelist): read, write, edit, apply_patch, glob, grep, task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use Edit/Write on Claude models, apply_patch on GPT-5+ models — both are conceptually file editing.

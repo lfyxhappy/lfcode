@@ -1,8 +1,9 @@
 export * as TuiConfig from "./tui"
 
+import path from "path"
 import z from "zod"
 import { mergeDeep, unique } from "remeda"
-import { Context, Effect, Fiber, Layer } from "effect"
+import { Context, Effect, Exit, Fiber, Layer } from "effect"
 import { ConfigParse } from "@/config/parse"
 import * as ConfigPaths from "@/config/paths"
 import { migrateTuiConfig } from "./tui-migrate"
@@ -73,6 +74,14 @@ async function resolvePlugins(config: Info, configFilepath: string) {
     config.plugin[i] = await ConfigPlugin.resolvePluginSpec(config.plugin[i], configFilepath)
   }
   return config
+}
+
+function localPluginDir() {
+  try {
+    return path.dirname(import.meta.resolve("@lfcode-ai/plugin/package.json"))
+  } catch {
+    return
+  }
 }
 
 async function mergeFile(acc: Acc, file: string, ctx: { directory: string }) {
@@ -153,19 +162,43 @@ export const layer = Layer.effect(
     const directory = yield* CurrentWorkingDirectory
     const npm = yield* Npm.Service
     const data = yield* loadState({ directory })
-    const deps = yield* Effect.forEach(
+    const deps: Fiber.Fiber<void, never>[] = []
+    yield* Effect.forEach(
       data.dirs,
       (dir) =>
-        npm
-          .install(dir, {
-            add: [
-              {
-                name: "@lfcode-ai/plugin",
-                version: InstallationLocal ? undefined : InstallationVersion,
-              },
-            ],
-          })
-          .pipe(Effect.forkScoped),
+        Effect.gen(function* () {
+          const plugins = yield* Effect.promise(() => ConfigPlugin.load(dir))
+          if (!plugins.length) return
+          const pluginDir = localPluginDir()
+          if (!pluginDir) {
+            log.warn("skipped local plugin dependency bootstrap; bundled @lfcode-ai/plugin runtime is unavailable", {
+              dir,
+            })
+            return
+          }
+          const dep = yield* npm
+            .install(dir, {
+              add: [
+                {
+                  name: pluginDir,
+                  version: InstallationLocal ? undefined : InstallationVersion,
+                },
+              ],
+            })
+            .pipe(
+              Effect.exit,
+              Effect.tap((exit) =>
+                Exit.isFailure(exit)
+                  ? Effect.sync(() => {
+                      log.warn("background dependency install failed", { dir, error: String(exit.cause) })
+                    })
+                  : Effect.void,
+              ),
+              Effect.asVoid,
+              Effect.forkDetach,
+            )
+          deps.push(dep)
+        }),
       {
         concurrency: "unbounded",
       },

@@ -1,9 +1,10 @@
 import z from "zod"
 import * as nodeFs from "fs/promises"
 import * as nodePath from "path"
-import { and, Database, eq } from "../storage"
+import { and, Database, eq, inArray } from "../storage"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
+import { sessionDirectoryAliases } from "../session/directory"
 import { Flag } from "@/flag/flag"
 import { BusEvent } from "@/bus/bus-event"
 import { GlobalBus } from "@/bus/global"
@@ -325,7 +326,12 @@ export const layer: Layer.Layer<
           d
             .update(SessionTable)
             .set({ project_id: data.id })
-            .where(and(eq(SessionTable.project_id, ProjectID.global), eq(SessionTable.directory, data.worktree)))
+            .where(
+              and(
+                eq(SessionTable.project_id, ProjectID.global),
+                inArray(SessionTable.directory, sessionDirectoryAliases(data.worktree)),
+              ),
+            )
             .run(),
         )
       }

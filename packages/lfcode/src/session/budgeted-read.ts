@@ -53,7 +53,9 @@ function parseSections(text: string): { preamble: string[]; sections: Section[] 
         italicSeen = true
         continue
       }
-      if (/^- See \S+\.md \(\d+/.test(line.trim())) current.indexLines.push(line)
+      if (/^- See \S+\.md \(\d+/.test(line.trim()) || /^- .+ -> MEMORY-[^|]+ \| keywords: .+ \| summary: .+/.test(line.trim())) {
+        current.indexLines.push(line)
+      }
       current.body.push(line)
     } else {
       preamble.push(line)

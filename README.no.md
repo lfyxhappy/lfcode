@@ -1,21 +1,22 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode-logo">
     </picture>
   </a>
 </p>
-<p align="center">Den åpne AI-kodingsagenten.</p>
+<p align="center">En åpen kildekode AI-kodingsagent bygget på opencode.</p>
+<p align="center">Beholder historisk kompatibilitet, samtidig som den utvider sesjonsstyring, Skills og GitHub Action-integrasjon.</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Siste utgivelse" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Byggestatus" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +43,26 @@
 
 ---
 
-> Denne lokaliserte README-en følger den naavaerende tilstanden i Lfcode-repositoriet slik at nedlastingslenker, release-filer og kompatibilitetsnotater holder seg korrekte.
+> Denne lokaliserte README-en speiler den nåværende tilstanden i Lfcode-repositoriet, slik at nedlastingslenker, utgivelsesfiler og kompatibilitetsnotater holder seg riktige.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Oversikt
 
-### Installation
+Lfcode er et Bun workspace-monorepo som er bygget videre på opencode. Det bevarer den historiske kompatibiliteten og leverer fortsatt Lfcode-branding, en skrivebordsapp, et nettgrensesnitt, et SDK og GitHub Action-støtte.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Høydepunkter
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Mer komplett sesjonsstyring: liste, status, opprette, oppdatere, slette, forke, dele, oppheve deling, oppsummere, komprimere, diff, revert og unrevert.
+- Flere interaksjonsmåter: sende meldinger, asynkron `prompt`, `shell`, kommandoer og prediksjon av neste prompt.
+- Skills-administrasjon: lokal Skills-liste, oppdagelse, installasjon, import, oppretting, oppdatering og katalogvisning.
+- GitHub Action-integrasjon: start automatisert arbeid fra issue- eller PR-kommentarer med `/lfcode`, `/opencode` eller `/oc`.
+- Historisk kompatibilitet: behold `opencode` CLI-kommandoen, `LFCODE_*`-miljøvariablene og `lfcode://`-protokollen.
+
+### Installasjon
+
+Offentlige nedlastinger publiseres på [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases)-siden.
+
+- Desktop: den nåværende release-pipelinen publiserer et Windows-installasjonsprogram med navnet `lfcode-win-x64.exe`.
+- Kilde: bruk Bun fra repoets rot for lokal utvikling.
 
 ```bash
 bun install
@@ -60,37 +71,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Kompatibilitet
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Noen runtime-identifikatorer bruker fortsatt det historiske navnet `opencode` av hensyn til kompatibilitet.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- CLI-kommando: `opencode`
+- Konfigurasjonsmappe: `~/.lfcode`
+- Miljøvariabler: `LFCODE_*`
+- Desktop-protokollskjema: `lfcode://`
 
-### Repository Layout
+### Repositoriets struktur
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
+- `packages/lfcode`: kjerneløpetid og sesjonsmotor
+- `packages/app`: web-UI
 - `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/ui`: delte UI-komponenter
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### Dokumentasjon
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+Den nåværende dokumentasjonskilden ligger i [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Validering
 
-Run the main repository checks from the workspace root:
+Kjør hovedkontrollene fra workspace-roten:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### Støtte
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
