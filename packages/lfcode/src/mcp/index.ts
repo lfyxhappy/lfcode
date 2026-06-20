@@ -33,6 +33,20 @@ import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
+const PLAYWRIGHT_MCP_BASE_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
+const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_BASE_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_BASE_COMMAND, "--browser", "chrome"] as const
+const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
+const PLAYWRIGHT_CDP_ENDPOINT = "http://127.0.0.1:9222"
+const PLAYWRIGHT_CDP_WAIT_TIMEOUT = 10_000
+const PLAYWRIGHT_BROWSER_TOOL_GUIDANCE = [
+  "Lfcode Playwright target rule:",
+  "Before the first Playwright browser action in a session, load the `playwright-browser` skill when the skill tool is available.",
+  "Use Playwright browser tools on the embedded side browser webview, not the Electron Lfcode application shell.",
+  "A hidden or collapsed side browser target still counts as open; reuse it and create a new side browser tab only when no embedded browser target exists.",
+  "Do not navigate or replace the main Lfcode window; external pages belong in the side browser panel.",
+  "If the current tab is the Lfcode app shell, retarget the embedded side browser before navigating.",
+].join("\n")
 
 export const Resource = z
   .object({
@@ -135,6 +149,38 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
   return typeof entry === "object" && entry !== null && "type" in entry
 }
 
+function sameCommand(command: readonly string[], expected: readonly string[]) {
+  return command.length === expected.length && command.every((item, index) => item === expected[index])
+}
+
+function hasExactKeys(value: object, expected: readonly string[]) {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && expected.every((key) => key in value)
+}
+
+function isManagedPlaywrightConfig(mcp: ConfigMCP.Info) {
+  if (typeof mcp !== "object" || mcp === null) return false
+  if (!hasExactKeys(mcp, PLAYWRIGHT_MCP_KEYS)) return false
+  if (mcp.type !== "local") return false
+  if (mcp.enabled !== true) return false
+  return sameCommand(mcp.command, PLAYWRIGHT_MCP_CDP_COMMAND) || sameCommand(mcp.command, PLAYWRIGHT_MCP_LEGACY_COMMAND)
+}
+
+async function waitForPlaywrightCdpEndpoint(timeoutMs: number) {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isPlaywrightCdpEndpointReady()) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
+}
+
+async function isPlaywrightCdpEndpointReady() {
+  return fetch(`${PLAYWRIGHT_CDP_ENDPOINT}/json/version`)
+    .then((response) => response.ok)
+    .catch(() => false)
+}
+
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
 const unsupportedLists = new WeakMap<Client, Set<OptionalListLabel>>()
 
@@ -161,7 +207,7 @@ function markListUnsupported(client: Client, label: OptionalListLabel) {
 }
 
 // Convert MCP tool definition to AI SDK Tool type
-function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
+function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, options?: { timeout?: number; descriptionPrefix?: string }): Tool {
   const inputSchema = mcpTool.inputSchema
 
   // Spread first, then override type to ensure it's always "object"
@@ -173,7 +219,7 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
   }
 
   return dynamicTool({
-    description: mcpTool.description ?? "",
+    description: [options?.descriptionPrefix, mcpTool.description].filter(Boolean).join("\n\n"),
     inputSchema: jsonSchema(schema),
     execute: async (args: unknown) => {
       return client.callTool(
@@ -184,7 +230,7 @@ function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number
         CallToolResultSchema,
         {
           resetTimeoutOnProgress: true,
-          timeout,
+          timeout: options?.timeout,
         },
       )
     },
@@ -427,35 +473,59 @@ export const layer = Layer.effect(
       key: string,
       mcp: ConfigMCP.Info & { type: "local" },
     ) {
-      const [cmd, ...args] = mcp.command
       const cwd = yield* InstanceState.directory
-      const transport = new StdioClientTransport({
-        stderr: "pipe",
-        command: cmd,
-        args,
-        cwd,
-        env: {
-          ...process.env,
-          ...(cmd === "lfcode" ? { BUN_BE_BUN: "1" } : {}),
-          ...mcp.environment,
-        },
-      })
-      transport.stderr?.on("data", (chunk: Buffer) => {
-        log.info(`mcp stderr: ${chunk.toString()}`, { key })
-      })
+      const connectLocalCommand = (command: readonly string[]) => {
+        const [cmd, ...args] = command
+        const transport = new StdioClientTransport({
+          stderr: "pipe",
+          command: cmd,
+          args,
+          cwd,
+          env: {
+            ...process.env,
+            ...(cmd === "lfcode" ? { BUN_BE_BUN: "1" } : {}),
+            ...mcp.environment,
+          },
+        })
+        transport.stderr?.on("data", (chunk: Buffer) => {
+          log.info(`mcp stderr: ${chunk.toString()}`, { key })
+        })
 
-      const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
-      return yield* connectTransport(transport, connectTimeout).pipe(
-        Effect.map((client): { client: MCPClient | undefined; status: Status } => ({
-          client,
-          status: { status: "connected" },
-        })),
-        Effect.catch((error): Effect.Effect<{ client: MCPClient | undefined; status: Status }> => {
-          const msg = error instanceof Error ? error.message : String(error)
-          log.error("local mcp startup failed", { key, command: ConfigMCP.redactCommand(mcp.command), cwd, error: msg })
-          return Effect.succeed({ client: undefined, status: { status: "failed", error: msg } })
-        }),
-      )
+        const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
+        return connectTransport(transport, connectTimeout).pipe(
+          Effect.map((client): { client: MCPClient | undefined; status: Status } => ({
+            client,
+            status: { status: "connected" },
+          })),
+          Effect.catch((error): Effect.Effect<{ client: MCPClient | undefined; status: Status }> => {
+            const msg = error instanceof Error ? error.message : String(error)
+            log.error("local mcp startup failed", { key, command: ConfigMCP.redactCommand([...command]), cwd, error: msg })
+            return Effect.succeed({ client: undefined, status: { status: "failed", error: msg } })
+          }),
+        )
+      }
+
+      if (key === "playwright" && isManagedPlaywrightConfig(mcp)) {
+        const cdpReady = yield* Effect.promise(() => waitForPlaywrightCdpEndpoint(PLAYWRIGHT_CDP_WAIT_TIMEOUT))
+        if (!cdpReady) {
+          log.warn("playwright MCP embedded browser endpoint is not ready; falling back to external browser", {
+            key,
+            endpoint: PLAYWRIGHT_CDP_ENDPOINT,
+          })
+          return yield* connectLocalCommand(PLAYWRIGHT_MCP_LEGACY_COMMAND)
+        }
+
+        const primary = yield* connectLocalCommand(PLAYWRIGHT_MCP_CDP_COMMAND)
+        if (primary.client) return primary
+
+        log.warn("playwright MCP internal browser startup failed; falling back to external browser", {
+          key,
+          command: ConfigMCP.redactCommand([...PLAYWRIGHT_MCP_CDP_COMMAND]),
+        })
+        return yield* connectLocalCommand(PLAYWRIGHT_MCP_LEGACY_COMMAND)
+      }
+
+      return yield* connectLocalCommand(mcp.command)
     })
 
     const create = Effect.fn("MCP.create")(function* (key: string, mcp: ConfigMCP.Info) {
@@ -709,7 +779,10 @@ export const layer = Layer.effect(
 
             const timeout = entry?.timeout ?? defaultTimeout
             for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, {
+                timeout,
+                descriptionPrefix: clientName === "playwright" ? PLAYWRIGHT_BROWSER_TOOL_GUIDANCE : undefined,
+              })
             }
           }),
         { concurrency: "unbounded" },

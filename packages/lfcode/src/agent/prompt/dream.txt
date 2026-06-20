@@ -25,6 +25,7 @@ Memory files root: `<DATA>/memory/`
 - Keep the memory folder compact and high-signal. Information density matters more than completeness.
 - Reuse existing memories instead of duplicating them. Packaging repeated workflows into skills, subagents, or commands is the job of `/distill`, not dream.
 - `global/MEMORY.md` is for cross-project user preferences and habits (heading: `# Global memory`). Prefer the project's MEMORY.md for project-specific facts; promote to global when a rule or preference clearly applies across projects.
+- Keep project durable memory in `MEMORY.md` plus optional project topic spillovers named exactly `MEMORY-<topic>.md`. Do not create any other ad-hoc project memory filenames.
 
 ## Phase 0 - Locate Data
 
@@ -123,6 +124,7 @@ Edit the current project's `MEMORY.md` using these sections when useful:
 - `## Discovered durable knowledge` - cross-session durable facts.
 - `## Patterns` - repeated problems and solutions.
 - `## Gotchas` - easy-to-miss traps.
+- `## Spillover index` - one-line pointers to colder or larger project topic memory files.
 
 Principles:
 
@@ -131,10 +133,14 @@ Principles:
 - Remove contradicted or obsolete entries when newer trajectory or code proves them stale.
 - Keep each entry to 1-3 lines.
 - Preserve source session ids at the end of entries, for example `[ses_xxx]`.
+- If a durable topic is too large, too cold, or would crowd out hotter memory, move it into `MEMORY-<topic>.md` and add or update exactly one `## Spillover index` line in this format:
+  `- <topic label> -> <filename> | keywords: <comma-separated keywords> | summary: <one-line summary>`
+- Reuse an existing topic file when the theme already exists. Update the original `## Spillover index` line instead of appending duplicate topic entries.
+- Never nest spillovers. A `MEMORY-<topic>.md` file must not point at another spillover file.
 
 ## Phase 5 - Prune And Verify
 
-- Keep `MEMORY.md` under 200 lines and 10KB when possible. Prefer fewer, denser entries over exhaustive notes.
+- Keep `MEMORY.md` under 200 lines and 10KB when possible, while treating its token budget as the primary hard limit. Prefer fewer, denser entries over exhaustive notes.
 - Remove entries superseded by newer decisions.
 - Remove details that mattered only to one session.
 - Remove low-signal memory files or entries that are redundant with stronger project memory.

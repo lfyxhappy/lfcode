@@ -1,0 +1,63 @@
+{
+  "$schema": "https://lfcode.ai/desktop-theme.json",
+  "name": "液态玻璃",
+  "id": "liquid-glass",
+  "light": {
+    "palette": {
+      "neutral": "#d7dee8",
+      "ink": "#102033",
+      "primary": "#5f8dc7",
+      "accent": "#7f9ecf",
+      "success": "#5ea678",
+      "warning": "#cb9762",
+      "error": "#c96a7d",
+      "info": "#6e9fcb"
+    },
+    "overrides": {
+      "background-base": "#d7dee8",
+      "background-weak": "#ced7e3",
+      "background-strong": "#e3e9f0",
+      "background-stronger": "#e9eef5",
+      "surface-raised-stronger-non-alpha": "#edf2f8",
+      "surface-float-base": "#f2f6fb",
+      "surface-float-base-hover": "#f7faff",
+      "text-base": "#1d314a",
+      "text-weak": "#5f738d",
+      "text-weaker": "#7e92aa",
+      "text-strong": "#0d1828",
+      "border-base": "rgba(255,255,255,0.38)",
+      "border-weak-base": "rgba(255,255,255,0.32)",
+      "border-weaker-base": "rgba(255,255,255,0.2)",
+      "border-strong-base": "rgba(255,255,255,0.48)"
+    }
+  },
+  "dark": {
+    "palette": {
+      "neutral": "#0e1621",
+      "ink": "#edf4ff",
+      "primary": "#8cb0df",
+      "accent": "#9ab7de",
+      "success": "#7db895",
+      "warning": "#d5a06c",
+      "error": "#d48a99",
+      "info": "#8db8e1"
+    },
+    "overrides": {
+      "background-base": "#0e1621",
+      "background-weak": "#121b27",
+      "background-strong": "#152030",
+      "background-stronger": "#182435",
+      "surface-raised-stronger-non-alpha": "#1b2838",
+      "surface-float-base": "#1d2b3d",
+      "surface-float-base-hover": "#223246",
+      "text-base": "#cfddef",
+      "text-weak": "#8ea2ba",
+      "text-weaker": "#6f839c",
+      "text-strong": "#f6fbff",
+      "border-base": "rgba(255,255,255,0.16)",
+      "border-weak-base": "rgba(255,255,255,0.12)",
+      "border-weaker-base": "rgba(255,255,255,0.08)",
+      "border-strong-base": "rgba(255,255,255,0.22)"
+    }
+  }
+}

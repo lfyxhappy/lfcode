@@ -68,7 +68,10 @@ test("desktop session header opens a browser tab and loads a typed file url", as
 
     await page.getByRole("button", { name: /Open browser|打开浏览器/i }).click()
     const address = page.locator('#review-panel input[name="url"]')
-    await expect(address).toHaveValue("https://", { timeout: 30_000 })
+    await expect(address).toHaveValue("https://www.bing.com", { timeout: 30_000 })
+    await expect(page.locator('webview[src^="https://www.bing.com"]')).toHaveCount(1, {
+      timeout: 30_000,
+    })
     await address.fill(tempFile)
     await address.press("Enter")
 

@@ -1,4 +1,4 @@
-import { Component, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
+import { Component, For, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@lfcode-ai/ui/button"
 import { Icon } from "@lfcode-ai/ui/icon"
@@ -29,6 +29,7 @@ import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { Link } from "./link"
 import { SettingsList } from "./settings-list"
+import { isLiquidGlassTheme } from "./liquid-glass-theme"
 
 let demoSoundState = {
   cleanup: undefined as (() => void) | undefined,
@@ -39,6 +40,14 @@ let demoSoundState = {
 type ThemeOption = {
   id: string
   name: string
+}
+
+type LiquidGlassControl = {
+  key: "blur" | "opacity" | "highlight" | "tint" | "saturation"
+  min: number
+  max: number
+  step: number
+  suffix: string
 }
 
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
@@ -169,6 +178,14 @@ export const SettingsGeneral: Component = () => {
   }
 
   const themeOptions = createMemo<ThemeOption[]>(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
+  const liquidGlassEnabled = createMemo(() => isLiquidGlassTheme(theme.themeId()))
+  const liquidGlassControls = createMemo<LiquidGlassControl[]>(() => [
+    { key: "blur", min: 0, max: 32, step: 1, suffix: "px" },
+    { key: "opacity", min: 28, max: 96, step: 1, suffix: "%" },
+    { key: "highlight", min: 0, max: 100, step: 1, suffix: "%" },
+    { key: "tint", min: 0, max: 100, step: 1, suffix: "%" },
+    { key: "saturation", min: 80, max: 160, step: 1, suffix: "%" },
+  ])
 
   const colorSchemeOptions = createMemo((): { value: ColorScheme; label: string }[] => [
     { value: "system", label: language.t("theme.scheme.system") },
@@ -220,7 +237,7 @@ export const SettingsGeneral: Component = () => {
   })
 
   const GeneralSection = () => (
-    <div class="flex flex-col gap-1">
+    <SettingsSection title={language.t("settings.section.desktop")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.row.language.title")}
@@ -245,6 +262,18 @@ export const SettingsGeneral: Component = () => {
         >
           <div data-action="settings-auto-accept-permissions">
             <Switch checked={accepting()} disabled={!dir()} onChange={toggleAccept} />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.restrictExternalDirectories.title")}
+          description={language.t("settings.general.row.restrictExternalDirectories.description")}
+        >
+          <div data-action="settings-restrict-external-directories">
+            <Switch
+              checked={settings.general.restrictExternalDirectories()}
+              onChange={(checked) => settings.general.setRestrictExternalDirectories(checked)}
+            />
           </div>
         </SettingsRow>
 
@@ -284,13 +313,11 @@ export const SettingsGeneral: Component = () => {
           </div>
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
   const AdvancedSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.advanced")}</h3>
-
+    <SettingsSection title={language.t("settings.general.section.advanced")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.row.showFileTree.title")}
@@ -352,13 +379,11 @@ export const SettingsGeneral: Component = () => {
           </div>
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
   const AppearanceSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.appearance")}</h3>
-
+    <SettingsSection title={language.t("settings.general.section.appearance")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.row.colorScheme.title")}
@@ -412,6 +437,86 @@ export const SettingsGeneral: Component = () => {
             triggerVariant="settings"
           />
         </SettingsRow>
+
+        <Show when={liquidGlassEnabled()}>
+          <SettingsRow
+            title={language.t("settings.general.row.liquidGlass.title")}
+            description={language.t("settings.general.row.liquidGlass.description")}
+          >
+            <div class="flex w-full max-w-[420px] flex-col gap-3">
+              <div class="flex justify-end">
+                <Button size="small" variant="secondary" onClick={() => settings.appearance.liquidGlass.reset()}>
+                  {language.t("settings.general.action.resetLiquidGlass")}
+                </Button>
+              </div>
+              <For each={liquidGlassControls()}>
+                {(control) => {
+                  const label = () => language.t(`settings.general.row.liquidGlass.${control.key}` as any)
+                  const value = () => {
+                    switch (control.key) {
+                      case "blur":
+                        return settings.appearance.liquidGlass.blur()
+                      case "opacity":
+                        return settings.appearance.liquidGlass.opacity()
+                      case "highlight":
+                        return settings.appearance.liquidGlass.highlight()
+                      case "tint":
+                        return settings.appearance.liquidGlass.tint()
+                      case "saturation":
+                        return settings.appearance.liquidGlass.saturation()
+                    }
+                  }
+                  const setValue = (next: number) => {
+                    switch (control.key) {
+                      case "blur":
+                        settings.appearance.liquidGlass.setBlur(next)
+                        return
+                      case "opacity":
+                        settings.appearance.liquidGlass.setOpacity(next)
+                        return
+                      case "highlight":
+                        settings.appearance.liquidGlass.setHighlight(next)
+                        return
+                      case "tint":
+                        settings.appearance.liquidGlass.setTint(next)
+                        return
+                      case "saturation":
+                        settings.appearance.liquidGlass.setSaturation(next)
+                        return
+                    }
+                  }
+
+                  return (
+                    <label
+                      class="rounded-[18px] px-4 py-3"
+                      data-action={`settings-liquid-glass-${control.key}`}
+                      data-component="settings-liquid-slider-row"
+                    >
+                      <div class="flex items-center justify-between gap-3">
+                        <span class="text-13-medium text-text-strong">{label()}</span>
+                        <span class="text-12-medium text-text-subtle">
+                          {value()}
+                          {control.suffix}
+                        </span>
+                      </div>
+                      <div class="pt-3">
+                        <input
+                          class="settings-liquid-slider"
+                          type="range"
+                          min={control.min}
+                          max={control.max}
+                          step={control.step}
+                          value={value()}
+                          onInput={(event) => setValue(Number(event.currentTarget.value))}
+                        />
+                      </div>
+                    </label>
+                  )
+                }}
+              </For>
+            </div>
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.uiFont.title")}
@@ -482,13 +587,11 @@ export const SettingsGeneral: Component = () => {
           </div>
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
   const NotificationsSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.notifications")}</h3>
-
+    <SettingsSection title={language.t("settings.general.section.notifications")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.notifications.agent.title")}
@@ -526,13 +629,11 @@ export const SettingsGeneral: Component = () => {
           </div>
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
   const SoundsSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.sounds")}</h3>
-
+    <SettingsSection title={language.t("settings.general.section.sounds")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.sounds.agent.title")}
@@ -579,13 +680,11 @@ export const SettingsGeneral: Component = () => {
           />
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
   const UpdatesSection = () => (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.updates")}</h3>
-
+    <SettingsSection title={language.t("settings.general.section.updates")}>
       <SettingsList>
         <SettingsRow
           title={language.t("settings.updates.row.startup.title")}
@@ -623,10 +722,9 @@ export const SettingsGeneral: Component = () => {
           </Button>
         </SettingsRow>
       </SettingsList>
-    </div>
+    </SettingsSection>
   )
 
-  console.log(import.meta.env)
   return (
     <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
@@ -637,41 +735,9 @@ export const SettingsGeneral: Component = () => {
 
       <div class="flex flex-col gap-8 w-full">
         <GeneralSection />
-
         <AppearanceSection />
-
         <NotificationsSection />
-
         <SoundsSection />
-
-        {/*<Show when={platform.platform === "desktop" && platform.os === "windows" && platform.getWslEnabled}>
-          {(_) => {
-            const [enabledResource, actions] = createResource(() => platform.getWslEnabled?.())
-            const enabled = () => (enabledResource.state === "pending" ? undefined : enabledResource.latest)
-
-            return (
-              <div class="flex flex-col gap-1">
-                <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.desktop.section.wsl")}</h3>
-
-                <SettingsList>
-                  <SettingsRow
-                    title={language.t("settings.desktop.wsl.title")}
-                    description={language.t("settings.desktop.wsl.description")}
-                  >
-                    <div data-action="settings-wsl">
-                      <Switch
-                        checked={enabled() ?? false}
-                        disabled={enabledResource.state === "pending"}
-                        onChange={(checked) => platform.setWslEnabled?.(checked)?.finally(() => actions.refetch())}
-                      />
-                    </div>
-                  </SettingsRow>
-                </SettingsList>
-              </div>
-            )
-          }}
-        </Show>*/}
-
         <UpdatesSection />
 
         <Show when={linux()}>
@@ -683,9 +749,7 @@ export const SettingsGeneral: Component = () => {
               platform.setDisplayBackend?.(checked ? "wayland" : "auto").finally(() => actions.refetch())
 
             return (
-              <div class="flex flex-col gap-1">
-                <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.display")}</h3>
-
+              <SettingsSection title={language.t("settings.general.section.display")}>
                 <SettingsList>
                   <SettingsRow
                     title={
@@ -705,7 +769,7 @@ export const SettingsGeneral: Component = () => {
                     </div>
                   </SettingsRow>
                 </SettingsList>
-              </div>
+              </SettingsSection>
             )
           }}
         </Show>
@@ -732,6 +796,22 @@ const SettingsRow: Component<SettingsRowProps> = (props) => {
         <span class="text-12-regular text-text-weak">{props.description}</span>
       </div>
       <div class="flex w-full justify-end sm:w-auto sm:shrink-0">{props.children}</div>
+    </div>
+  )
+}
+
+const SettingsSection: Component<{
+  title: string
+  description?: string | JSX.Element
+  children: JSX.Element
+}> = (props) => {
+  return (
+    <div class="flex flex-col gap-1">
+      <h3 class="text-14-medium text-text-strong pb-2">{props.title}</h3>
+      <Show when={props.description}>
+        {(value) => <div class="pb-2 text-12-regular text-text-weak">{value()}</div>}
+      </Show>
+      {props.children}
     </div>
   )
 }

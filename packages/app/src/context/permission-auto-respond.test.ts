@@ -14,6 +14,12 @@ const permission = (sessionID: string) =>
     sessionID,
   }) as Pick<PermissionRequest, "sessionID">
 
+const externalDirectoryPermission = (sessionID: string) =>
+  ({
+    sessionID,
+    permission: "external_directory",
+  }) as Pick<PermissionRequest, "sessionID" | "permission">
+
 describe("autoRespondsPermission", () => {
   test("uses a parent session's directory-scoped auto-accept", () => {
     const directory = "/tmp/project"
@@ -80,6 +86,23 @@ describe("autoRespondsPermission", () => {
     }
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(false)
+  })
+
+  test("auto-responds to external directory permissions by default", () => {
+    expect(autoRespondsPermission({}, [], externalDirectoryPermission("root"), "/tmp/project")).toBe(true)
+  })
+
+  test("requires approval for external directory permissions when restriction is enabled", () => {
+    const directory = "/tmp/project"
+    const autoAccept = {
+      [`${base64Encode(directory)}/*`]: true,
+    }
+
+    expect(
+      autoRespondsPermission(autoAccept, [], externalDirectoryPermission("root"), directory, {
+        restrictExternalDirectories: true,
+      }),
+    ).toBe(false)
   })
 })
 

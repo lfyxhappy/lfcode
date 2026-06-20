@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> يعكس هذا README المحلي الحالة الحالية لمستودع Lfcode حتى تبقى روابط التنزيل وملفات الإصدار وملاحظات التوافق دقيقة.
+> يعكس هذا README الحالة الحالية لمستودع Lfcode حتى تبقى روابط التنزيل وملفات الإصدارات وملاحظات التوافق دقيقة.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### نظرة عامة
 
-### Installation
+Lfcode هو monorepo مبني على Bun workspace وتطوّر من opencode. يحافظ على سطح التوافق التاريخي ويقدّم علامة Lfcode التجارية، وتطبيق سطح مكتب، وواجهة ويب، وSDK، ودعم GitHub Action.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### أبرز المزايا
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- إدارة جلسات أوسع: عرض القائمة، الحالة، الإنشاء، التحديث، الحذف، التفريع، المشاركة، إلغاء المشاركة، التلخيص، الضغط، diff، revert، وunrevert.
+- أوضاع تفاعل متعددة: إرسال الرسائل، `prompt` غير المتزامن، `shell`، الأوامر، وتوقع prompt التالي.
+- إدارة Skills: عرض Skills المحلية، اكتشافها، تثبيتها، استيرادها، إنشاؤها، تحديثها، وفحص المجلدات.
+- تكامل GitHub Action: تشغيل العمل الآلي من تعليقات issues أو PR باستخدام `/lfcode` أو `/opencode` أو `/oc`.
+- توافق تاريخي: الإبقاء على أمر CLI `opencode` ومتغيرات البيئة `LFCODE_*` والبروتوكول `lfcode://`.
+
+### التثبيت
+
+تُنشر التنزيلات العامة على صفحة [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+
+- سطح المكتب: تنشر قناة الإصدارات الحالية ملف تثبيت Windows باسم `lfcode-win-x64.exe`.
+- المصدر: استخدم Bun من جذر المستودع للتطوير المحلي.
 
 ```bash
 bun install
@@ -60,37 +70,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### التوافق
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+تستخدم عدة معرفات تشغيلية الاسم التاريخي `opencode` من أجل التوافق.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- أمر CLI: `opencode`
+- دليل الإعدادات: `~/.lfcode`
+- متغيرات البيئة: `LFCODE_*`
+- مخطط بروتوكول سطح المكتب: `lfcode://`
 
-### Repository Layout
+### بنية المستودع
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
-- `packages/sdk/js`: JavaScript SDK
+- `packages/lfcode`: النواة ومحرك الجلسات
+- `packages/app`: واجهة الويب
+- `packages/desktop`: مضيف سطح المكتب Electron
+- `packages/ui`: مكونات UI مشتركة
+- `packages/sdk/js`: SDK الخاص بـ JavaScript
 
-### Documentation
+### الوثائق
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+مصدر الوثائق الحالي موجود في [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### التحقق
 
-Run the main repository checks from the workspace root:
+شغّل الفحوصات الرئيسية من جذر مساحة العمل:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### الدعم
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

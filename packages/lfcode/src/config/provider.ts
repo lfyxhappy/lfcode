@@ -3,16 +3,50 @@ import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
 
 const PositiveInt = Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThan(0))
+const Protocol = Schema.Literals(["openai-chat", "openai-responses", "anthropic-messages", "gemini"])
+const Modality = Schema.Literals(["text", "audio", "image", "video", "pdf"])
+const CapabilityModalities = Schema.Struct({
+  text: Schema.optional(Schema.Boolean),
+  audio: Schema.optional(Schema.Boolean),
+  image: Schema.optional(Schema.Boolean),
+  video: Schema.optional(Schema.Boolean),
+  pdf: Schema.optional(Schema.Boolean),
+})
+const CapabilityInput = Schema.Union([CapabilityModalities, Schema.mutable(Schema.Array(Modality))])
 
 export const Model = Schema.Struct({
   id: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
   family: Schema.optional(Schema.String),
   release_date: Schema.optional(Schema.String),
+  protocol: Schema.optional(Protocol),
   attachment: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(Schema.Boolean),
   temperature: Schema.optional(Schema.Boolean),
   tool_call: Schema.optional(Schema.Boolean),
+  capabilities: Schema.optional(
+    Schema.Struct({
+      text: Schema.optional(Schema.Boolean),
+      audio: Schema.optional(Schema.Boolean),
+      image: Schema.optional(Schema.Boolean),
+      video: Schema.optional(Schema.Boolean),
+      pdf: Schema.optional(Schema.Boolean),
+      attachment: Schema.optional(Schema.Boolean),
+      reasoning: Schema.optional(Schema.Boolean),
+      temperature: Schema.optional(Schema.Boolean),
+      tool_call: Schema.optional(Schema.Boolean),
+      toolcall: Schema.optional(Schema.Boolean),
+      native_web: Schema.optional(Schema.Boolean),
+      input: Schema.optional(CapabilityInput),
+      output: Schema.optional(CapabilityInput),
+      modalities: Schema.optional(
+        Schema.Struct({
+          input: Schema.optional(Schema.mutable(Schema.Array(Modality))),
+          output: Schema.optional(Schema.mutable(Schema.Array(Modality))),
+        }),
+      ),
+    }),
+  ),
   interleaved: Schema.optional(
     Schema.Union([
       Schema.Literal(true),
@@ -57,7 +91,11 @@ export const Model = Schema.Struct({
       "Prompt-cache breakpoint TTL for Anthropic/OpenRouter. '1h' keeps the cached prefix alive for one hour (2x write cost) instead of the 5m default. Ignored by providers whose SDK doesn't support a cache TTL.",
   }),
   provider: Schema.optional(
-    Schema.Struct({ npm: Schema.optional(Schema.String), api: Schema.optional(Schema.String) }),
+    Schema.Struct({
+      npm: Schema.optional(Schema.String),
+      api: Schema.optional(Schema.String),
+      protocol: Schema.optional(Protocol),
+    }),
   ),
   options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -77,6 +115,7 @@ export const Model = Schema.Struct({
 export class Info extends Schema.Class<Info>("ProviderConfig")({
   api: Schema.optional(Schema.String),
   name: Schema.optional(Schema.String),
+  protocol: Schema.optional(Protocol),
   env: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
   id: Schema.optional(Schema.String),
   npm: Schema.optional(Schema.String),

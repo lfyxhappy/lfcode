@@ -30,7 +30,7 @@ type GlobalPathsResult = {
 }
 
 async function tmpdir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-global-"))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lfcode-global-"))
   return {
     path: dir,
     async [Symbol.asyncDispose]() {
@@ -76,23 +76,22 @@ describe("global paths", () => {
   test("tmp path stays under the system temp directory when no env overrides are set", async () => {
     await using tmp = await tmpdir()
     const result = await runWorker({
-      TMPDIR: path.join(tmp.path, "tmp"),
-      XDG_DATA_HOME: path.join(tmp.path, "xdg-data"),
-      XDG_STATE_HOME: path.join(tmp.path, "xdg-state"),
-      XDG_CACHE_HOME: path.join(tmp.path, "xdg-cache"),
+      LFCODE_DATA_DIR: path.join(tmp.path, "data"),
+      LFCODE_STATE_DIR: path.join(tmp.path, "state"),
+      LFCODE_CACHE_DIR: path.join(tmp.path, "cache"),
     })
 
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error(result.stderr)
 
-    expect(result.value.path.tmp).toBe(path.join(os.tmpdir(), "opencode"))
-    expect(result.value.make.tmp).toBe(path.join(os.tmpdir(), "opencode"))
-    expect(result.value.path.data).toBe(path.join(tmp.path, "xdg-data", "opencode"))
-    expect(result.value.path.state).toBe(path.join(tmp.path, "xdg-state", "opencode"))
-    expect(result.value.path.cache).toBe(path.join(tmp.path, "xdg-cache", "opencode"))
+    expect(result.value.path.tmp).toBe(path.join(os.tmpdir(), "lfcode"))
+    expect(result.value.make.tmp).toBe(path.join(os.tmpdir(), "lfcode"))
+    expect(result.value.path.data).toBe(path.join(tmp.path, "data"))
+    expect(result.value.path.state).toBe(path.join(tmp.path, "state"))
+    expect(result.value.path.cache).toBe(path.join(tmp.path, "cache"))
   })
 
-  test("respects final data, state, and cache env directories without appending opencode", async () => {
+  test("respects final data, state, and cache env directories without appending lfcode", async () => {
     await using tmp = await tmpdir()
     const data = path.join(tmp.path, "data")
     const state = path.join(tmp.path, "state")
@@ -126,15 +125,14 @@ describe("global paths", () => {
   test("tmp path is created on module load", async () => {
     await using tmp = await tmpdir()
     const result = await runWorker({
-      TMPDIR: path.join(tmp.path, "tmp"),
-      XDG_DATA_HOME: path.join(tmp.path, "xdg-data"),
-      XDG_STATE_HOME: path.join(tmp.path, "xdg-state"),
-      XDG_CACHE_HOME: path.join(tmp.path, "xdg-cache"),
+      LFCODE_DATA_DIR: path.join(tmp.path, "data"),
+      LFCODE_STATE_DIR: path.join(tmp.path, "state"),
+      LFCODE_CACHE_DIR: path.join(tmp.path, "cache"),
     })
 
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error(result.stderr)
 
-    expect((await fs.stat(path.join(os.tmpdir(), "opencode"))).isDirectory()).toBe(true)
+    expect((await fs.stat(path.join(os.tmpdir(), "lfcode"))).isDirectory()).toBe(true)
   })
 })

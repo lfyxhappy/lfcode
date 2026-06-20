@@ -61,6 +61,7 @@ export {
   oneDarkTheme,
   oneDarkProTheme,
   lfcodeTheme,
+  liquidGlassTheme,
   orngTheme,
   osakaJadeTheme,
   palenightTheme,

@@ -1,9 +1,9 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
     </picture>
   </a>
 </p>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +42,26 @@
 
 ---
 
-> この翻訳 README は、ダウンロードリンク、リリース資産、互換性メモが正確なままになるよう、現在の Lfcode リポジトリの状態に合わせています。
+> この README は現在の Lfcode リポジトリの状態を反映しており、ダウンロードリンク、リリース成果物、互換性メモが常に正しい状態になるようにしています。
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### 概要
 
-### Installation
+Lfcode は opencode から発展した Bun workspace ベースの monorepo です。従来の互換性を維持しつつ、Lfcode のブランド、デスクトップアプリ、Web UI、SDK、GitHub Action 連携を提供します。
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### 主な機能
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- セッション管理の強化: 一覧、状態確認、作成、更新、削除、fork、共有、共有解除、要約、圧縮、diff、revert、unrevert をサポート。
+- 複数の操作モード: メッセージ送信、非同期 `prompt`、`shell`、コマンド、次のプロンプト予測。
+- Skills 管理: ローカル Skills の一覧、発見、インストール、import、作成、更新、ディレクトリ確認。
+- GitHub Action 連携: Issue や PR のコメントから `/lfcode`、`/opencode`、`/oc` で自動処理を開始。
+- 歴史的互換性: `opencode` CLI コマンド、`LFCODE_*` 環境変数、`lfcode://` プロトコルを維持。
+
+### インストール
+
+公開ダウンロードは [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) ページで公開されています。
+
+- デスクトップ: 現在のリリースパイプラインは `lfcode-win-x64.exe` という Windows インストーラーを公開します。
+- ソース: ローカル開発ではリポジトリのルートから Bun を使ってください。
 
 ```bash
 bun install
@@ -60,37 +70,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### 互換性
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+互換性のため、いくつかの実行時識別子は今も歴史的な `opencode` 名を使用しています。
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- CLI コマンド: `opencode`
+- 設定ディレクトリ: `~/.lfcode`
+- 環境変数: `LFCODE_*`
+- デスクトップのプロトコルスキーム: `lfcode://`
 
-### Repository Layout
+### リポジトリ構成
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/lfcode`: コア実行基盤とセッションエンジン
+- `packages/app`: Web UI
+- `packages/desktop`: Electron デスクトップホスト
+- `packages/ui`: 共通 UI コンポーネント
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### ドキュメント
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+現在のドキュメントソースは [packages/web/src/content/docs](packages/web/src/content/docs) にあります。
 
-### Validation
+### 検証
 
-Run the main repository checks from the workspace root:
+ワークスペースのルートから主要なチェックを実行してください:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### サポート
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

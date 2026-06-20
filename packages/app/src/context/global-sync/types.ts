@@ -69,6 +69,23 @@ export type State = {
   message: {
     [sessionID: string]: Message[]
   }
+  messageByAgent: {
+    [sessionID: string]: {
+      [agentID: string]: Message[]
+    }
+  }
+  actor: {
+    [sessionID: string]: {
+      actorID: string
+      sessionID: string
+      mode: string
+      status: string
+      description: string
+      time: { created: number }
+      agent?: string
+      parentActorID?: string
+    }[]
+  }
   part: {
     [messageID: string]: Part[]
   }

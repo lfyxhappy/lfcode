@@ -17,6 +17,7 @@ import { Storage } from "@/storage"
 import { Log } from "../util"
 import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
+import { sessionDirectoryAliases } from "./directory"
 import { Instance } from "../project/instance"
 import { InstanceState } from "@/effect"
 import { Snapshot } from "@/snapshot"
@@ -34,6 +35,7 @@ const log = Log.create({ service: "session" })
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
+const ORPHAN_ASSISTANT_AGE_MS = 3_600_000
 
 function createDefaultTitle(isChild = false) {
   return (isChild ? childTitlePrefix : parentTitlePrefix) + new Date().toISOString()
@@ -200,7 +202,7 @@ export const GetInput = SessionID.zod
 export const ChildrenInput = SessionID.zod
 export const RemoveInput = SessionID.zod
 export const SetTitleInput = z.object({ sessionID: SessionID.zod, title: z.string() })
-export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.number().optional() })
+export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.number().nullable().optional() })
 export const SetPermissionInput = z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset.zod })
 export const SetRevertInput = z.object({
   sessionID: SessionID.zod,
@@ -363,7 +365,7 @@ export interface Interface {
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
-  readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
+  readonly setArchived: (input: { sessionID: SessionID; time?: number | null }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
@@ -643,8 +645,11 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       yield* patch(input.sessionID, { title: input.title })
     })
 
-    const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number }) {
-      yield* patch(input.sessionID, { time: { archived: input.time } })
+    const setArchived = Effect.fn("Session.setArchived")(function* (input: {
+      sessionID: SessionID
+      time?: number | null
+    }) {
+      yield* patch(input.sessionID, { time: { archived: input.time ?? null } })
     })
 
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
@@ -802,15 +807,14 @@ export function* list(input?: {
   limit?: number
 }) {
   const project = Instance.project
-  const conditions = [eq(SessionTable.project_id, project.id)]
+  const directoryAliases = input?.directory ? sessionDirectoryAliases(input.directory) : []
+  const conditions: SQL[] =
+    !Flag.LFCODE_EXPERIMENTAL_WORKSPACES && directoryAliases.length > 0
+      ? [inArray(SessionTable.directory, directoryAliases)]
+      : [eq(SessionTable.project_id, project.id)]
 
   if (input?.workspaceID) {
     conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
-  }
-  if (!Flag.LFCODE_EXPERIMENTAL_WORKSPACES) {
-    if (input?.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
-    }
   }
   if (input?.roots) {
     conditions.push(isNull(SessionTable.parent_id))
@@ -850,7 +854,7 @@ export function* listGlobal(input?: {
   const conditions: SQL[] = []
 
   if (input?.directory) {
-    conditions.push(eq(SessionTable.directory, input.directory))
+    conditions.push(inArray(SessionTable.directory, sessionDirectoryAliases(input.directory)))
   }
   if (input?.roots) {
     conditions.push(isNull(SessionTable.parent_id))
@@ -905,4 +909,57 @@ export function* listGlobal(input?: {
     const project = projects.get(row.project_id) ?? null
     yield { ...fromRow(row), project }
   }
+}
+
+export function clearOrphanAssistants(input?: {
+  sessionID?: SessionID
+  directory?: string
+  limit?: number
+  minAgeMs?: number
+  message?: string
+}) {
+  const now = Date.now()
+  const minAgeMs = input?.minAgeMs ?? ORPHAN_ASSISTANT_AGE_MS
+  const message = input?.message ?? "Abandoned: previous request interrupted before completion"
+  const sessions = input?.sessionID
+    ? [getStandalone(input.sessionID)]
+    : Array.from(list({ directory: input?.directory, limit: input?.limit }))
+
+  for (const session of sessions) {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, session.id))
+        .all(),
+    )
+    for (const row of rows) {
+      const info = MessageV2.Info.parse({
+        ...row.data,
+        id: row.id,
+        sessionID: row.session_id,
+        agentID: row.agent_id,
+      })
+      if (info.role !== "assistant") continue
+      if (info.time.completed) continue
+      const created = info.time.created ?? 0
+      if (now - created < minAgeMs) continue
+
+      SyncEvent.run(MessageV2.Event.Updated, {
+        sessionID: info.sessionID,
+        info: {
+          ...info,
+          time: { ...info.time, completed: now },
+          error: info.error ?? new MessageV2.AbortedError({ message }).toObject(),
+        },
+      })
+      log.info("orphan-assistant-cleared", { sessionID: info.sessionID, messageID: info.id })
+    }
+  }
+}
+
+function getStandalone(id: SessionID) {
+  const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+  if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
+  return fromRow(row)
 }

@@ -391,13 +391,6 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const expanded = createMemo(() => open().includes(file))
                     const mounted = createMemo(() => expanded() && (!!store.visible[file] || pinned(file)))
                     const force = () => !!store.force[file]
-                    const viewDiff = createMemo<NormalizedDiff | undefined>(() => {
-                      if (!expanded()) return
-                      if (!mounted()) return
-                      if (tooLarge()) return
-                      return { ...normalize(diff), preloaded: diff.preloaded }
-                    })
-
                     const comments = createMemo(() => grouped().get(file) ?? [])
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
                     const changedLines = () => diff.additions + diff.deletions
@@ -408,6 +401,12 @@ export const SessionReview = (props: SessionReviewProps) => {
                       if (force()) return false
                       if (mediaKind()) return false
                       return changedLines() > MAX_DIFF_CHANGED_LINES
+                    })
+                    const viewDiff = createMemo<NormalizedDiff | undefined>(() => {
+                      if (!expanded()) return
+                      if (!mounted()) return
+                      if (tooLarge()) return
+                      return { ...normalize(diff), preloaded: diff.preloaded }
                     })
 
                     const isAdded = () => diff.status === "added" || (diff.deletions === 0 && diff.additions > 0)

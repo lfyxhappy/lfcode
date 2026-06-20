@@ -24,6 +24,7 @@ export interface Interface {
     scope?: string
     scope_id?: string
     type?: string
+    path_prefix?: string
     limit?: number
   }) => Effect.Effect<
     Array<{ path: string; snippet: string; score: number; scope: string; scope_id: string; type: string }>
@@ -54,6 +55,7 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
       scope?: string
       scope_id?: string
       type?: string
+      path_prefix?: string
       limit?: number
     }) {
       // Lazy reconcile before search (covers off-tool writes); honour config flag.
@@ -96,6 +98,10 @@ export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
       if (input.type) {
         conditions.push("memory_fts.type = ?")
         params.push(input.type)
+      }
+      if (input.path_prefix) {
+        conditions.push("memory_fts.path LIKE ?")
+        params.push(`${input.path_prefix}%`)
       }
       const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""
 

@@ -60,6 +60,8 @@ function ensureGlobal() {
   )
 }
 
+const wintest = process.platform === "win32" ? test : test.skip
+
 describe("migrateFromGlobal", () => {
   test("migrates global sessions on first project creation", async () => {
     // 1. Start in a non-git directory — fromDirectory yields the "global" project ID.
@@ -146,5 +148,23 @@ describe("migrateFromGlobal", () => {
     expect(row).toBeDefined()
     // Should remain under "global" — not stolen
     expect(row!.project_id).toBe(ProjectID.global)
+  })
+
+  wintest("migrates global sessions across slash-style directory variants", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const { project } = await run((svc) => svc.fromDirectory(tmp.path))
+    expect(project.id).not.toBe(ProjectID.global)
+
+    ensureGlobal()
+
+    const alternate = tmp.path.replaceAll("\\", "/")
+    const id = uid()
+    seed({ id, dir: alternate, project: ProjectID.global })
+
+    await run((svc) => svc.fromDirectory(tmp.path))
+
+    const row = Database.use((db) => db.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
+    expect(row).toBeDefined()
+    expect(row!.project_id).toBe(project.id)
   })
 })

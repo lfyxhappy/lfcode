@@ -22,6 +22,7 @@
     "package": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --config electron-builder.config.ts",
     "package:mac": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --mac --config electron-builder.config.ts",
     "restore-runtime": "bun ./scripts/restore-win-runtime.ts",
+    "sync:win-use-copy": "bun ./scripts/sync-win-use-copy.ts",
     "package:win": "bun run preserve-runtime && bun run clean:dist && bun run preserve-config && bun run build && electron-builder --win --publish never --config electron-builder.config.ts && bun run restore-runtime && bun ./scripts/prune-win-dist.ts",
     "package:linux": "bun run clean:dist && bun run preserve-config && bun run build && electron-builder --linux --config electron-builder.config.ts",
     "native:build": "bun install --cwd native"

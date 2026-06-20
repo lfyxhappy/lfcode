@@ -38,6 +38,7 @@ import { LLM } from "@/session/llm"
 import { LSP } from "@/lsp"
 import { MCP } from "@/mcp"
 import { McpAuth } from "@/mcp/auth"
+import * as McpCatalog from "@/mcp/catalog"
 import { Command } from "@/command"
 import { Truncate } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -101,6 +102,7 @@ export const AppLayer = Layer.suspend(() =>
     LSP.defaultLayer,
     MCP.defaultLayer,
     McpAuth.defaultLayer,
+    McpCatalog.defaultLayer,
     Command.defaultLayer,
     Truncate.defaultLayer,
     ToolRegistry.defaultLayer,

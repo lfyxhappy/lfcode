@@ -36,6 +36,21 @@ describe("app session cache", () => {
       session_diff: Record<string, SnapshotFileDiff[] | undefined>
       todo: Record<string, Todo[] | undefined>
       message: Record<string, Message[] | undefined>
+      messageByAgent: Record<string, Record<string, Message[] | undefined> | undefined>
+      actor: Record<
+        string,
+        {
+          actorID: string
+          sessionID: string
+          mode: string
+          status: string
+          description: string
+          time: { created: number }
+          agent?: string
+          parentActorID?: string
+        }[]
+        | undefined
+      >
       part: Record<string, Part[] | undefined>
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
@@ -44,6 +59,8 @@ describe("app session cache", () => {
       session_diff: { ses_1: [] },
       todo: { ses_1: [] as Todo[] },
       message: {},
+      messageByAgent: {},
+      actor: {},
       part: { msg_1: [part("prt_1", "ses_1", "msg_1")] },
       permission: { ses_1: [] as PermissionRequest[] },
       question: { ses_1: [] as QuestionRequest[] },
@@ -67,6 +84,21 @@ describe("app session cache", () => {
       session_diff: Record<string, SnapshotFileDiff[] | undefined>
       todo: Record<string, Todo[] | undefined>
       message: Record<string, Message[] | undefined>
+      messageByAgent: Record<string, Record<string, Message[] | undefined> | undefined>
+      actor: Record<
+        string,
+        {
+          actorID: string
+          sessionID: string
+          mode: string
+          status: string
+          description: string
+          time: { created: number }
+          agent?: string
+          parentActorID?: string
+        }[]
+        | undefined
+      >
       part: Record<string, Part[] | undefined>
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
@@ -75,6 +107,8 @@ describe("app session cache", () => {
       session_diff: {},
       todo: {},
       message: { ses_1: [m] },
+      messageByAgent: {},
+      actor: {},
       part: { [m.id]: [part("prt_1", "ses_1", m.id)] },
       permission: {},
       question: {},

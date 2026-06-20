@@ -29,6 +29,11 @@ const api: ElectronAPI = {
   storeClear: (name) => ipcRenderer.invoke("store-clear", name),
   storeKeys: (name) => ipcRenderer.invoke("store-keys", name),
   storeLength: (name) => ipcRenderer.invoke("store-length", name),
+  createDetachedSidePanelWindow: (input) => ipcRenderer.invoke("create-detached-side-panel-window", input),
+  redockDetachedSidePanelWindow: (detachedWindowID, placement) =>
+    ipcRenderer.invoke("redock-detached-side-panel-window", detachedWindowID, placement),
+  setDetachedDockTarget: (input) => ipcRenderer.invoke("set-detached-dock-target", input),
+  clearDetachedDockTarget: () => ipcRenderer.invoke("clear-detached-dock-target"),
 
   getWindowCount: () => ipcRenderer.invoke("get-window-count"),
   onSqliteMigrationProgress: (cb) => {
@@ -50,6 +55,11 @@ const api: ElectronAPI = {
     const handler = (_: unknown, url: string) => cb(url)
     ipcRenderer.on("browser-window-open", handler)
     return () => ipcRenderer.removeListener("browser-window-open", handler)
+  },
+  onDetachedSidePanelEvent: (cb) => {
+    const handler = (_: unknown, event: any) => cb(event)
+    ipcRenderer.on("detached-side-panel-event", handler)
+    return () => ipcRenderer.removeListener("detached-side-panel-event", handler)
   },
 
   openDirectoryPicker: (opts) => ipcRenderer.invoke("open-directory-picker", opts),

@@ -1,21 +1,22 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Логотип Lfcode">
     </picture>
   </a>
 </p>
-<p align="center">Open source AI-агент для программирования.</p>
+<p align="center">Open-source AI-агент для кодирования, построенный на opencode.</p>
+<p align="center">Сохраняет историческую совместимость и расширяет управление сессиями, Skills и интеграцию с GitHub Action.</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Статус сборки" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -42,16 +43,26 @@
 
 ---
 
-> Этот локализованный README отражает текущее состояние репозитория Lfcode, чтобы ссылки на загрузку, файлы релизов и заметки о совместимости оставались точными.
+> Этот локализованный README отражает текущее состояние репозитория Lfcode, чтобы ссылки на загрузку, релизные файлы и заметки о совместимости оставались точными.
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### Обзор
 
-### Installation
+Lfcode — это Bun workspace monorepo, построенный на основе opencode. Он сохраняет историческую совместимость и продолжает поставлять бренд Lfcode, десктопное приложение, веб-интерфейс, SDK и поддержку GitHub Action.
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Основные возможности
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- Более полное управление сессиями: список, статус, создание, обновление, удаление, fork, sharing, unshare, summarize, compact, diff, revert и unrevert.
+- Несколько способов взаимодействия: отправка сообщений, асинхронный `prompt`, `shell`, команды и прогноз следующего prompt.
+- Управление Skills: локальный список Skills, обнаружение, установка, импорт, создание, обновление и просмотр каталогов.
+- Интеграция GitHub Action: запуск автоматической работы из комментариев issue или PR через `/lfcode`, `/opencode` или `/oc`.
+- Историческая совместимость: сохранены команда CLI `opencode`, переменные окружения `LFCODE_*` и протокол `lfcode://`.
+
+### Установка
+
+Публичные загрузки публикуются на странице [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+
+- Desktop: текущий release pipeline публикует Windows installer с именем `lfcode-win-x64.exe`.
+- Source: используйте Bun из корня репозитория для локальной разработки.
 
 ```bash
 bun install
@@ -60,37 +71,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### Совместимость
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Некоторые идентификаторы runtime по-прежнему используют историческое имя `opencode` ради совместимости.
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- Команда CLI: `opencode`
+- Каталог конфигурации: `~/.lfcode`
+- Переменные окружения: `LFCODE_*`
+- Схема desktop-протокола: `lfcode://`
 
-### Repository Layout
+### Структура репозитория
 
-- `packages/lfcode`: core runtime and session engine
+- `packages/lfcode`: основной runtime и движок сессий
 - `packages/app`: web UI
 - `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/ui`: общие UI-компоненты
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### Документация
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+Текущий источник документации находится в [packages/web/src/content/docs](packages/web/src/content/docs).
 
-### Validation
+### Проверка
 
-Run the main repository checks from the workspace root:
+Запускайте основные проверки из корня workspace:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### Поддержка
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

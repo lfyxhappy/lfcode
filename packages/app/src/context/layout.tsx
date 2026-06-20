@@ -40,6 +40,22 @@ type SessionTabs = {
   all: string[]
 }
 
+type DetachedPanelKind = "file" | "browser" | "review" | "context"
+
+type DetachedPanelPlacement = {
+  afterTab?: string
+  beforeTab?: string
+}
+
+type DetachedPanelRecord = {
+  detachedWindowID: string
+  sessionKey: string
+  tab: string
+  kind: DetachedPanelKind
+  sourceWindowID: number
+  title?: string
+}
+
 type SessionView = {
   scroll: Record<string, SessionScroll>
   reviewOpen?: string[]
@@ -118,7 +134,7 @@ function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): 
   return { all, active: tab }
 }
 
-function createBrowserState(url: string, title?: string, current?: BrowserViewState): BrowserViewState {
+export function createBrowserState(url: string, title?: string, current?: BrowserViewState): BrowserViewState {
   const next = normalizeBrowserURL(url)
   if (!next) {
     return current ?? {
@@ -138,17 +154,15 @@ function createBrowserState(url: string, title?: string, current?: BrowserViewSt
   const previousUrl = previousIndex >= 0 ? previousHistory[previousIndex] : undefined
 
   const history =
-    next === DEFAULT_BROWSER_URL
-      ? [DEFAULT_BROWSER_URL]
-      : current && previousUrl === next
-        ? previousHistory.length > 0
-          ? previousHistory
-          : [next]
-        : current
-          ? [...previousHistory.slice(0, previousIndex + 1), next]
-          : [next]
+    current && previousUrl === next
+      ? previousHistory.length > 0
+        ? previousHistory
+        : [next]
+      : current
+        ? [...previousHistory.slice(0, previousIndex + 1), next]
+        : [next]
 
-  const index = next === DEFAULT_BROWSER_URL ? 0 : history.lastIndexOf(next)
+  const index = history.lastIndexOf(next)
 
   return {
     url: next,
@@ -156,7 +170,7 @@ function createBrowserState(url: string, title?: string, current?: BrowserViewSt
     title: title ?? current?.title,
     history,
     index,
-    loading: next !== DEFAULT_BROWSER_URL,
+    loading: true,
     canGoBack: index > 0,
     canGoForward: index < history.length - 1,
     error: undefined,
@@ -187,11 +201,11 @@ export function normalizeBrowserViewState(value: unknown) {
 
   return {
     url: currentUrl,
-    input: typeof input.input === "string" ? input.input : currentUrl,
+    input: normalizeBrowserURL(typeof input.input === "string" ? input.input : currentUrl) ?? currentUrl,
     title: typeof input.title === "string" ? input.title : undefined,
     history: historyWithCurrent,
     index,
-    loading: typeof input.loading === "boolean" ? input.loading : currentUrl !== DEFAULT_BROWSER_URL,
+    loading: typeof input.loading === "boolean" ? input.loading : true,
     canGoBack: index > 0,
     canGoForward: index < historyWithCurrent.length - 1,
     error: typeof input.error === "string" ? input.error : undefined,
@@ -214,19 +228,13 @@ export function syncBrowserViewState(
   const currentUrl = history[currentIndex] ?? current.url
 
   const index = (() => {
-    if (normalized === DEFAULT_BROWSER_URL) return 0
     if (normalized === currentUrl) return history.length > 0 ? currentIndex : 0
     const existing = history.lastIndexOf(normalized)
     if (existing >= 0 && Math.abs(existing - currentIndex) === 1) return existing
     return history.length
   })()
 
-  const nextHistory =
-    normalized === DEFAULT_BROWSER_URL
-      ? [DEFAULT_BROWSER_URL]
-      : index < history.length
-        ? history
-        : [...history.slice(0, currentIndex + 1), normalized]
+  const nextHistory = index < history.length ? history : [...history.slice(0, currentIndex + 1), normalized]
 
   return {
     ...current,
@@ -444,7 +452,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           opened: false,
         },
         sessionTabs: {} as Record<string, SessionTabs>,
-      sessionView: {} as Record<string, SessionView>,
+        sessionView: {} as Record<string, SessionView>,
+        detachedPanels: [] as DetachedPanelRecord[],
         handoff: {
           tabs: undefined as TabHandoff | undefined,
         },
@@ -1135,7 +1144,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
               if (!current) return
               setStore("sessionView", session, "browser", tabID, {
                 ...current,
-                loading: current.url !== DEFAULT_BROWSER_URL,
+                loading: true,
                 error: undefined,
               })
             },
@@ -1279,6 +1288,62 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             )
           },
         }
+      },
+      detachedPanels: {
+        list: createMemo(() => store.detachedPanels),
+        listFor(sessionKey: string | Accessor<string>) {
+          const key = createSessionKeyReader(sessionKey, ensureKey)
+          return createMemo(() => store.detachedPanels.filter((item) => item.sessionKey === key()))
+        },
+        get(detachedWindowID: string) {
+          return store.detachedPanels.find((item) => item.detachedWindowID === detachedWindowID)
+        },
+        isDetached(sessionKey: string | Accessor<string>, tab: string) {
+          const key = createSessionKeyReader(sessionKey, ensureKey)
+          return createMemo(() => store.detachedPanels.some((item) => item.sessionKey === key() && item.tab === tab))
+        },
+        sync(records: DetachedPanelRecord[]) {
+          setStore("detachedPanels", records)
+        },
+        detach(input: DetachedPanelRecord) {
+          const exists = store.detachedPanels.some((item) => item.detachedWindowID === input.detachedWindowID)
+          if (exists) return
+          setStore("detachedPanels", store.detachedPanels.length, input)
+        },
+        redock(detachedWindowID: string, placement?: DetachedPanelPlacement) {
+          const current = store.detachedPanels.find((item) => item.detachedWindowID === detachedWindowID)
+          if (!current) return
+
+          const session = current.sessionKey
+          const tabs = store.sessionTabs[session] ?? { all: [], active: undefined }
+          const base = tabs.all.filter((item) => item !== current.tab)
+          const beforeIndex =
+            placement?.beforeTab !== undefined ? base.findIndex((item) => item === placement.beforeTab) : -1
+          const afterIndex =
+            placement?.afterTab !== undefined ? base.findIndex((item) => item === placement.afterTab) : -1
+          const insertIndex =
+            beforeIndex >= 0
+              ? beforeIndex
+              : afterIndex >= 0
+                ? afterIndex + 1
+                : tabs.active
+                  ? Math.max(0, base.findIndex((item) => item === tabs.active) + 1)
+                  : base.length
+          const all = base.slice()
+          all.splice(Math.max(0, Math.min(insertIndex, all.length)), 0, current.tab)
+
+          batch(() => {
+            setStore("sessionTabs", session, { all, active: current.tab })
+            setStore(
+              "detachedPanels",
+              produce((draft) => {
+                const index = draft.findIndex((item) => item.detachedWindowID === detachedWindowID)
+                if (index === -1) return
+                draft.splice(index, 1)
+              }),
+            )
+          })
+        },
       },
     }
   },

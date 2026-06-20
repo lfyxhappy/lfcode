@@ -942,6 +942,35 @@ test(
   ),
 )
 
+test(
+  "playwright tools include embedded side browser guidance",
+  withInstance({}, (mcp) =>
+    Effect.gen(function* () {
+      lastCreatedClientName = "playwright"
+      const serverState = getOrCreateClientState("playwright")
+      serverState.tools = [
+        {
+          name: "browser_navigate",
+          description: "Navigate the browser page.",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ]
+
+      yield* mcp.add("playwright", {
+        type: "local",
+        command: ["echo", "test"],
+      })
+
+      const tools = yield* mcp.tools()
+      expect(tools.playwright_browser_navigate?.description).toContain("load the `playwright-browser` skill")
+      expect(tools.playwright_browser_navigate?.description).toContain("embedded side browser webview")
+      expect(tools.playwright_browser_navigate?.description).toContain("hidden or collapsed side browser target still counts as open")
+      expect(tools.playwright_browser_navigate?.description).toContain("only when no embedded browser target exists")
+      expect(tools.playwright_browser_navigate?.description).toContain("Navigate the browser page.")
+    }),
+  ),
+)
+
 // ========================================================================
 // Test: transport leak — local stdio timeout (#19168)
 // ========================================================================

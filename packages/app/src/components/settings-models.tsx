@@ -16,6 +16,7 @@ import { popularProviders } from "@/hooks/use-providers"
 import { formatServerError } from "@/utils/server-errors"
 import { DialogRemoveProvider } from "./dialog-delete-custom-provider"
 import { SettingsList } from "./settings-list"
+import { SUBAGENT_FIELDS, subagentModelPatch, subagentModelValue, type SubagentField } from "./settings-models-helpers"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 type ConfigModelField = "model" | "small_model"
@@ -63,7 +64,7 @@ export const SettingsModels: Component = () => {
   const dialog = useDialog()
   const models = useModels()
   const globalSync = useGlobalSync()
-  const [saving, setSaving] = createSignal<ConfigModelField>()
+  const [saving, setSaving] = createSignal<ConfigModelField | SubagentField>()
 
   const modelValue = (item: ModelItem) => `${item.provider.id}/${item.id}`
   const reopenSettingsModels = () => {
@@ -97,7 +98,11 @@ export const SettingsModels: Component = () => {
 
   const options = createMemo<ModelOption[]>(() => {
     const seen = new Set(baseOptions().map((item) => item.value))
-    const current = [globalSync.data.config.model, globalSync.data.config.small_model]
+    const current = [
+      globalSync.data.config.model,
+      globalSync.data.config.small_model,
+      ...SUBAGENT_FIELDS.map((field) => subagentModelValue(globalSync.data.config, field)),
+    ]
       .filter((value): value is string => !!value && !seen.has(value))
       .map(
         (value) =>
@@ -111,11 +116,33 @@ export const SettingsModels: Component = () => {
     return [...current, ...baseOptions()]
   })
 
+  const subagentOptions = createMemo<ModelOption[]>(() => [
+    {
+      value: "",
+      label: language.t("settings.models.subagent.inherit"),
+      provider: language.t("settings.models.group.currentConfig"),
+    },
+    ...options(),
+  ])
+
   const currentOption = (field: ConfigModelField) => {
     const value = globalSync.data.config[field]
     if (!value) return
     return (
       options().find((item) => item.value === value) ?? {
+        value,
+        label: value,
+        provider: language.t("settings.models.group.currentConfig"),
+        custom: true,
+      }
+    )
+  }
+
+  const currentSubagentOption = (field: SubagentField) => {
+    const value = subagentModelValue(globalSync.data.config, field)
+    if (!value) return subagentOptions()[0]
+    return (
+      subagentOptions().find((item) => item.value === value) ?? {
         value,
         label: value,
         provider: language.t("settings.models.group.currentConfig"),
@@ -141,6 +168,35 @@ export const SettingsModels: Component = () => {
             field === "model"
               ? language.t("settings.models.toast.default.description", { model: option.label })
               : language.t("settings.models.toast.small.description", { model: option.label }),
+        })
+      })
+      .catch((err: unknown) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: formatServerError(err, language.t, language.t("common.requestFailed")),
+        })
+      })
+      .finally(() => setSaving(undefined))
+  }
+
+  const saveSubagentModel = async (field: SubagentField, option: ModelOption | undefined) => {
+    if (!option) return
+    const current = subagentModelValue(globalSync.data.config, field)
+    if (current === option.value) return
+    if (saving()) return
+
+    setSaving(field)
+    await globalSync
+      .updateConfig(subagentModelPatch(field, option.value))
+      .then(() => {
+        showToast({
+          variant: "success",
+          icon: "circle-check",
+          title: language.t("settings.models.toast.updated.title"),
+          description: language.t("settings.models.toast.subagentUpdated.description", {
+            agent: language.t(`settings.models.subagent.${field}.title`),
+            model: option.label,
+          }),
         })
       })
       .catch((err: unknown) => {
@@ -267,6 +323,40 @@ export const SettingsModels: Component = () => {
                 )}
               </Select>
             </SettingsRow>
+            <For each={SUBAGENT_FIELDS}>
+              {(field) => (
+                <SettingsRow
+                  title={language.t(`settings.models.subagent.${field}.title`)}
+                  description={language.t(`settings.models.subagent.${field}.description`)}
+                >
+                  <Select
+                    data-action={`settings-subagent-model-${field}`}
+                    options={subagentOptions()}
+                    current={currentSubagentOption(field)}
+                    value={(item) => item.value}
+                    label={(item) => item.label}
+                    groupBy={(item) => item.provider}
+                    onSelect={(item) => void saveSubagentModel(field, item)}
+                    placeholder={language.t("settings.models.subagent.inherit")}
+                    disabled={saving() !== undefined || subagentOptions().length === 0}
+                    variant="secondary"
+                    size="small"
+                    triggerVariant="settings"
+                    triggerStyle={{ "min-width": "260px", "max-width": "360px" }}
+                    valueClass="truncate"
+                  >
+                    {(item) => (
+                      <div class="flex min-w-0 items-center gap-2">
+                        <Show when={item?.providerID}>
+                          {(providerID) => <ProviderIcon id={providerID()} class="size-4 shrink-0 icon-weak-base" />}
+                        </Show>
+                        <span class="truncate">{item?.label}</span>
+                      </div>
+                    )}
+                  </Select>
+                </SettingsRow>
+              )}
+            </For>
           </SettingsList>
         </div>
 

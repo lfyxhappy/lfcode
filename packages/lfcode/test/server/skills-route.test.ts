@@ -1,0 +1,494 @@
+import { afterEach, describe, expect, mock, test } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import { setTimeout as sleep } from "node:timers/promises"
+import path from "path"
+import { Server } from "../../src/server/server"
+import { Instance } from "../../src/project/instance"
+import { cleanupTmpdir, tmpdir } from "../fixture/fixture"
+
+const originalFetch = globalThis.fetch
+const tmpdirWithGit = { git: true }
+
+afterEach(() => {
+  globalThis.fetch = originalFetch
+})
+
+afterEach(async () => {
+  await Instance.disposeAll().catch(() => undefined)
+  Bun.gc(true)
+  await sleep(800)
+})
+
+describe("skills routes", () => {
+  test("GET /skills lists local .lfcode/skills entries", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await Bun.write(
+          path.join(tmp.path, ".lfcode", "skills", "route-skill", "SKILL.md"),
+          `---\nname: route-skill\ndescription: Route test skill.\n---\n\n# Route Skill\n`,
+        )
+
+        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+        const response = await Server.Default().app.request("/skills", {
+          method: "GET",
+          headers: {
+            "x-lfcode-directory": tmp.path,
+          },
+        })
+        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+
+        expect(response.status).toBe(200)
+
+        const body = (await response.json()) as Array<{ name: string; description: string }>
+        expect(body.map((skill) => skill.name)).toContain("route-skill")
+        expect(body.find((skill) => skill.name === "route-skill")?.description).toBe("Route test skill.")
+      },
+    })
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("GET /skills/manage/list only lists local .lfcode/skills entries", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await Bun.write(
+          path.join(tmp.path, ".lfcode", "skills", "local-only", "SKILL.md"),
+          `---\nname: local-only\ndescription: Local only skill.\nhidden: true\n---\n\n# Local Only\n`,
+        )
+        await Bun.write(
+          path.join(tmp.path, "skills", "external", "SKILL.md"),
+          `---\nname: external\ndescription: External skill.\n---\n\n# External\n`,
+        )
+
+        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+        const response = await Server.Default().app.request("/skills/manage/list", {
+          method: "GET",
+          headers: {
+            "x-lfcode-directory": tmp.path,
+          },
+        })
+        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+
+        expect(response.status).toBe(200)
+
+        const body = (await response.json()) as Array<{ name: string; hidden?: boolean; directory: string }>
+        expect(body.map((skill) => skill.name)).toEqual(["local-only"])
+        expect(body[0]?.hidden).toBe(true)
+        expect(body[0]?.directory).toBe("local-only")
+      },
+    })
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("GET /skills/discover loads skills.sh entries and marks installed skills", async () => {
+    await using tmp = await tmpdir({ git: true })
+    globalThis.fetch = mock((input: URL | RequestInfo) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url)
+      if (url.pathname.endsWith("/sitemap-skills-1.xml")) {
+        return Promise.resolve(
+          new Response(
+            `<?xml version="1.0" encoding="UTF-8"?>
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://www.skills.sh/alpha/repo/alpha-skill</loc></url>
+              <url><loc>https://www.skills.sh/beta/repo/beta-skill</loc></url>
+            </urlset>`,
+            { headers: { "content-type": "application/xml" } },
+          ),
+        )
+      }
+      if (url.pathname.endsWith("/sitemap-skills-2.xml")) {
+        return Promise.resolve(
+          new Response(
+            `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`,
+            { headers: { "content-type": "application/xml" } },
+          ),
+        )
+      }
+      if (url.pathname === "/alpha/repo/alpha-skill") {
+        return Promise.resolve(
+          new Response(
+            `
+              <html>
+                <head>
+                  <script type="application/ld+json">
+                    {"@type":"SoftwareApplication","name":"Alpha Skill","description":"Alpha description"}
+                  </script>
+                </head>
+                <body>
+                  <code>npx skills add https://github.com/alpha/repo --skill alpha-skill</code>
+                </body>
+              </html>
+            `,
+            { headers: { "content-type": "text/html" } },
+          ),
+        )
+      }
+      if (url.pathname === "/beta/repo/beta-skill") {
+        return Promise.resolve(
+          new Response(
+            `
+              <html>
+                <head>
+                  <script type="application/ld+json">
+                    {"@type":"SoftwareApplication","name":"Beta Skill","description":"Beta description"}
+                  </script>
+                </head>
+                <body>
+                  <code>npx skills add https://github.com/beta/repo --skill beta-skill</code>
+                </body>
+              </html>
+            `,
+            { headers: { "content-type": "text/html" } },
+          ),
+        )
+      }
+      return Promise.resolve(new Response("not found", { status: 404 }))
+    }) as unknown as typeof globalThis.fetch
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await Bun.write(
+          path.join(tmp.path, ".lfcode", "skills", "alpha-skill", "SKILL.md"),
+          `---\nname: alpha-skill\ndescription: Alpha local skill.\n---\n\n# Alpha Skill\n`,
+        )
+
+        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+        const response = await Server.Default().app.request("/skills/discover?source=skills.sh&status=available&page=1&pageSize=24", {
+          method: "GET",
+          headers: {
+            "x-lfcode-directory": tmp.path,
+          },
+        })
+        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+
+        expect(response.status).toBe(200)
+
+        const body = (await response.json()) as {
+          items: Array<{ name: string; repository: string; installed: boolean }>
+          repositories: Array<{ id: string; count: number }>
+          total: number
+        }
+        expect(body.total).toBe(1)
+        expect(body.items).toHaveLength(1)
+        expect(body.items[0]?.name).toBe("Beta Skill")
+        expect(body.items[0]?.repository).toBe("beta/repo")
+        expect(body.items[0]?.installed).toBe(false)
+        expect(body.repositories.map((item) => item.id)).toEqual(["alpha/repo", "beta/repo"])
+        expect(body.repositories.find((item) => item.id === "alpha/repo")?.count).toBe(1)
+      },
+    })
+  })
+
+  test("POST /skills/import imports a single skill directory", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    await writeSkill(path.join(tmp.path, "external", "single"), "single-import", "Single import.")
+
+    const response = await Server.Default().app.request("/skills/import", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "single") }),
+    })
+
+    await expectOk(response)
+    const body = (await response.json()) as Array<{ name: string; location: string }>
+    expect(body.map((skill) => skill.name)).toEqual(["single-import"])
+    expect(body[0]?.location).toContain(path.join(".lfcode", "skills", "single", "SKILL.md"))
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("POST /skills/import imports multiple skill child directories", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const source = path.join(tmp.path, "external", "many")
+    await writeSkill(path.join(source, "alpha"), "alpha-import", "Alpha import.")
+    await writeSkill(path.join(source, "beta"), "beta-import", "Beta import.")
+
+    const response = await Server.Default().app.request("/skills/import", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ kind: "folder", source }),
+    })
+
+    await expectOk(response)
+    const body = (await response.json()) as Array<{ name: string }>
+    expect(body.map((skill) => skill.name).toSorted()).toEqual(["alpha-import", "beta-import"])
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("POST /skills/import imports a zip and cleans extracted files", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const zipPath = path.join(tmp.path, "zip-skill.zip")
+    await Bun.write(
+      zipPath,
+      createStoredZip({
+        "zip-root/SKILL.md": `---\nname: zip-import\ndescription: Zip import.\n---\n\n# Zip Import\n`,
+      }),
+    )
+
+    const response = await Server.Default().app.request("/skills/import", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ kind: "zip", source: zipPath }),
+    })
+
+    await expectOk(response)
+    const body = (await response.json()) as Array<{ name: string; location: string }>
+    expect(body.map((skill) => skill.name)).toEqual(["zip-import"])
+    expect(body[0]?.location).toContain(path.join(".lfcode", "skills", "zip-root", "SKILL.md"))
+    expect(await Bun.file(path.join(tmp.path, ".lfcode", "tmp", "skill-import")).exists()).toBe(false)
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("POST /skills/import returns a clear error for missing preset skill roots", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const originalHome = process.env.HOME
+        const originalUserProfile = process.env.USERPROFILE
+        process.env.HOME = path.join(tmp.path, "home")
+        process.env.USERPROFILE = path.join(tmp.path, "home")
+        try {
+          const response = await Server.Default().app.request("/skills/import", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-lfcode-directory": tmp.path,
+            },
+            body: JSON.stringify({ kind: "codex" }),
+          })
+
+          expect(response.status).toBe(404)
+          const text = await response.text()
+          expect(text).toContain("Preset skill root not found")
+          expect(text).toContain(".codex")
+        } finally {
+          if (originalHome === undefined) delete process.env.HOME
+          else process.env.HOME = originalHome
+          if (originalUserProfile === undefined) delete process.env.USERPROFILE
+          else process.env.USERPROFILE = originalUserProfile
+          await disposeTestInstance(tmp.path)
+        }
+      },
+    })
+  })
+
+  test("POST /skills/import overwrites duplicate target directories and refreshes", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    await writeSkill(path.join(tmp.path, ".lfcode", "skills", "dup"), "old-dup", "Old duplicate.")
+    await writeSkill(path.join(tmp.path, "external", "dup"), "new-dup", "New duplicate.")
+
+    const response = await Server.Default().app.request("/skills/import", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "dup") }),
+    })
+
+    await expectOk(response)
+    const body = (await response.json()) as Array<{ name: string; description: string }>
+    expect(body).toEqual([
+      expect.objectContaining({
+        name: "new-dup",
+        description: "New duplicate.",
+      }),
+    ])
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("PATCH /skills/manage/update toggles hidden frontmatter and refreshes", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    await writeSkill(path.join(tmp.path, ".lfcode", "skills", "managed"), "managed-skill", "Managed skill.")
+
+    const hideResponse = await Server.Default().app.request("/skills/manage/update", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ directory: "managed", hidden: true }),
+    })
+
+    await expectOk(hideResponse)
+    const hidden = (await hideResponse.json()) as { hidden?: boolean }
+    expect(hidden.hidden).toBe(true)
+    expect(await Bun.file(path.join(tmp.path, ".lfcode", "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
+
+    const showResponse = await Server.Default().app.request("/skills/manage/update", {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "x-lfcode-directory": tmp.path,
+      },
+      body: JSON.stringify({ directory: "managed", hidden: null }),
+    })
+
+    await expectOk(showResponse)
+    const shown = (await showResponse.json()) as { hidden?: boolean }
+    expect(shown.hidden).toBeUndefined()
+    expect(await Bun.file(path.join(tmp.path, ".lfcode", "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("DELETE /skills/manage/delete removes only local skill directories", async () => {
+    const root = await fs.mkdtemp(path.join(process.env["LFCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir(), "lfcode-test-delete-"))
+    try {
+      await Bun.$`git init`.cwd(root).quiet()
+      await Bun.$`git config core.fsmonitor false`.cwd(root).quiet()
+      await Bun.$`git config commit.gpgsign false`.cwd(root).quiet()
+      await Bun.$`git config user.email "test@lfcode.test"`.cwd(root).quiet()
+      await Bun.$`git config user.name "Test"`.cwd(root).quiet()
+      await Bun.$`git commit --allow-empty -m "root commit ${root}"`.cwd(root).quiet()
+
+      await writeSkill(path.join(root, ".lfcode", "skills", "managed"), "managed-skill", "Managed skill.")
+
+      const response = await Server.Default().app.request("/skills/manage/delete", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": root,
+        },
+        body: JSON.stringify({ directory: "managed" }),
+      })
+
+      await expectOk(response)
+      expect(await Bun.file(path.join(root, ".lfcode", "skills", "managed")).exists()).toBe(false)
+
+      const bad = await Server.Default().app.request("/skills/manage/delete", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": root,
+        },
+        body: JSON.stringify({ directory: ".." }),
+      })
+
+      expect(bad.status).toBe(404)
+      await disposeTestInstance(root)
+    } finally {
+      await cleanupTmpdir(root, retryRemove).catch(() => undefined)
+    }
+  })
+})
+
+async function writeSkill(dir: string, name: string, description: string) {
+  await Bun.write(
+    path.join(dir, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`,
+  )
+}
+
+async function expectOk(response: Response) {
+  if (response.status === 200) return
+  throw new Error(await response.text())
+}
+
+async function disposeTestInstance(directory: string) {
+  await Instance.provide({
+    directory,
+    fn: () => Instance.dispose(),
+  }).catch(() => undefined)
+  Bun.gc(true)
+  await sleep(1200)
+}
+
+async function retryRemove(target: string) {
+  await sleep(1500)
+  await fs.rm(target, {
+    recursive: true,
+    force: true,
+    maxRetries: 80,
+    retryDelay: 150,
+  })
+}
+
+function createStoredZip(files: Record<string, string>) {
+  const localParts: Buffer[] = []
+  const centralParts: Buffer[] = []
+  let offset = 0
+
+  for (const [name, content] of Object.entries(files)) {
+    const nameBuffer = Buffer.from(name.replaceAll("\\", "/"))
+    const data = Buffer.from(content)
+    const crc = crc32(data)
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0, 6)
+    local.writeUInt16LE(0, 8)
+    local.writeUInt16LE(0, 10)
+    local.writeUInt16LE(0, 12)
+    local.writeUInt32LE(crc, 14)
+    local.writeUInt32LE(data.length, 18)
+    local.writeUInt32LE(data.length, 22)
+    local.writeUInt16LE(nameBuffer.length, 26)
+    local.writeUInt16LE(0, 28)
+    localParts.push(local, nameBuffer, data)
+
+    const central = Buffer.alloc(46)
+    central.writeUInt32LE(0x02014b50, 0)
+    central.writeUInt16LE(20, 4)
+    central.writeUInt16LE(20, 6)
+    central.writeUInt16LE(0, 8)
+    central.writeUInt16LE(0, 10)
+    central.writeUInt16LE(0, 12)
+    central.writeUInt16LE(0, 14)
+    central.writeUInt32LE(crc, 16)
+    central.writeUInt32LE(data.length, 20)
+    central.writeUInt32LE(data.length, 24)
+    central.writeUInt16LE(nameBuffer.length, 28)
+    central.writeUInt16LE(0, 30)
+    central.writeUInt16LE(0, 32)
+    central.writeUInt16LE(0, 34)
+    central.writeUInt16LE(0, 36)
+    central.writeUInt32LE(0, 38)
+    central.writeUInt32LE(offset, 42)
+    centralParts.push(central, nameBuffer)
+    offset += local.length + nameBuffer.length + data.length
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(0, 4)
+  end.writeUInt16LE(0, 6)
+  end.writeUInt16LE(Object.keys(files).length, 8)
+  end.writeUInt16LE(Object.keys(files).length, 10)
+  end.writeUInt32LE(centralSize, 12)
+  end.writeUInt32LE(offset, 16)
+  end.writeUInt16LE(0, 20)
+
+  return Buffer.concat([...localParts, ...centralParts, end])
+}
+
+function crc32(input: Buffer) {
+  let crc = 0xffffffff
+  for (const value of input) {
+    crc ^= value
+    for (let bit = 0; bit < 8; bit++) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}

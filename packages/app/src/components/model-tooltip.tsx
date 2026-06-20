@@ -3,6 +3,8 @@ import { useLanguage } from "@/context/language"
 
 type InputKey = "text" | "image" | "audio" | "video" | "pdf"
 type InputMap = Record<InputKey, boolean>
+type CapabilityKey = InputKey | "tool_call" | "reasoning" | "native_web" | "temperature"
+type CapabilityMap = Record<CapabilityKey, boolean>
 
 type ModelInfo = {
   id: string
@@ -13,6 +15,10 @@ type ModelInfo = {
   capabilities?: {
     reasoning: boolean
     input: InputMap
+    tools?: boolean
+    toolcall?: boolean
+    temperature?: boolean
+    native_web?: boolean
   }
   modalities?: {
     input: Array<string>
@@ -44,6 +50,13 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
     if (value === "pdf") return language.t("model.input.pdf")
     return value
   }
+  const capabilityLabel = (value: CapabilityKey) => {
+    if (value === "tool_call") return language.t("model.capability.tool_call")
+    if (value === "reasoning") return language.t("model.capability.reasoning")
+    if (value === "native_web") return language.t("model.capability.native_web")
+    if (value === "temperature") return language.t("model.capability.temperature")
+    return inputLabel(value)
+  }
   const title = () => {
     const tags: Array<string> = []
     if (props.latest) tags.push(language.t("model.tag.latest"))
@@ -73,6 +86,20 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       : language.t("model.tooltip.reasoning.none")
   }
   const context = () => language.t("model.tooltip.context", { limit: props.model.limit.context.toLocaleString() })
+  const capabilities = () => {
+    const next: CapabilityMap = {
+      text: true,
+      image: !!props.model.capabilities?.input.image,
+      audio: !!props.model.capabilities?.input.audio,
+      video: !!props.model.capabilities?.input.video,
+      pdf: !!props.model.capabilities?.input.pdf,
+      tool_call: !!props.model.capabilities?.tools || !!props.model.capabilities?.toolcall,
+      reasoning: !!props.model.capabilities?.reasoning,
+      native_web: !!props.model.capabilities?.native_web,
+      temperature: !!props.model.capabilities?.temperature,
+    }
+    return (Object.keys(next) as CapabilityKey[]).filter((key) => next[key])
+  }
 
   return (
     <div class="flex flex-col gap-1 py-1">
@@ -84,6 +111,15 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
           </div>
         )}
       </Show>
+      {capabilities().length > 0 && (
+        <div class="text-12-regular text-text-invert-base">
+          {language.t("model.tooltip.capabilities", {
+            capabilities: capabilities()
+              .map((key) => capabilityLabel(key))
+              .join(", "),
+          })}
+        </div>
+      )}
       <div class="text-12-regular text-text-invert-base">{reasoning()}</div>
       <div class="text-12-regular text-text-invert-base">{context()}</div>
     </div>

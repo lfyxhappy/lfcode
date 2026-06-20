@@ -1,12 +1,40 @@
 import { accessSync, copyFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs"
-import { copyFile } from "node:fs/promises"
+import { copyFile, readFile } from "node:fs/promises"
 import { access, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import type { App } from "electron"
+import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 
 const CONFIG_FILES = ["lfcode.jsonc", "lfcode.json", "config.json"] as const
 const MANAGED_ROOT_DIR = ".lfcode"
+const PLAYWRIGHT_MCP_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
+const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--browser", "chrome"] as const
+const WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND = [
+  "cmd",
+  "/c",
+  "node",
+  "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
+] as const
+const WINDOWS_COMPUTER_USE_MCP_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
+const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
+const DEFAULT_ROOT_CONFIG = {
+  $schema: "https://lfcode.ai/config.json",
+  mcp: {
+    playwright: {
+      type: "local",
+      command: PLAYWRIGHT_MCP_CDP_COMMAND,
+      enabled: true,
+    },
+    "windows-computer-use": {
+      type: "local",
+      command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
+      enabled: true,
+    },
+  },
+} as const
 
 type RootEnv = {
   readonly LFCODE_CONFIG_DIR: string
@@ -82,6 +110,9 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
   app.setName(state.appName)
   app.setAppUserModelId(state.appId)
   if (state.layout) ensureRootLayoutSync(state.layout)
+  process.env.LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR = app.isPackaged
+    ? join(process.resourcesPath, "mcp", "windows-computer-use-mcp").replaceAll("\\", "/")
+    : join(app.getAppPath(), "../../.windows-computer-use-mcp").replaceAll("\\", "/")
   for (const [key, value] of Object.entries(state.env)) {
     if (!value) continue
     process.env[key] = value
@@ -208,6 +239,7 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
     sources: getMigrationSources(input, state),
   })
   await ensureRootConfigFile(state.layout)
+  const managedMcpMigrated = await upgradeManagedRootConfigFile(state.layout)
   const next = {
     ...state,
     migration,
@@ -216,6 +248,7 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
       migration.performed
         ? `desktop bootstrap root migration completed: ${migration.marker}`
         : `desktop bootstrap root migration skipped: ${migration.reason ?? "no changes"}`,
+      ...(managedMcpMigrated ? ["desktop bootstrap upgraded bundled MCP configuration"] : []),
     ],
   }
   bootstrapState = next
@@ -327,16 +360,66 @@ async function ensureRootLayout(layout: RootLayout) {
 
 async function ensureRootConfigFile(layout: RootLayout) {
   if (await pathExists(layout.configFile)) return
-  await writeFile(
-    layout.configFile,
-    `${JSON.stringify(
-      {
-        $schema: "https://lfcode.ai/config.json",
-      },
-      null,
-      2,
-    )}\n`,
-  )
+  await writeFile(layout.configFile, `${JSON.stringify(DEFAULT_ROOT_CONFIG, null, 2)}\n`)
+}
+
+async function upgradeManagedRootConfigFile(layout: RootLayout) {
+  const text = await readFile(layout.configFile, "utf8").catch(() => undefined)
+  if (!text) return false
+
+  const parsed = parseJsonc(text)
+  if (!isRecord(parsed)) return false
+  if (!isRecord(parsed.mcp)) return false
+
+  let updated = text
+  let changed = false
+  const playwright = parsed.mcp.playwright
+  if (isLegacyPlaywrightConfig(playwright)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "playwright"], DEFAULT_ROOT_CONFIG.mcp.playwright, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+    changed = true
+  }
+
+  if (
+    (isPlaywrightCdpConfig(playwright) || isLegacyPlaywrightConfig(playwright)) &&
+    parsed.mcp["windows-computer-use"] === undefined
+  ) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+    changed = true
+  }
+
+  const windowsComputerUse = parsed.mcp["windows-computer-use"]
+  if (isLegacyWindowsComputerUseConfig(windowsComputerUse)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+    changed = true
+  }
+
+  if (!changed) return false
+  await writeFile(layout.configFile, updated)
+  return true
 }
 
 function ensureRootLayoutSync(layout: RootLayout) {
@@ -396,6 +479,57 @@ function canWriteDirectorySync(directory: string) {
   } catch {
     return false
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]) {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && expected.every((key) => key in value)
+}
+
+function isStringArray(value: unknown, expected: readonly string[]) {
+  return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+}
+
+function isLegacyPlaywrightConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (!hasExactKeys(value, PLAYWRIGHT_MCP_KEYS)) return false
+  if (value.type !== "local") return false
+  if (value.enabled !== true) return false
+  return isStringArray(value.command, [...PLAYWRIGHT_MCP_LEGACY_COMMAND])
+}
+
+function isPlaywrightCdpConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (!hasExactKeys(value, PLAYWRIGHT_MCP_KEYS)) return false
+  if (value.type !== "local") return false
+  if (value.enabled !== true) return false
+  return isStringArray(value.command, [...PLAYWRIGHT_MCP_CDP_COMMAND])
+}
+
+function isLegacyWindowsComputerUseConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (!hasExactKeys(value, WINDOWS_COMPUTER_USE_MCP_KEYS)) return false
+  if (value.type !== "local") return false
+  if (value.enabled !== true) return false
+  return (
+    isStringArray(value.command, [...WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND]) ||
+    isBrokenWindowsComputerUseCommand(value.command)
+  )
+}
+
+function isBrokenWindowsComputerUseCommand(value: unknown) {
+  if (!Array.isArray(value) || value.length !== 4) return false
+  if (value[0] !== "cmd" || value[1] !== "/c" || value[2] !== "node") return false
+  if (typeof value[3] !== "string") return false
+  const target = value[3].replace(/^"+|"+$/g, "").replaceAll("\\", "/").toLowerCase()
+  return (
+    target === "{env:lfcode_windows_computer_use_mcp_dir}/bundle/index.js" ||
+    (target.includes("windows-computer-use-mcp") && target.endsWith("/bundle/index.js"))
+  )
 }
 
 function resolveProbeDirectory(directory: string) {

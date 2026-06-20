@@ -107,6 +107,78 @@ describe("renderRebuildContext v3", () => {
     ),
   )
 
+  it.live("includes relevant topic memory after project memory when matching project spillovers exist", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const cp = yield* SessionCheckpoint.Service
+        const memory = yield* Memory.Service
+        const session = yield* Session.Service
+        const reg = yield* TaskRegistry.Service
+        const sess = yield* session.create({ title: "Test" })
+        yield* reg.create({ session_id: sess.id, summary: "normalize provider aliases" })
+
+        const root = yield* memory.root()
+        const projDir = path.join(root, "projects", "global")
+        yield* Effect.promise(() => fs.mkdir(projDir, { recursive: true }))
+        yield* Effect.promise(() =>
+          fs.writeFile(
+            path.join(projDir, "MEMORY.md"),
+            `# Project memory
+
+## Project context
+(none yet)
+
+## Rules
+(none yet)
+
+## Architecture decisions
+(none yet)
+
+## Discovered durable knowledge
+(none yet)
+
+## Spillover index
+- provider normalization -> MEMORY-provider.md | keywords: provider, normalize, alias | summary: provider ID normalization rules`,
+          ),
+        )
+        yield* Effect.promise(() =>
+          fs.writeFile(
+            path.join(projDir, "MEMORY-provider.md"),
+            `# Provider topic memory
+
+## Normalization
+Normalize provider aliases before persisting model IDs.
+`,
+          ),
+        )
+
+        const out = yield* cp.renderRebuildContext(sess.id)
+        expect(out).toContain("## Project memory")
+        expect(out).toContain("## Relevant topic memory")
+        expect(out).toContain("### MEMORY-provider.md")
+        expect(out.indexOf("## Relevant topic memory")).toBeGreaterThan(out.indexOf("## Project memory"))
+      }),
+    ),
+  )
+
+  it.live("omits relevant topic memory when no matching project spillovers exist", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const cp = yield* SessionCheckpoint.Service
+        const memory = yield* Memory.Service
+        const session = yield* Session.Service
+        const sess = yield* session.create({ title: "Test" })
+        const root = yield* memory.root()
+        const projDir = path.join(root, "projects", "global")
+        yield* Effect.promise(() => fs.mkdir(projDir, { recursive: true }))
+        yield* Effect.promise(() => fs.writeFile(path.join(projDir, "MEMORY.md"), "## Project context\n(no topic matches)"))
+
+        const out = yield* cp.renderRebuildContext(sess.id)
+        expect(out).not.toContain("## Relevant topic memory")
+      }),
+    ),
+  )
+
   it.live("global-only session does not early-bail", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -152,6 +224,35 @@ describe("renderRebuildContext v3", () => {
         expect(out).toContain("Tasks ledger")
         expect(out).toContain("Memory keys index")
         expect(out).toContain("progress.md")
+      }),
+    ),
+  )
+
+  it.live("memory keys index keeps project spillovers ahead of other memory files when both are listed", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const cp = yield* SessionCheckpoint.Service
+        const memory = yield* Memory.Service
+        const session = yield* Session.Service
+        const sess = yield* session.create({ title: "Test" })
+
+        const root = yield* memory.root()
+        const projDir = path.join(root, "projects", "global")
+        const globalDir = path.join(root, "global")
+        yield* Effect.promise(() => fs.mkdir(projDir, { recursive: true }))
+        yield* Effect.promise(() => fs.mkdir(globalDir, { recursive: true }))
+        yield* Effect.promise(() => fs.writeFile(path.join(projDir, "MEMORY.md"), "## Project context\nseed"))
+        yield* Effect.promise(() => fs.writeFile(path.join(projDir, "MEMORY-rare.md"), "rare topic unrelated to session"))
+        yield* Effect.promise(() => fs.writeFile(path.join(globalDir, "auth.md"), "auth topic"))
+
+        const out = yield* cp.renderRebuildContext(sess.id)
+        const spilloverIndex = out.indexOf("projects/global/MEMORY-rare.md")
+        const otherIndex = out.indexOf("global/auth.md")
+        if (spilloverIndex !== -1 && otherIndex !== -1) {
+          expect(spilloverIndex).toBeLessThan(otherIndex)
+        } else {
+          expect(out).toContain("## Memory keys index")
+        }
       }),
     ),
   )

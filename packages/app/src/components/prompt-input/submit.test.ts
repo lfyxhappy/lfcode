@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
+import type { QuestionGuidance } from "@/utils/question-guidance"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
 
@@ -20,12 +21,14 @@ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
-const sentPrompt: string[] = []
-const sentPromptAsync: string[] = []
+const sentPrompt: Array<{ directory: string; input: { system?: string } }> = []
+const sentPromptAsync: Array<{ directory: string; input: { system?: string } }> = []
+const queuedDrafts: Array<{ questionGuidance?: QuestionGuidance }> = []
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
+let questionGuidance: QuestionGuidance = "normal"
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 
@@ -46,12 +49,12 @@ const clientFor = (directory: string) => {
         sentShell.push(directory)
         return { data: undefined }
       },
-      promptAsync: async () => {
-        sentPromptAsync.push(directory)
+      promptAsync: async (input: { system?: string }) => {
+        sentPromptAsync.push({ directory, input })
         return { data: undefined }
       },
-      prompt: async () => {
-        sentPrompt.push(directory)
+      prompt: async (input: { system?: string }) => {
+        sentPrompt.push({ directory, input })
         return { data: undefined }
       },
       command: async () => ({ data: undefined }),
@@ -94,6 +97,9 @@ beforeAll(async () => {
       },
       agent: {
         current: () => ({ name: "agent" }),
+      },
+      questionGuidance: {
+        current: () => questionGuidance,
       },
       session: {
         promote(directory: string, sessionID: string) {
@@ -220,9 +226,11 @@ beforeEach(() => {
   sentShell.length = 0
   sentPrompt.length = 0
   sentPromptAsync.length = 0
+  queuedDrafts.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  questionGuidance = "normal"
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -378,7 +386,7 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit(event)
     await Promise.resolve()
 
-    expect(sentPrompt).toEqual(["/repo/worktree-a"])
+    expect(sentPrompt.map((item) => item.directory)).toEqual(["/repo/worktree-a"])
     expect(sentPromptAsync).toEqual([])
   })
 
@@ -408,6 +416,124 @@ describe("prompt submit worktree selection", () => {
     await Promise.resolve()
 
     expect(sentPrompt).toEqual([])
-    expect(sentPromptAsync).toEqual(["/repo/main"])
+    expect(sentPromptAsync.map((item) => item.directory)).toEqual(["/repo/main"])
+  })
+
+  test("does not attach system guidance in normal mode", async () => {
+    const submit = createPromptSubmit({
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPrompt[0]?.input.system).toBeUndefined()
+  })
+
+  test("attaches low question guidance to prompts", async () => {
+    questionGuidance = "none"
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPromptAsync[0]?.input.system).toContain("minimize proactive use of the question tool")
+  })
+
+  test("attaches high question guidance to prompts", async () => {
+    questionGuidance = "high"
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPromptAsync[0]?.input.system).toContain("prefer asking the user at meaningful decision points")
+  })
+
+  test("keeps queued drafts pinned to the selected question guidance", async () => {
+    questionGuidance = "high"
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      shouldQueue: () => true,
+      onQueue: (draft) => queuedDrafts.push({ questionGuidance: draft.questionGuidance }),
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+
+    expect(queuedDrafts).toEqual([{ questionGuidance: "high" }])
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync).toEqual([])
   })
 })

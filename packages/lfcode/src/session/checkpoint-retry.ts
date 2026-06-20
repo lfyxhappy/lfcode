@@ -188,5 +188,12 @@ After extraction, edit the main file to:
   - INSERT an index line near the bottom:
     "- See <spillover-filename>.md (N entries) — short summary"
 
+For project MEMORY.md extractions:
+  - create or update a sibling file named exactly MEMORY-<topic>.md
+  - maintain a dedicated "## Spillover index" section in MEMORY.md
+  - add or update exactly one line in that section using:
+    "- <topic label> -> <filename> | keywords: <comma-separated keywords> | summary: <one-line summary>"
+  - reuse existing topic files for the same theme instead of creating duplicates
+
 Re-validation will run after this single extraction.`
 }

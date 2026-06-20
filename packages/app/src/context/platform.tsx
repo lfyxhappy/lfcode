@@ -8,6 +8,27 @@ type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
 type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: string[]; extensions?: string[] }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type UpdateInfo = { updateAvailable: boolean; version?: string }
+type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
+type DetachedSidePanelRecord = {
+  detachedWindowID: string
+  sessionKey: string
+  tab: string
+  kind: DetachedSidePanelKind
+  sourceWindowID: number
+  title?: string
+}
+type DetachedSidePanelEvent =
+  | { type: "sync"; records: DetachedSidePanelRecord[] }
+  | { type: "dock-target"; detachedWindowID: string; active: boolean }
+  | { type: "prepare-redock"; detachedWindowID: string }
+  | {
+      type: "redock"
+      detachedWindowID: string
+      placement?: {
+        afterTab?: string
+        beforeTab?: string
+      }
+    }
 
 export type Platform = {
   /** Platform discriminator */
@@ -90,6 +111,28 @@ export type Platform = {
 
   /** Read image from clipboard (desktop only) */
   readClipboardImage?(): Promise<File | null>
+
+  createDetachedSidePanelWindow?(input: {
+    detachedWindowID: string
+    route: string
+    sessionKey: string
+    tab: string
+    kind: DetachedSidePanelKind
+    title?: string
+  }): Promise<void>
+  redockDetachedSidePanelWindow?(
+    detachedWindowID: string,
+    placement?: {
+      afterTab?: string
+      beforeTab?: string
+    },
+  ): Promise<void>
+  setDetachedDockTarget?(input: {
+    sessionKey: string
+    rect: { x: number; y: number; width: number; height: number }
+  }): Promise<void>
+  clearDetachedDockTarget?(): Promise<void>
+  onDetachedSidePanelEvent?(cb: (event: DetachedSidePanelEvent) => void): () => void
 }
 
 export type DisplayBackend = "auto" | "wayland"

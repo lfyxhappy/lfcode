@@ -67,6 +67,7 @@ const names: Record<string, string> = {
   "one-dark": "One Dark",
   onedarkpro: "One Dark Pro",
   lfcode: "Lfcode",
+  "liquid-glass": "液态玻璃",
   orng: "Orng",
   "osaka-jade": "Osaka Jade",
   palenight: "Palenight",

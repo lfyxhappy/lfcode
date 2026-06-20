@@ -10,12 +10,12 @@ import { ActorRegistry } from "@/actor/registry"
 import type { AgentOutcome, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
-import { Database, and, eq, or } from "@/storage"
+import { Database, and, desc, eq, or } from "@/storage"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
-import { SessionTable } from "./session.sql"
+import { MessageTable, SessionTable } from "./session.sql"
 import * as Session from "./session"
-import { MessageV2 } from "./message-v2"
+import { MessageV2, TextPart } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Filesystem, Log, Token } from "../util"
 import { Effect, Layer, Deferred, Context, Scope } from "effect"
@@ -78,6 +78,78 @@ function toolResultContinueReminder(): string {
     "them and continue to the next iteration. Do not pause to summarize.",
     "</system-reminder>",
   ].join("\n")
+}
+
+const MEMORY_SPILLOVER_RE = /^MEMORY-.+\.md$/i
+const MIN_SPILLOVER_BUDGET = 1000
+
+function isProjectMemorySpillover(filePath: string) {
+  return MEMORY_SPILLOVER_RE.test(path.basename(filePath))
+}
+
+function buildTopicRecallQuery(input: {
+  lastUserText: string
+  topLevelTasks: { summary: string; status: string }[]
+  actorDescriptions: string[]
+}) {
+  return [input.lastUserText, ...input.topLevelTasks.map((task) => task.summary), ...input.actorDescriptions]
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .join("\n")
+}
+
+function spilloverPerFileBudget(total: number, count: number) {
+  if (count <= 0) return 0
+  return Math.max(MIN_SPILLOVER_BUDGET, Math.floor(total / count))
+}
+
+async function readRelevantTopicMemory(input: {
+  projectID: ProjectID
+  memoryRoot: string
+  memory: Memory.Interface
+  query: string
+  totalBudget: number
+  fileLimit: number
+}) {
+  if (!input.query.trim()) return []
+  const projectDir = path.join(input.memoryRoot, "projects", input.projectID)
+  const hits = await Effect.runPromise(
+    input.memory.search({
+      query: input.query,
+      scope: "projects",
+      scope_id: input.projectID,
+      path_prefix: projectDir + path.sep,
+      limit: Math.max(input.fileLimit * 3, input.fileLimit),
+    }),
+  )
+  const selected = hits
+    .filter((hit) => isProjectMemorySpillover(hit.path))
+    .filter((hit, index, rows) => rows.findIndex((row) => row.path === hit.path) === index)
+    .slice(0, input.fileLimit)
+  if (selected.length === 0) return []
+  const perFileBudget = spilloverPerFileBudget(input.totalBudget, selected.length)
+  return Promise.all(
+    selected.map(async (hit) => ({
+      file: path.basename(hit.path),
+      body: await readBudgetedSectionAware(hit.path, perFileBudget),
+    })),
+  )
+}
+
+function extractUserText(info: unknown) {
+  if (!info || typeof info !== "object") return ""
+  const record = info as Record<string, unknown>
+  if (record.role !== "user") return ""
+  const parts = Array.isArray(record.parts) ? record.parts : []
+  return parts
+    .flatMap((part) => {
+      if (!part || typeof part !== "object") return []
+      const textPart = part as Partial<TextPart>
+      if (textPart.type !== "text" || textPart.synthetic || textPart.ignored || typeof textPart.text !== "string") return []
+      return [textPart.text.trim()]
+    })
+    .filter((text) => text.length > 0)
+    .join("\n")
 }
 
 async function ensureCheckpointTemplate(checkpointFile: string): Promise<void> {
@@ -1043,6 +1115,7 @@ export const layer: Layer.Layer<
 
       // Section data: tasks (SQL), session checkpoint (file), project memory (file).
       const tasks = yield* taskRegistry.list({ session_id: sessionID, include_terminal: true })
+      const topLevelTasks = tasks.filter((t) => !t.parent_task_id && (t.status === "open" || t.status === "in_progress"))
 
       const checkpointResult = yield* Effect.promise(() =>
         readBudgetedSectionAware(checkpointPath(sessionID), caps.checkpoint ?? 11_000),
@@ -1051,7 +1124,7 @@ export const layer: Layer.Layer<
 
       yield* Effect.promise(() => migrateProjectMemory(projectID))
       const memoryResult = yield* Effect.promise(() =>
-        readBudgetedSectionAware(memoryPath(projectID), caps.memory ?? 10_000),
+        readBudgetedSectionAware(memoryPath(projectID), caps.memory ?? 16_000),
       )
       const memoryText = memoryResult?.text ?? ""
 
@@ -1066,12 +1139,40 @@ export const layer: Layer.Layer<
       const globalText = globalResult?.text ?? ""
 
       const actors = yield* actorRegistry.listActive()
+      const lastUserText = yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .select({ data: MessageTable.data })
+            .from(MessageTable)
+            .where(eq(MessageTable.session_id, sessionID))
+            .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+            .all(),
+        ),
+      ).pipe(
+        Effect.map((rows) => rows.map((row) => extractUserText(row.data)).find((text) => text.length > 0) ?? ""),
+      )
+      const topicRecallQuery = buildTopicRecallQuery({
+        lastUserText,
+        topLevelTasks,
+        actorDescriptions: actors.map((actor) => actor.description),
+      })
+      const relevantTopicMemory = yield* Effect.promise(() =>
+        readRelevantTopicMemory({
+          projectID,
+          memoryRoot,
+          memory,
+          query: topicRecallQuery,
+          totalBudget: caps.memory_spillover_total ?? 4000,
+          fileLimit: caps.memory_spillover_files ?? 2,
+        }),
+      )
 
       // Bail early if absolutely nothing to push: no tasks, no memory content, no live actors.
       if (
         tasks.length === 0 &&
         !checkpointText.trim() &&
         !memoryText.trim() &&
+        relevantTopicMemory.length === 0 &&
         !globalText.trim() &&
         actors.length === 0
       ) {
@@ -1144,6 +1245,16 @@ export const layer: Layer.Layer<
         lines.push("")
       }
 
+      if (relevantTopicMemory.some((item) => item.body?.text.trim())) {
+        lines.push("## Relevant topic memory")
+        for (const item of relevantTopicMemory) {
+          if (!item.body?.text.trim()) continue
+          lines.push(`### ${item.file}`)
+          lines.push(item.body.text.trim())
+          lines.push("")
+        }
+      }
+
       // Section 7.4: global memory (full body, capped). User-level cross-project
       // preferences. Placed after project memory (more actionable) and before
       // session notes (more volatile).
@@ -1175,17 +1286,11 @@ export const layer: Layer.Layer<
         ].filter((p) => p.length > 0),
       )
 
-      const scopeFilter =
-        currentProjectID && currentProjectID !== ProjectID.global
-          ? or(
-              eq(MemoryFtsTable.scope, "global"),
-              and(eq(MemoryFtsTable.scope, "sessions"), eq(MemoryFtsTable.scope_id, sessionID as string)),
-              and(eq(MemoryFtsTable.scope, "projects"), eq(MemoryFtsTable.scope_id, currentProjectID)),
-            )
-          : or(
-              eq(MemoryFtsTable.scope, "global"),
-              and(eq(MemoryFtsTable.scope, "sessions"), eq(MemoryFtsTable.scope_id, sessionID as string)),
-            )
+      const scopeFilter = or(
+        eq(MemoryFtsTable.scope, "global"),
+        and(eq(MemoryFtsTable.scope, "sessions"), eq(MemoryFtsTable.scope_id, sessionID as string)),
+        and(eq(MemoryFtsTable.scope, "projects"), eq(MemoryFtsTable.scope_id, projectID)),
+      )
       const scopedPaths = yield* Effect.sync(() =>
         Database.use((db) =>
           db.select({ path: MemoryFtsTable.path }).from(MemoryFtsTable).where(scopeFilter).all(),
@@ -1194,6 +1299,12 @@ export const layer: Layer.Layer<
       const keyEntries = scopedPaths
         .map((r) => r.path)
         .filter((p) => !pushedPaths.has(p) && !p.includes(`${path.sep}checkpoint${path.sep}learning-`))
+        .toSorted((a, b) => {
+          const aSpillover = isProjectMemorySpillover(a) ? 0 : 1
+          const bSpillover = isProjectMemorySpillover(b) ? 0 : 1
+          if (aSpillover !== bSpillover) return aSpillover - bSpillover
+          return a.localeCompare(b)
+        })
         .map((p) => p.replace(memoryRoot + path.sep, ""))
       if (keyEntries.length > 0) {
         lines.push("## Memory keys index")

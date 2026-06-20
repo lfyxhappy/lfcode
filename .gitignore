@@ -10,6 +10,7 @@ node_modules
 .codex-temp/
 .codegraph/
 .playwright-mcp/
+.windows-computer-use-mcp/
 *~
 playground
 tmp

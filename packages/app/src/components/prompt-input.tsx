@@ -56,6 +56,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { ImagePreview } from "@lfcode-ai/ui/image-preview"
 import { useQueries, useQuery } from "@tanstack/solid-query"
 import { loadAgentsQuery, loadProvidersQuery } from "@/context/global-sync/bootstrap"
+import { QUESTION_GUIDANCE_OPTIONS } from "@/utils/question-guidance"
 
 interface PromptInputProps {
   class?: string
@@ -1073,6 +1074,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const variants = createMemo(() => ["default", ...local.model.variant.list()])
+  const questionGuidanceOptions = () => [...QUESTION_GUIDANCE_OPTIONS]
   const accepting = createMemo(() => {
     const id = params.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk.directory)
@@ -1600,6 +1602,33 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           valueClass="truncate text-13-regular text-text-base"
                           triggerStyle={control()}
                           triggerProps={{ "data-action": "prompt-model-variant" }}
+                          variant="ghost"
+                        />
+                      </TooltipKeybind>
+                    </div>
+                    <div data-component="prompt-question-guidance-control" style={{ animation: "fade-in 0.3s" }}>
+                      <TooltipKeybind
+                        placement="top"
+                        gutter={4}
+                        title={language.t("command.question.guidance")}
+                        keybind=""
+                      >
+                        <Select
+                          size="normal"
+                          options={questionGuidanceOptions()}
+                          current={local.questionGuidance.current()}
+                          label={(value) =>
+                            language.t(`prompt.questionGuidance.${value}` as Parameters<typeof language.t>[0])
+                          }
+                          onSelect={(value) => {
+                            if (!value) return
+                            local.questionGuidance.set(value)
+                            restoreFocus()
+                          }}
+                          class="max-w-[140px] text-text-base"
+                          valueClass="truncate text-13-regular text-text-base"
+                          triggerStyle={control()}
+                          triggerProps={{ "data-action": "prompt-question-guidance" }}
                           variant="ghost"
                         />
                       </TooltipKeybind>

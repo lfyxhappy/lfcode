@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
 import { createServer } from "node:net"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
@@ -10,18 +11,33 @@ import pkg from "electron-updater"
 import contextMenu from "electron-context-menu"
 import { drizzle } from "drizzle-orm/node-sqlite/driver"
 import type { Server } from "virtual:lfcode-server"
-import type { InitStep, ServerReadyData, SqliteMigrationProgress, WslConfig } from "../preload/types"
+import type {
+  DetachedSidePanelEvent,
+  DetachedSidePanelRecord,
+  InitStep,
+  ServerReadyData,
+  SqliteMigrationProgress,
+  WslConfig,
+} from "../preload/types"
 import { checkAppExists, resolveAppPath, wslPath } from "./apps"
 import { getBootstrapState } from "./bootstrap"
 import { UPDATER_ENABLED } from "./constants"
-import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendSqliteMigrationProgress } from "./ipc"
+import {
+  registerIpcHandlers,
+  sendDeepLinks,
+  sendDetachedSidePanelEvent,
+  sendMenuCommand,
+  sendSqliteMigrationProgress,
+} from "./ipc"
 import { initLogging } from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
 import { migrate } from "./migrate"
 import { getDefaultServerUrl, getWslConfig, setDefaultServerUrl, setWslConfig, spawnLocalServer } from "./server"
+import { BaiduPanUpdateError, BaiduPanUpdater } from "./updater-baidu"
 import {
   createLoadingWindow,
+  createDetachedSidePanelWindow,
   createMainWindow,
   registerRendererProtocol,
   setBackgroundColor,
@@ -40,11 +56,26 @@ let server: Server.Listener | null = null
 let recoveryPromptOpen = false
 let shuttingDown = false
 let updateReady = false
-let updateCheck: Promise<{ updateAvailable: boolean; version?: string; failed?: boolean }> | undefined
+let updateState: UpdateReadyState | undefined
+let updateCheck: Promise<UpdateCheckResult> | undefined
 const loadingComplete = defer<void>()
 const pendingDeepLinks: string[] = []
 const serverReady = defer<ServerReadyData>()
 const logger = initLogging()
+const detachedSidePanels = new Map<
+  string,
+  DetachedSidePanelRecord & {
+    route: string
+    window: BrowserWindow
+  }
+>()
+const detachedDockTargets = new Map<
+  number,
+  {
+    sessionKey: string
+    rect: { x: number; y: number; width: number; height: number }
+  }
+>()
 
 logger.log("app starting", {
   bootstrap: bootstrapState,
@@ -139,6 +170,92 @@ function focusMainWindow() {
   if (!mainWindow) return
   mainWindow.show()
   mainWindow.focus()
+}
+
+function broadcastDetachedSidePanelSync(active?: { detachedWindowID: string; active: boolean }) {
+  const records = Array.from(detachedSidePanels.values()).map<DetachedSidePanelRecord>((item) => ({
+    detachedWindowID: item.detachedWindowID,
+    sessionKey: item.sessionKey,
+    tab: item.tab,
+    kind: item.kind,
+    sourceWindowID: item.sourceWindowID,
+    title: item.title,
+  }))
+  const events: DetachedSidePanelEvent[] = [{ type: "sync", records }]
+  if (active) {
+    events.push({
+      type: "dock-target",
+      detachedWindowID: active.detachedWindowID,
+      active: active.active,
+    })
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    for (const event of events) sendDetachedSidePanelEvent(win, event)
+  }
+}
+
+function sendDetachedRedock(detachedWindowID: string, placement?: { afterTab?: string; beforeTab?: string }) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    sendDetachedSidePanelEvent(win, {
+      type: "redock",
+      detachedWindowID,
+      placement,
+    })
+  }
+}
+
+function sendDetachedPrepareRedock(detachedWindowID: string) {
+  const current = detachedSidePanels.get(detachedWindowID)
+  if (!current || current.window.isDestroyed()) return
+  sendDetachedSidePanelEvent(current.window, {
+    type: "prepare-redock",
+    detachedWindowID,
+  })
+}
+
+function dockTargetActive(input: {
+  sessionKey: string
+  bounds: Electron.Rectangle
+  sourceWindowID: number
+}) {
+  const target = detachedDockTargets.get(input.sourceWindowID)
+  if (!target) return false
+  if (target.sessionKey !== input.sessionKey) return false
+  const centerX = input.bounds.x + input.bounds.width / 2
+  const topY = input.bounds.y
+  return (
+    centerX >= target.rect.x &&
+    centerX <= target.rect.x + target.rect.width &&
+    topY >= target.rect.y - 80 &&
+    topY <= target.rect.y + target.rect.height + 80
+  )
+}
+
+function updateDetachedDockState(detachedWindowID: string) {
+  const item = detachedSidePanels.get(detachedWindowID)
+  if (!item) return false
+  const active = dockTargetActive({
+    sessionKey: item.sessionKey,
+    bounds: item.window.getBounds(),
+    sourceWindowID: item.sourceWindowID,
+  })
+  sendDetachedSidePanelEvent(item.window, {
+    type: "dock-target",
+    detachedWindowID,
+    active,
+  })
+  return active
+}
+
+function finishDetachedRedock(detachedWindowID: string, placement?: { afterTab?: string; beforeTab?: string }) {
+  const current = detachedSidePanels.get(detachedWindowID)
+  if (!current) return
+  detachedSidePanels.delete(detachedWindowID)
+  sendDetachedRedock(detachedWindowID, placement)
+  broadcastDetachedSidePanelSync()
+  if (!current.window.isDestroyed()) current.window.destroy()
 }
 
 function setInitStep(step: InitStep) {
@@ -268,6 +385,75 @@ registerIpcHandlers({
   checkUpdate: async () => checkUpdate(),
   installUpdate: async () => installUpdate(),
   setBackgroundColor: (color) => setBackgroundColor(color),
+  createDetachedSidePanelWindow: async (input) => {
+    if (detachedSidePanels.has(input.detachedWindowID)) return
+    const win = createDetachedSidePanelWindow({
+      detachedWindowID: input.detachedWindowID,
+      route: input.route,
+      title: input.title,
+      kind: input.kind,
+    })
+    detachedSidePanels.set(input.detachedWindowID, {
+      detachedWindowID: input.detachedWindowID,
+      sessionKey: input.sessionKey,
+      tab: input.tab,
+      kind: input.kind,
+      sourceWindowID: input.sourceWindowID,
+      title: input.title,
+      route: input.route,
+      window: win,
+    })
+    let moveTimer: ReturnType<typeof setTimeout> | undefined
+    win.on("move", () => {
+      const active = updateDetachedDockState(input.detachedWindowID)
+      clearTimeout(moveTimer)
+      moveTimer = setTimeout(() => {
+        if (!active) return
+        sendDetachedPrepareRedock(input.detachedWindowID)
+      }, 120)
+    })
+    win.on("close", (event) => {
+      if (!detachedSidePanels.has(input.detachedWindowID)) return
+      event.preventDefault()
+      finishDetachedRedock(input.detachedWindowID)
+    })
+    win.on("closed", () => {
+      clearTimeout(moveTimer)
+      if (!detachedSidePanels.has(input.detachedWindowID)) return
+      detachedSidePanels.delete(input.detachedWindowID)
+      broadcastDetachedSidePanelSync()
+    })
+    broadcastDetachedSidePanelSync()
+  },
+  redockDetachedSidePanelWindow: async (detachedWindowID) => {
+    const current = detachedSidePanels.get(detachedWindowID)
+    if (!current) return
+    finishDetachedRedock(detachedWindowID)
+  },
+  setDetachedDockTarget: async (senderWindowID, input) => {
+    detachedDockTargets.set(senderWindowID, input)
+    for (const [detachedWindowID, item] of detachedSidePanels) {
+      if (item.sessionKey !== input.sessionKey) {
+        sendDetachedSidePanelEvent(item.window, {
+          type: "dock-target",
+          detachedWindowID,
+          active: false,
+        })
+        continue
+      }
+      updateDetachedDockState(detachedWindowID)
+    }
+  },
+  clearDetachedDockTarget: async (senderWindowID) => {
+    detachedDockTargets.delete(senderWindowID)
+    for (const [detachedWindowID, item] of detachedSidePanels) {
+      sendDetachedSidePanelEvent(item.window, {
+        type: "dock-target",
+        detachedWindowID,
+        active: false,
+      })
+    }
+  },
 })
 
 function killSidecar() {
@@ -436,52 +622,46 @@ function ensurePortableWindowsShortcuts() {
   }
 }
 
-async function checkUpdate() {
+async function checkUpdate(): Promise<UpdateCheckResult> {
   if (!UPDATER_ENABLED) return { updateAvailable: false }
   if (updateCheck) return updateCheck
   updateReady = false
+  updateState = undefined
   updateCheck = (async () => {
-    logger.log("checking for updates", {
-      allowDowngrade: autoUpdater.allowDowngrade,
-      allowPrerelease: autoUpdater.allowPrerelease,
-      channel: autoUpdater.channel,
-      currentVersion: app.getVersion(),
-    })
-    try {
-      const result = await autoUpdater.checkForUpdates()
-      const updateInfo = result?.updateInfo
-      logger.log("update metadata fetched", {
-        files: updateInfo?.files?.map((file) => file.url) ?? [],
-        releaseDate: updateInfo?.releaseDate ?? null,
-        releaseName: updateInfo?.releaseName ?? null,
-        releaseVersion: updateInfo?.version ?? null,
-      })
-      const version = result?.updateInfo?.version
-      if (result?.isUpdateAvailable === false || !version) {
-        logger.log("no update available", {
-          reason: "provider returned no newer version",
-        })
-        return { updateAvailable: false }
+    const github = await checkGithubUpdate()
+    if (github.failed) {
+      const baidu = await checkBaiduPanUpdate()
+      if (baidu.updateAvailable) {
+        logger.log("github failed, baidu fallback succeeded", { version: baidu.version })
+        updateCheck = undefined
+        return baidu
       }
-      logger.log("update available", { version })
-      await autoUpdater.downloadUpdate()
-      logger.log("update download completed", { version })
-      updateReady = true
-      return { updateAvailable: true, version }
-    } catch (error) {
-      logger.error("update check failed", error)
-      return { updateAvailable: false, failed: true }
-    } finally {
       updateCheck = undefined
+      return baidu.failed ? { updateAvailable: false, failed: true } : { updateAvailable: false }
     }
+    updateCheck = undefined
+    return github
   })()
   return updateCheck
 }
 
 async function installUpdate() {
   if (!updateReady) return
-  killSidecar()
-  autoUpdater.quitAndInstall()
+  if (updateState?.source === "github") {
+    killSidecar()
+    autoUpdater.quitAndInstall()
+    return
+  }
+  if (updateState?.source === "baidu") {
+    killSidecar()
+    const child = spawn("cmd.exe", ["/c", "start", "", updateState.installerPath], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    })
+    child.unref()
+    app.exit(0)
+  }
 }
 
 async function checkForUpdates(alertOnFail: boolean) {
@@ -489,7 +669,7 @@ async function checkForUpdates(alertOnFail: boolean) {
   logger.log("checkForUpdates invoked", { alertOnFail })
   const result = await checkUpdate()
   if (!result.updateAvailable) {
-    if (result.failed) {
+    if ("failed" in result && result.failed) {
       logger.log("no update decision", { reason: "update check failed" })
       if (!alertOnFail) return
       await dialog.showMessageBox({
@@ -509,10 +689,12 @@ async function checkForUpdates(alertOnFail: boolean) {
     })
     return
   }
+  const success = result as Extract<UpdateCheckResult, { updateAvailable: true }>
+  const version = success.version
 
   const response = await dialog.showMessageBox({
     type: "info",
-    message: `Update ${result.version ?? ""} downloaded. Restart now?`,
+    message: `Update ${version} downloaded. Restart now?`,
     title: "Update Ready",
     buttons: ["Restart", "Later"],
     defaultId: 0,
@@ -520,7 +702,7 @@ async function checkForUpdates(alertOnFail: boolean) {
   })
   logger.log("update prompt response", {
     restartNow: response.response === 0,
-    version: result.version ?? null,
+    version,
   })
   if (response.response === 0) {
     await installUpdate()
@@ -529,6 +711,70 @@ async function checkForUpdates(alertOnFail: boolean) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+type UpdateReadyState =
+  | { source: "github"; version: string }
+  | { source: "baidu"; version: string; installerPath: string }
+
+type UpdateCheckResult =
+  | { updateAvailable: false; failed?: boolean }
+  | { updateAvailable: true; version: string; source: UpdateReadyState["source"] }
+
+async function checkGithubUpdate() {
+  logger.log("checking for github updates", {
+    allowDowngrade: autoUpdater.allowDowngrade,
+    allowPrerelease: autoUpdater.allowPrerelease,
+    channel: autoUpdater.channel,
+    currentVersion: app.getVersion(),
+  })
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    const updateInfo = result?.updateInfo
+    logger.log("github update metadata fetched", {
+      files: updateInfo?.files?.map((file) => file.url) ?? [],
+      releaseDate: updateInfo?.releaseDate ?? null,
+      releaseName: updateInfo?.releaseName ?? null,
+      releaseVersion: updateInfo?.version ?? null,
+    })
+    const version = result?.updateInfo?.version
+    if (result?.isUpdateAvailable === false || !version) {
+      logger.log("no update available", {
+        reason: "github provider returned no newer version",
+      })
+      return { updateAvailable: false } satisfies UpdateCheckResult
+    }
+    logger.log("github update available", { version })
+    await autoUpdater.downloadUpdate()
+    logger.log("github update download completed", { version })
+    updateReady = true
+    updateState = { source: "github", version }
+    return { updateAvailable: true, version, source: "github" as const } satisfies UpdateCheckResult
+  } catch (error) {
+    logger.error("github update check failed", error)
+    return { updateAvailable: false, failed: true } satisfies UpdateCheckResult
+  }
+}
+
+async function checkBaiduPanUpdate() {
+  try {
+    const updater = new BaiduPanUpdater({
+      cacheDir: process.env.LFCODE_CACHE_DIR ?? join(app.getPath("temp"), "lfcode-cache"),
+      currentVersion: app.getVersion(),
+    })
+    const result = await updater.downloadLatestIfAvailable()
+    if (!result) return { updateAvailable: false } satisfies UpdateCheckResult
+    updateReady = true
+    updateState = { source: "baidu", version: result.version, installerPath: result.installerPath }
+    return { updateAvailable: true, version: result.version, source: "baidu" as const } satisfies UpdateCheckResult
+  } catch (error) {
+    if (error instanceof BaiduPanUpdateError) {
+      logger.warn?.("baidu fallback check failed", { message: error.message })
+    } else {
+      logger.error("baidu fallback check failed", error)
+    }
+    return { updateAvailable: false, failed: true } satisfies UpdateCheckResult
+  }
 }
 
 function defer<T>() {

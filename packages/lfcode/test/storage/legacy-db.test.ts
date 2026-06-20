@@ -284,4 +284,31 @@ describe("mergeLegacyDatabases", () => {
       ;(target.$client as { close?: () => void }).close?.()
     }
   })
+
+  test("merges the old xdg data root into the current lfcode database", async () => {
+    const dir = await tempDir()
+    const currentPath = path.join(dir, "lfcode.db")
+    const legacyDir = path.join(dir, "legacy-xdg")
+    const legacyPath = path.join(legacyDir, "lfcode.db")
+
+    createSchema(currentPath, "target")
+    await fs.mkdir(legacyDir, { recursive: true })
+    createSchema(legacyPath, "mimocode")
+    seedLegacy(legacyPath, "mimo", true)
+
+    const target = init(currentPath)
+    try {
+      mergeLegacyDatabases(target, currentPath, { legacyDataDir: legacyDir })
+
+      const count = (table: string) =>
+        Number((target.$client as { query: (sqlText: string) => { all: () => Array<{ count: number }> } })
+          .query(`select count(*) as count from ${table}`)
+          .all()[0]?.count ?? 0)
+
+      expect(count("project")).toBe(1)
+      expect(count("session")).toBe(1)
+    } finally {
+      ;(target.$client as { close?: () => void }).close?.()
+    }
+  })
 })

@@ -6,6 +6,7 @@ import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { DEFAULT_QUESTION_GUIDANCE, normalizeQuestionGuidance, type QuestionGuidance } from "@/utils/question-guidance"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
@@ -16,6 +17,7 @@ type State = {
   agent?: string
   model?: ModelKey
   variant?: string | null
+  questionGuidance?: QuestionGuidance
 }
 
 type Saved = {
@@ -48,6 +50,7 @@ const clone = (value: State | undefined) => {
   return {
     ...value,
     model: value.model ? { ...value.model } : undefined,
+    questionGuidance: normalizeQuestionGuidance(value.questionGuidance),
   } satisfies State
 }
 
@@ -78,10 +81,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       current?: string
       draft?: State
       last?: {
-        type: "agent" | "model" | "variant"
+        type: "agent" | "model" | "variant" | "questionGuidance"
         agent?: string
         model?: ModelKey | null
         variant?: string | null
+        questionGuidance?: QuestionGuidance
       }
     }>({
       current: list()[0]?.name,
@@ -196,6 +200,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             agent: item.name,
             model: item.model ?? prev?.model,
             variant: item.variant ?? prev?.variant,
+            questionGuidance: prev?.questionGuidance,
           } satisfies State
           const session = id()
           if (session) {
@@ -249,6 +254,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         agent: agent.current()?.name,
         model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
         variant: selected(),
+        questionGuidance: normalizeQuestionGuidance(scope()?.questionGuidance),
       } satisfies State
     }
 
@@ -351,10 +357,26 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const questionGuidance = {
+      current() {
+        return normalizeQuestionGuidance(scope()?.questionGuidance)
+      },
+      set(value: QuestionGuidance) {
+        batch(() => {
+          setStore("last", {
+            type: "questionGuidance",
+            questionGuidance: value,
+          })
+          write({ questionGuidance: value === DEFAULT_QUESTION_GUIDANCE ? undefined : value })
+        })
+      },
+    }
+
     const result = {
       slug: createMemo(() => base64Encode(sdk.directory)),
       model,
       agent,
+      questionGuidance,
       session: {
         reset() {
           setStore("draft", undefined)

@@ -222,7 +222,7 @@ export async function runCustomProviderWizard(opts: {
     },
   } as const
 
-  const updateRes = await sdk.client.global.config.update({ config: patch as any })
+  const updateRes = await sdk.client.global.config.update({ configPatch: patch as any })
   if (updateRes.error) {
     toast.show({ variant: "error", message: JSON.stringify(updateRes.error) })
     return

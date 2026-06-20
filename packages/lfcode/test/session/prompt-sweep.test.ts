@@ -107,6 +107,78 @@ describe("sweepOrphanAssistants", () => {
     ),
   )
 
+  it.live("can clear a recent incomplete assistant when requested explicitly", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const svc = yield* SessionPrompt.Service
+        const session = yield* sessions.create({})
+
+        const userMsg = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "default",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() - 10_000 },
+        })
+
+        const now = Date.now()
+        const assistant = makeAssistant(session.id, userMsg.id, dir, { created: now - 5_000 })
+        yield* sessions.updateMessage(assistant)
+
+        yield* svc.sweepOrphanAssistants(session.id, {
+          minAgeMs: 0,
+          message: "Interrupted: previous request was stopped because Lfcode restarted",
+        })
+
+        const after = yield* sessions.messages({ sessionID: session.id })
+        const updated = after.find((m) => m.info.id === assistant.id)
+        expect(updated).toBeDefined()
+        const info = updated!.info as MessageV2.Assistant
+        expect(info.time.completed).toBeDefined()
+        expect(JSON.stringify(info.error)).toContain("Lfcode restarted")
+      }),
+    ),
+  )
+
+  it.live("clears recent incomplete assistants by directory during startup cleanup", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({})
+
+        const userMsg = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "default",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() - 10_000 },
+        })
+
+        const now = Date.now()
+        const assistant = makeAssistant(session.id, userMsg.id, dir, { created: now - 5_000 })
+        yield* sessions.updateMessage(assistant)
+
+        yield* Effect.sync(() =>
+          Session.clearOrphanAssistants({
+            directory: dir,
+            minAgeMs: 0,
+            message: "Interrupted: previous request was stopped because Lfcode restarted",
+          }),
+        )
+
+        const after = yield* sessions.messages({ sessionID: session.id })
+        const updated = after.find((m) => m.info.id === assistant.id)
+        expect(updated).toBeDefined()
+        const info = updated!.info as MessageV2.Assistant
+        expect(info.time.completed).toBeDefined()
+        expect(JSON.stringify(info.error)).toContain("Lfcode restarted")
+      }),
+    ),
+  )
+
   it.live("leaves an already-completed assistant message untouched", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

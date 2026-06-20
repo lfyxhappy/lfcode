@@ -169,7 +169,8 @@ If these dumps are visible in your context:
 
 - Do NOT Read them again as whole files. The bytes are already in front of you.
 - For specific past details (a particular turn's content, a specific tool output, an old command), use Grep with a keyword pattern to target the exact item — do not pull a whole file.
-- For files NOT in the rebuild dump (per-task splitover progress.md files for tasks you don't actively need, spillover files, older session checkpoints in other sessions), Read on demand.
+- Relevant project spillover files may also be auto-injected under the "## Relevant topic memory" header. Treat those injected files the same way as Project memory: if the content is already present in the rebuild dump, do NOT Read the whole file again.
+- For files NOT in the rebuild dump (per-task splitover progress.md files for tasks you don't actively need, spillover files that were not auto-injected, older session checkpoints in other sessions), Read on demand.
 
 If a dump shows "⚠️ Truncated at ~N tokens. Read(<path>, offset=L) for the rest." — that file was budget-cut. Use Read with the offset only when you need the missing tail.
 

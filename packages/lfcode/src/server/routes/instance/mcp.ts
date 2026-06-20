@@ -2,6 +2,8 @@ import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import z from "zod"
 import { MCP } from "@/mcp"
+import * as McpCatalog from "@/mcp/catalog"
+import { Config } from "@/config"
 import { ConfigMCP } from "@/config/mcp"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
@@ -10,6 +12,84 @@ import { jsonRequest, runRequest } from "./trace"
 
 export const McpRoutes = lazy(() =>
   new Hono()
+    .get(
+      "/manage",
+      describeRoute({
+        summary: "List managed MCP servers",
+        description: "Return MCP config entries with runtime status and local managed metadata.",
+        operationId: "mcp.manage.list",
+        responses: {
+          200: {
+            description: "Managed MCP servers",
+            content: {
+              "application/json": {
+                schema: resolver(McpCatalog.McpManageItem.array()),
+              },
+            },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("McpRoutes.manage.list", c, function* () {
+          const catalog = yield* McpCatalog.Service
+          return yield* catalog.manage()
+        }),
+    )
+    .get(
+      "/catalog",
+      describeRoute({
+        summary: "List MCP catalog items",
+        description: "Return MCP discovery items from the official registry.",
+        operationId: "mcp.catalog.list",
+        responses: {
+          200: {
+            description: "MCP catalog items",
+            content: {
+              "application/json": {
+                schema: resolver(McpCatalog.McpCatalogItem.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          q: z.string().optional(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("McpRoutes.catalog.list", c, function* () {
+          const catalog = yield* McpCatalog.Service
+          const query = c.req.valid("query")
+          return yield* catalog.catalog(query)
+        }),
+    )
+    .post(
+      "/catalog/install",
+      describeRoute({
+        summary: "Install MCP catalog item",
+        description: "Install a supported MCP from the official registry into the current workspace.",
+        operationId: "mcp.catalog.install",
+        responses: {
+          200: {
+            description: "Installed MCP",
+            content: {
+              "application/json": {
+                schema: resolver(McpCatalog.McpManageItem),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("json", McpCatalog.CatalogInstallInput),
+      async (c) =>
+        jsonRequest("McpRoutes.catalog.install", c, function* () {
+          const catalog = yield* McpCatalog.Service
+          return yield* catalog.install(c.req.valid("json"))
+        }),
+    )
     .get(
       "/",
       describeRoute({
@@ -232,6 +312,44 @@ export const McpRoutes = lazy(() =>
           return true
         }),
     )
+    .patch(
+      "/manage/:name",
+      describeRoute({
+        summary: "Update MCP config",
+        description: "Update an MCP config entry in its owning config file.",
+        operationId: "mcp.manage.update",
+        responses: {
+          200: {
+            description: "Updated MCP list",
+            content: {
+              "application/json": {
+                schema: resolver(McpCatalog.McpManageItem),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ name: z.string() })),
+      validator(
+        "json",
+        z.object({
+          config: ConfigMCP.Info.zod,
+          target: z.enum(["project", "global"]).optional(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("McpRoutes.manage.update", c, function* () {
+          const { name } = c.req.valid("param")
+          const { config, target } = c.req.valid("json")
+          const cfg = yield* Config.Service
+          yield* cfg.upsertMcp(name, config, { target: target ?? "auto" })
+          const catalog = yield* McpCatalog.Service
+          const item = (yield* catalog.manage()).find((entry) => entry.name === name)
+          if (!item) throw new Error(`MCP ${name} not found after update`)
+          return item
+        }),
+    )
     .post(
       "/:name/disconnect",
       describeRoute({
@@ -255,6 +373,38 @@ export const McpRoutes = lazy(() =>
           const mcp = yield* MCP.Service
           yield* mcp.disconnect(name)
           return true
+        }),
+    )
+    .delete(
+      "/manage/:name",
+      describeRoute({
+        summary: "Delete MCP config",
+        description: "Delete an MCP config entry and any managed local metadata.",
+        operationId: "mcp.manage.delete",
+        responses: {
+          200: {
+            description: "Deleted MCP",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ success: z.literal(true) })),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ name: z.string() })),
+      async (c) =>
+        jsonRequest("McpRoutes.manage.delete", c, function* () {
+          const { name } = c.req.valid("param")
+          const cfg = yield* Config.Service
+          const mcp = yield* MCP.Service
+          const catalog = yield* McpCatalog.Service
+          yield* mcp.disconnect(name).pipe(Effect.catch(() => Effect.void))
+          yield* cfg.removeMcp(name)
+          yield* catalog.removeManagedFiles(name)
+          yield* mcp.removeAuth(name).pipe(Effect.catch(() => Effect.void))
+          return { success: true as const }
         }),
     ),
 )

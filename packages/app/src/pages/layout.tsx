@@ -3,6 +3,7 @@ import {
   createEffect,
   createMemo,
   createResource,
+  createSignal,
   For,
   on,
   onCleanup,
@@ -55,14 +56,14 @@ import { createAim } from "@/utils/aim"
 import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
-import { BROWSER_REQUEST_OPEN_EVENT } from "@/pages/session/helpers"
-import { normalizeBrowserURL } from "@/pages/session/helpers"
+import { BROWSER_REQUEST_OPEN_EVENT, normalizeBrowserRequestURL, normalizeBrowserURL } from "@/pages/session/helpers"
 
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@lfcode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { Titlebar } from "@/components/titlebar"
+import { SettingsView } from "@/components/dialog-settings"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import {
@@ -71,6 +72,7 @@ import {
   errorMessage,
   latestRootSession,
   sortedRootSessions,
+  startupProjectRoot,
   workspaceKey,
 } from "./layout/helpers"
 import {
@@ -142,6 +144,7 @@ export default function Layout(props: ParentProps) {
     }
   })
   const availableThemeEntries = createMemo(() => theme.ids().map((id) => [id, theme.themes()[id]] as const))
+  const [settingsOpen, setSettingsOpen] = createSignal(false)
   const colorSchemeOrder: ColorScheme[] = ["system", "light", "dark"]
   const colorSchemeKey: Record<ColorScheme, "theme.scheme.system" | "theme.scheme.light" | "theme.scheme.dark"> = {
     system: "theme.scheme.system",
@@ -573,15 +576,9 @@ export default function Layout(props: ParentProps) {
 
     const list = layout.projects.list()
     const last = server.projects.last()
-
-    if (list.length === 0) {
-      if (!last) return
-      await openProject(last, true)
-    } else {
-      const next = list.find((project) => project.worktree === last) ?? list[0]
-      if (!next) return
-      await openProject(next.worktree, true)
-    }
+    const next = startupProjectRoot(last, list)
+    if (!next) return
+    await openProject(next, true)
   })
 
   const workspaceName = (directory: string, projectId?: string, branch?: string) => {
@@ -756,7 +753,7 @@ export default function Layout(props: ParentProps) {
       directory,
       sessionID,
       task: (rev) =>
-        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk }))
+        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk, agent_id: "*" }))
           .then((messages) => {
             if (prefetchToken.value !== token) return
             if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
@@ -767,6 +764,7 @@ export default function Layout(props: ParentProps) {
             const stale = markPrefetched(directory, sessionID)
             const cursor = messages.response.headers.get("x-next-cursor") ?? undefined
             const meta = {
+              scope: "all" as const,
               limit: sorted.length,
               cursor,
               complete: !cursor,
@@ -1202,11 +1200,12 @@ export default function Layout(props: ParentProps) {
   }
 
   function openSettings() {
-    const run = ++dialogRun
-    void import("@/components/dialog-settings").then((x) => {
-      if (dialogDead || dialogRun !== run) return
-      dialog.show(() => <x.DialogSettings />)
-    })
+    setSettingsOpen(true)
+    layout.mobileSidebar.hide()
+  }
+
+  function closeSettings() {
+    setSettingsOpen(false)
   }
 
   function projectRoot(directory: string) {
@@ -1420,10 +1419,10 @@ export default function Layout(props: ParentProps) {
 
     const browserHandler = (event: Event) => {
       if (platform.platform !== "desktop") return
-      const detail = (event as CustomEvent<{ url: string }>).detail
-      const url = detail?.url
+      const detail = (event as CustomEvent<{ url?: string }>).detail
+      if (detail?.url && /^\/[^/]/.test(detail.url)) return
+      const url = normalizeBrowserRequestURL(detail?.url)
       if (!url) return
-      if (/^\/[^/]/.test(url)) return
 
       const sessionRoute = /^\/[^/]+\/session(?:\/[^/]+)?$/.test(location.pathname)
       if (sessionRoute) return
@@ -2449,9 +2448,11 @@ export default function Layout(props: ParentProps) {
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
       renderProjectOverlay={projectOverlay}
-      settingsLabel={() => language.t("sidebar.settings")}
-      settingsKeybind={() => command.keybind("settings.open")}
+      settingsOpen={settingsOpen}
+      settingsLabel={() => (settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings"))}
+      settingsKeybind={() => (settingsOpen() ? undefined : command.keybind("settings.open"))}
       onOpenSettings={openSettings}
+      onCloseSettings={closeSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://lfcode.ai/desktop-feedback")}
       renderPanel={() =>
@@ -2561,7 +2562,9 @@ export default function Layout(props: ParentProps) {
                 }}
               >
                 <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
-                  {props.children}
+                  <Show when={settingsOpen()} fallback={props.children}>
+                    <SettingsView />
+                  </Show>
                 </Show>
               </main>
             </div>

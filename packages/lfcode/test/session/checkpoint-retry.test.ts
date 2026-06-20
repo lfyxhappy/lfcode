@@ -147,4 +147,12 @@ describe("buildExtractionReflection", () => {
     expect(msg).toContain("checkpoint.md (12000 tokens > 8000 budget)")
     expect(msg).toContain("spillover")
   })
+
+  test("mentions spillover index maintenance for project memory extractions", () => {
+    const msg = buildExtractionReflection([
+      { file: "MEMORY.md", rule: "budget-exceeded", severity: "extract-required", detail: "18000 tokens > 16000 budget" },
+    ])
+    expect(msg).toContain('maintain a dedicated "## Spillover index" section in MEMORY.md')
+    expect(msg).toContain("reuse existing topic files")
+  })
 })

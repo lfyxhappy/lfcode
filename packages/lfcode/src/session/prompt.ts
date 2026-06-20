@@ -166,6 +166,10 @@ const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.LFCODE_INVALID_OUTPUT_CONTINUATIO
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
+type SweepOrphanAssistantsOptions = {
+  minAgeMs?: number
+  message?: string
+}
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
@@ -174,7 +178,7 @@ export interface Interface {
   readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
-  readonly sweepOrphanAssistants: (sessionID: SessionID) => Effect.Effect<void>
+  readonly sweepOrphanAssistants: (sessionID: SessionID, options?: SweepOrphanAssistantsOptions) => Effect.Effect<void>
   readonly predict: (input: { sessionID: SessionID }) => Effect.Effect<string>
 }
 
@@ -1616,39 +1620,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return { info, parts }
     }, Effect.scoped)
 
-    const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (sessionID: SessionID) {
-      const msgs = yield* sessions.messages({ sessionID, agentID: "*" })
-      const now = Date.now()
-      // 1 hour — must exceed Task 1's chunkMs (300s) plus Task 2's
-      // PERSISTENT_RETRY worst-case backoff (10 attempts × 5 min cap =
-      // 50 min) so a still-active in-flight request is never falsely
-      // swept while its retry chain is making progress.
-      const ORPHAN_AGE_MS = 3_600_000
-      for (const m of msgs) {
-        if (m.info.role !== "assistant") continue
-        if (m.info.time?.completed) continue
-        const created = m.info.time?.created ?? 0
-        if (now - created < ORPHAN_AGE_MS) continue
-        m.info.time = { ...m.info.time, completed: now }
-        m.info.error =
-          m.info.error ??
-          new MessageV2.AbortedError({
-            message: "Abandoned: previous request interrupted before completion",
-          }).toObject()
-        yield* sessions.updateMessage(m.info).pipe(
-          Effect.catchCause((cause) =>
-            elog.warn("orphan-update-failed", {
-              sessionID,
-              messageID: m.info.id,
-              cause,
-            }),
-          ),
-        )
-        yield* elog.info("orphan-assistant-cleared", {
-          sessionID,
-          messageID: m.info.id,
-        })
-      }
+    const sweepOrphanAssistants = Effect.fn("SessionPrompt.sweepOrphanAssistants")(function* (
+      sessionID: SessionID,
+      options?: SweepOrphanAssistantsOptions,
+    ) {
+      yield* Effect.sync(() => Session.clearOrphanAssistants({ sessionID, ...options }))
     })
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(

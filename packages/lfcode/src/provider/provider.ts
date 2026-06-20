@@ -7,6 +7,14 @@ import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Log } from "../util"
 import { Npm } from "../npm"
 import { Hash } from "@lfcode-ai/shared/util/hash"
+import {
+  inferModelCapabilities,
+  normalizeModelCapabilities,
+  normalizeProtocol,
+  protocolPackage,
+  ProviderProtocol,
+  type ModelCapabilityConfig,
+} from "@lfcode-ai/shared/model-capabilities"
 import { Plugin } from "../plugin"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
@@ -32,6 +40,12 @@ import { ModelID, ProviderID } from "./schema"
 
 const log = Log.create({ service: "provider" })
 const DEFAULT_CONTEXT_WINDOW = 1_000_000
+const Protocols = [
+  ProviderProtocol.OpenAIChat,
+  ProviderProtocol.OpenAIResponses,
+  ProviderProtocol.AnthropicMessages,
+  ProviderProtocol.Gemini,
+] as const
 // Reserved built-in model tiers: always resolve, falling back to the default
 // model when not configured in `model_groups` (zero-config never errors).
 const BUILTIN_TIERS = new Set(["ultra", "standard", "lite"])
@@ -49,6 +63,67 @@ function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
   if (!match) return false
   return Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")
+}
+
+export function inferProtocol(input: {
+  providerID: string
+  modelID: string
+  apiID: string
+  protocol?: string
+  npm?: string
+}): ProviderProtocol {
+  const explicit = normalizeProtocol(input.protocol)
+  if (explicit) return explicit
+
+  switch (input.npm) {
+    case "@ai-sdk/openai":
+      return ProviderProtocol.OpenAIResponses
+    case "@ai-sdk/anthropic":
+    case "@ai-sdk/google-vertex/anthropic":
+      return ProviderProtocol.AnthropicMessages
+    case "@ai-sdk/google":
+    case "@ai-sdk/google-vertex":
+      return ProviderProtocol.Gemini
+    case "@ai-sdk/openai-compatible":
+      return ProviderProtocol.OpenAIChat
+  }
+
+  const provider = input.providerID.toLowerCase()
+  if (provider.includes("gemini") || provider === "google") return ProviderProtocol.Gemini
+  if (provider.includes("anthropic") || provider.includes("claude")) return ProviderProtocol.AnthropicMessages
+
+  return ProviderProtocol.OpenAIChat
+}
+
+function protocolToModelProtocol(input: {
+  providerID: string
+  modelID: string
+  apiID: string
+  protocol?: string
+  npm?: string
+}) {
+  return inferProtocol(input)
+}
+
+export function selectLanguageModel(
+  sdk: {
+    chat?: (modelID: string) => unknown
+    responses?: (modelID: string) => unknown
+    languageModel?: (modelID: string) => unknown
+  },
+  model: Pick<Model, "protocol" | "providerID" | "api">,
+): LanguageModelV3 {
+  const protocol = protocolToModelProtocol({
+    providerID: String(model.providerID),
+    modelID: String(model.api.id),
+    apiID: String(model.api.id),
+    protocol: model.protocol,
+    npm: model.api.npm,
+  })
+
+  if (protocol === ProviderProtocol.OpenAIResponses && sdk.responses) return sdk.responses(model.api.id) as LanguageModelV3
+  if (protocol === ProviderProtocol.OpenAIChat && sdk.chat) return sdk.chat(model.api.id) as LanguageModelV3
+  return (sdk.languageModel?.(model.api.id) ?? sdk.chat?.(model.api.id) ?? sdk.responses?.(model.api.id)) as LanguageModelV3
 }
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
@@ -653,6 +728,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
                     reasoning: true,
                     attachment: true,
                     toolcall: true,
+                    native_web: false,
                     input: {
                       text: true,
                       audio: false,
@@ -857,6 +933,7 @@ const ProviderCapabilities = Schema.Struct({
   reasoning: Schema.Boolean,
   attachment: Schema.Boolean,
   toolcall: Schema.Boolean,
+  native_web: Schema.optional(Schema.Boolean),
   input: ProviderModalities,
   output: ProviderModalities,
   interleaved: ProviderInterleaved,
@@ -889,6 +966,7 @@ const ProviderLimit = Schema.Struct({
 export const Model = Schema.Struct({
   id: ModelID,
   providerID: ProviderID,
+  protocol: Schema.optional(Schema.Literals(Protocols)),
   api: ProviderApiInfo,
   name: Schema.String,
   family: Schema.optional(Schema.String),
@@ -911,6 +989,7 @@ export const Info = Schema.Struct({
   id: ProviderID,
   name: Schema.String,
   source: Schema.Literals(["env", "config", "custom", "api"]),
+  protocol: Schema.optional(Schema.Literals(Protocols)),
   env: Schema.Array(Schema.String),
   key: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Any),
@@ -985,10 +1064,66 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
   return result
 }
 
+function runtimeCapabilities(input: {
+  base?: Partial<ReturnType<typeof normalizeModelCapabilities>>
+  inferred?: Partial<ReturnType<typeof normalizeModelCapabilities>>
+  legacy?: ModelCapabilityConfig
+  explicit?: ModelCapabilityConfig
+  interleaved?: Model["capabilities"]["interleaved"]
+}): Model["capabilities"] {
+  const capabilities = normalizeModelCapabilities(input)
+  return {
+    temperature: capabilities.temperature,
+    reasoning: capabilities.reasoning,
+    attachment: capabilities.attachment,
+    toolcall: capabilities.tool_call,
+    native_web: capabilities.native_web,
+    input: capabilities.input,
+    output: capabilities.output,
+    interleaved: input.interleaved ?? false,
+  }
+}
+
+function modelCapabilityBase(model: Model | undefined): Partial<ReturnType<typeof normalizeModelCapabilities>> | undefined {
+  if (!model) return undefined
+  return {
+    temperature: model.capabilities.temperature,
+    reasoning: model.capabilities.reasoning,
+    attachment: model.capabilities.attachment,
+    tool_call: model.capabilities.toolcall,
+    native_web: model.capabilities.native_web ?? false,
+    input: model.capabilities.input,
+    output: model.capabilities.output,
+  }
+}
+
+function legacyCapabilityConfig(model: {
+  attachment?: boolean
+  reasoning?: boolean
+  temperature?: boolean
+  tool_call?: boolean
+  modalities?: { input?: unknown; output?: unknown }
+}): ModelCapabilityConfig {
+  return {
+    attachment: model.attachment,
+    reasoning: model.reasoning,
+    temperature: model.temperature,
+    tool_call: model.tool_call,
+    modalities: model.modalities as ModelCapabilityConfig["modalities"],
+  }
+}
+
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
+  const protocol = inferProtocol({
+    providerID: provider.id,
+    modelID: model.id,
+    apiID: model.id,
+    npm: model.provider?.npm ?? provider.npm,
+  })
   const base: Model = {
     id: ModelID.make(model.id),
     providerID: ProviderID.make(provider.id),
+    protocol,
     name: model.name,
     family: model.family,
     api: {
@@ -1005,27 +1140,20 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       input: model.limit.input,
       output: model.limit.output,
     },
-    capabilities: {
-      temperature: model.temperature ?? false,
-      reasoning: model.reasoning ?? false,
-      attachment: model.attachment ?? false,
-      toolcall: model.tool_call ?? true,
-      input: {
-        text: model.modalities?.input?.includes("text") ?? false,
-        audio: model.modalities?.input?.includes("audio") ?? false,
-        image: model.modalities?.input?.includes("image") ?? false,
-        video: model.modalities?.input?.includes("video") ?? false,
-        pdf: model.modalities?.input?.includes("pdf") ?? false,
+    capabilities: runtimeCapabilities({
+      base: {
+        temperature: false,
+        reasoning: false,
+        attachment: false,
+        tool_call: true,
+        native_web: false,
+        input: { text: false, audio: false, image: false, video: false, pdf: false },
+        output: { text: false, audio: false, image: false, video: false, pdf: false },
       },
-      output: {
-        text: model.modalities?.output?.includes("text") ?? false,
-        audio: model.modalities?.output?.includes("audio") ?? false,
-        image: model.modalities?.output?.includes("image") ?? false,
-        video: model.modalities?.output?.includes("video") ?? false,
-        pdf: model.modalities?.output?.includes("pdf") ?? false,
-      },
+      inferred: inferModelCapabilities({ providerID: provider.id, modelID: model.id, apiID: model.id, protocol }),
+      legacy: legacyCapabilityConfig(model),
       interleaved: model.interleaved ?? false,
-    },
+    }),
     release_date: model.release_date ?? "",
     variants: {},
   }
@@ -1142,9 +1270,11 @@ const layer: Layer.Layer<
         // extend database from config
         for (const [providerID, provider] of configProviders) {
           const existing = database[providerID]
+          const providerProtocol = normalizeProtocol(provider.protocol)
           const parsed: Info = {
             id: ProviderID.make(providerID),
             name: provider.name ?? existing?.name ?? providerID,
+            protocol: providerProtocol ?? existing?.protocol,
             env: provider.env ?? existing?.env ?? [],
             options: mergeDeep(existing?.options ?? {}, provider.options ?? {}),
             source: "config",
@@ -1154,9 +1284,17 @@ const layer: Layer.Layer<
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
             const existingModel = parsed.models[model.id ?? modelID]
             const apiID = model.id ?? existingModel?.api.id ?? modelID
+            const protocol = inferProtocol({
+              providerID,
+              modelID,
+              apiID,
+              protocol: model.provider?.protocol ?? model.protocol ?? provider.protocol ?? existingModel?.protocol,
+              npm: model.provider?.npm ?? provider.npm ?? existingModel?.api.npm ?? modelsDev[providerID]?.npm,
+            })
             const apiNpm =
               model.provider?.npm ??
               provider.npm ??
+              (model.provider?.protocol || model.protocol || provider.protocol ? protocolPackage(protocol) : undefined) ??
               existingModel?.api.npm ??
               modelsDev[providerID]?.npm ??
               "@ai-sdk/openai-compatible"
@@ -1167,6 +1305,7 @@ const layer: Layer.Layer<
             })
             const parsedModel: Model = {
               id: ModelID.make(modelID),
+              protocol,
               api: {
                 id: apiID,
                 npm: apiNpm,
@@ -1175,35 +1314,28 @@ const layer: Layer.Layer<
               status: model.status ?? existingModel?.status ?? "active",
               name,
               providerID: ProviderID.make(providerID),
-              capabilities: {
-                temperature: model.temperature ?? existingModel?.capabilities.temperature ?? false,
-                reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? false,
-                attachment: model.attachment ?? existingModel?.capabilities.attachment ?? false,
-                toolcall: model.tool_call ?? existingModel?.capabilities.toolcall ?? true,
-                input: {
-                  text: model.modalities?.input?.includes("text") ?? existingModel?.capabilities.input.text ?? true,
-                  audio: model.modalities?.input?.includes("audio") ?? existingModel?.capabilities.input.audio ?? false,
-                  image: model.modalities?.input?.includes("image") ?? existingModel?.capabilities.input.image ?? false,
-                  video: model.modalities?.input?.includes("video") ?? existingModel?.capabilities.input.video ?? false,
-                  pdf: model.modalities?.input?.includes("pdf") ?? existingModel?.capabilities.input.pdf ?? false,
-                },
-                output: {
-                  text: model.modalities?.output?.includes("text") ?? existingModel?.capabilities.output.text ?? true,
-                  audio:
-                    model.modalities?.output?.includes("audio") ?? existingModel?.capabilities.output.audio ?? false,
-                  image:
-                    model.modalities?.output?.includes("image") ?? existingModel?.capabilities.output.image ?? false,
-                  video:
-                    model.modalities?.output?.includes("video") ?? existingModel?.capabilities.output.video ?? false,
-                  pdf: model.modalities?.output?.includes("pdf") ?? existingModel?.capabilities.output.pdf ?? false,
-                },
+              capabilities: runtimeCapabilities({
+                base:
+                  modelCapabilityBase(existingModel) ??
+                  ({
+                    temperature: false,
+                    reasoning: false,
+                    attachment: false,
+                    tool_call: true,
+                    native_web: false,
+                    input: { text: true, audio: false, image: false, video: false, pdf: false },
+                    output: { text: true, audio: false, image: false, video: false, pdf: false },
+                  } satisfies Partial<ReturnType<typeof normalizeModelCapabilities>>),
+                inferred: inferModelCapabilities({ providerID, modelID, apiID, protocol }),
+                legacy: legacyCapabilityConfig(model),
+                explicit: model.capabilities as ModelCapabilityConfig | undefined,
                 interleaved:
                   model.interleaved ??
                   existingModel?.capabilities.interleaved ??
                   (!existingModel && apiNpm === "@ai-sdk/openai-compatible" && apiID.includes("deepseek")
                     ? { field: "reasoning_content" }
                     : false),
-              },
+              }),
               cost: {
                 input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,
                 output: model?.cost?.output ?? existingModel?.cost?.output ?? 0,
@@ -1607,7 +1739,7 @@ const layer: Layer.Layer<
                 ...provider.options,
                 ...model.options,
               })
-            : sdk.languageModel(model.api.id)
+            : selectLanguageModel(sdk, model)
           s.models.set(key, language)
           return language
         } catch (e) {

@@ -20,7 +20,7 @@ describe("session.system", () => {
           ["alpha-skill", "Alpha skill."],
           ["middle-skill", "Middle skill."],
         ]) {
-          const skillDir = path.join(dir, ".lfcode", "skill", name)
+          const skillDir = path.join(dir, ".lfcode", "skills", name)
           await Bun.write(
             path.join(skillDir, "SKILL.md"),
             `---
@@ -62,6 +62,9 @@ description: ${description}
           expect(alpha).toBeGreaterThan(-1)
           expect(middle).toBeGreaterThan(alpha)
           expect(zeta).toBeGreaterThan(middle)
+          expect(first).toContain("<name>playwright-browser</name>")
+          expect(first).toContain("embedded side browser")
+          expect(first).toContain("hidden or collapsed")
         },
       })
     } finally {

@@ -1,21 +1,22 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="Lfcode logo">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode โลโก้">
     </picture>
   </a>
 </p>
-<p align="center">เอเจนต์เขียนโค้ด AI แบบโอเพนซอร์ส</p>
+<p align="center">เอเจนต์เขียนโค้ด AI แบบโอเพนซอร์สที่พัฒนาต่อยอดจาก opencode</p>
+<p align="center">ยังคงรองรับจุดเชื่อมต่อแบบเดิม พร้อมเพิ่มการจัดการ session, Skills และ GitHub Action ให้ครบขึ้น</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="รุ่นล่าสุด" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="สถานะการ build" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
+  <a href="README.en.md">English</a> |
+  <a href="README.md">简体中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -44,14 +45,24 @@
 
 > README ฉบับแปลนี้อ้างอิงสถานะปัจจุบันของรีโพซิทอรี Lfcode เพื่อให้ลิงก์ดาวน์โหลด ไฟล์รีลีส และหมายเหตุด้านความเข้ากันได้ยังคงถูกต้อง
 
-Lfcode is a Bun workspace monorepo for the Lfcode AI coding agent. The repository currently ships Lfcode desktop branding, while the compatible CLI and config surface still use historical `opencode` names in several places.
+### ภาพรวม
 
-### Installation
+Lfcode คือ Bun workspace monorepo ที่พัฒนาต่อยอดจาก opencode โดยยังคงความเข้ากันได้กับของเดิม และยังส่งมอบแบรนด์ Lfcode, แอปเดสก์ท็อป, Web UI, SDK และการรองรับ GitHub Action ต่อไป
 
-Current public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### ฟีเจอร์เด่น
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+- การจัดการ session ที่ครบขึ้น: รายการ, สถานะ, สร้าง, อัปเดต, ลบ, fork, แชร์, ยกเลิกการแชร์, สรุป, บีบอัด, diff, revert และ unrevert
+- รูปแบบการโต้ตอบที่หลากหลาย: ส่งข้อความ, `prompt` แบบ async, `shell`, คำสั่ง และการคาดเดา prompt ถัดไป
+- การจัดการ Skills: รายการ Skills ในเครื่อง, ค้นพบ, ติดตั้ง, นำเข้า, สร้าง, รีเฟรช และดูโฟลเดอร์
+- การเชื่อมต่อ GitHub Action: เริ่มงานอัตโนมัติจากคอมเมนต์ issue หรือ PR ด้วย `/lfcode`, `/opencode` หรือ `/oc`
+- ความเข้ากันได้ย้อนหลัง: ยังเก็บคำสั่ง CLI `opencode`, ตัวแปรสภาพแวดล้อม `LFCODE_*` และโปรโตคอล `lfcode://`
+
+### การติดตั้ง
+
+ไฟล์ดาวน์โหลดสาธารณะเผยแพร่ที่หน้า [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases)
+
+- เดสก์ท็อป: release ปัจจุบันเผยแพร่ Windows installer ชื่อ `lfcode-win-x64.exe`
+- ซอร์สโค้ด: ใช้ Bun จาก root ของ repo สำหรับการพัฒนาในเครื่อง
 
 ```bash
 bun install
@@ -60,37 +71,37 @@ bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+### ความเข้ากันได้
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+ตัวระบุ runtime บางส่วนยังใช้ชื่อ `opencode` เดิมเพื่อความเข้ากันได้
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+- คำสั่ง CLI: `opencode`
+- โฟลเดอร์ตั้งค่า: `~/.lfcode`
+- ตัวแปรสภาพแวดล้อม: `LFCODE_*`
+- โปรโตคอลเดสก์ท็อป: `lfcode://`
 
-### Repository Layout
+### โครงสร้าง repository
 
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
+- `packages/lfcode`: runtime หลักและ session engine
+- `packages/app`: Web UI
 - `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
+- `packages/ui`: คอมโพเนนต์ UI ที่ใช้ร่วมกัน
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
+### เอกสาร
 
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
+แหล่งเอกสารปัจจุบันอยู่ที่ [packages/web/src/content/docs](packages/web/src/content/docs)
 
-### Validation
+### การตรวจสอบ
 
-Run the main repository checks from the workspace root:
+รันการตรวจสอบหลักจาก root ของ workspace:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+### การสนับสนุน
 
 - Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
 - Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)

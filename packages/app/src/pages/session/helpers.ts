@@ -5,7 +5,9 @@ import { same } from "@/utils/same"
 
 const emptyTabs: string[] = []
 const BROWSER_TAB_PREFIX = "browser://"
-export const DEFAULT_BROWSER_URL = "https://"
+const EMPTY_BROWSER_URL = "https://"
+export const BROWSER_HOME_URL = "https://www.bing.com"
+export const DEFAULT_BROWSER_URL = BROWSER_HOME_URL
 const ALLOWED_BROWSER_PROTOCOLS = new Set(["http:", "https:", "file:"])
 
 export const BROWSER_REQUEST_OPEN_EVENT = "lfcode:browser-request-open"
@@ -34,7 +36,7 @@ export const sanitizeBrowserURL = (value: string) => {
 }
 
 export const isAllowedBrowserURL = (value: string) => {
-  if (value.trim() === DEFAULT_BROWSER_URL) return true
+  if (value.trim() === EMPTY_BROWSER_URL || value.trim() === DEFAULT_BROWSER_URL) return true
   try {
     const url = new URL(sanitizeBrowserURL(value))
     return ALLOWED_BROWSER_PROTOCOLS.has(url.protocol)
@@ -45,10 +47,13 @@ export const isAllowedBrowserURL = (value: string) => {
 
 export const normalizeBrowserURL = (value: string) => {
   const next = sanitizeBrowserURL(value)
+  if (next === EMPTY_BROWSER_URL) return DEFAULT_BROWSER_URL
   if (next === DEFAULT_BROWSER_URL) return next
   if (!isAllowedBrowserURL(next)) return undefined
   return next
 }
+
+export const normalizeBrowserRequestURL = (value?: string) => normalizeBrowserURL(value ?? DEFAULT_BROWSER_URL)
 
 export const formatBrowserTabLabel = (value: string) => {
   try {
@@ -70,6 +75,8 @@ type TabsInput = {
   normalizeTab: (tab: string) => string
   review?: Accessor<boolean>
   hasReview?: Accessor<boolean>
+  detachedTabs?: Accessor<string[]>
+  forcedTab?: Accessor<string | undefined>
 }
 
 export const getSessionKey = (dir: string | undefined, id: string | undefined) => `${dir ?? ""}${id ? `/${id}` : ""}`
@@ -77,6 +84,8 @@ export const getSessionKey = (dir: string | undefined, id: string | undefined) =
 export const createSessionTabs = (input: TabsInput) => {
   const review = input.review ?? (() => false)
   const hasReview = input.hasReview ?? (() => false)
+  const detachedTabs = input.detachedTabs ?? (() => emptyTabs)
+  const forcedTab = input.forcedTab ?? (() => undefined)
   const contextOpen = createMemo(() => input.tabs().active() === "context" || input.tabs().all().includes("context"))
   const openedTabs = createMemo(
     () => {
@@ -85,6 +94,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .tabs()
         .all()
         .flatMap((tab) => {
+          if (detachedTabs().includes(tab)) return []
           if (tab === "context" || tab === "review") return []
           if (isBrowserTab(tab)) return seen.has(tab) ? [] : (seen.add(tab), [tab])
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
@@ -97,7 +107,16 @@ export const createSessionTabs = (input: TabsInput) => {
     { equals: same },
   )
   const activeTab = createMemo(() => {
+    const pinned = forcedTab()
+    if (pinned) return pinned
     const active = input.tabs().active()
+    if (detachedTabs().includes(active ?? "")) {
+      const first = openedTabs()[0]
+      if (first) return first
+      if (contextOpen()) return "context"
+      if (review() && hasReview()) return "review"
+      return "empty"
+    }
     if (active === "context") return active
     if (active === "review" && review()) return active
     if (active && isBrowserTab(active)) return active

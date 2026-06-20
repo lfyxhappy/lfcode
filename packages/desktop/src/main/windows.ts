@@ -5,7 +5,7 @@ import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, sh
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { getBootstrapState } from "./bootstrap"
-import type { TitlebarTheme } from "../preload/types"
+import type { DetachedSidePanelKind, TitlebarTheme } from "../preload/types"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -113,79 +113,21 @@ export function createMainWindow() {
     defaultWidth: 1280,
     defaultHeight: 800,
   })
-
   const headless = isHeadlessWindowMode()
-  const mode = tone()
-  const icon = iconPath()
-  const win = new BrowserWindow({
+
+  const win = createAppWindow({
     x: state.x,
     y: state.y,
     width: state.width,
     height: state.height,
     show: false,
     title: "Lfcode",
-    ...(icon ? { icon } : {}),
-    backgroundColor,
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hidden" as const,
-          trafficLightPosition: { x: 12, y: 14 },
-        }
-      : {}),
-    ...(process.platform === "win32"
-      ? {
-          frame: false,
-          titleBarStyle: "hidden" as const,
-          titleBarOverlay: overlay({ mode }),
-        }
-      : {}),
-    webPreferences: {
-      preload: join(root, "../preload/index.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webviewTag: true,
-    },
+    webviewTag: true,
   })
 
   applyWindowsTaskbarDetails(win)
   wireWindowRecovery(win, "main")
-  win.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
-    webPreferences.preload = undefined
-    webPreferences.nodeIntegration = false
-    webPreferences.contextIsolation = true
-    webPreferences.sandbox = true
-    webPreferences.webSecurity = true
-    params.partition = "persist:lfcode-browser"
-    if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
-      params.src = "about:blank"
-    }
-  })
-  win.webContents.on("did-attach-webview", (_event, guest) => {
-    guest.setWindowOpenHandler(({ url }) => {
-      win.webContents.send("browser-window-open", url)
-      return { action: "deny" }
-    })
-  })
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    win.webContents.send("browser-window-open", url)
-    return { action: "deny" }
-  })
-  win.webContents.session.on("will-download", (_event, item) => {
-    void shell.openPath(item.getSavePath()).catch(() => undefined)
-  })
-  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
-    const { requestHeaders } = details
-    upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
-    callback({ requestHeaders })
-  })
-
-  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    const { responseHeaders = {} } = details
-    upsertKeyValue(responseHeaders, "Access-Control-Allow-Origin", ["*"])
-    upsertKeyValue(responseHeaders, "Access-Control-Allow-Headers", ["*"])
-    callback({ responseHeaders })
-  })
+  wireBrowserEvents(win)
 
   state.manage(win)
   loadWindow(win, "index.html", "main")
@@ -200,6 +142,29 @@ export function createMainWindow() {
   return win
 }
 
+export function createDetachedSidePanelWindow(input: {
+  detachedWindowID: string
+  route: string
+  title?: string
+  kind: DetachedSidePanelKind
+}) {
+  const win = createAppWindow({
+    width: 980,
+    height: 720,
+    minWidth: 560,
+    minHeight: 360,
+    show: true,
+    title: input.title ?? "Lfcode",
+    webviewTag: input.kind === "browser",
+  })
+
+  applyWindowsTaskbarDetails(win)
+  wireBrowserEvents(win)
+  wireZoom(win)
+  loadWindow(win, "index.html", `detached-side-panel:${input.detachedWindowID}`, input.route)
+  return win
+}
+
 function isAllowedEmbeddedURL(input: string) {
   try {
     const url = new URL(input)
@@ -209,32 +174,27 @@ function isAllowedEmbeddedURL(input: string) {
   }
 }
 
+function isExternalMainWindowNavigation(input: string) {
+  if (!isAllowedEmbeddedURL(input)) return false
+  const devUrl = process.env.ELECTRON_RENDERER_URL
+  if (devUrl) {
+    try {
+      return new URL(input).origin !== new URL(devUrl).origin
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
 export function createLoadingWindow() {
-  const headless = isHeadlessWindowMode()
-  const mode = tone()
-  const icon = iconPath()
-  const win = new BrowserWindow({
+  const win = createAppWindow({
     width: 640,
     height: 480,
     resizable: false,
     center: true,
-    show: !headless,
-    ...(icon ? { icon } : {}),
-    backgroundColor,
-    ...(process.platform === "darwin" ? { titleBarStyle: "hidden" as const } : {}),
-    ...(process.platform === "win32"
-      ? {
-          frame: false,
-          titleBarStyle: "hidden" as const,
-          titleBarOverlay: overlay({ mode }),
-        }
-      : {}),
-    webPreferences: {
-      preload: join(root, "../preload/index.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    show: !isHeadlessWindowMode(),
+    title: "Lfcode",
   })
 
   wireWindowRecovery(win, "loading")
@@ -262,10 +222,11 @@ export function registerRendererProtocol() {
   })
 }
 
-function loadWindow(win: BrowserWindow, html: string, name: string) {
+function loadWindow(win: BrowserWindow, html: string, name: string, route?: string) {
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
     const url = new URL(html, devUrl)
+    if (route) url.hash = route
     const value = url.toString()
     void win.loadURL(value).catch((error) => {
       log.scope("window").error("window load rejected", { window: name, url: value, error })
@@ -273,9 +234,90 @@ function loadWindow(win: BrowserWindow, html: string, name: string) {
     return
   }
 
-  const value = `${rendererProtocol}://${rendererHost}/${html}`
+  const value = `${rendererProtocol}://${rendererHost}/${html}${route ? `#${route}` : ""}`
   void win.loadURL(value).catch((error) => {
     log.scope("window").error("window load rejected", { window: name, url: value, error })
+  })
+}
+
+function createAppWindow(
+  input: Electron.BrowserWindowConstructorOptions & {
+    title: string
+    webviewTag?: boolean
+  },
+) {
+  const headless = isHeadlessWindowMode()
+  const mode = tone()
+  const icon = iconPath()
+  return new BrowserWindow({
+    ...input,
+    show: input.show ?? !headless,
+    ...(icon ? { icon } : {}),
+    backgroundColor,
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hidden" as const,
+          trafficLightPosition: { x: 12, y: 14 },
+        }
+      : {}),
+    ...(process.platform === "win32"
+      ? {
+          frame: false,
+          titleBarStyle: "hidden" as const,
+          titleBarOverlay: overlay({ mode }),
+        }
+      : {}),
+    webPreferences: {
+      preload: join(root, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: input.webviewTag ?? false,
+    },
+  })
+}
+
+function wireBrowserEvents(win: BrowserWindow) {
+  win.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
+    webPreferences.preload = undefined
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+    webPreferences.webSecurity = true
+    params.partition = "persist:lfcode-browser"
+    if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
+      params.src = "about:blank"
+    }
+  })
+  win.webContents.on("did-attach-webview", (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      win.webContents.send("browser-window-open", url)
+      return { action: "deny" }
+    })
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    win.webContents.send("browser-window-open", url)
+    return { action: "deny" }
+  })
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!isExternalMainWindowNavigation(url)) return
+    event.preventDefault()
+    win.webContents.send("browser-window-open", url)
+  })
+  win.webContents.session.on("will-download", (_event, item) => {
+    void shell.openPath(item.getSavePath()).catch(() => undefined)
+  })
+  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+    const { requestHeaders } = details
+    upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
+    callback({ requestHeaders })
+  })
+
+  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const { responseHeaders = {} } = details
+    upsertKeyValue(responseHeaders, "Access-Control-Allow-Origin", ["*"])
+    upsertKeyValue(responseHeaders, "Access-Control-Allow-Headers", ["*"])
+    callback({ responseHeaders })
   })
 }
 

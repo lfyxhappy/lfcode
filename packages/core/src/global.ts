@@ -8,29 +8,27 @@ import { Flag } from "./flag/flag"
 import { LayerNode } from "./effect/layer-node"
 
 const app = "lfcode"
-const data = process.env.LFCODE_DATA_DIR ?? path.join(xdgData!, app)
-const cache = process.env.LFCODE_CACHE_DIR ?? path.join(xdgCache!, app)
-const config = process.env.LFCODE_CONFIG_DIR ?? path.join(xdgConfig!, app)
-const state = process.env.LFCODE_STATE_DIR ?? path.join(xdgState!, app)
+const WINDOWS_HOME_ROOT = ".lfcode"
+const resolvedPaths = resolveCorePaths()
 const tmp = path.join(os.tmpdir(), app)
 
 const paths = {
   get home() {
     return process.env.LFCODE_TEST_HOME ?? os.homedir()
   },
-  data,
-  bin: path.join(cache, "bin"),
-  log: path.join(data, "log"),
-  repos: path.join(data, "repos"),
-  cache,
-  config,
-  state,
+  data: resolvedPaths.data,
+  bin: path.join(resolvedPaths.cache, "bin"),
+  log: path.join(resolvedPaths.data, "log"),
+  repos: path.join(resolvedPaths.data, "repos"),
+  cache: resolvedPaths.cache,
+  config: resolvedPaths.config,
+  state: resolvedPaths.state,
   tmp,
 }
 
 export const Path = paths
 
-Flock.setGlobal({ state })
+Flock.setGlobal({ state: Path.state })
 
 await Promise.all([
   fs.mkdir(Path.data, { recursive: true }),
@@ -59,14 +57,14 @@ export interface Interface {
 export function make(input: Partial<Interface> = {}): Interface {
   return {
     home: Path.home,
-    data,
-    cache,
+    data: Path.data,
+    cache: Path.cache,
     config: Flag.LFCODE_CONFIG_DIR ?? Path.config,
-    state,
+    state: Path.state,
     tmp: Path.tmp,
-    bin: path.join(cache, "bin"),
-    log: path.join(data, "log"),
-    repos: path.join(data, "repos"),
+    bin: path.join(Path.cache, "bin"),
+    log: path.join(Path.data, "log"),
+    repos: path.join(Path.data, "repos"),
     ...input,
   }
 }
@@ -86,3 +84,28 @@ export const layerWith = (input: Partial<Interface>) =>
   )
 
 export * as Global from "./global"
+
+function resolveCorePaths(env: NodeJS.ProcessEnv = process.env) {
+  const home = env.USERPROFILE ?? os.homedir()
+  const defaults =
+    process.platform === "win32"
+      ? {
+          cache: path.join(home, WINDOWS_HOME_ROOT, "cache"),
+          config: path.join(home, WINDOWS_HOME_ROOT, "config"),
+          data: path.join(home, WINDOWS_HOME_ROOT, "data"),
+          state: path.join(home, WINDOWS_HOME_ROOT, "state"),
+        }
+      : {
+          cache: path.join(xdgCache!, app),
+          config: path.join(xdgConfig!, app),
+          data: path.join(xdgData!, app),
+          state: path.join(xdgState!, app),
+        }
+
+  return {
+    data: env.LFCODE_DATA_DIR || defaults.data,
+    cache: env.LFCODE_CACHE_DIR || defaults.cache,
+    config: env.LFCODE_CONFIG_DIR || defaults.config,
+    state: env.LFCODE_STATE_DIR || defaults.state,
+  }
+}

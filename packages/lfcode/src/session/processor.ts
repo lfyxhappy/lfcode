@@ -465,6 +465,7 @@ export const layer: Layer.Layer<
               usage: value.usage,
               metadata: value.providerMetadata,
             })
+            const overhead = (value as { overhead?: { cost: number; tokensIn: number; tokensOut: number } }).overhead
             ctx.assistantMessage.finish = value.finishReason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
@@ -477,6 +478,23 @@ export const layer: Layer.Layer<
               type: "step-finish",
               tokens: usage.tokens,
               cost: usage.cost,
+              ...(overhead && (overhead.cost > 0 || overhead.tokensIn > 0 || overhead.tokensOut > 0)
+                ? {
+                    overhead: {
+                      cost: overhead.cost,
+                      tokens: {
+                        total: overhead.tokensIn + overhead.tokensOut,
+                        input: overhead.tokensIn,
+                        output: overhead.tokensOut,
+                        reasoning: 0,
+                        cache: {
+                          read: 0,
+                          write: 0,
+                        },
+                      },
+                    },
+                  }
+                : {}),
             })
             yield* session.updateMessage(ctx.assistantMessage)
             let stepFilesChanged = 0
@@ -876,6 +894,7 @@ export const layer: Layer.Layer<
               usage: input.usage ?? emptyUsage,
               finishReason: input.finishReason,
               providerMetadata: input.providerMetadata,
+              ...(input.overhead ? { overhead: input.overhead } : {}),
             } as unknown as StreamEvent)
 
             // Account for ensemble overhead (losing candidates + judge): real
@@ -899,10 +918,10 @@ export const layer: Layer.Layer<
                   model_id: ctx.model.id,
                   provider: ctx.model.providerID,
                   total_tokens_in: input.overhead.tokensIn,
-                  total_tokens_out: input.overhead.tokensOut,
-                })
-                .pipe(Effect.ignore)
-            }
+                total_tokens_out: input.overhead.tokensOut,
+              })
+              .pipe(Effect.ignore)
+          }
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {

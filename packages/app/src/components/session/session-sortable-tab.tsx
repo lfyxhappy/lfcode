@@ -16,7 +16,7 @@ import { browserTabID, formatBrowserTabLabel } from "@/pages/session/helpers"
 
 export function FileVisual(props: { path: string; active?: boolean }): JSX.Element {
   return (
-    <div class="flex items-center gap-x-1.5 min-w-0">
+    <div data-component="file-visual" class="flex items-center gap-x-1.5 min-w-0">
       <Show
         when={!props.active}
         fallback={<FileIcon node={{ path: props.path, type: "file" }} class="size-4 shrink-0" />}
@@ -35,6 +35,21 @@ export function SortableTab(props: {
   tab: string
   onTabClose: (tab: string) => void
   onBrowserTabClose?: (tabID: string) => void
+  onDetach?: (tab: string) => void
+  detachBounds?: () => DOMRect | undefined
+  onDetachPreviewChange?: (
+    value?:
+      | {
+          tab: string
+          x: number
+          y: number
+          width: number
+          height: number
+          offsetX: number
+          offsetY: number
+        }
+      | undefined,
+  ) => void
 }): JSX.Element {
   const file = useFile()
   const language = useLanguage()
@@ -66,6 +81,70 @@ export function SortableTab(props: {
       </div>
     )
   })
+  const trackDetachGesture = (event: PointerEvent) => {
+    const detach = props.onDetach
+    if (!detach) return
+    if (event.button !== 0) return
+    if (!props.detachBounds) return
+
+    const target = event.currentTarget as HTMLElement
+    const rect = target.getBoundingClientRect()
+    const startX = event.clientX
+    const startY = event.clientY
+    const offsetX = event.clientX - rect.left
+    const offsetY = event.clientY - rect.top
+    let pendingDetach = false
+    const clearPreview = () => props.onDetachPreviewChange?.()
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("pointerup", onPointerUp)
+      window.removeEventListener("pointercancel", cleanup)
+      clearPreview()
+    }
+    const onPointerMove = (move: PointerEvent) => {
+      const dx = move.clientX - startX
+      const dy = move.clientY - startY
+      if (Math.hypot(dx, dy) < 20) {
+        pendingDetach = false
+        clearPreview()
+        return
+      }
+      const bounds = props.detachBounds?.()
+      if (!bounds) {
+        pendingDetach = false
+        clearPreview()
+        return
+      }
+      pendingDetach =
+        move.clientX < bounds.left - 24 ||
+        move.clientX > bounds.right + 24 ||
+        move.clientY < bounds.top - 24 ||
+        move.clientY > bounds.bottom + 24
+      if (!pendingDetach) {
+        clearPreview()
+        return
+      }
+      props.onDetachPreviewChange?.({
+        tab: props.tab,
+        x: move.clientX,
+        y: move.clientY,
+        width: rect.width,
+        height: rect.height,
+        offsetX,
+        offsetY,
+      })
+    }
+    const onPointerUp = () => {
+      cleanup()
+      if (!pendingDetach) return
+      detach(props.tab)
+    }
+
+    window.addEventListener("pointermove", onPointerMove)
+    window.addEventListener("pointerup", onPointerUp)
+    window.addEventListener("pointercancel", cleanup)
+  }
+
   return (
     <div use:sortable class="h-full flex items-center" classList={{ "opacity-0": sortable.isActiveDraggable }}>
       <div class="relative">
@@ -103,7 +182,8 @@ export function SortableTab(props: {
             }
             props.onTabClose(props.tab)
           }}
-          >
+          onPointerDown={trackDetachGesture}
+        >
           <Show when={browserContent()} fallback={<Show when={content()}>{(value) => value()}</Show>}>
             {(value) => value()}
           </Show>

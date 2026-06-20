@@ -39,6 +39,7 @@ export const collectNewSessionDeepLinks = (urls: string[]) =>
 type LfcodeWindow = Window & {
   __LFCODE__?: {
     deepLinks?: string[]
+    detachedSidePanel?: import("@/pages/session/detached-side-panel").DetachedSidePanelContext
   }
 }
 

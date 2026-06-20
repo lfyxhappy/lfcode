@@ -26,11 +26,6 @@ function supportsImageInput(model: Provider.Model): boolean {
     if (id.includes("v2.5-pro")) return false
     if (id === "mimo-auto" || id.includes("v2.5")) return true
   }
-  // Claude and GPT models are all multimodal regardless of catalog data.
-  const id = model.id.toLowerCase()
-  const apiID = model.api.id.toLowerCase()
-  if (id.includes("claude") || apiID.includes("claude") || model.providerID === "anthropic") return true
-  if (id.includes("gpt") || apiID.includes("gpt")) return true
   return model.capabilities.input.image
 }
 
