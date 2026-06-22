@@ -19,6 +19,14 @@ describe("file path helpers", () => {
     expect(path.normalize("C:/repo/src/app.ts")).toBe("src/app.ts")
     expect(path.normalize("file://C:/repo/src/app.ts")).toBe("src/app.ts")
     expect(path.normalize("c:\\repo\\src\\app.ts")).toBe("src\\app.ts")
+    expect(path.normalize("D:\\outside\\image.png")).toBe("D:\\outside\\image.png")
+    expect(path.pathFromTab("file:///D:/outside/image.png")).toBe("D:/outside/image.png")
+  })
+
+  test("preserves external absolute POSIX paths", () => {
+    const path = createPathHelpers(() => "/repo")
+    expect(path.normalize("/tmp/outside/image.png")).toBe("/tmp/outside/image.png")
+    expect(path.pathFromTab("file:///tmp/outside/image.png")).toBe("/tmp/outside/image.png")
   })
 
   test("keeps query/hash stripping behavior stable", () => {

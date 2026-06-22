@@ -15,15 +15,15 @@ async function tmpdir() {
 }
 
 describe("desktop bootstrap paths", () => {
-  const playwrightCdpCommand = [
-    "cmd",
-    "/c",
-    "npx",
-    "-y",
-    "@playwright/mcp@0.0.73",
-    "--cdp-endpoint=http://127.0.0.1:9222",
-  ]
   const playwrightLegacyCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"]
+  const playwrightRemoteConfig = {
+    type: "remote",
+    url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
+    headers: {
+      authorization: "{env:LFCODE_SERVER_AUTH}",
+    },
+    enabled: true,
+  }
   const windowsComputerUseCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"]
   const legacyWindowsComputerUseCommand = [
     "cmd",
@@ -175,19 +175,15 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
-        mcp: {
-          playwright: {
-            type: "local",
-            command: playwrightCdpCommand,
-            enabled: true,
-          },
-          "windows-computer-use": {
-            type: "local",
-            command: windowsComputerUseCommand,
-            enabled: true,
-          },
+      mcp: {
+        playwright: playwrightRemoteConfig,
+        "windows-computer-use": {
+          type: "local",
+          command: windowsComputerUseCommand,
+          enabled: true,
         },
-      })
+      },
+    })
   })
 
   test("upgrades the shipped mcp config without touching other MCPs", async () => {
@@ -248,11 +244,7 @@ describe("desktop bootstrap paths", () => {
           command: ["codegraph", "serve", "--mcp"],
           enabled: true,
         },
-        playwright: {
-          type: "local",
-          command: playwrightCdpCommand,
-          enabled: true,
-        },
+        playwright: playwrightRemoteConfig,
         "windows-computer-use": {
           type: "local",
           command: windowsComputerUseCommand,
@@ -412,7 +404,7 @@ describe("desktop bootstrap paths", () => {
     await fs.mkdir(home, { recursive: true })
     await fs.mkdir(path.join(installedRoot, "data"), { recursive: true })
     await fs.mkdir(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev"), { recursive: true })
-    await fs.writeFile(path.join(installedRoot, "lfcode.jsonc"), "{\"providers\":{\"root\":true}}")
+    await fs.writeFile(path.join(installedRoot, "opencode.jsonc"), "{\"providers\":{\"root\":true}}")
     await fs.writeFile(path.join(installedRoot, "data", "auth.json"), "legacy-root-data")
     await fs.writeFile(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "{\"from\":\"root\"}")
 
@@ -431,9 +423,41 @@ describe("desktop bootstrap paths", () => {
     expect(state.rootKind).toBe("managed")
     expect(state.layout?.root).toBe(managedRoot)
     expect(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8")).toBe("{\"providers\":{\"root\":true}}")
+    expect(
+      await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false)
     expect(await fs.readFile(path.join(managedRoot, "data", "auth.json"), "utf8")).toBe("legacy-root-data")
     expect(await fs.readFile(path.join(managedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "utf8")).toBe(
       "{\"from\":\"root\"}",
     )
+  })
+
+  test("promotes a managed-root opencode.jsonc into lfcode.jsonc even when migration already ran", async () => {
+    await using tmp = await tmpdir()
+    const home = path.join(tmp.path, "home")
+    const managedRoot = path.join(home, ".lfcode")
+
+    await fs.mkdir(path.join(managedRoot, "state"), { recursive: true })
+    await fs.writeFile(path.join(managedRoot, "opencode.jsonc"), "{\"providers\":{\"legacy\":true}}")
+    await fs.writeFile(path.join(managedRoot, "state", "migration.json"), "{\"version\":1}")
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(tmp.path, "Program Files", "Lfcode", "Lfcode.exe"),
+      homeDir: home,
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+    })
+
+    expect(state.mode).toBe("root")
+    expect(state.rootKind).toBe("managed")
+    expect(state.layout?.root).toBe(managedRoot)
+    expect(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8")).toBe("{\"providers\":{\"legacy\":true}}")
   })
 })

@@ -8,6 +8,7 @@ import { ConfigMCP } from "@/config/mcp"
 import { Global } from "@/global"
 import { InstanceState } from "@/effect"
 import { MCP } from "./index"
+import { Flag } from "@/flag/flag"
 
 const REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/"
 const REGISTRY_CACHE_DIR = path.join(Global.Path.cache, "mcp-registry")
@@ -15,7 +16,15 @@ const REGISTRY_CACHE_FILE = path.join(REGISTRY_CACHE_DIR, "servers.json")
 const REGISTRY_CACHE_TTL_MS = 60 * 60 * 1000
 const MANAGED_DIR_NAME = "mcps"
 const MANIFEST_FILE = "manifest.json"
-const PLAYWRIGHT_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const PLAYWRIGHT_DESKTOP_REMOTE_CONFIG = {
+  type: "remote",
+  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
+  headers: {
+    authorization: "{env:LFCODE_SERVER_AUTH}",
+  },
+  enabled: true,
+} as const
+const PLAYWRIGHT_EXTERNAL_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"] as const
 const WINDOWS_COMPUTER_USE_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
 
 const RegistryRemote = z.object({
@@ -161,11 +170,14 @@ function bundledInfo(name: string): { title: string; adapter: InstallAdapter; co
     return {
       title: "Playwright",
       adapter: "bundled-playwright",
-      config: {
-        type: "local",
-        command: [...PLAYWRIGHT_COMMAND],
-        enabled: true,
-      },
+      config:
+        Flag.LFCODE_CLIENT === "desktop"
+          ? PLAYWRIGHT_DESKTOP_REMOTE_CONFIG
+          : {
+              type: "local",
+              command: [...PLAYWRIGHT_EXTERNAL_COMMAND],
+              enabled: true,
+            },
     }
   }
 
@@ -351,94 +363,98 @@ export const layer = Layer.effect(
       return items.toSorted((a, b) => a.name.localeCompare(b.name))
     })
 
-    const catalog: Interface["catalog"] = Effect.fn("McpCatalog.catalog")(function* (query) {
-      const servers = yield* loadRegistry()
-      const current = yield* config.get()
-      const term = query?.q?.trim().toLowerCase() ?? ""
-      return servers
-        .map((item: OfficialServer) => {
-          const meta = item._meta?.["io.modelcontextprotocol.registry/official"]
-          const install = installability(item)
-          return {
-            id: item.server.name,
-            serverName: item.server.name,
-            title: item.server.title ?? item.server.name,
-            description: item.server.description ?? "",
-            source: "official-registry" as const,
-            packageType: install.packageType,
-            transportType: install.transportType,
-            installable: install.installable,
-            installed: !!current.mcp?.[item.server.name],
-            installAdapter: install.installAdapter,
-            installReason: install.installReason,
-            official: Boolean(meta && typeof meta === "object"),
-            version: item.server.version,
-          } satisfies McpCatalogItem
+    const catalog: Interface["catalog"] = (query) =>
+      Effect.fn("McpCatalog.catalog")(function* () {
+        const servers = yield* loadRegistry()
+        const current = yield* config.get()
+        const term = query?.q?.trim().toLowerCase() ?? ""
+        return servers
+          .map((item: OfficialServer) => {
+            const meta = item._meta?.["io.modelcontextprotocol.registry/official"]
+            const install = installability(item)
+            return {
+              id: item.server.name,
+              serverName: item.server.name,
+              title: item.server.title ?? item.server.name,
+              description: item.server.description ?? "",
+              source: "official-registry" as const,
+              packageType: install.packageType,
+              transportType: install.transportType,
+              installable: install.installable,
+              installed: !!current.mcp?.[item.server.name],
+              installAdapter: install.installAdapter,
+              installReason: install.installReason,
+              official: Boolean(meta && typeof meta === "object"),
+              version: item.server.version,
+            } satisfies McpCatalogItem
+          })
+          .filter((item: McpCatalogItem) => {
+            if (!term) return true
+            return [item.serverName, item.title, item.description, item.packageType].some((value) => value.toLowerCase().includes(term))
+          })
+          .toSorted((a: McpCatalogItem, b: McpCatalogItem) => a.title.localeCompare(b.title))
+      })().pipe(Effect.orDie)
+
+    const install: Interface["install"] = (input) =>
+      Effect.fn("McpCatalog.install")(function* () {
+        const directory = yield* InstanceState.directory
+        const catalogItems = yield* catalog()
+        const item = catalogItems.find((entry: McpCatalogItem) => entry.id === input.id)
+        if (!item) return yield* Effect.die(new Error(`MCP catalog item ${input.id} not found`))
+        if (!item.installable || !item.installAdapter) {
+          return yield* Effect.die(new Error(item.installReason ?? `MCP ${input.id} is not installable`))
+        }
+
+        const server = (yield* loadRegistry()).find((entry: OfficialServer) => entry.server.name === input.id)
+        if (!server) return yield* Effect.die(new Error(`Registry definition not found for ${input.id}`))
+
+        const installedAt = new Date().toISOString()
+        const bundled = bundledInfo(item.serverName)
+        const nextConfig =
+          item.installAdapter === "registry-remote"
+            ? yield* Effect.sync(() => {
+                const remote = server.server.remotes?.find((entry) => entry.type === "streamable-http" || entry.type === "remote")
+                if (!remote) throw new Error(`Registry server ${input.id} has no supported remote transport`)
+                return {
+                  type: "remote" as const,
+                  url: remote.url,
+                  enabled: true,
+                } satisfies ConfigMCP.Info
+              }).pipe(Effect.orDie)
+            : bundled?.config
+
+        if (!nextConfig) return yield* Effect.die(new Error(`Missing install config for ${input.id}`))
+
+        const updated = yield* config.upsertMcp(item.serverName, nextConfig, { target: configTarget(input.target) })
+        const configFile =
+          input.target === "global" ? Global.Path.config : path.join(directory, ".lfcode", "lfcode.jsonc")
+        yield* writeManifest(directory, item.serverName, {
+          id: item.id,
+          serverName: item.serverName,
+          title: item.title,
+          source: "official-registry",
+          adapter: item.installAdapter,
+          installedAt,
+          configTarget: configFile,
+          configName: item.serverName,
+          payload: { kind: "none" },
+          upstream: {
+            url: nextConfig.type === "remote" ? nextConfig.url : undefined,
+            version: server.server.version,
+          },
         })
-        .filter((item: McpCatalogItem) => {
-          if (!term) return true
-          return [item.serverName, item.title, item.description, item.packageType].some((value) => value.toLowerCase().includes(term))
-        })
-        .toSorted((a: McpCatalogItem, b: McpCatalogItem) => a.title.localeCompare(b.title))
-    })
-
-    const install: Interface["install"] = Effect.fn("McpCatalog.install")(function* (input) {
-      const directory = yield* InstanceState.directory
-      const catalogItems = yield* catalog()
-      const item = catalogItems.find((entry: McpCatalogItem) => entry.id === input.id)
-      if (!item) throw new Error(`MCP catalog item ${input.id} not found`)
-      if (!item.installable || !item.installAdapter) throw new Error(item.installReason ?? `MCP ${input.id} is not installable`)
-
-      const server = (yield* loadRegistry()).find((entry: OfficialServer) => entry.server.name === input.id)
-      if (!server) throw new Error(`Registry definition not found for ${input.id}`)
-
-      const installedAt = new Date().toISOString()
-      const bundled = bundledInfo(item.serverName)
-      const nextConfig =
-        item.installAdapter === "registry-remote"
-          ? (() => {
-              const remote = server.server.remotes?.find((entry) => entry.type === "streamable-http" || entry.type === "remote")
-              if (!remote) throw new Error(`Registry server ${input.id} has no supported remote transport`)
-              return {
-                type: "remote" as const,
-                url: remote.url,
-                enabled: true,
-              } satisfies ConfigMCP.Info
-            })()
-          : bundled?.config
-
-      if (!nextConfig) throw new Error(`Missing install config for ${input.id}`)
-
-      const updated = yield* config.upsertMcp(item.serverName, nextConfig, { target: configTarget(input.target) })
-      const configFile =
-        input.target === "global" ? Global.Path.config : path.join(directory, ".lfcode", "lfcode.jsonc")
-      yield* writeManifest(directory, item.serverName, {
-        id: item.id,
-        serverName: item.serverName,
-        title: item.title,
-        source: "official-registry",
-        adapter: item.installAdapter,
-        installedAt,
-        configTarget: configFile,
-        configName: item.serverName,
-        payload: { kind: "none" },
-        upstream: {
-          url: nextConfig.type === "remote" ? nextConfig.url : undefined,
-          version: server.server.version,
-        },
-      })
-      const status = (yield* mcp.status())[item.serverName] ?? { status: "disabled" as const }
-      return {
-        name: item.serverName,
-        status,
-        origin: updated.mcp_origins?.[item.serverName] ?? null,
-        managed: true,
-        installable: true,
-        installAdapter: item.installAdapter,
-        manifest: (yield* readManifest(directory, item.serverName)) ?? null,
-        config: nextConfig,
-      }
-    })
+        const status = (yield* mcp.status())[item.serverName] ?? { status: "disabled" as const }
+        return {
+          name: item.serverName,
+          status,
+          origin: updated.mcp_origins?.[item.serverName] ?? null,
+          managed: true,
+          installable: true,
+          installAdapter: item.installAdapter,
+          manifest: (yield* readManifest(directory, item.serverName)) ?? null,
+          config: nextConfig,
+        }
+      })().pipe(Effect.orDie)
 
     return Service.of({
       manage,

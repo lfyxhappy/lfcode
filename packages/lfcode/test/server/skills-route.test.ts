@@ -3,8 +3,9 @@ import fs from "fs/promises"
 import os from "os"
 import { setTimeout as sleep } from "node:timers/promises"
 import path from "path"
-import { Server } from "../../src/server/server"
+import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
+import { Server } from "../../src/server/server"
 import { cleanupTmpdir, tmpdir } from "../fixture/fixture"
 
 const originalFetch = globalThis.fetch
@@ -21,69 +22,73 @@ afterEach(async () => {
 })
 
 describe("skills routes", () => {
-  test("GET /skills lists local .lfcode/skills entries", async () => {
+  test("GET /skills lists managed global skill entries", async () => {
     await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        await Bun.write(
-          path.join(tmp.path, ".lfcode", "skills", "route-skill", "SKILL.md"),
-          `---\nname: route-skill\ndescription: Route test skill.\n---\n\n# Route Skill\n`,
-        )
+    await withManagedPaths(tmp.path, async () => {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await Bun.write(
+            path.join(tmp.path, "skills", "route-skill", "SKILL.md"),
+            `---\nname: route-skill\ndescription: Route test skill.\n---\n\n# Route Skill\n`,
+          )
 
-        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
-        const response = await Server.Default().app.request("/skills", {
-          method: "GET",
-          headers: {
-            "x-lfcode-directory": tmp.path,
-          },
-        })
-        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+          const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+          const response = await Server.Default().app.request("/skills", {
+            method: "GET",
+            headers: {
+              "x-lfcode-directory": tmp.path,
+            },
+          })
+          if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
 
-        expect(response.status).toBe(200)
+          expect(response.status).toBe(200)
 
-        const body = (await response.json()) as Array<{ name: string; description: string }>
-        expect(body.map((skill) => skill.name)).toContain("route-skill")
-        expect(body.find((skill) => skill.name === "route-skill")?.description).toBe("Route test skill.")
-      },
+          const body = (await response.json()) as Array<{ name: string; description: string }>
+          expect(body.map((skill) => skill.name)).toContain("route-skill")
+          expect(body.find((skill) => skill.name === "route-skill")?.description).toBe("Route test skill.")
+        },
+      })
     })
     await disposeTestInstance(tmp.path)
   })
 
-  test("GET /skills/manage/list only lists local .lfcode/skills entries", async () => {
+  test("GET /skills/manage/list only lists managed global skill entries", async () => {
     await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        await Bun.write(
-          path.join(tmp.path, ".lfcode", "skills", "local-only", "SKILL.md"),
-          `---\nname: local-only\ndescription: Local only skill.\nhidden: true\n---\n\n# Local Only\n`,
-        )
-        await Bun.write(
-          path.join(tmp.path, "skills", "external", "SKILL.md"),
-          `---\nname: external\ndescription: External skill.\n---\n\n# External\n`,
-        )
+    await withManagedPaths(tmp.path, async () => {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await Bun.write(
+            path.join(tmp.path, "skills", "local-only", "SKILL.md"),
+            `---\nname: local-only\ndescription: Local only skill.\nhidden: true\n---\n\n# Local Only\n`,
+          )
+          await Bun.write(
+            path.join(tmp.path, ".lfcode", "skills", "project-local", "SKILL.md"),
+            `---\nname: project-local\ndescription: Project local skill.\n---\n\n# Project Local\n`,
+          )
 
-        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
-        const response = await Server.Default().app.request("/skills/manage/list", {
-          method: "GET",
-          headers: {
-            "x-lfcode-directory": tmp.path,
-          },
-        })
-        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+          const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+          const response = await Server.Default().app.request("/skills/manage/list", {
+            method: "GET",
+            headers: {
+              "x-lfcode-directory": tmp.path,
+            },
+          })
+          if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
 
-        expect(response.status).toBe(200)
+          expect(response.status).toBe(200)
 
-        const body = (await response.json()) as Array<{ name: string; hidden?: boolean; directory: string }>
-        expect(body.map((skill) => skill.name)).toEqual(["local-only"])
-        expect(body[0]?.hidden).toBe(true)
-        expect(body[0]?.directory).toBe("local-only")
-      },
+          const body = (await response.json()) as Array<{ name: string; hidden?: boolean; directory: string }>
+          expect(body.map((skill) => skill.name)).toEqual(["local-only"])
+          expect(body[0]?.hidden).toBe(true)
+          expect(body[0]?.directory).toBe("local-only")
+        },
+      })
     })
     await disposeTestInstance(tmp.path)
   })
@@ -153,40 +158,42 @@ describe("skills routes", () => {
       return Promise.resolve(new Response("not found", { status: 404 }))
     }) as unknown as typeof globalThis.fetch
 
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        await Bun.write(
-          path.join(tmp.path, ".lfcode", "skills", "alpha-skill", "SKILL.md"),
-          `---\nname: alpha-skill\ndescription: Alpha local skill.\n---\n\n# Alpha Skill\n`,
-        )
+    await withManagedPaths(tmp.path, async () => {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await Bun.write(
+            path.join(tmp.path, "skills", "alpha-skill", "SKILL.md"),
+            `---\nname: alpha-skill\ndescription: Alpha local skill.\n---\n\n# Alpha Skill\n`,
+          )
 
-        const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
-        const response = await Server.Default().app.request("/skills/discover?source=skills.sh&status=available&page=1&pageSize=24", {
-          method: "GET",
-          headers: {
-            "x-lfcode-directory": tmp.path,
-          },
-        })
-        if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
-        else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
+          const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = "true"
+          const response = await Server.Default().app.request("/skills/discover?source=skills.sh&status=available&page=1&pageSize=24", {
+            method: "GET",
+            headers: {
+              "x-lfcode-directory": tmp.path,
+            },
+          })
+          if (previous === undefined) delete process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
+          else process.env["LFCODE_DISABLE_COMPOSE_SKILLS"] = previous
 
-        expect(response.status).toBe(200)
+          expect(response.status).toBe(200)
 
-        const body = (await response.json()) as {
-          items: Array<{ name: string; repository: string; installed: boolean }>
-          repositories: Array<{ id: string; count: number }>
-          total: number
-        }
-        expect(body.total).toBe(1)
-        expect(body.items).toHaveLength(1)
-        expect(body.items[0]?.name).toBe("Beta Skill")
-        expect(body.items[0]?.repository).toBe("beta/repo")
-        expect(body.items[0]?.installed).toBe(false)
-        expect(body.repositories.map((item) => item.id)).toEqual(["alpha/repo", "beta/repo"])
-        expect(body.repositories.find((item) => item.id === "alpha/repo")?.count).toBe(1)
-      },
+          const body = (await response.json()) as {
+            items: Array<{ name: string; repository: string; installed: boolean }>
+            repositories: Array<{ id: string; count: number }>
+            total: number
+          }
+          expect(body.total).toBe(1)
+          expect(body.items).toHaveLength(1)
+          expect(body.items[0]?.name).toBe("Beta Skill")
+          expect(body.items[0]?.repository).toBe("beta/repo")
+          expect(body.items[0]?.installed).toBe(false)
+          expect(body.repositories.map((item) => item.id)).toEqual(["alpha/repo", "beta/repo"])
+          expect(body.repositories.find((item) => item.id === "alpha/repo")?.count).toBe(1)
+        },
+      })
     })
   })
 
@@ -194,19 +201,21 @@ describe("skills routes", () => {
     await using tmp = await tmpdir(tmpdirWithGit)
     await writeSkill(path.join(tmp.path, "external", "single"), "single-import", "Single import.")
 
-    const response = await Server.Default().app.request("/skills/import", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "single") }),
-    })
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "single") }),
+      }),
+    )
 
     await expectOk(response)
     const body = (await response.json()) as Array<{ name: string; location: string }>
     expect(body.map((skill) => skill.name)).toEqual(["single-import"])
-    expect(body[0]?.location).toContain(path.join(".lfcode", "skills", "single", "SKILL.md"))
+    expect(body[0]?.location).toContain(path.join("skills", "single", "SKILL.md"))
     await disposeTestInstance(tmp.path)
   })
 
@@ -216,14 +225,16 @@ describe("skills routes", () => {
     await writeSkill(path.join(source, "alpha"), "alpha-import", "Alpha import.")
     await writeSkill(path.join(source, "beta"), "beta-import", "Beta import.")
 
-    const response = await Server.Default().app.request("/skills/import", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ kind: "folder", source }),
-    })
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ kind: "folder", source }),
+      }),
+    )
 
     await expectOk(response)
     const body = (await response.json()) as Array<{ name: string }>
@@ -241,70 +252,78 @@ describe("skills routes", () => {
       }),
     )
 
-    const response = await Server.Default().app.request("/skills/import", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ kind: "zip", source: zipPath }),
-    })
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ kind: "zip", source: zipPath }),
+      }),
+    )
 
     await expectOk(response)
     const body = (await response.json()) as Array<{ name: string; location: string }>
     expect(body.map((skill) => skill.name)).toEqual(["zip-import"])
-    expect(body[0]?.location).toContain(path.join(".lfcode", "skills", "zip-root", "SKILL.md"))
-    expect(await Bun.file(path.join(tmp.path, ".lfcode", "tmp", "skill-import")).exists()).toBe(false)
+    expect(body[0]?.location).toContain(path.join("skills", "zip-root", "SKILL.md"))
+    expect(await Bun.file(path.join(tmp.path, "tmp", "skill-import")).exists()).toBe(false)
     await disposeTestInstance(tmp.path)
   })
 
   test("POST /skills/import returns a clear error for missing preset skill roots", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const originalHome = process.env.HOME
-        const originalUserProfile = process.env.USERPROFILE
-        process.env.HOME = path.join(tmp.path, "home")
-        process.env.USERPROFILE = path.join(tmp.path, "home")
-        try {
-          const response = await Server.Default().app.request("/skills/import", {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "x-lfcode-directory": tmp.path,
-            },
-            body: JSON.stringify({ kind: "codex" }),
-          })
+    await withManagedPaths(tmp.path, async () => {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const originalHome = process.env.HOME
+          const originalUserProfile = process.env.USERPROFILE
+          process.env.HOME = path.join(tmp.path, "home")
+          process.env.USERPROFILE = path.join(tmp.path, "home")
+          try {
+            const response = await Server.Default().app.request("/skills/import", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-lfcode-directory": tmp.path,
+              },
+              body: JSON.stringify({ kind: "codex" }),
+            })
 
-          expect(response.status).toBe(404)
-          const text = await response.text()
-          expect(text).toContain("Preset skill root not found")
-          expect(text).toContain(".codex")
-        } finally {
-          if (originalHome === undefined) delete process.env.HOME
-          else process.env.HOME = originalHome
-          if (originalUserProfile === undefined) delete process.env.USERPROFILE
-          else process.env.USERPROFILE = originalUserProfile
-          await disposeTestInstance(tmp.path)
-        }
-      },
+            expect(response.status).toBe(404)
+            const text = await response.text()
+            expect(text).toContain("Preset skill root not found")
+            expect(text).toContain(".codex")
+          } finally {
+            if (originalHome === undefined) delete process.env.HOME
+            else process.env.HOME = originalHome
+            if (originalUserProfile === undefined) delete process.env.USERPROFILE
+            else process.env.USERPROFILE = originalUserProfile
+            await disposeTestInstance(tmp.path)
+          }
+        },
+      })
     })
   })
 
   test("POST /skills/import overwrites duplicate target directories and refreshes", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
-    await writeSkill(path.join(tmp.path, ".lfcode", "skills", "dup"), "old-dup", "Old duplicate.")
-    await writeSkill(path.join(tmp.path, "external", "dup"), "new-dup", "New duplicate.")
-
-    const response = await Server.Default().app.request("/skills/import", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "dup") }),
+    await withManagedPaths(tmp.path, async () => {
+      await writeSkill(path.join(tmp.path, "skills", "dup"), "old-dup", "Old duplicate.")
+      await writeSkill(path.join(tmp.path, "external", "dup"), "new-dup", "New duplicate.")
     })
+
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/import", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "dup") }),
+      }),
+    )
 
     await expectOk(response)
     const body = (await response.json()) as Array<{ name: string; description: string }>
@@ -319,39 +338,45 @@ describe("skills routes", () => {
 
   test("PATCH /skills/manage/update toggles hidden frontmatter and refreshes", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
-    await writeSkill(path.join(tmp.path, ".lfcode", "skills", "managed"), "managed-skill", "Managed skill.")
-
-    const hideResponse = await Server.Default().app.request("/skills/manage/update", {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ directory: "managed", hidden: true }),
+    await withManagedPaths(tmp.path, async () => {
+      await writeSkill(path.join(tmp.path, "skills", "managed"), "managed-skill", "Managed skill.")
     })
+
+    const hideResponse = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/manage/update", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ directory: "managed", hidden: true }),
+      }),
+    )
 
     await expectOk(hideResponse)
     const hidden = (await hideResponse.json()) as { hidden?: boolean }
     expect(hidden.hidden).toBe(true)
-    expect(await Bun.file(path.join(tmp.path, ".lfcode", "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
+    expect(await Bun.file(path.join(tmp.path, "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
 
-    const showResponse = await Server.Default().app.request("/skills/manage/update", {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-        "x-lfcode-directory": tmp.path,
-      },
-      body: JSON.stringify({ directory: "managed", hidden: null }),
-    })
+    const showResponse = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/manage/update", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ directory: "managed", hidden: null }),
+      }),
+    )
 
     await expectOk(showResponse)
     const shown = (await showResponse.json()) as { hidden?: boolean }
     expect(shown.hidden).toBeUndefined()
-    expect(await Bun.file(path.join(tmp.path, ".lfcode", "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
+    expect(await Bun.file(path.join(tmp.path, "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
     await disposeTestInstance(tmp.path)
   })
 
-  test("DELETE /skills/manage/delete removes only local skill directories", async () => {
+  test("DELETE /skills/manage/delete removes only managed skill directories", async () => {
     const root = await fs.mkdtemp(path.join(process.env["LFCODE_TEST_TMPDIR_ROOT"] ?? os.tmpdir(), "lfcode-test-delete-"))
     try {
       await Bun.$`git init`.cwd(root).quiet()
@@ -361,28 +386,34 @@ describe("skills routes", () => {
       await Bun.$`git config user.name "Test"`.cwd(root).quiet()
       await Bun.$`git commit --allow-empty -m "root commit ${root}"`.cwd(root).quiet()
 
-      await writeSkill(path.join(root, ".lfcode", "skills", "managed"), "managed-skill", "Managed skill.")
-
-      const response = await Server.Default().app.request("/skills/manage/delete", {
-        method: "DELETE",
-        headers: {
-          "content-type": "application/json",
-          "x-lfcode-directory": root,
-        },
-        body: JSON.stringify({ directory: "managed" }),
+      await withManagedPaths(root, async () => {
+        await writeSkill(path.join(root, "skills", "managed"), "managed-skill", "Managed skill.")
       })
+
+      const response = await withManagedPaths(root, () =>
+        Server.Default().app.request("/skills/manage/delete", {
+          method: "DELETE",
+          headers: {
+            "content-type": "application/json",
+            "x-lfcode-directory": root,
+          },
+          body: JSON.stringify({ directory: "managed" }),
+        }),
+      )
 
       await expectOk(response)
-      expect(await Bun.file(path.join(root, ".lfcode", "skills", "managed")).exists()).toBe(false)
+      expect(await Bun.file(path.join(root, "skills", "managed")).exists()).toBe(false)
 
-      const bad = await Server.Default().app.request("/skills/manage/delete", {
-        method: "DELETE",
-        headers: {
-          "content-type": "application/json",
-          "x-lfcode-directory": root,
-        },
-        body: JSON.stringify({ directory: ".." }),
-      })
+      const bad = await withManagedPaths(root, () =>
+        Server.Default().app.request("/skills/manage/delete", {
+          method: "DELETE",
+          headers: {
+            "content-type": "application/json",
+            "x-lfcode-directory": root,
+          },
+          body: JSON.stringify({ directory: ".." }),
+        }),
+      )
 
       expect(bad.status).toBe(404)
       await disposeTestInstance(root)
@@ -391,6 +422,16 @@ describe("skills routes", () => {
     }
   })
 })
+
+async function withManagedPaths<T>(root: string, fn: () => T | Promise<T>) {
+  const original = { config: Global.Path.config, state: Global.Path.state }
+  Object.assign(Global.Path, { config: root, state: root })
+  try {
+    return await fn()
+  } finally {
+    Object.assign(Global.Path, original)
+  }
+}
 
 async function writeSkill(dir: string, name: string, description: string) {
   await Bun.write(

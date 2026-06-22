@@ -1,3 +1,13 @@
+import type {
+  BrowserCookieIdentity,
+  BrowserCookieRecord,
+  BrowserPasswordCapturePrompt,
+  BrowserPasswordPromptAck,
+  BrowserPasswordStorageState,
+  SavedBrowserLoginRecord,
+  SavedBrowserLoginUpsert,
+} from "@lfcode-ai/shared/desktop-browser-management"
+
 export type InitStep = { phase: "server_waiting" } | { phase: "sqlite_waiting" } | { phase: "done" }
 
 export type ServerReadyData = {
@@ -17,6 +27,17 @@ export type TitlebarTheme = {
 
 export type WindowConfig = {
   updaterEnabled: boolean
+}
+
+export type BrowserGuestTarget = {
+  sourceWindowID: number
+  tabID: string
+}
+
+export type BrowserSiteDataResult = {
+  url: string
+  origin?: string
+  clearedCookies: number
 }
 
 export type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
@@ -97,10 +118,12 @@ export type ElectronAPI = {
   clearDetachedDockTarget: () => Promise<void>
 
   getWindowCount: () => Promise<number>
+  getWindowID: () => Promise<number | null>
   onSqliteMigrationProgress: (cb: (progress: SqliteMigrationProgress) => void) => () => void
   onMenuCommand: (cb: (id: string) => void) => () => void
   onDeepLink: (cb: (urls: string[]) => void) => () => void
   onBrowserWindowOpen: (cb: (url: string) => void) => () => void
+  onBrowserPasswordCapture: (cb: (event: BrowserPasswordCapturePrompt) => void) => () => void
   onDetachedSidePanelEvent: (cb: (event: DetachedSidePanelEvent) => void) => () => void
 
   openDirectoryPicker: (opts?: {
@@ -118,6 +141,20 @@ export type ElectronAPI = {
   saveFilePicker: (opts?: { title?: string; defaultPath?: string }) => Promise<string | null>
   openLink: (url: string) => void
   openExternalLink: (url: string) => void
+  openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void>
+  clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult>
+  listBrowserCookies: () => Promise<BrowserCookieRecord[]>
+  removeBrowserCookie: (cookie: BrowserCookieIdentity) => Promise<void>
+  clearBrowserCookiesByDomain: (domain: string) => Promise<number>
+  clearAllBrowserCookies: () => Promise<number>
+  getBrowserPasswordStorageState: () => Promise<BrowserPasswordStorageState>
+  listSavedBrowserLogins: () => Promise<SavedBrowserLoginRecord[]>
+  upsertSavedBrowserLogin: (input: SavedBrowserLoginUpsert) => Promise<SavedBrowserLoginRecord>
+  deleteSavedBrowserLogin: (id: string) => Promise<void>
+  acknowledgeBrowserSavePasswordPrompt: (input: BrowserPasswordPromptAck) => Promise<SavedBrowserLoginRecord | null>
+  registerBrowserGuest: (target: BrowserGuestTarget & { guestID: number }) => Promise<void>
+  unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void>
+  setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void>
   openPath: (path: string, app?: string) => Promise<void>
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
   showNotification: (title: string, body?: string) => void

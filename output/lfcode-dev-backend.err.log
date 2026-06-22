@@ -1,1 +1,0 @@
-$ LFCODE_HOME=$PWD/.dev-home bun run --cwd packages/lfcode --conditions=browser src/index.ts

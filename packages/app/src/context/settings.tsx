@@ -2,6 +2,12 @@ import { createStore, reconcile } from "solid-js/store"
 import { createEffect, createMemo } from "solid-js"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { persisted } from "@/utils/persist"
+import {
+  filterBrowserBookmarks,
+  removeBrowserBookmark,
+  type BrowserBookmark,
+  upsertBrowserBookmark,
+} from "@/utils/browser-settings"
 
 export interface NotificationSettings {
   agent: boolean
@@ -55,6 +61,11 @@ export interface Settings {
   }
   notifications: NotificationSettings
   sounds: SoundSettings
+  browser: {
+    autofillEnabled: boolean
+    promptToSavePasswords: boolean
+    bookmarks: BrowserBookmark[]
+  }
 }
 
 export const monoDefault = "System Mono"
@@ -158,6 +169,11 @@ const defaultSettings: Settings = {
     permissions: "staplebops-02",
     errorsEnabled: true,
     errors: "nope-03",
+  },
+  browser: {
+    autofillEnabled: true,
+    promptToSavePasswords: true,
+    bookmarks: [],
   },
 }
 
@@ -374,6 +390,40 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         errors: withFallback(() => store.sounds?.errors, defaultSettings.sounds.errors),
         setErrors(value: string) {
           setStore("sounds", "errors", value)
+        },
+      },
+      browser: {
+        autofillEnabled: withFallback(
+          () => store.browser?.autofillEnabled,
+          defaultSettings.browser.autofillEnabled,
+        ),
+        setAutofillEnabled(value: boolean) {
+          setStore("browser", "autofillEnabled", value)
+        },
+        promptToSavePasswords: withFallback(
+          () => store.browser?.promptToSavePasswords,
+          defaultSettings.browser.promptToSavePasswords,
+        ),
+        setPromptToSavePasswords(value: boolean) {
+          setStore("browser", "promptToSavePasswords", value)
+        },
+        bookmarks: createMemo(() => filterBrowserBookmarks(store.browser?.bookmarks ?? defaultSettings.browser.bookmarks, "")),
+        upsertBookmark(input: {
+          id: string
+          title: string
+          url: string
+        }) {
+          setStore("browser", "bookmarks", (current) => {
+            return (
+              upsertBrowserBookmark(current ?? [], {
+                ...input,
+                now: Date.now(),
+              }) ?? current ?? []
+            )
+          })
+        },
+        removeBookmark(id: string) {
+          setStore("browser", "bookmarks", (current) => removeBrowserBookmark(current ?? [], id))
         },
       },
     }

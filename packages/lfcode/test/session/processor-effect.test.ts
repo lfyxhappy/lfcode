@@ -318,6 +318,222 @@ it.live("session.processor effect tests preserve text start time", () =>
   ),
 )
 
+it.live("session.processor effect tests accumulate response metrics across steps", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "metrics")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const first = yield* handle.replay({
+          text: "preface",
+          toolCalls: [],
+          finishReason: "tool-calls",
+          usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+          tools: {},
+          messages: [],
+        })
+        const second = yield* handle.replay({
+          text: "done",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 },
+          tools: {},
+          messages: [],
+        })
+
+        const texts = MessageV2.parts(msg.id).filter((part): part is MessageV2.TextPart => part.type === "text")
+        const responseMetrics = handle.message.responseMetrics
+
+        expect(first).toBe("continue")
+        expect(second).toBe("continue")
+        expect(texts.map((part) => part.text)).toEqual(["preface", "done"])
+        expect(handle.message.tokens.input).toBe(7)
+        expect(handle.message.tokens.output).toBe(3)
+        expect(responseMetrics?.tokens.input).toBe(12)
+        expect(responseMetrics?.tokens.output).toBe(5)
+        expect(responseMetrics?.tokens.reasoning).toBe(0)
+        expect(responseMetrics?.tokens.cache.read).toBe(0)
+        expect(responseMetrics?.tokens.cache.write).toBe(0)
+        expect(responseMetrics?.firstTokenAt).toBeDefined()
+        expect(texts[0]?.time?.start).toBeDefined()
+        expect(texts[1]?.time?.start).toBeDefined()
+        if (!responseMetrics?.firstTokenAt || !texts[0]?.time?.start || !texts[1]?.time?.start) return
+        expect(responseMetrics.firstTokenAt).toBeGreaterThanOrEqual(texts[0].time.start)
+        expect(responseMetrics.firstTokenAt).toBeLessThan(texts[1].time.start)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests keep response metrics free of max-mode overhead", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "overhead")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.replay({
+          text: "done",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+          tools: {},
+          messages: [],
+          overhead: { cost: 1, tokensIn: 100, tokensOut: 200 },
+        })
+
+        expect(value).toBe("continue")
+        expect(handle.message.cost).toBe(1)
+        expect(handle.message.responseMetrics?.tokens.input).toBe(3)
+        expect(handle.message.responseMetrics?.tokens.output).toBe(2)
+        expect(handle.message.responseMetrics?.tokens.reasoning).toBe(0)
+        expect(handle.message.responseMetrics?.tokens.cache.read).toBe(0)
+        expect(handle.message.responseMetrics?.tokens.cache.write).toBe(0)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests record step timing and status", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "step timing")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.replay({
+          text: "done",
+          toolCalls: [],
+          finishReason: "stop",
+          usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+          tools: {},
+          messages: [],
+        })
+
+        const finish = MessageV2.parts(msg.id).find((part): part is MessageV2.StepFinishPart => part.type === "step-finish")
+
+        expect(value).toBe("continue")
+        expect(finish?.status).toBe("completed")
+        expect(finish?.time?.ttft).not.toBeNull()
+        expect(finish?.time?.start).toBeDefined()
+        expect(finish?.time?.end).toBeDefined()
+        if (!finish?.time) return
+        expect(finish.time.end).toBeGreaterThanOrEqual(finish.time.start)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests skip response metrics for tool-only replies", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "tool only")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.replay({
+          toolCalls: [{ toolCallId: "call_1", toolName: "echo", input: { value: "x" } }],
+          finishReason: "tool-calls",
+          usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+          tools: {
+            echo: {
+              execute: async () => ({ title: "echo", metadata: {}, output: "ok" }),
+            },
+          },
+          messages: [],
+        })
+
+        expect(value).toBe("continue")
+        expect(handle.message.responseMetrics).toBeUndefined()
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests persist terminal failed steps for usage", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+
+        yield* llm.error(400, { error: { message: "terminal failure" } })
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "terminal failure")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "terminal failure" }],
+          tools: {},
+        })
+
+        const finish = MessageV2.parts(msg.id).find((part): part is MessageV2.StepFinishPart => part.type === "step-finish")
+
+        expect(value).toBe("stop")
+        expect(handle.message.error?.name).toBe("APIError")
+        expect(finish?.status).toBe("error")
+        expect(finish?.tokens.input).toBe(0)
+        expect(finish?.tokens.output).toBe(0)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
 it.live("session.processor effect tests stop after token overflow requests compaction", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>

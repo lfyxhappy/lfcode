@@ -106,6 +106,11 @@ export function createPathHelpers(scope: () => string) {
     const root = scope()
 
     let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input))))
+    let strippedRoot = false
+
+    if (/^\/[A-Za-z]:[\\/]/.test(path)) {
+      path = path.slice(1)
+    }
 
     // Separator-agnostic prefix stripping for Cygwin/native Windows compatibility
     // Only case-insensitive on Windows (drive letter or UNC paths)
@@ -118,13 +123,14 @@ export function createPathHelpers(scope: () => string) {
     ) {
       // Slice from original path to preserve native separators
       path = path.slice(root.length)
+      strippedRoot = true
     }
 
     if (path.startsWith("./") || path.startsWith(".\\")) {
       path = path.slice(2)
     }
 
-    if (path.startsWith("/") || path.startsWith("\\")) {
+    if (strippedRoot && (path.startsWith("/") || path.startsWith("\\"))) {
       path = path.slice(1)
     }
     return path

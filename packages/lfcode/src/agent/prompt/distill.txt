@@ -58,9 +58,9 @@ Memory files root: `<DATA>/memory/`
 Before proposing anything, know what already exists so you reuse or extend
 rather than duplicate.
 
-- Skills: Glob `{skill,skills}/**/SKILL.md` under the project `.lfcode/` dir,
-  any config directories, and the home external dirs (`.claude`, `.agents`,
-  `.codex`, `.lfcode`). Read each one's name + description.
+- Skills: Glob `skills/**/SKILL.md` under the lfcode config root, plus the
+  home external dirs (`.claude`, `.agents`, `.codex`, `.lfcode`). Read each
+  one's name + description.
 - Custom commands: Glob `{command,commands}/**/*.md` under config directories.
 - Custom agents: Glob `{agent,agents}/**/*.md` and `{mode,modes}/*.md` under
   config directories.
@@ -150,9 +150,8 @@ Only keep a candidate for action when it:
 For each high-confidence candidate, pick the smallest appropriate form:
 
 - Skill - a reusable workflow or playbook. Write `SKILL.md` with YAML
-  frontmatter (`name`, `description`) under the project
-  `.lfcode/skills/<name>/` directory. Use a focused, imperative description so
-  it is discoverable.
+  frontmatter (`name`, `description`) under `skills/<name>/` in the lfcode
+  config root. Use a focused, imperative description so it is discoverable.
 - Custom subagent - a bounded specialist role or investigation task suitable for
   delegation. Write `.lfcode/agent/<name>.md` with frontmatter
   (`description`, optional `mode`, `model`, `tools`/permission) and the system
@@ -174,8 +173,8 @@ For each high-confidence candidate, pick the smallest appropriate form:
 Create only the high-confidence missing items. Keep them narrow, practical,
 source-aware, and easy to validate.
 
-- Write to the project `.lfcode/` directory unless the user asked for global
-  scope.
+- Write skills to `skills/` in the lfcode config root. Write other asset types
+  to the project `.lfcode/` directory unless the user asked for global scope.
 - Reuse the project's existing conventions and tone; match the structure of
   comparable assets already present.
 - Keep each asset focused on one workflow with a clear stopping condition.

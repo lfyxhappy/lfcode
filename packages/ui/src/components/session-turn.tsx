@@ -22,6 +22,7 @@ import { useI18n } from "../context/i18n"
 import { FileReference } from "./file-reference"
 import { FileReferenceProvider, type FileReferenceApp, type FileReferenceContextValue } from "../context/file-reference"
 import { inferFileReferenceKind } from "./file-reference-path"
+import { getTurnResponseMetricsLine } from "./session-turn-response-metrics"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -365,6 +366,27 @@ export function SessionTurn(
   })
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
+  const responseMetricsLine = createMemo(() => {
+    if (working() || interrupted() || !!error()) return
+    return getTurnResponseMetricsLine({
+      locale: i18n.locale(),
+      messages: assistantMessages(),
+      startedAt: message()?.time.created,
+      labels: {
+        ended: i18n.t("ui.message.responseMetrics.ended"),
+        first: i18n.t("ui.message.responseMetrics.first"),
+        total: i18n.t("ui.message.responseMetrics.total"),
+        input: i18n.t("ui.message.responseMetrics.input"),
+        output: i18n.t("ui.message.responseMetrics.output"),
+        tokens: i18n.t("ui.message.responseMetrics.tokens"),
+        in: i18n.t("ui.message.responseMetrics.in"),
+        out: i18n.t("ui.message.responseMetrics.out"),
+        hit: i18n.t("ui.message.responseMetrics.hit"),
+        write: i18n.t("ui.message.responseMetrics.write"),
+        tps: i18n.t("ui.message.responseMetrics.tps"),
+      },
+    })
+  })
   const showThinking = createMemo(() => {
     if (!working() || !!error()) return false
     if (status().type === "retry") return false
@@ -408,6 +430,7 @@ export function SessionTurn(
                     messages={assistantMessages()}
                     showAssistantCopyPartID={assistantCopyPartID()}
                     turnDurationMs={turnDurationMs()}
+                    responseMetricsLine={responseMetricsLine()}
                     working={working()}
                     showReasoningSummaries={showReasoningSummaries()}
                     shellToolDefaultOpen={props.shellToolDefaultOpen}

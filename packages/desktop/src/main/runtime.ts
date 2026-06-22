@@ -39,11 +39,34 @@ import {
   createLoadingWindow,
   createDetachedSidePanelWindow,
   createMainWindow,
+  emitBrowserGuestRegistered,
+  emitBrowserGuestUnregistered,
   registerRendererProtocol,
   setBackgroundColor,
   setDockIcon,
   setRelaunchHandler,
 } from "./windows"
+import {
+  acknowledgeBrowserSavePasswordPrompt,
+  captureBrowserPassword,
+  clearAllBrowserCookies,
+  clearBrowserCookiesByDomain,
+  deleteSavedBrowserLogin,
+  getBrowserPasswordStorageState,
+  listBrowserCookies,
+  listSavedBrowserLogins,
+  removeBrowserCookie,
+  resolveBrowserAutofill,
+  upsertSavedBrowserLogin,
+} from "./browser-management"
+import {
+  clearBrowserGuestSiteData,
+  openBrowserGuestDevTools,
+  setActiveBrowserTab,
+  trackBrowserGuest,
+  untrackBrowserGuest,
+} from "./browser-runtime"
+import { registerBrowserAutomationBridge } from "./browser-automation"
 
 contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
@@ -85,6 +108,7 @@ logger.log("app starting", {
 })
 
 migrate()
+registerBrowserAutomationBridge()
 setupApp()
 
 function setupApp() {
@@ -170,6 +194,26 @@ function focusMainWindow() {
   if (!mainWindow) return
   mainWindow.show()
   mainWindow.focus()
+}
+
+function broadcastBrowserGuestRegistered(input: {
+  sourceWindowID: number
+  tabID: string
+  guestID: number
+}) {
+  const target = BrowserWindow.fromId(input.sourceWindowID)
+  if (!target || target.isDestroyed()) return
+  emitBrowserGuestRegistered(target, input)
+}
+
+function broadcastBrowserGuestUnregistered(input: {
+  sourceWindowID: number
+  tabID: string
+  guestID?: number
+}) {
+  const target = BrowserWindow.fromId(input.sourceWindowID)
+  if (!target || target.isDestroyed()) return
+  emitBrowserGuestUnregistered(target, input)
 }
 
 function broadcastDetachedSidePanelSync(active?: { detachedWindowID: string; active: boolean }) {
@@ -453,6 +497,57 @@ registerIpcHandlers({
         active: false,
       })
     }
+  },
+  registerBrowserGuest: async (target) => {
+    trackBrowserGuest(target)
+  },
+  unregisterBrowserGuest: async (target) => {
+    untrackBrowserGuest(target)
+  },
+  openBrowserDevTools: async (target) => {
+    openBrowserGuestDevTools(target)
+  },
+  clearBrowserSiteData: async (target) => {
+    return clearBrowserGuestSiteData(target)
+  },
+  listBrowserCookies: async () => {
+    return listBrowserCookies()
+  },
+  removeBrowserCookie: async (cookie) => {
+    await removeBrowserCookie(cookie)
+  },
+  clearBrowserCookiesByDomain: async (domain) => {
+    return clearBrowserCookiesByDomain(domain)
+  },
+  clearAllBrowserCookies: async () => {
+    return clearAllBrowserCookies()
+  },
+  getBrowserPasswordStorageState: () => {
+    return getBrowserPasswordStorageState()
+  },
+  listSavedBrowserLogins: async () => {
+    return listSavedBrowserLogins()
+  },
+  upsertSavedBrowserLogin: async (input) => {
+    return upsertSavedBrowserLogin(input)
+  },
+  deleteSavedBrowserLogin: async (id) => {
+    await deleteSavedBrowserLogin(id)
+  },
+  acknowledgeBrowserSavePasswordPrompt: async (input) => {
+    return acknowledgeBrowserSavePasswordPrompt(input)
+  },
+  resolveBrowserAutofill: async (origin) => {
+    return resolveBrowserAutofill(origin)
+  },
+  captureBrowserPassword: async (input) => {
+    captureBrowserPassword(input)
+  },
+  setActiveBrowserTab: async (target) => {
+    setActiveBrowserTab({
+      sourceWindowID: target.sourceWindowID,
+      tabID: target.active ? target.tabID : undefined,
+    })
   },
 })
 

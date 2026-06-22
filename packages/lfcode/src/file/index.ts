@@ -293,6 +293,8 @@ const isTextByName = (file: string) => textName.has(name(file))
 const isBinaryByExtension = (file: string) => binary.has(ext(file))
 const isImage = (mimeType: string) => mimeType.startsWith("image/")
 const getImageMimeType = (file: string) => mime[ext(file)] || "image/" + ext(file)
+const docxMimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+const docxTextEntry = /^word\/(?:document|footnotes|endnotes|header\d+|footer\d+)\.xml$/u
 
 function shouldEncode(mimeType: string) {
   const type = mimeType.toLowerCase()
@@ -302,6 +304,60 @@ function shouldEncode(mimeType: string) {
   if (type.includes("charset=")) return false
   const top = type.split("/", 2)[0]
   return ["image", "audio", "video", "font", "model", "multipart"].includes(top)
+}
+
+function decodeXmlEntities(input: string) {
+  return input
+    .replace(/&#x([0-9a-f]+);/giu, (_, value: string) => String.fromCodePoint(parseInt(value, 16)))
+    .replace(/&#(\d+);/gu, (_, value: string) => String.fromCodePoint(parseInt(value, 10)))
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"')
+    .replace(/&apos;/gu, "'")
+    .replace(/&amp;/gu, "&")
+}
+
+function extractDocxXmlText(input: string) {
+  return decodeXmlEntities(
+    input
+      .replace(/<w:tab[^>]*\/>/gu, "\t")
+      .replace(/<w:br[^>]*\/>/gu, "\n")
+      .replace(/<w:cr[^>]*\/>/gu, "\n")
+      .replace(/<\/w:p>/gu, "\n")
+      .replace(/<\/w:tr>/gu, "\n")
+      .replace(/<\/w:tc>/gu, "\t")
+      .replace(/<[^>]+>/gu, ""),
+  )
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+async function extractDocxText(bytes: Uint8Array) {
+  const zip = await import("@zip.js/zip.js")
+  const buffer =
+    bytes.buffer instanceof ArrayBuffer
+      ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+      : Uint8Array.from(bytes).buffer
+  const reader = new zip.ZipReader(new zip.BlobReader(new Blob([buffer], { type: docxMimeType })))
+
+  try {
+    const entries = await reader.getEntries()
+    const xmlEntries = entries.filter((entry) => docxTextEntry.test(entry.filename) && !!entry.getData)
+    if (!xmlEntries.length) return undefined
+
+    const chunks: string[] = []
+    for (const entry of xmlEntries) {
+      if (!entry.getData) continue
+      const xml = await entry.getData(new zip.TextWriter())
+      const text = extractDocxXmlText(xml)
+      if (text) chunks.push(text)
+    }
+    if (!chunks.length) return ""
+    return chunks.join("\n\n").trim()
+  } finally {
+    await reader.close().catch(() => undefined)
+  }
 }
 
 const hidden = (item: string) => {
@@ -511,9 +567,10 @@ export const layer = Layer.effect(
     const read: Interface["read"] = Effect.fn("File.read")(function* (file: string) {
       using _ = log.time("read", { file })
       const ctx = yield* InstanceState.context
-      const full = path.join(ctx.directory, file)
+      const full = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
+      const projectRelative = AppFileSystem.contains(ctx.directory, full) ? path.relative(ctx.directory, full) : undefined
 
-      if (!Instance.containsPath(full, ctx)) {
+      if (!path.isAbsolute(file) && !Instance.containsPath(full, ctx)) {
         throw new Error("Access denied: path escapes project directory")
       }
 
@@ -529,6 +586,22 @@ export const layer = Layer.effect(
           }
         }
         return { type: "text" as const, content: "" }
+      }
+
+      if (ext(file) === "docx") {
+        const exists = yield* appFs.existsSafe(full)
+        if (!exists) return { type: "text" as const, content: "" }
+
+        const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+        const content = yield* Effect.promise(() => extractDocxText(bytes)).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        if (content !== undefined) {
+          return {
+            type: "text" as const,
+            content,
+            mimeType: docxMimeType,
+          }
+        }
+        return { type: "binary" as const, content: "", mimeType: docxMimeType }
       }
 
       const knownText = isTextByExtension(file) || isTextByName(file)
@@ -558,14 +631,14 @@ export const layer = Layer.effect(
         Effect.catch(() => Effect.succeed("")),
       )
 
-      if (ctx.project.vcs === "git") {
-        let diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--", file])
+      if (ctx.project.vcs === "git" && projectRelative) {
+        let diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--", projectRelative])
         if (!diff.trim()) {
-          diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--staged", "--", file])
+          diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--staged", "--", projectRelative])
         }
         if (diff.trim()) {
-          const original = yield* git.show(ctx.directory, "HEAD", file)
-          const patch = structuredPatch(file, file, original, content, "old", "new", {
+          const original = yield* git.show(ctx.directory, "HEAD", projectRelative)
+          const patch = structuredPatch(projectRelative, projectRelative, original, content, "old", "new", {
             context: Infinity,
             ignoreWhitespace: true,
           })

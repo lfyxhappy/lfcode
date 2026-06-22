@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { Agent } from "../../src/agent/agent"
+import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { SystemPrompt } from "../../src/session/system"
 import { provideInstance, tmpdir } from "../fixture/fixture"
@@ -20,7 +21,7 @@ describe("session.system", () => {
           ["alpha-skill", "Alpha skill."],
           ["middle-skill", "Middle skill."],
         ]) {
-          const skillDir = path.join(dir, ".lfcode", "skills", name)
+          const skillDir = path.join(dir, "skills", name)
           await Bun.write(
             path.join(skillDir, "SKILL.md"),
             `---
@@ -35,10 +36,8 @@ description: ${description}
       },
     })
 
-    const home = process.env.HOME
-    const userProfile = process.env.USERPROFILE
-    process.env.HOME = tmp.path
-    process.env.USERPROFILE = tmp.path
+    const originalConfig = Global.Path.config
+    Object.assign(Global.Path, { config: tmp.path })
 
     try {
       await Instance.provide({
@@ -68,8 +67,7 @@ description: ${description}
         },
       })
     } finally {
-      process.env.HOME = home
-      process.env.USERPROFILE = userProfile
+      Object.assign(Global.Path, { config: originalConfig })
     }
   })
 })

@@ -7,6 +7,17 @@ import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 const distDir = path.resolve(import.meta.dir, "../dist")
 const targetDir = path.join(distDir, "win-unpacked")
 const backupDir = path.join(distDir, ".win-unpacked-runtime")
+const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
+const playwrightLegacyCommand = [...playwrightBaseCommand, "--browser", "chrome"] as const
+const playwrightCdpCommand = [...playwrightBaseCommand, "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const playwrightRemoteConfig = {
+  type: "remote",
+  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
+  headers: {
+    authorization: "{env:LFCODE_SERVER_AUTH}",
+  },
+  enabled: true,
+} as const
 const windowsComputerUseLegacyCommand = [
   "cmd",
   "/c",
@@ -28,21 +39,34 @@ for (const entry of await readdir(backupDir, { withFileTypes: true })) {
 const configFile = path.join(targetDir, "lfcode.jsonc")
 if (existsSync(configFile)) {
   const text = await Bun.file(configFile).text()
-  const upgraded = upgradeWindowsComputerUseCommand(text)
+  const upgraded = upgradeBundledCommands(text)
   if (upgraded !== text) await Bun.write(configFile, upgraded)
 }
 
 await rm(backupDir, { recursive: true, force: true })
 console.log(`Restored preserved Windows runtime data into ${targetDir}`)
 
-function upgradeWindowsComputerUseCommand(text: string) {
+function upgradeBundledCommands(text: string) {
   const parsed = parseJsonc(text)
   if (!isRecord(parsed) || !isRecord(parsed.mcp)) return text
+  let updated = text
+  const playwright = parsed.mcp.playwright
+  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+  }
   const value = parsed.mcp["windows-computer-use"]
-  if (!isLegacyWindowsComputerUseConfig(value)) return text
+  if (!isLegacyWindowsComputerUseConfig(value)) return updated
   return applyEdits(
-    text,
-    modify(text, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
+    updated,
+    modify(updated, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
       formattingOptions: {
         insertSpaces: true,
         tabSize: 2,
@@ -66,6 +90,14 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
 
 function isExactCommand(value: unknown, expected: readonly string[]) {
   return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+}
+
+function isLegacyPlaywrightConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightLegacyCommand)
+}
+
+function isPlaywrightCdpConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightCdpCommand)
 }
 
 function isBrokenWindowsComputerUseCommand(value: unknown) {

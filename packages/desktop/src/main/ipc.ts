@@ -1,8 +1,19 @@
 import { execFile } from "node:child_process"
 import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
+import type {
+  BrowserCookieIdentity,
+  BrowserPasswordCapturePrompt,
+  BrowserPasswordCapturePayload,
+  BrowserPasswordPromptAck,
+  BrowserPasswordStorageState,
+  SavedBrowserLoginRecord,
+  SavedBrowserLoginUpsert,
+} from "@lfcode-ai/shared/desktop-browser-management"
 
 import type {
+  BrowserGuestTarget,
+  BrowserSiteDataResult,
   DetachedSidePanelEvent,
   DetachedSidePanelRecord,
   InitStep,
@@ -65,6 +76,22 @@ type Deps = {
     },
   ) => Promise<void> | void
   clearDetachedDockTarget: (senderWindowID: number) => Promise<void> | void
+  registerBrowserGuest: (target: BrowserGuestTarget & { guestID: number }) => Promise<void> | void
+  unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void> | void
+  openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void> | void
+  clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult> | BrowserSiteDataResult
+  listBrowserCookies: () => Promise<any[]> | any[]
+  removeBrowserCookie: (cookie: BrowserCookieIdentity) => Promise<void> | void
+  clearBrowserCookiesByDomain: (domain: string) => Promise<number> | number
+  clearAllBrowserCookies: () => Promise<number> | number
+  getBrowserPasswordStorageState: () => Promise<BrowserPasswordStorageState> | BrowserPasswordStorageState
+  listSavedBrowserLogins: () => Promise<SavedBrowserLoginRecord[]> | SavedBrowserLoginRecord[]
+  upsertSavedBrowserLogin: (input: SavedBrowserLoginUpsert) => Promise<SavedBrowserLoginRecord> | SavedBrowserLoginRecord
+  deleteSavedBrowserLogin: (id: string) => Promise<void> | void
+  acknowledgeBrowserSavePasswordPrompt: (input: BrowserPasswordPromptAck) => Promise<SavedBrowserLoginRecord | null> | SavedBrowserLoginRecord | null
+  resolveBrowserAutofill: (origin: string) => Promise<{ username: string; password: string } | null> | { username: string; password: string } | null
+  captureBrowserPassword: (input: { guestID: number; payload: BrowserPasswordCapturePayload }) => Promise<void> | void
+  setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void> | void
 }
 
 export function registerIpcHandlers(deps: Deps) {
@@ -122,6 +149,12 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("clear-detached-dock-target", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return deps.clearDetachedDockTarget(win?.id ?? -1)
+  })
+  ipcMain.handle("register-browser-guest", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { guestID: number }) => {
+    return deps.registerBrowserGuest(target)
+  })
+  ipcMain.handle("unregister-browser-guest", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { guestID?: number }) => {
+    return deps.unregisterBrowserGuest(target)
   })
   ipcMain.handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     const store = getStore(name)
@@ -197,6 +230,43 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.on("open-external-link", (_event: IpcMainEvent, url: string) => {
     void openExternal(url)
   })
+  ipcMain.handle("open-browser-devtools", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
+    return deps.openBrowserDevTools(target)
+  })
+  ipcMain.handle("clear-browser-site-data", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
+    return deps.clearBrowserSiteData(target)
+  })
+  ipcMain.handle("list-browser-cookies", () => deps.listBrowserCookies())
+  ipcMain.handle("remove-browser-cookie", (_event: IpcMainInvokeEvent, cookie: BrowserCookieIdentity) => {
+    return deps.removeBrowserCookie(cookie)
+  })
+  ipcMain.handle("clear-browser-cookies-by-domain", (_event: IpcMainInvokeEvent, domain: string) => {
+    return deps.clearBrowserCookiesByDomain(domain)
+  })
+  ipcMain.handle("clear-all-browser-cookies", () => deps.clearAllBrowserCookies())
+  ipcMain.handle("get-browser-password-storage-state", () => deps.getBrowserPasswordStorageState())
+  ipcMain.handle("list-saved-browser-logins", () => deps.listSavedBrowserLogins())
+  ipcMain.handle("upsert-saved-browser-login", (_event: IpcMainInvokeEvent, input: SavedBrowserLoginUpsert) => {
+    return deps.upsertSavedBrowserLogin(input)
+  })
+  ipcMain.handle("delete-saved-browser-login", (_event: IpcMainInvokeEvent, id: string) => {
+    return deps.deleteSavedBrowserLogin(id)
+  })
+  ipcMain.handle("acknowledge-browser-save-password-prompt", (_event: IpcMainInvokeEvent, input: BrowserPasswordPromptAck) => {
+    return deps.acknowledgeBrowserSavePasswordPrompt(input)
+  })
+  ipcMain.handle("browser-request-autofill", (_event: IpcMainInvokeEvent, origin: string) => {
+    return deps.resolveBrowserAutofill(origin)
+  })
+  ipcMain.on("browser-password-capture", (event: IpcMainEvent, payload: BrowserPasswordCapturePayload) => {
+    return deps.captureBrowserPassword({
+      guestID: event.sender.id,
+      payload,
+    })
+  })
+  ipcMain.handle("set-active-browser-tab", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { active: boolean }) => {
+    return deps.setActiveBrowserTab(target)
+  })
 
   ipcMain.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
     if (!app) return shell.openPath(path)
@@ -220,6 +290,10 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   ipcMain.handle("get-window-count", () => BrowserWindow.getAllWindows().length)
+  ipcMain.handle("get-window-id", (event: IpcMainInvokeEvent) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win?.id ?? null
+  })
 
   ipcMain.handle("get-window-focused", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -264,4 +338,8 @@ export function sendDeepLinks(win: BrowserWindow, urls: string[]) {
 
 export function sendDetachedSidePanelEvent(win: BrowserWindow, event: DetachedSidePanelEvent) {
   win.webContents.send("detached-side-panel-event", event)
+}
+
+export function sendBrowserPasswordCapture(win: BrowserWindow, event: BrowserPasswordCapturePrompt) {
+  win.webContents.send("browser-password-capture", event)
 }

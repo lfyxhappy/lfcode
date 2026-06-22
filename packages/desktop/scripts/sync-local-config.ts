@@ -8,6 +8,17 @@ const desktopRoot = path.resolve(import.meta.dir, "..")
 const distConfig = path.join(desktopRoot, "dist", "win-unpacked", "lfcode.jsonc")
 const localConfigDir = path.join(desktopRoot, "local-config")
 const localConfig = path.join(localConfigDir, "lfcode.jsonc")
+const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
+const playwrightLegacyCommand = [...playwrightBaseCommand, "--browser", "chrome"] as const
+const playwrightCdpCommand = [...playwrightBaseCommand, "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const playwrightRemoteConfig = {
+  type: "remote",
+  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
+  headers: {
+    authorization: "{env:LFCODE_SERVER_AUTH}",
+  },
+  enabled: true,
+} as const
 const windowsComputerUseLegacyCommand = [
   "cmd",
   "/c",
@@ -21,24 +32,37 @@ if (!existsSync(distConfig)) process.exit(0)
 
 function sanitizeSecrets(text: string) {
   return text.replace(
-    /("(?:(?:api[_-]?key)|token|secret|password|credential|authorization)"\s*:\s*)"[^"]*"/gi,
-    '$1""',
+    /("(?:(?:api[_-]?key)|token|secret|password|credential|authorization)"\s*:\s*)"([^"]*)"/gi,
+    (_match, prefix: string, value: string) => `${prefix}"${value.startsWith("{env:") ? value : ""}"`,
   )
 }
 
 await mkdir(localConfigDir, { recursive: true })
 const content = existsSync(localConfig) ? await readFile(localConfig, "utf8") : await readFile(distConfig, "utf8")
-await writeFile(localConfig, sanitizeSecrets(upgradeWindowsComputerUseCommand(content)))
+await writeFile(localConfig, sanitizeSecrets(upgradeBundledCommands(content)))
 console.log(`Synced packaged config into local template without secrets: ${localConfig}`)
 
-function upgradeWindowsComputerUseCommand(text: string) {
+function upgradeBundledCommands(text: string) {
   const parsed = parseJsonc(text)
   if (!isRecord(parsed) || !isRecord(parsed.mcp)) return text
-  const value = parsed.mcp["windows-computer-use"]
-  if (!isLegacyWindowsComputerUseConfig(value)) return text
+  let updated = text
+  const playwright = parsed.mcp.playwright
+  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+  }
+  const windowsComputerUse = parsed.mcp["windows-computer-use"]
+  if (!isLegacyWindowsComputerUseConfig(windowsComputerUse)) return updated
   return applyEdits(
-    text,
-    modify(text, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
+    updated,
+    modify(updated, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
       formattingOptions: {
         insertSpaces: true,
         tabSize: 2,
@@ -62,6 +86,14 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
 
 function isExactCommand(value: unknown, expected: readonly string[]) {
   return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+}
+
+function isLegacyPlaywrightConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightLegacyCommand)
+}
+
+function isPlaywrightCdpConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightCdpCommand)
 }
 
 function isBrokenWindowsComputerUseCommand(value: unknown) {

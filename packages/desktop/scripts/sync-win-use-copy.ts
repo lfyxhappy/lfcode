@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs"
 import { cp, mkdir, readdir, rm } from "node:fs/promises"
 import path from "node:path"
+import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 
 const distDir = path.resolve(import.meta.dir, "../dist")
 const sourceDir = path.join(distDir, "win-unpacked")
@@ -18,6 +19,24 @@ const skippedEntries = new Set([
   "opencode.jsonc",
   "state",
 ])
+const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
+const playwrightLegacyCommand = [...playwrightBaseCommand, "--browser", "chrome"] as const
+const playwrightCdpCommand = [...playwrightBaseCommand, "--cdp-endpoint=http://127.0.0.1:9222"] as const
+const playwrightRemoteConfig = {
+  type: "remote",
+  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
+  headers: {
+    authorization: "{env:LFCODE_SERVER_AUTH}",
+  },
+  enabled: true,
+} as const
+const windowsComputerUseLegacyCommand = [
+  "cmd",
+  "/c",
+  "node",
+  "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
+] as const
+const windowsComputerUseCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
 
 async function clearDirectory(target: string) {
   await mkdir(target, { recursive: true })
@@ -41,6 +60,13 @@ async function assertSyncedFile(source: string, target: string) {
   if (sourceStat.size !== targetStat.size) {
     throw new Error(`Synced file size mismatch: ${target} (${targetStat.size}) != ${source} (${sourceStat.size})`)
   }
+}
+
+async function upgradeBundledConfig(target: string) {
+  if (!existsSync(target)) return
+  const text = await Bun.file(target).text()
+  const upgraded = upgradeBundledCommands(text)
+  if (upgraded !== text) await Bun.write(target, upgraded)
 }
 
 if (process.platform !== "win32") process.exit(0)
@@ -68,5 +94,71 @@ for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
 
 await assertSyncedFile(path.join(sourceDir, "Lfcode.exe"), path.join(targetDir, "Lfcode.exe"))
 await assertSyncedFile(path.join(sourceDir, "resources", "app.asar"), path.join(targetDir, "resources", "app.asar"))
+await upgradeBundledConfig(path.join(targetDir, "lfcode.jsonc"))
 
 console.log(`Synced packaged Windows app from ${sourceDir} to ${targetDir}`)
+
+function upgradeBundledCommands(text: string) {
+  const parsed = parseJsonc(text)
+  if (!isRecord(parsed) || !isRecord(parsed.mcp)) return text
+  let updated = text
+  const playwright = parsed.mcp.playwright
+  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+  }
+  const windowsComputerUse = parsed.mcp["windows-computer-use"]
+  if (!isLegacyWindowsComputerUseConfig(windowsComputerUse)) return updated
+  return applyEdits(
+    updated,
+    modify(updated, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
+      formattingOptions: {
+        insertSpaces: true,
+        tabSize: 2,
+      },
+    }),
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isExactCommand(value: unknown, expected: readonly string[]) {
+  return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+}
+
+function isLegacyPlaywrightConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightLegacyCommand)
+}
+
+function isPlaywrightCdpConfig(value: unknown) {
+  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightCdpCommand)
+}
+
+function isLegacyWindowsComputerUseConfig(value: unknown) {
+  return (
+    isRecord(value) &&
+    value.type === "local" &&
+    value.enabled === true &&
+    (isExactCommand(value.command, windowsComputerUseLegacyCommand) || isBrokenWindowsComputerUseCommand(value.command))
+  )
+}
+
+function isBrokenWindowsComputerUseCommand(value: unknown) {
+  if (!Array.isArray(value) || value.length !== 4) return false
+  if (value[0] !== "cmd" || value[1] !== "/c" || value[2] !== "node") return false
+  if (typeof value[3] !== "string") return false
+  const target = value[3].replace(/^"+|"+$/g, "").replaceAll("\\", "/").toLowerCase()
+  return (
+    target === "{env:lfcode_windows_computer_use_mcp_dir}/bundle/index.js" ||
+    (target.includes("windows-computer-use-mcp") && target.endsWith("/bundle/index.js"))
+  )
+}

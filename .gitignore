@@ -29,6 +29,18 @@ a.out
 target
 .scripts
 .direnv/
+.dev-home/
+output/
+packages/app/.tmp-settings-dev.err.log
+packages/app/.tmp-settings-dev.out.log
+.codex-asset-rename-list.txt
+buttons.json
+home-usage-qa.png
+usage-*.png
+lfcode-*.png
+liquid-glass-*.png
+settings-general-verify.png
+volcengine-api-key-dialog.png
 
 # Local dev files
 opencode-dev

@@ -1,5 +1,0 @@
-INFO  2026-06-18T17:27:14 +449ms service=server-proxy version=local args=[] process_role=main run_id=3155d0a1-4975-4ec8-bb60-3693704867e0 lfcode
-INFO  2026-06-18T17:27:14 +24ms service=db path=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db opening database
-INFO  2026-06-18T17:27:14 +10ms service=db count=34 mode=dev applying migrations
-INFO  2026-06-18T17:27:14 +4ms service=legacy-db reason=marker matches targetPath=C:\算法\小应用\知识库\10_Projects\Lfcode\.dev-home\data\lfcode.db legacy db merge skipped
-INFO  2026-06-18T17:27:18 +3911ms service=server-proxy directory=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\lfcode creating instance

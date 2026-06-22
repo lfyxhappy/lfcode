@@ -210,6 +210,8 @@
 [data-component="text-part"] {
   width: 100%;
   margin-top: 24px;
+  display: flex;
+  flex-direction: column;
 
   [data-slot="text-part-body"] {
     margin-top: 0;
@@ -235,6 +237,14 @@
 
   [data-slot="text-part-meta"] {
     user-select: none;
+  }
+
+  [data-slot="text-part-response-metrics"] {
+    margin-top: 4px;
+    user-select: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: var(--line-height-large);
   }
 
   [data-slot="text-part-copy-wrapper"][data-interrupted] {

@@ -17,6 +17,7 @@ import { Config } from "../../config"
 import { ProviderID } from "@/provider/schema"
 import { errors } from "../error"
 import { NamedError } from "@lfcode-ai/shared/util/error"
+import { PlaywrightMcpRoutes } from "./global-playwright"
 
 const log = Log.create({ service: "server" })
 
@@ -74,6 +75,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
 
 export const GlobalRoutes = lazy(() =>
   new Hono()
+    .route("/", PlaywrightMcpRoutes())
     .get(
       "/health",
       describeRoute({

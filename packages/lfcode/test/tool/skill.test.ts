@@ -5,6 +5,7 @@ import path from "path"
 import { pathToFileURL } from "url"
 import type { Permission } from "../../src/permission"
 import type { Tool } from "../../src/tool"
+import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { SkillTool } from "../../src/tool/skill"
 import { ToolRegistry } from "../../src/tool"
@@ -35,7 +36,15 @@ describe("tool.skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const skill = path.join(dir, ".lfcode", "skill", "tool-skill")
+          const originalConfig = Global.Path.config
+          Object.assign(Global.Path, { config: dir })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              Object.assign(Global.Path, { config: originalConfig })
+            }),
+          )
+
+          const skill = path.join(dir, "skills", "tool-skill")
           yield* Effect.promise(() =>
             Bun.write(
               path.join(skill, "SKILL.md"),
@@ -51,17 +60,6 @@ Use this skill.
             ),
           )
           yield* Effect.promise(() => Bun.write(path.join(skill, "scripts", "demo.txt"), "demo"))
-
-          const home = process.env.HOME
-          const userProfile = process.env.USERPROFILE
-          process.env.HOME = dir
-          process.env.USERPROFILE = dir
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              process.env.HOME = home
-              process.env.USERPROFILE = userProfile
-            }),
-          )
 
           const registry = yield* ToolRegistry.Service
           const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }

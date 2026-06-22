@@ -1,5 +1,14 @@
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
+import type {
+  BrowserCookieIdentity,
+  BrowserCookieRecord,
+  BrowserPasswordCapturePrompt,
+  BrowserPasswordPromptAck,
+  BrowserPasswordStorageState,
+  SavedBrowserLoginRecord,
+  SavedBrowserLoginUpsert,
+} from "@lfcode-ai/shared/desktop-browser-management"
 import type { Accessor } from "solid-js"
 import { ServerConnection } from "./server"
 
@@ -8,6 +17,15 @@ type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
 type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: string[]; extensions?: string[] }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type UpdateInfo = { updateAvailable: boolean; version?: string }
+type BrowserGuestTarget = {
+  sourceWindowID: number
+  tabID: string
+}
+type BrowserSiteDataResult = {
+  url: string
+  origin?: string
+  clearedCookies: number
+}
 type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
 type DetachedSidePanelRecord = {
   detachedWindowID: string
@@ -40,11 +58,43 @@ export type Platform = {
   /** App version */
   version?: string
 
+  getWindowID?(): Promise<number | null>
+
   /** Open a URL in the default browser */
   openLink(url: string): void
 
   /** Open a URL in the system browser */
   openExternalLink?(url: string): void
+
+  openBrowserDevTools?(target: BrowserGuestTarget): Promise<void>
+
+  clearBrowserSiteData?(target: BrowserGuestTarget): Promise<BrowserSiteDataResult>
+
+  listBrowserCookies?(): Promise<BrowserCookieRecord[]>
+
+  removeBrowserCookie?(cookie: BrowserCookieIdentity): Promise<void>
+
+  clearBrowserCookiesByDomain?(domain: string): Promise<number>
+
+  clearAllBrowserCookies?(): Promise<number>
+
+  getBrowserPasswordStorageState?(): Promise<BrowserPasswordStorageState>
+
+  listSavedBrowserLogins?(): Promise<SavedBrowserLoginRecord[]>
+
+  upsertSavedBrowserLogin?(input: SavedBrowserLoginUpsert): Promise<SavedBrowserLoginRecord>
+
+  deleteSavedBrowserLogin?(id: string): Promise<void>
+
+  acknowledgeBrowserSavePasswordPrompt?(input: BrowserPasswordPromptAck): Promise<SavedBrowserLoginRecord | null>
+
+  onBrowserPasswordCapture?(cb: (event: BrowserPasswordCapturePrompt) => void): () => void
+
+  registerBrowserGuest?(target: BrowserGuestTarget & { guestID: number }): Promise<void>
+
+  unregisterBrowserGuest?(target: BrowserGuestTarget & { guestID?: number }): Promise<void>
+
+  setActiveBrowserTab?(target: BrowserGuestTarget & { active: boolean }): Promise<void>
 
   /** Open a local path in a local app (desktop only) */
   openPath?(path: string, app?: string): Promise<void>

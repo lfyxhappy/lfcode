@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, onCleanup } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
@@ -24,6 +24,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
   let inputRef: HTMLInputElement | HTMLTextAreaElement | undefined
   let lastLoadedURL = ""
   let ready = false
+  let registeredGuestID: number | undefined
+  let pendingGuestID: number | undefined
+  const [windowID, setWindowID] = createSignal<number | null>(null)
+  const [siteDataBusy, setSiteDataBusy] = createSignal(false)
+  const [guestReady, setGuestReady] = createSignal(false)
 
   const tabID = createMemo(() => browserTabID(props.tab))
   const browser = createMemo(() => {
@@ -40,6 +45,68 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
     inputRef?.focus()
     inputRef?.select?.()
   }
+  const desktopTarget = createMemo(() => {
+    if (platform.platform !== "desktop") return
+    const id = tabID()
+    const sourceWindowID = windowID()
+    if (!id || sourceWindowID === null) return
+    return {
+      sourceWindowID,
+      tabID: id,
+    }
+  })
+
+  const ensureGuestRegistration = () => {
+    const target = desktopTarget()
+    const guestID = resolveGuestID()
+    if (!target || typeof guestID !== "number" || guestID <= 0) return
+    if (!platform.registerBrowserGuest) {
+      registeredGuestID = guestID
+      pendingGuestID = undefined
+      setGuestReady(true)
+      return
+    }
+    if (registeredGuestID === guestID) {
+      pendingGuestID = undefined
+      setGuestReady(true)
+      return
+    }
+    if (pendingGuestID === guestID) return
+
+    pendingGuestID = guestID
+    setGuestReady(false)
+    void platform
+      .registerBrowserGuest({
+        ...target,
+        guestID,
+      })
+      .then(() => {
+        if (pendingGuestID !== guestID) return
+        registeredGuestID = guestID
+        pendingGuestID = undefined
+        setGuestReady(true)
+      })
+      .catch(() => {
+        if (pendingGuestID !== guestID) return
+        pendingGuestID = undefined
+        registeredGuestID = undefined
+        setGuestReady(false)
+      })
+  }
+
+  const resolveGuestID = () => {
+    if (!ready) return
+    try {
+      return webviewRef?.getWebContentsId?.()
+    } catch {
+      return
+    }
+  }
+
+  onMount(() => {
+    if (!platform.getWindowID) return
+    void platform.getWindowID().then(setWindowID).catch(() => setWindowID(null))
+  })
 
   const runCommand = (command: "back" | "forward" | "reload" | "stop" | "focusAddress") => {
     const id = tabID()
@@ -104,7 +171,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
     const webview = webviewRef
     if (!id || !webview) return
 
-    const sync = () => {
+    const sync = (input?: {
+      loading?: boolean
+      error?: string
+      clearError?: boolean
+    }) => {
       const current = state()
       const url = ready ? webview.getURL?.() || current?.url || "" : current?.url || ""
       if (url) lastLoadedURL = url
@@ -112,8 +183,8 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
         url,
         input: url,
         title: ready ? webview.getTitle?.() || current?.title : current?.title,
-        loading: ready ? webview.isLoading?.() ?? false : current?.loading ?? false,
-        error: undefined,
+        loading: input?.loading ?? current?.loading ?? false,
+        error: input?.clearError ? undefined : input?.error ?? current?.error,
       })
     }
 
@@ -122,6 +193,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
         loading: true,
         error: undefined,
       })
+      ensureGuestRegistration()
       if (ready) sync()
     }
 
@@ -130,7 +202,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
       const details = event as ({ errorCode?: number; errorDescription?: string } & Event) | undefined
       const code = typeof details?.errorCode === "number" ? details.errorCode : undefined
       const description = typeof details?.errorDescription === "string" ? details.errorDescription : undefined
-      layout.view(sessionKey()).browser.sync(id, {
+      sync({
         loading: false,
         error: description ?? (code !== undefined ? `Failed to load (${code})` : "Failed to load"),
       })
@@ -145,7 +217,14 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
 
     const onReady = () => {
       ready = true
+      ensureGuestRegistration()
       sync()
+    }
+    const finish = () => {
+      sync({
+        loading: false,
+        clearError: true,
+      })
     }
     const onCommand = (event: Event) => {
       const detail = (event as CustomEvent<{ command?: "back" | "forward" | "reload" | "stop" | "focusAddress"; tabID?: string }>).detail
@@ -155,6 +234,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
     }
 
     webview.addEventListener("did-start-loading", start)
+    webview.addEventListener("did-finish-load", finish)
     webview.addEventListener("did-stop-loading", sync)
     webview.addEventListener("did-navigate", sync)
     webview.addEventListener("did-navigate-in-page", sync)
@@ -165,8 +245,19 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
     window.addEventListener(BROWSER_COMMAND_EVENT, onCommand)
 
     onCleanup(() => {
+      const target = desktopTarget()
+      if (target && platform.unregisterBrowserGuest && registeredGuestID !== undefined) {
+        void platform.unregisterBrowserGuest({
+          ...target,
+          guestID: registeredGuestID,
+        })
+      }
+      pendingGuestID = undefined
+      registeredGuestID = undefined
+      setGuestReady(false)
       ready = false
       webview.removeEventListener("did-start-loading", start)
+      webview.removeEventListener("did-finish-load", finish)
       webview.removeEventListener("did-stop-loading", sync)
       webview.removeEventListener("did-navigate", sync)
       webview.removeEventListener("did-navigate-in-page", sync)
@@ -194,6 +285,43 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
     window.open(current.url, "_blank", "noopener,noreferrer")
   }
 
+  const openDevTools = () => {
+    const target = desktopTarget()
+    if (!target || !platform.openBrowserDevTools || !guestReady()) return
+    void platform.openBrowserDevTools(target).catch((error) => {
+      showToast({
+        title: "Failed to open browser DevTools",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "error",
+      })
+    })
+  }
+
+  const clearSiteData = () => {
+    const target = desktopTarget()
+    if (!target || !platform.clearBrowserSiteData || siteDataBusy() || !guestReady()) return
+    setSiteDataBusy(true)
+    void platform
+      .clearBrowserSiteData(target)
+      .then((result) => {
+        showToast({
+          title: "Site data cleared",
+          description: result.clearedCookies > 0 ? `Removed ${result.clearedCookies} cookies for the current page.` : "Cleared storage for the current page.",
+        })
+        webviewRef?.reload?.()
+      })
+      .catch((error) => {
+        showToast({
+          title: "Failed to clear site data",
+          description: error instanceof Error ? error.message : String(error),
+          variant: "error",
+        })
+      })
+      .finally(() => {
+        setSiteDataBusy(false)
+      })
+  }
+
   const currentFilePath = createMemo(() => {
     const current = state()
     if (!current) return
@@ -212,6 +340,23 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
       layout.tabs(sessionKey()).setActive(tab)
     })
   }
+
+  createEffect(() => {
+    const target = desktopTarget()
+    if (!target || !platform.setActiveBrowserTab) return
+    ensureGuestRegistration()
+    const active = props.visible !== false
+    void platform.setActiveBrowserTab({
+      ...target,
+      active,
+    })
+    onCleanup(() => {
+      void platform.setActiveBrowserTab?.({
+        ...target,
+        active: false,
+      })
+    })
+  })
 
   return (
     <div class="size-full flex flex-col min-h-0 bg-background-base">
@@ -291,6 +436,30 @@ export function BrowserPanel(props: { tab: string; visible?: boolean }) {
                 class="size-7 rounded-md"
                 onClick={openSource}
                 aria-label={language.t("browser.openSource")}
+              />
+            </Tooltip>
+          </Show>
+          <Show when={platform.platform === "desktop" && platform.openBrowserDevTools}>
+            <Tooltip value="Open page DevTools" placement="bottom">
+              <IconButton
+                icon="console"
+                variant="ghost"
+                class="size-7 rounded-md"
+                disabled={!guestReady()}
+                onClick={openDevTools}
+                aria-label="Open page DevTools"
+              />
+            </Tooltip>
+          </Show>
+          <Show when={platform.platform === "desktop" && platform.clearBrowserSiteData}>
+            <Tooltip value="Clear current site data" placement="bottom">
+              <IconButton
+                icon="trash"
+                variant="ghost"
+                class="size-7 rounded-md"
+                disabled={siteDataBusy() || !guestReady()}
+                onClick={clearSiteData}
+                aria-label="Clear current site data"
               />
             </Tooltip>
           </Show>
