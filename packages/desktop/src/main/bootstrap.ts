@@ -6,11 +6,23 @@ import { dirname, join } from "node:path"
 import type { App } from "electron"
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 
-const CONFIG_FILES = ["lfcode.jsonc", "lfcode.json", "config.json"] as const
+const CONFIG_FILES = [
+  "lfcode.jsonc",
+  "lfcode.json",
+  "opencode.jsonc",
+  "opencode.json",
+  "mimocode.jsonc",
+  "mimocode.json",
+  "config.json",
+] as const
 const MANAGED_ROOT_DIR = ".lfcode"
 const PLAYWRIGHT_MCP_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
 const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
 const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--browser", "chrome"] as const
+const PLAYWRIGHT_MCP_REMOTE_URL = "{env:LFCODE_SERVER_URL}/global/mcp/playwright"
+const PLAYWRIGHT_MCP_REMOTE_HEADERS = {
+  authorization: "{env:LFCODE_SERVER_AUTH}",
+} as const
 const WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND = [
   "cmd",
   "/c",
@@ -24,8 +36,9 @@ const DEFAULT_ROOT_CONFIG = {
   $schema: "https://lfcode.ai/config.json",
   mcp: {
     playwright: {
-      type: "local",
-      command: PLAYWRIGHT_MCP_CDP_COMMAND,
+      type: "remote",
+      url: PLAYWRIGHT_MCP_REMOTE_URL,
+      headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
       enabled: true,
     },
     "windows-computer-use": {
@@ -360,6 +373,11 @@ async function ensureRootLayout(layout: RootLayout) {
 
 async function ensureRootConfigFile(layout: RootLayout) {
   if (await pathExists(layout.configFile)) return
+  const legacy = await findLegacyConfigFile(layout.root)
+  if (legacy && legacy !== layout.configFile) {
+    await copyFile(legacy, layout.configFile)
+    return
+  }
   await writeFile(layout.configFile, `${JSON.stringify(DEFAULT_ROOT_CONFIG, null, 2)}\n`)
 }
 
@@ -374,7 +392,7 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
   let updated = text
   let changed = false
   const playwright = parsed.mcp.playwright
-  if (isLegacyPlaywrightConfig(playwright)) {
+  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
     updated = applyEdits(
       updated,
       modify(updated, ["mcp", "playwright"], DEFAULT_ROOT_CONFIG.mcp.playwright, {
@@ -387,10 +405,7 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
     changed = true
   }
 
-  if (
-    (isPlaywrightCdpConfig(playwright) || isLegacyPlaywrightConfig(playwright)) &&
-    parsed.mcp["windows-computer-use"] === undefined
-  ) {
+  if ((isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) && parsed.mcp["windows-computer-use"] === undefined) {
     updated = applyEdits(
       updated,
       modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {

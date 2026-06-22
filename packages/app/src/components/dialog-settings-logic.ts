@@ -1,4 +1,13 @@
-export type SettingsTab = "general" | "shortcuts" | "archives" | "providers" | "models" | "mcp" | "skills" | "usage"
+export type SettingsTab =
+  | "general"
+  | "shortcuts"
+  | "browser"
+  | "archives"
+  | "providers"
+  | "models"
+  | "mcp"
+  | "skills"
+  | "usage"
 
 export function nextVisitedSettingsTabs(current: Set<SettingsTab>, tab: SettingsTab) {
   if (current.has(tab)) return current

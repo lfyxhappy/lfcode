@@ -150,6 +150,7 @@ export interface MessagePartProps {
   defaultOpen?: boolean
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
+  responseMetricsLine?: string
 }
 
 export type PartComponent = Component<MessagePartProps>
@@ -542,6 +543,7 @@ export function AssistantParts(props: {
   messages: AssistantMessage[]
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
+  responseMetricsLine?: string
   working?: boolean
   showReasoningSummaries?: boolean
   shellToolDefaultOpen?: boolean
@@ -626,6 +628,7 @@ export function AssistantParts(props: {
                         message={message()!}
                         showAssistantCopyPartID={props.showAssistantCopyPartID}
                         turnDurationMs={props.turnDurationMs}
+                        responseMetricsLine={props.responseMetricsLine}
                         defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
                       />
                     </Show>
@@ -1168,6 +1171,7 @@ export function Part(props: MessagePartProps) {
         defaultOpen={props.defaultOpen}
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
+        responseMetricsLine={props.responseMetricsLine}
       />
     </Show>
   )
@@ -1394,6 +1398,12 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
     return isLastTextPart()
   })
   const [copied, setCopied] = createSignal(false)
+  const responseMetrics = createMemo(() => {
+    if (props.message.role !== "assistant") return ""
+    if (streaming()) return ""
+    if (interrupted()) return ""
+    return isLastTextPart() ? props.responseMetricsLine ?? "" : ""
+  })
 
   const handleCopy = async () => {
     const content = text()
@@ -1433,6 +1443,11 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
               </span>
             </Show>
           </div>
+          <Show when={responseMetrics()}>
+            <div data-slot="text-part-response-metrics" class="text-12-regular text-text-weak cursor-default">
+              {responseMetrics()}
+            </div>
+          </Show>
         </Show>
       </div>
     </Show>

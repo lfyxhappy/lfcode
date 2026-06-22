@@ -289,8 +289,13 @@ function setupFileReferenceActions(root: HTMLDivElement, options: FileReferenceO
     if (!(element instanceof HTMLElement)) return
     const path = element.dataset.path
     if (!path) return
+    const kind = inferFileReferenceKind(element.dataset.display ?? path)
     event.preventDefault()
     event.stopPropagation()
+    if (kind === "directory" && options.onOpenDefaultApp) {
+      options.onOpenDefaultApp(path)
+      return
+    }
     options.onPreviewPath?.(path)
   }
 

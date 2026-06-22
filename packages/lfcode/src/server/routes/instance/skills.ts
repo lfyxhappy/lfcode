@@ -134,7 +134,7 @@ export const SkillsRoutes = lazy(() =>
       "/",
       describeRoute({
         summary: "List skills",
-        description: "List skills from the local .lfcode/skills directory.",
+        description: "List available skills, including the managed global skills directory.",
         operationId: "skills.list",
         responses: {
           200: {
@@ -162,8 +162,8 @@ export const SkillsRoutes = lazy(() =>
     .get(
       "/manage/list",
       describeRoute({
-        summary: "List local skills",
-        description: "List skills directly from the local .lfcode/skills directory.",
+        summary: "List managed skills",
+        description: "List skills directly from the managed global skills directory.",
         operationId: "skills.manage.list",
         responses: {
           200: {
@@ -191,8 +191,8 @@ export const SkillsRoutes = lazy(() =>
     .patch(
       "/manage/update",
       describeRoute({
-        summary: "Update a local skill",
-        description: "Update the hidden frontmatter of a skill in .lfcode/skills.",
+        summary: "Update a managed skill",
+        description: "Update the hidden frontmatter of a skill in the managed global skills directory.",
         operationId: "skills.manage.update",
         responses: {
           200: {
@@ -239,8 +239,8 @@ export const SkillsRoutes = lazy(() =>
     .delete(
       "/manage/delete",
       describeRoute({
-        summary: "Delete a local skill",
-        description: "Permanently delete a skill directory from .lfcode/skills.",
+        summary: "Delete a managed skill",
+        description: "Permanently delete a skill directory from the managed global skills directory.",
         operationId: "skills.manage.delete",
         responses: {
           200: {
@@ -339,7 +339,7 @@ export const SkillsRoutes = lazy(() =>
       "/discover/install",
       describeRoute({
         summary: "Install a discovered skill",
-        description: "Install a skill from a skills.sh repository into .lfcode/skills.",
+        description: "Install a skill from a skills.sh repository into the managed global skills directory.",
         operationId: "skills.discover.install",
         responses: {
           200: {
@@ -429,7 +429,7 @@ export const SkillsRoutes = lazy(() =>
       "/import",
       describeRoute({
         summary: "Import a skill directory",
-        description: "Copy local skills into .lfcode/skills from a folder, zip file, or known external skill root.",
+        description: "Copy skills into the managed global skills directory from a folder, zip file, or known external skill root.",
         operationId: "skills.import",
         responses: {
           200: {
@@ -470,7 +470,7 @@ export const SkillsRoutes = lazy(() =>
       "/create",
       describeRoute({
         summary: "Create a new skill",
-        description: "Create a new skill skeleton under .lfcode/skills.",
+        description: "Create a new skill skeleton under the managed global skills directory.",
         operationId: "skills.create",
         responses: {
           200: {
@@ -493,7 +493,7 @@ export const SkillsRoutes = lazy(() =>
             Effect.gen(function* () {
               const { name, description } = c.req.valid("json")
               const fs = yield* AppFileSystem.Service
-              const target = path.join(Instance.directory, ".lfcode", "skills", name)
+              const target = path.join(localSkillRoot(), name)
               if (yield* fs.existsSafe(target)) {
                 throw new Error(`Skill already exists: ${name}`)
               }
@@ -704,7 +704,7 @@ function installDiscoverySkill(input: {
     })
 
     const targetName = input.name ?? detail.name
-    const target = path.join(Instance.directory, ".lfcode", "skills", targetName)
+    const target = path.join(localSkillRoot(), targetName)
     if (yield* fs.existsSafe(target)) {
       yield* fs.remove(target, { recursive: true }).pipe(Effect.catch(() => Effect.void))
     }
@@ -850,7 +850,7 @@ function resolveImportSource(
     }
 
     if (!(yield* isFilePath(source))) throw new Error(`Source zip file not found: ${input.source}`)
-    const temp = path.join(Instance.directory, ".lfcode", "tmp", "skill-import", `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    const temp = path.join(Global.Path.state, "tmp", "skill-import", `${Date.now()}-${Math.random().toString(36).slice(2)}`)
     yield* fs.ensureDir(temp)
     yield* Effect.promise(() => Archive.extractZip(source, temp))
     return {
@@ -916,7 +916,7 @@ function importSkillCandidate(
   candidate: ImportCandidate,
 ): Effect.Effect<{ target: string; targetName: string }, unknown, AppFileSystem.Service> {
   return Effect.gen(function* () {
-    const target = path.join(Instance.directory, ".lfcode", "skills", candidate.targetName)
+    const target = path.join(localSkillRoot(), candidate.targetName)
     if (AppFileSystem.resolve(candidate.source) === AppFileSystem.resolve(target)) {
       throw new Error("Source and destination are the same")
     }
@@ -984,7 +984,7 @@ async function copyDirectory(fs: AppFileSystem.Interface, source: string, target
 }
 
 function localSkillRoot() {
-  return path.join(Instance.directory, ".lfcode", "skills")
+  return path.join(Global.Path.config, "skills")
 }
 
 function resolveLocalSkillTarget(directory: string) {

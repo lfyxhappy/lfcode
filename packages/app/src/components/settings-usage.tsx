@@ -6,17 +6,18 @@ import { type Component, For, Show, createMemo, createSignal } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { SettingsList } from "./settings-list"
-
-type UsageRange = "today" | "7d" | "30d" | "all"
-
-type TrendPoint = {
-  time: number
-  input: number
-  output: number
-  cacheCreate: number
-  cacheHit: number
-  cost: number
-}
+import {
+  buildUsageFilters,
+  buildUsageOptions,
+  hasMoreUsageLogs,
+  selectedUsageOption,
+  USAGE_ALL,
+  type UsageAgentKind,
+  type UsageData,
+  type UsageLog,
+  type UsageRange,
+  type UsageStatus,
+} from "./settings-usage-helpers"
 
 const PAGE_SIZE = 50
 
@@ -26,6 +27,9 @@ const ranges: Array<{ value: UsageRange; label: string }> = [
   { value: "30d", label: "settings.usage.range.30d" },
   { value: "all", label: "settings.usage.range.all" },
 ]
+
+const statuses: UsageStatus[] = ["completed", "error", "aborted"]
+const agentKinds: UsageAgentKind[] = ["main", "subagent"]
 
 function compactNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale, {
@@ -50,6 +54,11 @@ function currency(value: number, locale: string) {
   }).format(value)
 }
 
+function percent(value: number | null, locale: string) {
+  if (value == null) return "N/A"
+  return `${decimal(value, locale)}%`
+}
+
 function dateTime(value: number, locale: string) {
   return new Intl.DateTimeFormat(locale, {
     month: "2-digit",
@@ -62,6 +71,12 @@ function dateTime(value: number, locale: string) {
 function nullableMetric(value: number | null, locale: string) {
   if (value == null) return "N/A"
   return `${decimal(value, locale)} ms`
+}
+
+function statusTone(status: UsageLog["status"]) {
+  if (status === "completed") return "bg-emerald-500/10 text-emerald-600"
+  if (status === "error") return "bg-rose-500/10 text-rose-600"
+  return "bg-amber-500/10 text-amber-600"
 }
 
 const MetricCard: Component<{ title: string; value: string; hint?: string }> = (props) => (
@@ -90,18 +105,22 @@ const EmptyState: Component<{ title: string; description: string }> = (props) =>
   </div>
 )
 
-const TrendChart: Component<{ points: TrendPoint[]; locale: string; labels: Record<string, string> }> = (props) => {
+const TrendChart: Component<{
+  points: UsageData["trend"]
+  locale: string
+  labels: Record<"input" | "output" | "cacheCreate" | "cacheHit" | "cost", string>
+}> = (props) => {
   const width = 960
   const height = 280
   const padding = { top: 12, right: 12, bottom: 28, left: 12 }
 
   const series = createMemo(() => {
     const keys = [
-      { key: "input", color: "#3b82f6", label: props.labels.input },
-      { key: "output", color: "#22c55e", label: props.labels.output },
-      { key: "cacheCreate", color: "#f97316", label: props.labels.cacheCreate },
-      { key: "cacheHit", color: "#a855f7", label: props.labels.cacheHit },
-      { key: "cost", color: "#f43f5e", label: props.labels.cost },
+      { key: "input", color: "#2563eb", label: props.labels.input },
+      { key: "output", color: "#16a34a", label: props.labels.output },
+      { key: "cacheCreate", color: "#ea580c", label: props.labels.cacheCreate },
+      { key: "cacheHit", color: "#7c3aed", label: props.labels.cacheHit },
+      { key: "cost", color: "#e11d48", label: props.labels.cost },
     ] as const
     const max = Math.max(1, ...props.points.flatMap((point) => keys.map((item) => Number(point[item.key]))))
     return keys.map((item) => ({
@@ -120,9 +139,7 @@ const TrendChart: Component<{ points: TrendPoint[]; locale: string; labels: Reco
     <div class="rounded-lg border border-border-weak-base bg-background-base/50 px-4 py-4">
       <svg viewBox={`0 0 ${width} ${height}`} class="h-[280px] w-full">
         <line x1="12" y1={height - 28} x2={width - 12} y2={height - 28} stroke="var(--border-weak-base)" />
-        <For each={series()}>
-          {(item) => <path d={item.path} fill="none" stroke={item.color} stroke-width="3" stroke-linecap="round" />}
-        </For>
+        <For each={series()}>{(item) => <path d={item.path} fill="none" stroke={item.color} stroke-width="3" stroke-linecap="round" />}</For>
       </svg>
       <div class="flex flex-wrap gap-x-4 gap-y-2 pt-2 text-12-regular text-text-weak">
         <For each={series()}>
@@ -143,24 +160,60 @@ const TrendChart: Component<{ points: TrendPoint[]; locale: string; labels: Reco
   )
 }
 
+const StatRow: Component<{ title: string; subtitle?: string; amount: string; meta: string }> = (props) => (
+  <div class="flex items-center justify-between gap-4 border-b border-border-weak-base py-3 last:border-none">
+    <div class="min-w-0">
+      <div class="truncate text-14-medium text-text-strong">{props.title}</div>
+      <Show when={props.subtitle}>
+        {(subtitle) => <div class="truncate pt-1 text-12-regular text-text-weak">{subtitle()}</div>}
+      </Show>
+    </div>
+    <div class="text-right">
+      <div class="text-14-medium text-text-strong">{props.amount}</div>
+      <div class="pt-1 text-12-regular text-text-weak">{props.meta}</div>
+    </div>
+  </div>
+)
+
 export const SettingsUsage: Component = () => {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
   const [range, setRange] = createSignal<UsageRange>("all")
-  const [provider, setProvider] = createSignal("")
-  const [model, setModel] = createSignal("")
+  const [provider, setProvider] = createSignal(USAGE_ALL)
+  const [model, setModel] = createSignal(USAGE_ALL)
+  const [project, setProject] = createSignal(USAGE_ALL)
+  const [session, setSession] = createSignal(USAGE_ALL)
+  const [status, setStatus] = createSignal(USAGE_ALL)
+  const [agentKind, setAgentKind] = createSignal(USAGE_ALL)
   const [search, setSearch] = createSignal("")
 
-  const filters = createMemo(() => ({
-    range: range(),
-    provider: provider() || undefined,
-    model: model() || undefined,
-    search: search() || undefined,
-    source: "lfcode" as const,
-  }))
+  const filters = createMemo(() =>
+    buildUsageFilters({
+      range: range(),
+      provider: provider(),
+      model: model(),
+      project: project(),
+      session: session(),
+      status: status(),
+      agentKind: agentKind(),
+      search: search(),
+    }),
+  )
 
   const usageQuery = createQuery(() => ({
-    queryKey: ["settings-usage", "summary", globalSDK.url, range(), provider(), model(), search()],
+    queryKey: [
+      "settings-usage",
+      "summary",
+      globalSDK.url,
+      range(),
+      provider(),
+      model(),
+      project(),
+      session(),
+      status(),
+      agentKind(),
+      search(),
+    ],
     queryFn: () =>
       globalSDK.client.usage.get({
         ...filters(),
@@ -169,7 +222,19 @@ export const SettingsUsage: Component = () => {
   }))
 
   const logsQuery = createInfiniteQuery(() => ({
-    queryKey: ["settings-usage", "logs", globalSDK.url, range(), provider(), model(), search()],
+    queryKey: [
+      "settings-usage",
+      "logs",
+      globalSDK.url,
+      range(),
+      provider(),
+      model(),
+      project(),
+      session(),
+      status(),
+      agentKind(),
+      search(),
+    ],
     queryFn: ({ pageParam }) =>
       globalSDK.client.usage.get({
         ...filters(),
@@ -182,21 +247,8 @@ export const SettingsUsage: Component = () => {
 
   const data = createMemo(() => usageQuery.data?.data)
   const locale = createMemo(() => language.intl())
+  const unknown = createMemo(() => language.t("common.unknown"))
   const logs = createMemo(() => logsQuery.data?.pages.flatMap((page) => page.data?.logs ?? []) ?? [])
-  const providers = createMemo(() => data()?.providerStats.map((item) => item.provider) ?? [])
-  const models = createMemo(() => data()?.modelStats.map((item) => item.model) ?? [])
-  const rangeOptions = createMemo(() => ranges.map((item) => ({ value: item.value, label: language.t(item.label as never) })))
-  const providerOptions = createMemo(() => [
-    { value: "", label: language.t("settings.usage.filter.allProviders") },
-    ...providers().map((item) => ({ value: item, label: item })),
-  ])
-  const modelOptions = createMemo(() => [
-    { value: "", label: language.t("settings.usage.filter.allModels") },
-    ...models().map((item) => ({ value: item, label: item })),
-  ])
-  const selectedRange = createMemo(() => rangeOptions().find((item) => item.value === range()) ?? rangeOptions()[0])
-  const selectedProvider = createMemo(() => providerOptions().find((item) => item.value === provider()) ?? providerOptions()[0])
-  const selectedModel = createMemo(() => modelOptions().find((item) => item.value === model()) ?? modelOptions()[0])
   const chartLabels = createMemo(() => ({
     input: language.t("settings.usage.chart.input"),
     output: language.t("settings.usage.chart.output"),
@@ -204,29 +256,72 @@ export const SettingsUsage: Component = () => {
     cacheHit: language.t("settings.usage.chart.cacheHit"),
     cost: language.t("settings.usage.chart.cost"),
   }))
+  const rangeOptions = createMemo(() => ranges.map((item) => ({ value: item.value, label: language.t(item.label as never) })))
+  const providerOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allProviders"), data()?.providerStats ?? [], (item) => ({
+      value: item.provider,
+      label: item.provider,
+    })),
+  )
+  const modelOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allModels"), data()?.modelStats ?? [], (item) => ({
+      value: item.model,
+      label: item.model,
+    })),
+  )
+  const projectOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allProjects"), data()?.projectStats ?? [], (item) => ({
+      value: item.projectID,
+      label: item.projectName,
+    })),
+  )
+  const sessionOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allSessions"), data()?.sessionStats ?? [], (item) => ({
+      value: item.sessionID,
+      label: item.sessionTitle || item.directory,
+    })),
+  )
+  const statusOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allStatuses"), statuses, (item) => ({
+      value: item,
+      label: language.t(`settings.usage.status.${item}` as never),
+    })),
+  )
+  const agentKindOptions = createMemo(() =>
+    buildUsageOptions(language.t("settings.usage.filter.allAgentKinds"), agentKinds, (item) => ({
+      value: item,
+      label: language.t(`settings.usage.agent.${item}` as never),
+    })),
+  )
+  const selectedRange = createMemo(() => selectedUsageOption(rangeOptions(), range()))
+  const selectedProvider = createMemo(() => selectedUsageOption(providerOptions(), provider()))
+  const selectedModel = createMemo(() => selectedUsageOption(modelOptions(), model()))
+  const selectedProject = createMemo(() => selectedUsageOption(projectOptions(), project()))
+  const selectedSession = createMemo(() => selectedUsageOption(sessionOptions(), session()))
+  const selectedStatus = createMemo(() => selectedUsageOption(statusOptions(), status()))
+  const selectedAgentKind = createMemo(() => selectedUsageOption(agentKindOptions(), agentKind()))
   const hasUsage = createMemo(() => (data()?.summary.requestCount ?? 0) > 0)
   const hasMoreLogs = createMemo(() => {
     const pages = logsQuery.data?.pages
-    if (!pages?.length) return false
-    const lastPage = pages[pages.length - 1]
-    return lastPage?.data?.nextCursor != null
+    const lastPage = pages?.[pages.length - 1]
+    return hasMoreUsageLogs(lastPage?.data?.nextCursor)
   })
 
   return (
     <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex max-w-[980px] flex-col gap-4 pb-6 pt-6">
+        <div class="flex max-w-[1180px] flex-col gap-4 pb-6 pt-6">
           <div>
             <h2 class="text-16-medium text-text-strong">{language.t("settings.usage.title")}</h2>
             <p class="pt-1 text-14-regular text-text-weak">{language.t("settings.usage.description")}</p>
           </div>
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-[160px_180px_220px_1fr]">
+          <div class="grid grid-cols-1 gap-3 lg:grid-cols-4">
             <Select
               options={rangeOptions()}
               current={selectedRange()}
               value={(item) => item.value}
               label={(item) => item.label}
-              onSelect={(item) => setRange(item?.value ?? "all")}
+              onSelect={(item) => setRange(item?.value as UsageRange)}
               triggerVariant="settings"
               variant="secondary"
               size="small"
@@ -236,7 +331,7 @@ export const SettingsUsage: Component = () => {
               current={selectedProvider()}
               value={(item) => item.value}
               label={(item) => item.label}
-              onSelect={(item) => setProvider(item?.value ?? "")}
+              onSelect={(item) => setProvider(item?.value ?? USAGE_ALL)}
               triggerVariant="settings"
               variant="secondary"
               size="small"
@@ -246,7 +341,49 @@ export const SettingsUsage: Component = () => {
               current={selectedModel()}
               value={(item) => item.value}
               label={(item) => item.label}
-              onSelect={(item) => setModel(item?.value ?? "")}
+              onSelect={(item) => setModel(item?.value ?? USAGE_ALL)}
+              triggerVariant="settings"
+              variant="secondary"
+              size="small"
+            />
+            <Select
+              options={projectOptions()}
+              current={selectedProject()}
+              value={(item) => item.value}
+              label={(item) => item.label}
+              onSelect={(item) => setProject(item?.value ?? USAGE_ALL)}
+              triggerVariant="settings"
+              variant="secondary"
+              size="small"
+            />
+          </div>
+          <div class="grid grid-cols-1 gap-3 lg:grid-cols-4">
+            <Select
+              options={sessionOptions()}
+              current={selectedSession()}
+              value={(item) => item.value}
+              label={(item) => item.label}
+              onSelect={(item) => setSession(item?.value ?? USAGE_ALL)}
+              triggerVariant="settings"
+              variant="secondary"
+              size="small"
+            />
+            <Select
+              options={statusOptions()}
+              current={selectedStatus()}
+              value={(item) => item.value}
+              label={(item) => item.label}
+              onSelect={(item) => setStatus(item?.value ?? USAGE_ALL)}
+              triggerVariant="settings"
+              variant="secondary"
+              size="small"
+            />
+            <Select
+              options={agentKindOptions()}
+              current={selectedAgentKind()}
+              value={(item) => item.value}
+              label={(item) => item.label}
+              onSelect={(item) => setAgentKind(item?.value ?? USAGE_ALL)}
               triggerVariant="settings"
               variant="secondary"
               size="small"
@@ -266,7 +403,7 @@ export const SettingsUsage: Component = () => {
         </div>
       </div>
 
-      <div class="flex max-w-[980px] flex-col gap-8">
+      <div class="flex max-w-[1180px] flex-col gap-8">
         <Show
           when={!usageQuery.isLoading && !logsQuery.isLoading}
           fallback={<EmptyState title={language.t("common.loading")} description={language.t("common.loading.ellipsis")} />}
@@ -275,35 +412,24 @@ export const SettingsUsage: Component = () => {
             when={hasUsage()}
             fallback={<EmptyState title={language.t("settings.usage.empty.title")} description={language.t("settings.usage.empty.description")} />}
           >
-            <div class="grid grid-cols-1 gap-3 lg:grid-cols-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <MetricCard title={language.t("settings.usage.metric.totalTokens")} value={compactNumber(data()!.summary.totalTokens, locale())} />
+              <MetricCard title={language.t("settings.usage.metric.totalCost")} value={currency(data()!.summary.totalCost, locale())} />
               <MetricCard
-                title={language.t("settings.usage.metric.totalTokens")}
-                value={compactNumber(data()!.summary.totalTokens, locale())}
-                hint={decimal(data()!.summary.totalTokens, locale(), 0)}
+                title={language.t("settings.usage.metric.requests")}
+                value={decimal(data()!.summary.requestCount, locale(), 0)}
+                hint={`${language.t("settings.usage.metric.successRate")}: ${percent(data()!.summary.successRate, locale())}`}
               />
-              <MetricCard
-                title={language.t("settings.usage.metric.input")}
-                value={compactNumber(data()!.summary.inputTokens, locale())}
-              />
-              <MetricCard
-                title={language.t("settings.usage.metric.output")}
-                value={compactNumber(data()!.summary.outputTokens, locale())}
-              />
-              <MetricCard
-                title={language.t("settings.usage.metric.totalCost")}
-                value={currency(data()!.summary.totalCost, locale())}
-                hint={`${language.t("settings.usage.metric.requests")}: ${decimal(data()!.summary.requestCount, locale(), 0)}`}
-              />
+              <MetricCard title={language.t("settings.usage.metric.avgDuration")} value={nullableMetric(data()!.summary.avgDuration, locale())} />
+              <MetricCard title={language.t("settings.usage.metric.avgTtft")} value={nullableMetric(data()!.summary.avgTtft, locale())} />
             </div>
 
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <MetricCard title={language.t("settings.usage.metric.input")} value={compactNumber(data()!.summary.inputTokens, locale())} />
+              <MetricCard title={language.t("settings.usage.metric.output")} value={compactNumber(data()!.summary.outputTokens, locale())} />
               <MetricCard title={language.t("settings.usage.metric.cacheCreate")} value={compactNumber(data()!.summary.cacheCreateTokens, locale())} />
               <MetricCard title={language.t("settings.usage.metric.cacheHit")} value={compactNumber(data()!.summary.cacheHitTokens, locale())} />
-              <MetricCard
-                title={language.t("settings.usage.metric.cacheHitRatio")}
-                value={data()!.summary.cacheHitRatio == null ? "N/A" : `${decimal(data()!.summary.cacheHitRatio ?? 0, locale())}%`}
-              />
-              <MetricCard title={language.t("settings.usage.metric.requests")} value={decimal(data()!.summary.requestCount, locale(), 0)} />
+              <MetricCard title={language.t("settings.usage.metric.cacheHitRatio")} value={percent(data()!.summary.cacheHitRatio, locale())} />
             </div>
 
             <div class="flex flex-col gap-2">
@@ -313,24 +439,49 @@ export const SettingsUsage: Component = () => {
 
             <div class="grid grid-cols-1 gap-8 xl:grid-cols-2">
               <div class="flex flex-col gap-2">
+                <SectionTitle title={language.t("settings.usage.section.projects")} />
+                <SettingsList>
+                  <For each={data()!.projectStats}>
+                    {(item) => (
+                      <StatRow
+                        title={item.projectName}
+                        subtitle={item.directory}
+                        amount={currency(item.totalCost, locale())}
+                        meta={`${compactNumber(item.totalTokens, locale())} · ${language.t("settings.usage.label.requests")}: ${decimal(item.requestCount, locale(), 0)} · ${decimal(item.share, locale())}%`}
+                      />
+                    )}
+                  </For>
+                </SettingsList>
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <SectionTitle title={language.t("settings.usage.section.sessions")} />
+                <SettingsList>
+                  <For each={data()!.sessionStats}>
+                    {(item) => (
+                      <StatRow
+                        title={item.sessionTitle || unknown()}
+                        subtitle={`${item.projectName} · ${item.directory}`}
+                        amount={currency(item.totalCost, locale())}
+                        meta={`${compactNumber(item.totalTokens, locale())} · ${language.t("settings.usage.label.requests")}: ${decimal(item.requestCount, locale(), 0)} · ${decimal(item.share, locale())}%`}
+                      />
+                    )}
+                  </For>
+                </SettingsList>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-8 xl:grid-cols-2">
+              <div class="flex flex-col gap-2">
                 <SectionTitle title={language.t("settings.usage.section.providers")} />
                 <SettingsList>
                   <For each={data()!.providerStats}>
                     {(item) => (
-                      <div class="flex items-center justify-between gap-4 border-b border-border-weak-base py-3 last:border-none">
-                        <div>
-                          <div class="text-14-medium text-text-strong">{item.provider}</div>
-                          <div class="pt-1 text-12-regular text-text-weak">
-                            {language.t("settings.usage.label.requests")}: {decimal(item.requestCount, locale(), 0)}
-                          </div>
-                        </div>
-                        <div class="text-right">
-                          <div class="text-14-medium text-text-strong">{currency(item.totalCost, locale())}</div>
-                          <div class="pt-1 text-12-regular text-text-weak">
-                            {compactNumber(item.totalTokens, locale())} · {decimal(item.share, locale())}%
-                          </div>
-                        </div>
-                      </div>
+                      <StatRow
+                        title={item.provider || unknown()}
+                        amount={currency(item.totalCost, locale())}
+                        meta={`${compactNumber(item.totalTokens, locale())} · ${language.t("settings.usage.label.requests")}: ${decimal(item.requestCount, locale(), 0)} · ${decimal(item.share, locale())}%`}
+                      />
                     )}
                   </For>
                 </SettingsList>
@@ -341,18 +492,12 @@ export const SettingsUsage: Component = () => {
                 <SettingsList>
                   <For each={data()!.modelStats}>
                     {(item) => (
-                      <div class="flex items-center justify-between gap-4 border-b border-border-weak-base py-3 last:border-none">
-                        <div>
-                          <div class="text-14-medium text-text-strong">{item.model}</div>
-                          <div class="pt-1 text-12-regular text-text-weak">{item.provider}</div>
-                        </div>
-                        <div class="text-right">
-                          <div class="text-14-medium text-text-strong">{currency(item.totalCost, locale())}</div>
-                          <div class="pt-1 text-12-regular text-text-weak">
-                            {compactNumber(item.totalTokens, locale())} · {decimal(item.share, locale())}%
-                          </div>
-                        </div>
-                      </div>
+                      <StatRow
+                        title={item.model || unknown()}
+                        subtitle={item.provider || unknown()}
+                        amount={currency(item.totalCost, locale())}
+                        meta={`${compactNumber(item.totalTokens, locale())} · ${language.t("settings.usage.label.requests")}: ${decimal(item.requestCount, locale(), 0)} · ${decimal(item.share, locale())}%`}
+                      />
                     )}
                   </For>
                 </SettingsList>
@@ -368,39 +513,59 @@ export const SettingsUsage: Component = () => {
                 <table class="min-w-full text-left">
                   <thead class="border-b border-border-weak-base text-12-medium text-text-weak">
                     <tr>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.time")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.provider")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.model")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.input")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.output")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.cost")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.latency")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.status")}</th>
-                      <th class="px-4 py-3">{language.t("settings.usage.table.source")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.time")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.project")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.session")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.provider")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.agentKind")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.input")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.output")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.reasoning")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.cacheRead")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.cacheWrite")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.cost")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.latency")}</th>
+                      <th class="px-3 py-2.5">{language.t("settings.usage.table.status")}</th>
                     </tr>
                   </thead>
-                  <tbody class="text-14-regular text-text-strong">
+                  <tbody class="text-13-regular text-text-strong">
                     <For each={logs()}>
                       {(item) => (
-                        <tr class="border-b border-border-weak-base last:border-none">
-                          <td class="px-4 py-3">{dateTime(item.time, locale())}</td>
-                          <td class="px-4 py-3">{item.provider || "N/A"}</td>
-                          <td class="px-4 py-3">
-                            <div>{item.model || "N/A"}</div>
-                            <div class="max-w-[240px] truncate pt-1 text-12-regular text-text-weak">{item.sessionTitle || item.directory || "N/A"}</div>
+                        <tr class="border-b border-border-weak-base align-top last:border-none">
+                          <td class="whitespace-nowrap px-3 py-2.5">{dateTime(item.time, locale())}</td>
+                          <td class="px-3 py-2.5">
+                            <div class="max-w-[180px] truncate">{item.projectName || unknown()}</div>
+                            <div class="max-w-[180px] truncate pt-1 text-12-regular text-text-weak">{item.projectDirectory || unknown()}</div>
                           </td>
-                          <td class="px-4 py-3">{compactNumber(item.input, locale())}</td>
-                          <td class="px-4 py-3">
-                            <div>{compactNumber(item.output + item.reasoning, locale())}</div>
-                            <div class="pt-1 text-12-regular text-text-weak">R{compactNumber(item.reasoning, locale())}</div>
+                          <td class="px-3 py-2.5">
+                            <div class="max-w-[180px] truncate">{item.sessionTitle || unknown()}</div>
+                            <div class="max-w-[180px] truncate pt-1 text-12-regular text-text-weak">{item.directory || unknown()}</div>
                           </td>
-                          <td class="px-4 py-3">{currency(item.cost, locale())}</td>
-                          <td class="px-4 py-3">
-                            <div>{nullableMetric(item.duration, locale())}</div>
-                            <div class="pt-1 text-12-regular text-text-weak">{nullableMetric(item.ttft, locale())}</div>
+                          <td class="px-3 py-2.5">
+                            <div class="whitespace-nowrap">{item.provider || unknown()}</div>
+                            <div class="whitespace-nowrap pt-1 text-12-regular text-text-weak">{item.model || unknown()}</div>
                           </td>
-                          <td class="px-4 py-3">{item.status || "N/A"}</td>
-                          <td class="px-4 py-3">{item.source || "N/A"}</td>
+                          <td class="px-3 py-2.5">
+                            <div class="whitespace-nowrap">{language.t(`settings.usage.agent.${item.agentKind}` as never)}</div>
+                            <Show when={item.agentKind === "subagent"}>
+                              <div class="whitespace-nowrap pt-1 text-12-regular text-text-weak">{item.agentID}</div>
+                            </Show>
+                          </td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{compactNumber(item.input, locale())}</td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{compactNumber(item.output, locale())}</td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{compactNumber(item.reasoning, locale())}</td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{compactNumber(item.cacheRead, locale())}</td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{compactNumber(item.cacheWrite, locale())}</td>
+                          <td class="whitespace-nowrap px-3 py-2.5">{currency(item.cost, locale())}</td>
+                          <td class="px-3 py-2.5">
+                            <div class="whitespace-nowrap">{nullableMetric(item.duration, locale())}</div>
+                            <div class="whitespace-nowrap pt-1 text-12-regular text-text-weak">{nullableMetric(item.ttft, locale())}</div>
+                          </td>
+                          <td class="px-3 py-2.5">
+                            <span class={`inline-flex rounded-full px-2 py-1 text-12-medium ${statusTone(item.status)}`}>
+                              {language.t(`settings.usage.status.${item.status}` as never)}
+                            </span>
+                          </td>
                         </tr>
                       )}
                     </For>

@@ -62,7 +62,7 @@ function normalizeLoadedConfig(data: unknown, source: string) {
   delete copy.keybinds
   delete copy.tui
   delete copy.skills
-  log.warn("legacy keys in lfcode config are deprecated; move them to tui.json and .lfcode/skills/", {
+  log.warn("legacy keys in lfcode config are deprecated; move them to tui.json and skills/ under the lfcode config root", {
     path: source,
   })
   return copy

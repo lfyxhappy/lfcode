@@ -6,6 +6,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { getBootstrapState } from "./bootstrap"
 import type { DetachedSidePanelKind, TitlebarTheme } from "../preload/types"
+import { browserPartition } from "./browser-runtime"
+import { wireBrowserGuest } from "./browser-management"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -165,6 +167,22 @@ export function createDetachedSidePanelWindow(input: {
   return win
 }
 
+export function emitBrowserGuestRegistered(win: BrowserWindow, input: {
+  sourceWindowID: number
+  tabID: string
+  guestID: number
+}) {
+  win.webContents.send("browser-guest-registered", input)
+}
+
+export function emitBrowserGuestUnregistered(win: BrowserWindow, input: {
+  sourceWindowID: number
+  tabID: string
+  guestID?: number
+}) {
+  win.webContents.send("browser-guest-unregistered", input)
+}
+
 function isAllowedEmbeddedURL(input: string) {
   try {
     const url = new URL(input)
@@ -279,17 +297,21 @@ function createAppWindow(
 
 function wireBrowserEvents(win: BrowserWindow) {
   win.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
-    webPreferences.preload = undefined
+    webPreferences.preload = join(root, "../preload/browser-webview.js")
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
     webPreferences.webSecurity = true
-    params.partition = "persist:lfcode-browser"
+    params.partition = browserPartition()
     if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
       params.src = "about:blank"
     }
   })
   win.webContents.on("did-attach-webview", (_event, guest) => {
+    wireBrowserGuest({
+      sourceWindowID: win.id,
+      guest,
+    })
     guest.setWindowOpenHandler(({ url }) => {
       win.webContents.send("browser-window-open", url)
       return { action: "deny" }

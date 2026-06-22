@@ -52,6 +52,22 @@ describe("file/index Filesystem patterns", () => {
       })
     })
 
+    test("reads absolute files outside the workspace", async () => {
+      await using tmp = await tmpdir()
+      await using external = await tmpdir()
+      const filepath = path.join(external.path, "outside.txt")
+      await fs.writeFile(filepath, "external file", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read(filepath)
+          expect(result.type).toBe("text")
+          expect(result.content).toBe("external file")
+        },
+      })
+    })
+
     test("trims whitespace from text content", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "test.txt")
@@ -115,6 +131,25 @@ describe("file/index Filesystem patterns", () => {
       })
     })
 
+    test("reads absolute external images as base64 previews", async () => {
+      await using tmp = await tmpdir()
+      await using external = await tmpdir()
+      const filepath = path.join(external.path, "outside.png")
+      const binaryContent = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+      await fs.writeFile(filepath, binaryContent)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read(filepath)
+          expect(result.type).toBe("text")
+          expect(result.encoding).toBe("base64")
+          expect(result.mimeType).toBe("image/png")
+          expect(result.content).toBe(binaryContent.toString("base64"))
+        },
+      })
+    })
+
     test("returns empty for binary non-image files", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "binary.so")
@@ -126,6 +161,39 @@ describe("file/index Filesystem patterns", () => {
           const result = await read("binary.so")
           expect(result.type).toBe("binary")
           expect(result.content).toBe("")
+        },
+      })
+    })
+
+    test("extracts readable text from docx previews", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "sample.docx")
+      const zip = await import("@zip.js/zip.js")
+      const writer = new zip.ZipWriter(new zip.BlobWriter("application/zip"))
+      await writer.add(
+        "word/document.xml",
+        new zip.TextReader(
+          [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">',
+            "<w:body>",
+            "<w:p><w:r><w:t>Hello</w:t></w:r></w:p>",
+            "<w:p><w:r><w:t>World</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>Docx</w:t></w:r></w:p>",
+            "</w:body>",
+            "</w:document>",
+          ].join(""),
+        ),
+      )
+      const blob = await writer.close()
+      await fs.writeFile(filepath, Buffer.from(await blob.arrayBuffer()))
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read("sample.docx")
+          expect(result.type).toBe("text")
+          expect(result.mimeType).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+          expect(result.content).toBe("Hello\nWorld\tDocx")
         },
       })
     })

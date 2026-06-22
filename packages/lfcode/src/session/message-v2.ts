@@ -267,34 +267,35 @@ export const StepStartPart = PartBase.extend({
 })
 export type StepStartPart = z.infer<typeof StepStartPart>
 
+const MessageTokens = z.object({
+  total: z.number().optional(),
+  input: z.number(),
+  output: z.number(),
+  reasoning: z.number(),
+  cache: z.object({
+    read: z.number(),
+    write: z.number(),
+  }),
+})
+
 export const StepFinishPart = PartBase.extend({
   type: z.literal("step-finish"),
   reason: z.string(),
   snapshot: z.string().optional(),
+  status: z.enum(["completed", "error", "aborted"]).optional(),
+  time: z
+    .object({
+      start: z.number(),
+      end: z.number(),
+      ttft: z.number().nullable(),
+    })
+    .optional(),
   cost: z.number(),
-  tokens: z.object({
-    total: z.number().optional(),
-    input: z.number(),
-    output: z.number(),
-    reasoning: z.number(),
-    cache: z.object({
-      read: z.number(),
-      write: z.number(),
-    }),
-  }),
+  tokens: MessageTokens,
   overhead: z
     .object({
       cost: z.number(),
-      tokens: z.object({
-        total: z.number().optional(),
-        input: z.number(),
-        output: z.number(),
-        reasoning: z.number(),
-        cache: z.object({
-          read: z.number(),
-          write: z.number(),
-        }),
-      }),
+      tokens: MessageTokens,
     })
     .optional(),
 }).meta({
@@ -479,16 +480,13 @@ export const Assistant = Base.extend({
   }),
   summary: z.boolean().optional(),
   cost: z.number(),
-  tokens: z.object({
-    total: z.number().optional(),
-    input: z.number(),
-    output: z.number(),
-    reasoning: z.number(),
-    cache: z.object({
-      read: z.number(),
-      write: z.number(),
-    }),
-  }),
+  tokens: MessageTokens,
+  responseMetrics: z
+    .object({
+      firstTokenAt: z.number(),
+      tokens: MessageTokens,
+    })
+    .optional(),
   structured: z.any().optional(),
   variant: z.string().optional(),
   finish: z.string().optional(),

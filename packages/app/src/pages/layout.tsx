@@ -53,6 +53,7 @@ import { Binary } from "@lfcode-ai/shared/util/binary"
 import { retry } from "@lfcode-ai/shared/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
+import { BROWSER_LOGINS_UPDATED_EVENT } from "@/utils/browser-events"
 import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
@@ -527,8 +528,41 @@ export default function Layout(props: ParentProps) {
       })
     })
 
+  const useBrowserPasswordCaptureToasts = () =>
+    onMount(() => {
+      if (!platform.onBrowserPasswordCapture || !platform.acknowledgeBrowserSavePasswordPrompt) return
+      const dispose = platform.onBrowserPasswordCapture((event) => {
+        showToast({
+          persistent: true,
+          icon: "checklist",
+          title: language.t("settings.browser.passwordPrompt.title"),
+          description: language.t("settings.browser.passwordPrompt.description", {
+            origin: event.origin,
+            username: event.username || language.t("settings.browser.logins.usernameEmpty"),
+          }),
+          actions: [
+            {
+              label: language.t("settings.browser.passwordPrompt.action.save"),
+              onClick: async () => {
+                const saved = await platform.acknowledgeBrowserSavePasswordPrompt?.({ id: event.id, save: true })
+                if (saved) window.dispatchEvent(new Event(BROWSER_LOGINS_UPDATED_EVENT))
+              },
+            },
+            {
+              label: language.t("settings.browser.passwordPrompt.action.ignore"),
+              onClick: async () => {
+                await platform.acknowledgeBrowserSavePasswordPrompt?.({ id: event.id, save: false })
+              },
+            },
+          ],
+        })
+      })
+      onCleanup(dispose)
+    })
+
   useUpdatePolling()
   useSDKNotificationToasts()
+  useBrowserPasswordCaptureToasts()
 
   function scrollToSession(sessionId: string, sessionKey: string) {
     if (!scrollContainerRef) return

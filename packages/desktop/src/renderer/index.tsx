@@ -150,6 +150,49 @@ const createPlatform = (): Platform => {
     openExternalLink(url: string) {
       window.api.openExternalLink(url)
     },
+    openBrowserDevTools: async (target) => {
+      await window.api.openBrowserDevTools(target)
+    },
+    clearBrowserSiteData: async (target) => {
+      return window.api.clearBrowserSiteData(target)
+    },
+    listBrowserCookies: async () => {
+      return window.api.listBrowserCookies()
+    },
+    removeBrowserCookie: async (cookie) => {
+      await window.api.removeBrowserCookie(cookie)
+    },
+    clearBrowserCookiesByDomain: async (domain) => {
+      return window.api.clearBrowserCookiesByDomain(domain)
+    },
+    clearAllBrowserCookies: async () => {
+      return window.api.clearAllBrowserCookies()
+    },
+    getBrowserPasswordStorageState: async () => {
+      return window.api.getBrowserPasswordStorageState()
+    },
+    listSavedBrowserLogins: async () => {
+      return window.api.listSavedBrowserLogins()
+    },
+    upsertSavedBrowserLogin: async (input) => {
+      return window.api.upsertSavedBrowserLogin(input)
+    },
+    deleteSavedBrowserLogin: async (id) => {
+      await window.api.deleteSavedBrowserLogin(id)
+    },
+    acknowledgeBrowserSavePasswordPrompt: async (input) => {
+      return window.api.acknowledgeBrowserSavePasswordPrompt(input)
+    },
+    onBrowserPasswordCapture: (cb) => window.api.onBrowserPasswordCapture(cb),
+    registerBrowserGuest: async (target) => {
+      await window.api.registerBrowserGuest(target)
+    },
+    unregisterBrowserGuest: async (target) => {
+      await window.api.unregisterBrowserGuest(target)
+    },
+    setActiveBrowserTab: async (target) => {
+      await window.api.setActiveBrowserTab(target)
+    },
     async openPath(path: string, app?: string) {
       if (os === "windows") {
         const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
@@ -240,6 +283,10 @@ const createPlatform = (): Platform => {
     parseMarkdown: (markdown: string) => window.api.parseMarkdownCommand(markdown),
 
     webviewZoom,
+
+    getWindowID: async () => {
+      return window.api.getWindowID()
+    },
 
     checkAppExists: async (appName: string) => {
       return window.api.checkAppExists(appName)

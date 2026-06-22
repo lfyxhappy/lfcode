@@ -990,6 +990,19 @@ export type AssistantMessage = {
       write: number
     }
   }
+  responseMetrics?: {
+    firstTokenAt: number
+    tokens: {
+      total?: number
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+  }
   structured?: unknown
   variant?: string
   finish?: string
@@ -1197,6 +1210,12 @@ export type StepFinishPart = {
   type: "step-finish"
   reason: string
   snapshot?: string
+  status?: "completed" | "error" | "aborted"
+  time?: {
+    start: number
+    end: number
+    ttft: number | null
+  }
   cost: number
   tokens: {
     total?: number
@@ -6695,6 +6714,12 @@ export type UsageGetResponses = {
       requestCount: number
       totalCost: number
       overheadCost: number
+      successCount: number
+      errorCount: number
+      abortedCount: number
+      successRate: number | null
+      avgDuration: number | null
+      avgTtft: number | null
     }
     trend: Array<{
       time: number
@@ -6706,9 +6731,15 @@ export type UsageGetResponses = {
     }>
     logs: Array<{
       id: string
+      projectID: string
+      projectName: string
+      projectDirectory: string
       sessionID: string
+      sessionParentID: string | null
       sessionTitle: string
       directory: string
+      agentID: string
+      agentKind: "main" | "subagent"
       time: number
       provider: string
       model: string
@@ -6723,8 +6754,27 @@ export type UsageGetResponses = {
       cost: number
       duration: number | null
       ttft: number | null
-      status: string
-      source: string
+      status: "completed" | "error" | "aborted"
+      source: "lfcode"
+    }>
+    projectStats: Array<{
+      projectID: string
+      projectName: string
+      directory: string
+      requestCount: number
+      totalTokens: number
+      totalCost: number
+      share: number
+    }>
+    sessionStats: Array<{
+      sessionID: string
+      sessionTitle: string
+      projectName: string
+      directory: string
+      requestCount: number
+      totalTokens: number
+      totalCost: number
+      share: number
     }>
     providerStats: Array<{
       provider: string
@@ -6745,6 +6795,10 @@ export type UsageGetResponses = {
       range: "today" | "7d" | "30d" | "all"
       provider: string | null
       model: string | null
+      project: string | null
+      session: string | null
+      status: "completed" | "error" | "aborted" | null
+      agent_kind: "main" | "subagent" | null
       search: string | null
       limit: number
       cursor: number | null

@@ -10,6 +10,7 @@ import { SettingsGeneral } from "./settings-general"
 import { SettingsKeybinds } from "./settings-keybinds"
 
 const SettingsArchives = lazy(() => import("./settings-archives").then((mod) => ({ default: mod.SettingsArchives })))
+const SettingsBrowser = lazy(() => import("./settings-browser").then((mod) => ({ default: mod.SettingsBrowser })))
 const SettingsProviders = lazy(() => import("./settings-providers").then((mod) => ({ default: mod.SettingsProviders })))
 const SettingsModels = lazy(() => import("./settings-models").then((mod) => ({ default: mod.SettingsModels })))
 const SettingsMcp = lazy(() => import("./settings-mcp").then((mod) => ({ default: mod.SettingsMcp })))
@@ -19,7 +20,7 @@ const SettingsSkills = lazy(() => import("./settings-skills").then((mod) => ({ d
 type SettingsPanelRenderers = Partial<Record<SettingsTab, Component>>
 
 const serverTabs = ["archives", "providers", "models", "mcp", "skills", "usage"] as const satisfies SettingsTab[]
-const desktopTabs = ["general", "shortcuts"] as const satisfies SettingsTab[]
+const desktopTabs = ["general", "shortcuts", "browser"] as const satisfies SettingsTab[]
 
 function SettingsPanelSkeleton() {
   return (
@@ -64,6 +65,8 @@ function SettingsPanelBoundary(props: { children: JSX.Element }) {
 
 function renderLazyPanel(tab: Exclude<SettingsTab, "general" | "shortcuts">) {
   switch (tab) {
+    case "browser":
+      return SettingsBrowser
     case "archives":
       return SettingsArchives
     case "providers":
@@ -153,6 +156,7 @@ export const SettingsView: Component<{
       ({
         general: { icon: "sliders" as const, label: language.t("settings.tab.general") },
         shortcuts: { icon: "keyboard" as const, label: language.t("settings.tab.shortcuts") },
+        browser: { icon: "window-cursor" as const, label: language.t("settings.browser.title") },
         archives: { icon: "archive" as const, label: language.t("settings.archives.title") },
         providers: { icon: "providers" as const, label: language.t("settings.providers.title") },
         models: { icon: "models" as const, label: language.t("settings.models.title") },
@@ -218,6 +222,7 @@ export const SettingsView: Component<{
       </Tabs.List>
       <SettingsPanel tab="general" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <SettingsPanel tab="shortcuts" selected={selected} visited={visited} renderers={props.tabRenderers} />
+      <SettingsPanel tab="browser" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <For each={serverTabs}>
         {(tab) => <SettingsPanel tab={tab} selected={selected} visited={visited} renderers={props.tabRenderers} />}
       </For>

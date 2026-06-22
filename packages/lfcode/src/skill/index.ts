@@ -9,6 +9,7 @@ import { InstanceState } from "@/effect"
 import { Flag } from "@/flag/flag"
 import { Permission } from "@/permission"
 import { AppFileSystem } from "@/filesystem"
+import { Global } from "@/global"
 import { ConfigMarkdown } from "../config"
 import { Glob } from "@lfcode-ai/shared/util/glob"
 import { Log } from "../util"
@@ -139,7 +140,7 @@ const scan = Effect.fnUntraced(function* (
   }
 })
 
-const discoverSkills = Effect.fnUntraced(function* (fsys: AppFileSystem.Interface, directory: string, worktree: string) {
+const discoverSkills = Effect.fnUntraced(function* (fsys: AppFileSystem.Interface, _directory: string, _worktree: string) {
   const state: ScanState = { matches: new Set(), dirs: new Set() }
 
   if (!Flag.LFCODE_DISABLE_LFCODE_SKILLS) {
@@ -161,21 +162,9 @@ const discoverSkills = Effect.fnUntraced(function* (fsys: AppFileSystem.Interfac
     }
   }
 
-  const localSkillRoot = path.join(directory, ".lfcode", "skills")
-  if (yield* fsys.isDir(localSkillRoot)) {
-    yield* scan(state, localSkillRoot, SKILL_PATTERN, { scope: "local" })
-  }
-
-  if (!Flag.LFCODE_DISABLE_EXTERNAL_SKILLS) {
-    const projectSkillDirs = yield* fsys
-      .up({ targets: [".lfcode"], start: directory, stop: worktree })
-      .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-
-    for (const root of projectSkillDirs) {
-      const skillRoot = path.join(root, "skills")
-      if (!(yield* fsys.isDir(skillRoot))) continue
-      yield* scan(state, skillRoot, SKILL_PATTERN, { scope: "project" })
-    }
+  const globalSkillRoot = path.join(Global.Path.config, "skills")
+  if (yield* fsys.isDir(globalSkillRoot)) {
+    yield* scan(state, globalSkillRoot, SKILL_PATTERN, { scope: "global" })
   }
 
   return {

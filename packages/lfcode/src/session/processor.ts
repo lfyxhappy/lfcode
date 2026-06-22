@@ -133,6 +133,39 @@ type ToolCall = {
   done: Deferred.Deferred<void>
 }
 
+function emptyResponseTokens(): MessageV2.Assistant["tokens"] {
+  return {
+    total: 0,
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    cache: {
+      read: 0,
+      write: 0,
+    },
+  }
+}
+
+function addTokens(
+  current: MessageV2.Assistant["tokens"],
+  next: MessageV2.Assistant["tokens"],
+): MessageV2.Assistant["tokens"] {
+  return {
+    total: (current.total ?? 0) + (next.total ?? 0),
+    input: current.input + next.input,
+    output: current.output + next.output,
+    reasoning: current.reasoning + next.reasoning,
+    cache: {
+      read: current.cache.read + next.cache.read,
+      write: current.cache.write + next.cache.write,
+    },
+  }
+}
+
+function tokenCount(tokens: MessageV2.Assistant["tokens"]) {
+  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+}
+
 interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
@@ -142,7 +175,10 @@ interface ProcessorContext extends Input {
   currentText: MessageV2.TextPart | undefined
   reasoningMap: Record<string, MessageV2.ReasoningPart>
   stepStartedAt: number | undefined
-  firstTokenAt: number | undefined
+  stepFirstTokenAt: number | undefined
+  stepFinished: boolean
+  responseFirstTokenAt: number | undefined
+  responseTokens: MessageV2.Assistant["tokens"]
   stepPartIds: PartID[]
 }
 
@@ -196,7 +232,10 @@ export const layer: Layer.Layer<
         currentText: undefined,
         reasoningMap: {},
         stepStartedAt: undefined,
-        firstTokenAt: undefined,
+        stepFirstTokenAt: undefined,
+        stepFinished: false,
+        responseFirstTokenAt: undefined,
+        responseTokens: emptyResponseTokens(),
         stepPartIds: [],
       }
       let aborted = false
@@ -214,10 +253,78 @@ export const layer: Layer.Layer<
           aborted,
         })
 
+      const syncResponseMetrics = () => {
+        if (!ctx.responseFirstTokenAt || tokenCount(ctx.responseTokens) <= 0) {
+          delete ctx.assistantMessage.responseMetrics
+          return
+        }
+        ctx.assistantMessage.responseMetrics = {
+          firstTokenAt: ctx.responseFirstTokenAt,
+          tokens: ctx.responseTokens,
+        }
+      }
+
       const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
         const done = ctx.toolcalls[toolCallID]?.done
         delete ctx.toolcalls[toolCallID]
         if (done) yield* Deferred.succeed(done, undefined).pipe(Effect.ignore)
+      })
+
+      const stepStatus = (error: NonNullable<MessageV2.Assistant["error"]> | undefined) => {
+        if (error?.name === "MessageAbortedError") return "aborted" as const
+        if (error) return "error" as const
+        return "completed" as const
+      }
+
+      const stepTime = () => {
+        const start = ctx.stepStartedAt ?? ctx.assistantMessage.time.created ?? Date.now()
+        const end = Date.now()
+        return {
+          start,
+          end,
+          ttft: ctx.stepStartedAt && ctx.stepFirstTokenAt ? Math.max(0, ctx.stepFirstTokenAt - ctx.stepStartedAt) : null,
+        }
+      }
+
+      const writeStepFinish = Effect.fn("SessionProcessor.writeStepFinish")(function* (input: {
+        reason: string
+        status: "completed" | "error" | "aborted"
+        usage: {
+          cost: number
+          tokens: MessageV2.Assistant["tokens"]
+        }
+        overhead?: { cost: number; tokensIn: number; tokensOut: number }
+      }) {
+        ctx.stepFinished = true
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          reason: input.reason,
+          status: input.status,
+          time: stepTime(),
+          snapshot: yield* snapshot.track(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.assistantMessage.sessionID,
+          type: "step-finish",
+          tokens: input.usage.tokens,
+          cost: input.usage.cost,
+          ...(input.overhead && (input.overhead.cost > 0 || input.overhead.tokensIn > 0 || input.overhead.tokensOut > 0)
+            ? {
+                overhead: {
+                  cost: input.overhead.cost,
+                  tokens: {
+                    total: input.overhead.tokensIn + input.overhead.tokensOut,
+                    input: input.overhead.tokensIn,
+                    output: input.overhead.tokensOut,
+                    reasoning: 0,
+                    cache: {
+                      read: 0,
+                      write: 0,
+                    },
+                  },
+                },
+              }
+            : {}),
+        })
       })
 
       const readToolCall = Effect.fn("SessionProcessor.readToolCall")(function* (toolCallID: string) {
@@ -321,7 +428,8 @@ export const layer: Layer.Layer<
             return
 
           case "reasoning-delta":
-            if (!ctx.firstTokenAt) ctx.firstTokenAt = Date.now()
+            if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
+            if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
             if (!(value.id in ctx.reasoningMap)) return
             ctx.reasoningMap[value.id].text += value.text
             if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
@@ -446,7 +554,8 @@ export const layer: Layer.Layer<
 
           case "start-step":
             ctx.stepStartedAt = Date.now()
-            ctx.firstTokenAt = undefined
+            ctx.stepFirstTokenAt = undefined
+            ctx.stepFinished = false
             if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
             const stepStartPartId = PartID.ascending()
             yield* session.updatePart({
@@ -469,32 +578,13 @@ export const layer: Layer.Layer<
             ctx.assistantMessage.finish = value.finishReason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
-            yield* session.updatePart({
-              id: PartID.ascending(),
+            ctx.responseTokens = addTokens(ctx.responseTokens, usage.tokens)
+            syncResponseMetrics()
+            yield* writeStepFinish({
               reason: value.finishReason,
-              snapshot: yield* snapshot.track(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.assistantMessage.sessionID,
-              type: "step-finish",
-              tokens: usage.tokens,
-              cost: usage.cost,
-              ...(overhead && (overhead.cost > 0 || overhead.tokensIn > 0 || overhead.tokensOut > 0)
-                ? {
-                    overhead: {
-                      cost: overhead.cost,
-                      tokens: {
-                        total: overhead.tokensIn + overhead.tokensOut,
-                        input: overhead.tokensIn,
-                        output: overhead.tokensOut,
-                        reasoning: 0,
-                        cache: {
-                          read: 0,
-                          write: 0,
-                        },
-                      },
-                    },
-                  }
-                : {}),
+              status: "completed",
+              usage,
+              overhead,
             })
             yield* session.updateMessage(ctx.assistantMessage)
             let stepFilesChanged = 0
@@ -525,7 +615,7 @@ export const layer: Layer.Layer<
                 sessionID: ctx.sessionID,
                 finish_reason: value.finishReason,
                 ttft_ms:
-                  ctx.firstTokenAt && ctx.stepStartedAt ? ctx.firstTokenAt - ctx.stepStartedAt : undefined,
+                  ctx.stepFirstTokenAt && ctx.stepStartedAt ? ctx.stepFirstTokenAt - ctx.stepStartedAt : undefined,
                 latency_ms: ctx.stepStartedAt ? Date.now() - ctx.stepStartedAt : 0,
                 cached_read_tokens: usage.tokens.cache.read,
                 model_id: ctx.model.id,
@@ -564,7 +654,8 @@ export const layer: Layer.Layer<
             return
 
           case "text-delta":
-            if (!ctx.firstTokenAt) ctx.firstTokenAt = Date.now()
+            if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
+            if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
             if (!ctx.currentText) return
             ctx.currentText.text += value.text
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
@@ -672,11 +763,25 @@ export const layer: Layer.Layer<
         slog.error("process", { error: errorMessage(e), stack: e instanceof Error ? e.stack : undefined })
         const error = parse(e)
         if (MessageV2.ContextOverflowError.isInstance(error)) {
+          if (!ctx.stepFinished) {
+            yield* writeStepFinish({
+              reason: "context-overflow",
+              status: "error",
+              usage: { cost: 0, tokens: emptyResponseTokens() },
+            })
+          }
           ctx.needsOverflowHandling = true
           yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
           return
         }
         ctx.assistantMessage.error = error
+        if (!ctx.stepFinished) {
+          yield* writeStepFinish({
+            reason: error.name,
+            status: stepStatus(error),
+            usage: { cost: 0, tokens: emptyResponseTokens() },
+          })
+        }
         yield* bus.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,

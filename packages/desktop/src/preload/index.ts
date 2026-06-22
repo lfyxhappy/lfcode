@@ -36,6 +36,7 @@ const api: ElectronAPI = {
   clearDetachedDockTarget: () => ipcRenderer.invoke("clear-detached-dock-target"),
 
   getWindowCount: () => ipcRenderer.invoke("get-window-count"),
+  getWindowID: () => ipcRenderer.invoke("get-window-id"),
   onSqliteMigrationProgress: (cb) => {
     const handler = (_: unknown, progress: SqliteMigrationProgress) => cb(progress)
     ipcRenderer.on("sqlite-migration-progress", handler)
@@ -56,6 +57,11 @@ const api: ElectronAPI = {
     ipcRenderer.on("browser-window-open", handler)
     return () => ipcRenderer.removeListener("browser-window-open", handler)
   },
+  onBrowserPasswordCapture: (cb) => {
+    const handler = (_: unknown, event: any) => cb(event)
+    ipcRenderer.on("browser-password-capture", handler)
+    return () => ipcRenderer.removeListener("browser-password-capture", handler)
+  },
   onDetachedSidePanelEvent: (cb) => {
     const handler = (_: unknown, event: any) => cb(event)
     ipcRenderer.on("detached-side-panel-event", handler)
@@ -67,6 +73,20 @@ const api: ElectronAPI = {
   saveFilePicker: (opts) => ipcRenderer.invoke("save-file-picker", opts),
   openLink: (url) => ipcRenderer.send("open-link", url),
   openExternalLink: (url) => ipcRenderer.send("open-external-link", url),
+  openBrowserDevTools: (target) => ipcRenderer.invoke("open-browser-devtools", target),
+  clearBrowserSiteData: (target) => ipcRenderer.invoke("clear-browser-site-data", target),
+  listBrowserCookies: () => ipcRenderer.invoke("list-browser-cookies"),
+  removeBrowserCookie: (cookie) => ipcRenderer.invoke("remove-browser-cookie", cookie),
+  clearBrowserCookiesByDomain: (domain) => ipcRenderer.invoke("clear-browser-cookies-by-domain", domain),
+  clearAllBrowserCookies: () => ipcRenderer.invoke("clear-all-browser-cookies"),
+  getBrowserPasswordStorageState: () => ipcRenderer.invoke("get-browser-password-storage-state"),
+  listSavedBrowserLogins: () => ipcRenderer.invoke("list-saved-browser-logins"),
+  upsertSavedBrowserLogin: (input) => ipcRenderer.invoke("upsert-saved-browser-login", input),
+  deleteSavedBrowserLogin: (id) => ipcRenderer.invoke("delete-saved-browser-login", id),
+  acknowledgeBrowserSavePasswordPrompt: (input) => ipcRenderer.invoke("acknowledge-browser-save-password-prompt", input),
+  registerBrowserGuest: (target) => ipcRenderer.invoke("register-browser-guest", target),
+  unregisterBrowserGuest: (target) => ipcRenderer.invoke("unregister-browser-guest", target),
+  setActiveBrowserTab: (target) => ipcRenderer.invoke("set-active-browser-tab", target),
   openPath: (path, app) => ipcRenderer.invoke("open-path", path, app),
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
   showNotification: (title, body) => ipcRenderer.send("show-notification", title, body),

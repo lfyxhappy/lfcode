@@ -4,6 +4,7 @@ import path from "path"
 import { provideInstance, tmpdir, provideTmpdirInstance } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Agent } from "../../src/agent/agent"
+import { Global } from "../../src/global"
 import { Permission } from "../../src/permission"
 import { ToolRegistry } from "../../src/tool"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -559,7 +560,7 @@ test("skill directories are allowed for external_directory", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
-      const skillDir = path.join(dir, ".lfcode", "skill", "perm-skill")
+      const skillDir = path.join(dir, "skills", "perm-skill")
       await Bun.write(
         path.join(skillDir, "SKILL.md"),
         `---
@@ -573,24 +574,21 @@ description: Permission skill.
     },
   })
 
-  const home = process.env.HOME
-  const userProfile = process.env.USERPROFILE
-  process.env.HOME = tmp.path
-  process.env.USERPROFILE = tmp.path
+  const originalConfig = Global.Path.config
+  Object.assign(Global.Path, { config: tmp.path })
 
   try {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         const build = await load(tmp.path, (svc) => svc.get("build"))
-        const skillDir = path.join(tmp.path, ".lfcode", "skill", "perm-skill")
+        const skillDir = path.join(tmp.path, "skills", "perm-skill")
         const target = path.join(skillDir, "reference", "notes.md")
         expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
       },
     })
   } finally {
-    process.env.HOME = home
-    process.env.USERPROFILE = userProfile
+    Object.assign(Global.Path, { config: originalConfig })
   }
 })
 

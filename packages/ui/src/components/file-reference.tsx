@@ -37,6 +37,9 @@ export function FileReference(props: FileReferenceProps) {
   const openTarget = createMemo(() => resolved() ?? props.path)
   const canPreviewPaths = createMemo(() => props.clickable ?? !!context?.canOpenPaths)
   const canPreview = createMemo(() => canPreviewPaths() && !!resolved() && !!(props.onPreview ?? context?.onPreviewPath))
+  const canDirectoryOpen = createMemo(
+    () => kind() === "directory" && !!resolved() && !!(props.onOpenDefaultApp ?? context?.onOpenDefaultApp) && !!context?.canExternalOpenPaths,
+  )
   const canExternalOpen = createMemo(
     () => !!resolved() && !!(props.onOpenDefaultApp ?? context?.onOpenDefaultApp) && !!context?.canExternalOpenPaths,
   )
@@ -53,6 +56,10 @@ export function FileReference(props: FileReferenceProps) {
   const openApps = createMemo(() => context?.openWithApps ?? [])
 
   const click = () => {
+    if (canDirectoryOpen()) {
+      ;(props.onOpenDefaultApp ?? context?.onOpenDefaultApp)?.(openTarget()!)
+      return
+    }
     if (!canPreview()) return
     ;(props.onPreview ?? context?.onPreviewPath)?.(openTarget()!)
   }
@@ -63,9 +70,10 @@ export function FileReference(props: FileReferenceProps) {
       data-kind={kind()}
       class={props.class}
       classList={{
-        clickable: canPreview(),
+        clickable: canPreview() || canDirectoryOpen(),
         pressed: pressed(),
-        "text-text-interactive-base hover:underline underline-offset-2 cursor-pointer": canPreview() || allowContextMenu(),
+        "text-text-interactive-base hover:underline underline-offset-2 cursor-pointer":
+          canPreview() || canDirectoryOpen() || allowContextMenu(),
         ...props.classList,
       }}
       onClick={(event) => {

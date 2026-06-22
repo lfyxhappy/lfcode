@@ -3828,9 +3828,9 @@ export class Event extends HeyApiClient {
 
 export class Manage extends HeyApiClient {
   /**
-   * List local skills
+   * List managed skills
    *
-   * List skills directly from the local .lfcode/skills directory.
+   * List skills directly from the managed global skills directory.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3858,9 +3858,9 @@ export class Manage extends HeyApiClient {
   }
 
   /**
-   * Update a local skill
+   * Update a managed skill
    *
-   * Update the hidden frontmatter of a skill in .lfcode/skills.
+   * Update the hidden frontmatter of a skill in the managed global skills directory.
    */
   public update<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3905,9 +3905,9 @@ export class Manage extends HeyApiClient {
   }
 
   /**
-   * Delete a local skill
+   * Delete a managed skill
    *
-   * Permanently delete a skill directory from .lfcode/skills.
+   * Permanently delete a skill directory from the managed global skills directory.
    */
   public delete<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -3956,7 +3956,7 @@ export class Discover extends HeyApiClient {
   /**
    * Install a discovered skill
    *
-   * Install a skill from a skills.sh repository into .lfcode/skills.
+   * Install a skill from a skills.sh repository into the managed global skills directory.
    */
   public install<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4007,7 +4007,7 @@ export class Skills extends HeyApiClient {
   /**
    * List skills
    *
-   * List skills from the local .lfcode/skills directory.
+   * List available skills, including the managed global skills directory.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4139,7 +4139,7 @@ export class Skills extends HeyApiClient {
   /**
    * Import a skill directory
    *
-   * Copy local skills into .lfcode/skills from a folder, zip file, or known external skill root.
+   * Copy skills into the managed global skills directory from a folder, zip file, or known external skill root.
    */
   public import<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -4180,7 +4180,7 @@ export class Skills extends HeyApiClient {
   /**
    * Create a new skill
    *
-   * Create a new skill skeleton under .lfcode/skills.
+   * Create a new skill skeleton under the managed global skills directory.
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {

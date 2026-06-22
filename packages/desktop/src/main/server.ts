@@ -30,7 +30,8 @@ export function setWslConfig(config: WslConfig) {
 }
 
 export async function spawnLocalServer(hostname: string, port: number, password: string) {
-  prepareServerEnv(password)
+  const url = `http://${hostname}:${port}`
+  prepareServerEnv(password, url)
   const { Log, Server } = await import("virtual:lfcode-server")
   await Log.init({ level: "WARN" })
   const listener = await Server.listen({
@@ -42,8 +43,6 @@ export async function spawnLocalServer(hostname: string, port: number, password:
   })
 
   const wait = (async () => {
-    const url = `http://${hostname}:${port}`
-
     const ready = async () => {
       while (true) {
         await new Promise((resolve) => setTimeout(resolve, 100))
@@ -64,7 +63,7 @@ const ROOT_ENV_KEYS = [
   "LFCODE_CACHE_DIR",
 ] as const
 
-function prepareServerEnv(password: string) {
+function prepareServerEnv(password: string, url: string) {
   const shell = process.platform === "win32" ? null : getUserShell()
   const shellEnv = shell ? (loadShellEnv(shell) ?? {}) : {}
   const env: NodeJS.ProcessEnv = {
@@ -75,6 +74,8 @@ function prepareServerEnv(password: string) {
     LFCODE_CLIENT: "desktop",
     LFCODE_SERVER_USERNAME: "lfcode",
     LFCODE_SERVER_PASSWORD: password,
+    LFCODE_SERVER_URL: url,
+    LFCODE_SERVER_AUTH: `Basic ${Buffer.from(`lfcode:${password}`).toString("base64")}`,
   }
   for (const key of ROOT_ENV_KEYS) {
     const value = process.env[key]
