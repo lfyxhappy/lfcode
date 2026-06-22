@@ -24,7 +24,19 @@ const windowsComputerUseLegacyCommand = [
   "node",
   "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
 ] as const
-const windowsComputerUseCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const windowsComputerUsePreviousCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const windowsComputerUseCommand = [
+  "{env:LFCODE_BUNDLED_NODE}",
+  "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
+] as const
+const windowsComputerUseConfig = {
+  type: "local",
+  command: windowsComputerUseCommand,
+  environment: {
+    ELECTRON_RUN_AS_NODE: "1",
+  },
+  enabled: true,
+} as const
 
 if (process.platform !== "win32") process.exit(0)
 if (!existsSync(targetDir) || !existsSync(backupDir)) process.exit(0)
@@ -48,9 +60,21 @@ console.log(`Restored preserved Windows runtime data into ${targetDir}`)
 
 function upgradeBundledCommands(text: string) {
   const parsed = parseJsonc(text)
-  if (!isRecord(parsed) || !isRecord(parsed.mcp)) return text
+  if (!isRecord(parsed)) return text
   let updated = text
-  const playwright = parsed.mcp.playwright
+  const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined
+  if (!mcp) {
+    return applyEdits(
+      updated,
+      modify(updated, ["mcp"], { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig }, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+  }
+  const playwright = mcp.playwright
   if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
     updated = applyEdits(
       updated,
@@ -62,17 +86,19 @@ function upgradeBundledCommands(text: string) {
       }),
     )
   }
-  const value = parsed.mcp["windows-computer-use"]
-  if (!isLegacyWindowsComputerUseConfig(value)) return updated
-  return applyEdits(
-    updated,
-    modify(updated, ["mcp", "windows-computer-use", "command"], windowsComputerUseCommand, {
-      formattingOptions: {
-        insertSpaces: true,
-        tabSize: 2,
-      },
-    }),
-  )
+  const value = mcp["windows-computer-use"]
+  if (value === undefined || isLegacyWindowsComputerUseConfig(value)) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp", "windows-computer-use"], windowsComputerUseConfig, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+  }
+  return updated
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,7 +110,11 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
     isRecord(value) &&
     value.type === "local" &&
     value.enabled === true &&
-    (isExactCommand(value.command, windowsComputerUseLegacyCommand) || isBrokenWindowsComputerUseCommand(value.command))
+    (
+      isExactCommand(value.command, windowsComputerUsePreviousCommand) ||
+      isExactCommand(value.command, windowsComputerUseLegacyCommand) ||
+      isBrokenWindowsComputerUseCommand(value.command)
+    )
   )
 }
 
