@@ -25,7 +25,13 @@ const PLAYWRIGHT_DESKTOP_REMOTE_CONFIG = {
   enabled: true,
 } as const
 const PLAYWRIGHT_EXTERNAL_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"] as const
-const WINDOWS_COMPUTER_USE_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const WINDOWS_COMPUTER_USE_COMMAND = [
+  "{env:LFCODE_BUNDLED_NODE}",
+  "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
+] as const
+const WINDOWS_COMPUTER_USE_ENVIRONMENT = {
+  ELECTRON_RUN_AS_NODE: "1",
+} as const
 
 const RegistryRemote = z.object({
   type: z.string(),
@@ -188,6 +194,7 @@ function bundledInfo(name: string): { title: string; adapter: InstallAdapter; co
       config: {
         type: "local",
         command: [...WINDOWS_COMPUTER_USE_COMMAND],
+        environment: { ...WINDOWS_COMPUTER_USE_ENVIRONMENT },
         enabled: true,
       },
     }

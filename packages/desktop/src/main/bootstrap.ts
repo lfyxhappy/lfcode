@@ -29,9 +29,17 @@ const WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND = [
   "node",
   "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
 ] as const
-const WINDOWS_COMPUTER_USE_MCP_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const WINDOWS_COMPUTER_USE_MCP_PREVIOUS_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
+const WINDOWS_COMPUTER_USE_MCP_COMMAND = [
+  "{env:LFCODE_BUNDLED_NODE}",
+  "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
+] as const
+const WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT = {
+  ELECTRON_RUN_AS_NODE: "1",
+} as const
 const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
 const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
+const BUNDLED_MCP_MIGRATION_VERSION = 2
 const DEFAULT_ROOT_CONFIG = {
   $schema: "https://lfcode.ai/config.json",
   mcp: {
@@ -44,6 +52,7 @@ const DEFAULT_ROOT_CONFIG = {
     "windows-computer-use": {
       type: "local",
       command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
+      environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
       enabled: true,
     },
   },
@@ -123,6 +132,7 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
   app.setName(state.appName)
   app.setAppUserModelId(state.appId)
   if (state.layout) ensureRootLayoutSync(state.layout)
+  process.env.LFCODE_BUNDLED_NODE = process.execPath.replaceAll("\\", "/")
   process.env.LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR = app.isPackaged
     ? join(process.resourcesPath, "mcp", "windows-computer-use-mcp").replaceAll("\\", "/")
     : join(app.getAppPath(), "../../.windows-computer-use-mcp").replaceAll("\\", "/")
@@ -385,17 +395,20 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
   const text = await readFile(layout.configFile, "utf8").catch(() => undefined)
   if (!text) return false
 
+  const marker = await readMigrationMarker(layout)
+  const bundledMcpVersion = typeof marker?.bundledMcpVersion === "number" ? marker.bundledMcpVersion : 0
+  const bundledMcpMigrationPending = bundledMcpVersion < BUNDLED_MCP_MIGRATION_VERSION
   const parsed = parseJsonc(text)
   if (!isRecord(parsed)) return false
-  if (!isRecord(parsed.mcp)) return false
 
   let updated = text
   let changed = false
-  const playwright = parsed.mcp.playwright
-  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+  const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined
+
+  if (bundledMcpMigrationPending && !mcp) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp", "playwright"], DEFAULT_ROOT_CONFIG.mcp.playwright, {
+      modify(updated, ["mcp"], DEFAULT_ROOT_CONFIG.mcp, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -405,35 +418,47 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
     changed = true
   }
 
-  if ((isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) && parsed.mcp["windows-computer-use"] === undefined) {
-    updated = applyEdits(
-      updated,
-      modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
-        },
-      }),
-    )
-    changed = true
+  if (mcp) {
+    const playwright = mcp.playwright
+    if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright) || (bundledMcpMigrationPending && playwright === undefined)) {
+      updated = applyEdits(
+        updated,
+        modify(updated, ["mcp", "playwright"], DEFAULT_ROOT_CONFIG.mcp.playwright, {
+          formattingOptions: {
+            insertSpaces: true,
+            tabSize: 2,
+          },
+        }),
+      )
+      changed = true
+    }
+
+    const windowsComputerUse = mcp["windows-computer-use"]
+    if (
+      isLegacyWindowsComputerUseConfig(windowsComputerUse) ||
+      (bundledMcpMigrationPending && windowsComputerUse === undefined)
+    ) {
+      updated = applyEdits(
+        updated,
+        modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
+          formattingOptions: {
+            insertSpaces: true,
+            tabSize: 2,
+          },
+        }),
+      )
+      changed = true
+    }
   }
 
-  const windowsComputerUse = parsed.mcp["windows-computer-use"]
-  if (isLegacyWindowsComputerUseConfig(windowsComputerUse)) {
-    updated = applyEdits(
-      updated,
-      modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
-        },
-      }),
-    )
-    changed = true
+  if (changed) await writeFile(layout.configFile, updated)
+  if (bundledMcpMigrationPending) {
+    await writeMigrationMarker(layout, {
+      bundledMcpVersion: BUNDLED_MCP_MIGRATION_VERSION,
+    })
   }
 
   if (!changed) return false
-  await writeFile(layout.configFile, updated)
   return true
 }
 
@@ -531,6 +556,7 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
   if (value.type !== "local") return false
   if (value.enabled !== true) return false
   return (
+    isStringArray(value.command, [...WINDOWS_COMPUTER_USE_MCP_PREVIOUS_COMMAND]) ||
     isStringArray(value.command, [...WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND]) ||
     isBrokenWindowsComputerUseCommand(value.command)
   )
@@ -570,5 +596,27 @@ function safeStat(path: string) {
   return stat(path).then(
     (info) => info,
     () => undefined,
+  )
+}
+
+async function readMigrationMarker(layout: RootLayout) {
+  const text = await readFile(layout.migrationMarker, "utf8").catch(() => undefined)
+  if (!text) return
+  const parsed = parseJsonc(text)
+  return isRecord(parsed) ? parsed : undefined
+}
+
+async function writeMigrationMarker(layout: RootLayout, patch: Record<string, unknown>) {
+  const current = (await readMigrationMarker(layout)) ?? {}
+  await writeFile(
+    layout.migrationMarker,
+    JSON.stringify(
+      {
+        ...current,
+        ...patch,
+      },
+      null,
+      2,
+    ),
   )
 }
