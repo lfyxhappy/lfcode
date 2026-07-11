@@ -21,3 +21,49 @@
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
+
+[data-prompt-composer="true"] {
+  background-color: var(--surface-raised-stronger-non-alpha);
+  box-shadow: var(--shadow-xs-border);
+  border-radius: 24px;
+  overflow: clip;
+  position: relative;
+}
+
+[data-prompt-composer="true"] [data-dock-surface="shell"] {
+  background-color: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  overflow: visible;
+  z-index: 1;
+}
+
+[data-prompt-composer="true"] [data-dock-surface="tray"] {
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  z-index: 1;
+}
+
+[data-prompt-composer="true"] [data-dock-surface="tray"][data-dock-attach="top"] {
+  margin-top: 0;
+}
+
+[data-prompt-control-strip="true"] [data-slot="select-select-trigger"][data-variant="ghost"],
+[data-prompt-control-strip="true"] [data-component="button"][data-variant="ghost"] {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+[data-prompt-control-strip="true"] [data-slot="select-select-trigger"][data-variant="ghost"]:hover:not(:disabled),
+[data-prompt-control-strip="true"] [data-component="button"][data-variant="ghost"]:hover:not(:disabled) {
+  background-color: var(--surface-raised-base-hover);
+}
+
+[data-prompt-control-strip="true"] [data-slot="select-select-trigger"][data-variant="ghost"][data-expanded],
+[data-prompt-control-strip="true"] [data-slot="select-select-trigger"][data-variant="ghost"]:focus-visible,
+[data-prompt-control-strip="true"] [data-component="button"][data-variant="ghost"]:focus-visible {
+  background-color: transparent;
+  box-shadow: none;
+}

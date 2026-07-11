@@ -1,4 +1,5 @@
-import type { UserMessage } from "@lfcode-ai/sdk/v2"
+import type { Message, UserMessage } from "@lfcode-ai/sdk/v2"
+import type { Session } from "@lfcode-ai/sdk/v2/client"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
 import {
@@ -10,26 +11,29 @@ import {
   createMemo,
   createEffect,
   createComputed,
+  createSignal,
   on,
   onMount,
   untrack,
   createResource,
+  type Accessor,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLocal } from "@/context/local"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { encodeFilePath } from "@/context/file/path"
-import { createStore } from "solid-js/store"
+import { createStore, produce } from "solid-js/store"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Select } from "@lfcode-ai/ui/select"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { createAutoScroll } from "@lfcode-ai/ui/hooks"
 import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@lfcode-ai/ui/toast"
+import { Binary } from "@lfcode-ai/shared/util/binary"
 import type { FileReferenceApp } from "@lfcode-ai/ui/context/file-reference"
 import { checksum } from "@lfcode-ai/shared/util/encode"
-import { useSearchParams } from "@solidjs/router"
+import { useLocation, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
 import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
@@ -37,297 +41,114 @@ import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
-import { usePrompt } from "@/context/prompt"
+import { usePrompt, type Prompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
+import type { HtmlComponentEventDetail } from "@lfcode-ai/ui/markdown"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import {
+  BROWSER_REQUEST_OPEN_EVENT,
+  type BrowserOpenRequestDetail,
   browserTab,
+  browserTabID,
   createBrowserTabID,
   createOpenReviewFile,
   createSessionTabs,
   createSizing,
   focusTerminalById,
+  normalizeBrowserRequestURL,
+  isSideChatTab,
+  sideChatTab,
+  sideChatTabID,
   shouldFocusTerminalOnKeyDown,
 } from "@/pages/session/helpers"
-import { getSessionHandoff, setSessionHandoff } from "@/pages/session/handoff"
-import { MessageTimeline } from "@/pages/session/message-timeline"
+import { getSessionHandoff, SESSION_HANDOFF_EVENT, setSessionHandoff } from "@/pages/session/handoff"
+import { SessionTimelineSurface } from "@/pages/session/session-timeline-surface"
+import { buildHtmlComponentFollowupDraft } from "@/pages/session/html-component-followup"
+import { BrowserKeepaliveHost } from "@/pages/session/browser-keepalive-host"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
+import { SelectionToolbar } from "@/pages/session/selection-toolbar"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { DetachedSidePanelView } from "@/pages/session/detached-side-panel-view"
 import { getDetachedSidePanelContext } from "@/pages/session/detached-side-panel"
+import { createOpenCodeEditorPath } from "@/pages/session/file-tab-navigation"
+import {
+  buildSessionMessageViews,
+  createSessionHistoryWindow,
+  createSessionTimelineMessageSource,
+} from "@/pages/session/session-timeline-history"
+import { createSessionContentSignature, sessionContentRevision } from "@/pages/session/session-view-state"
+import {
+  activateSessionViewSurface,
+  registerSessionViewport,
+  registerSessionViewSurface,
+  sessionViewSurfaceDiagnostics,
+  startSessionViewMemoryGuard,
+} from "@/pages/session/session-viewport-registry"
+import { TimelineVirtualController } from "@/pages/session/timeline-virtual-controller"
+import { findTimelineViewportAnchor } from "@/pages/session/timeline-viewport-anchor"
+import { rememberSessionVirtualCache, sessionVirtualCacheDiagnostics } from "@/pages/session/session-virtual-cache"
+import {
+  readSessionTimelineVisualSnapshot,
+  rememberSessionTimelineVisualSnapshot,
+  sessionTimelineVisualSnapshotDiagnostics,
+} from "@/pages/session/session-timeline-visual-cache"
+import type { VirtualizerHandle } from "virtua/solid"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { decode64 } from "@/utils/base64"
 import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
-import { getParentPath, inferFileReferenceKind, resolveFileReferencePath } from "@/utils/file-reference"
+import { getParentPath, inferFileReferenceKind, resolveFileReferencePath } from "@lfcode-ai/ui/file-reference-path"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
+import { createSessionStorageKey, normalizeSessionStorageKey } from "@/utils/session-key"
 import { formatServerError } from "@/utils/server-errors"
-import { isSessionWorking } from "@/utils/session-status"
+import { isSessionStreaming } from "@/utils/session-status"
 import { LINUX_APPS, MAC_APPS, WINDOWS_APPS } from "@/components/session/session-open-apps"
+import { messageIdFromHash } from "@/pages/session/message-id-from-hash"
+import type {
+  UiDriverEditorInput,
+  UiDriverNodeSnapshot,
+  UiDriverQueryInput,
+  UiDriverReadTextInput,
+  UiDriverTypeInput,
+  UiDriverWaitInput,
+  UiDriverToken,
+} from "@/automation/ui-driver"
 
 const emptyUserMessages: UserMessage[] = []
+const emptyMessages: Message[] = []
 type FollowupItem = FollowupDraft & { id: string }
 type FollowupEdit = Pick<FollowupItem, "id" | "prompt" | "context">
 const emptyFollowups: FollowupItem[] = []
-
 type ReviewMode = "recent-1" | "recent-15" | "full"
 
-type SessionHistoryWindowInput = {
-  sessionID: () => string | undefined
-  messagesReady: () => boolean
-  loaded: () => number
-  visibleUserMessages: () => UserMessage[]
-  historyMore: () => boolean
-  historyLoading: () => boolean
-  loadMore: (sessionID: string) => Promise<void>
-  userScrolled: () => boolean
-  scroller: () => HTMLDivElement | undefined
+type MainTimelineSurfaceState = {
+  sessionID: string
+  key: string
+  source: ReturnType<typeof createSessionTimelineMessageSource>
+  history: ReturnType<typeof createSessionHistoryWindow>
+  ready: Accessor<boolean>
+  historyMore: Accessor<boolean>
+  historyLoading: Accessor<boolean>
+  contentRevision: Accessor<number>
 }
 
-/**
- * Maintains the rendered history window for a session timeline.
- *
- * It keeps initial paint bounded to recent turns, reveals cached turns in
- * small batches while scrolling upward, and prefetches older history near top.
- */
-function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
-  const turnInit = 10
-  const turnBatch = 8
-  const turnScrollThreshold = 200
-  const turnPrefetchBuffer = 16
-  const prefetchCooldownMs = 400
-  const prefetchNoGrowthLimit = 2
-
-  const [state, setState] = createStore({
-    turnID: undefined as string | undefined,
-    turnStart: 0,
-    prefetchUntil: 0,
-    prefetchNoGrowth: 0,
-  })
-
-  const initialTurnStart = (len: number) => (len > turnInit ? len - turnInit : 0)
-
-  const turnStart = createMemo(() => {
-    const id = input.sessionID()
-    const len = input.visibleUserMessages().length
-    if (!id || len <= 0) return 0
-    if (state.turnID !== id) return initialTurnStart(len)
-    if (state.turnStart <= 0) return 0
-    if (state.turnStart >= len) return initialTurnStart(len)
-    return state.turnStart
-  })
-
-  const setTurnStart = (start: number) => {
-    const id = input.sessionID()
-    const next = start > 0 ? start : 0
-    if (!id) {
-      setState({ turnID: undefined, turnStart: next })
-      return
-    }
-    setState({ turnID: id, turnStart: next })
-  }
-
-  const renderedUserMessages = createMemo(
-    () => {
-      const msgs = input.visibleUserMessages()
-      const start = turnStart()
-      if (start <= 0) return msgs
-      return msgs.slice(start)
-    },
-    emptyUserMessages,
-    {
-      equals: same,
-    },
-  )
-
-  const preserveScroll = (fn: () => void) => {
-    const el = input.scroller()
-    if (!el) {
-      fn()
-      return
-    }
-    const beforeTop = el.scrollTop
-    const beforeHeight = el.scrollHeight
-    fn()
-    requestAnimationFrame(() => {
-      const delta = el.scrollHeight - beforeHeight
-      if (!delta) return
-      el.scrollTop = beforeTop + delta
-    })
-  }
-
-  const backfillTurns = () => {
-    const start = turnStart()
-    if (start <= 0) return
-
-    const next = start - turnBatch
-    const nextStart = next > 0 ? next : 0
-
-    preserveScroll(() => setTurnStart(nextStart))
-  }
-
-  /** Button path: reveal all cached turns, fetch older history, reveal one batch. */
-  const loadAndReveal = async () => {
-    const id = input.sessionID()
-    if (!id) return
-
-    const start = turnStart()
-    const beforeVisible = input.visibleUserMessages().length
-    let loaded = input.loaded()
-
-    if (start > 0) setTurnStart(0)
-
-    if (!input.historyMore() || input.historyLoading()) return
-
-    let afterVisible = beforeVisible
-    let added = 0
-
-    while (true) {
-      await input.loadMore(id)
-      if (input.sessionID() !== id) return
-
-      afterVisible = input.visibleUserMessages().length
-      const nextLoaded = input.loaded()
-      const raw = nextLoaded - loaded
-      added += raw
-      loaded = nextLoaded
-
-      if (afterVisible > beforeVisible) break
-      if (raw <= 0) break
-      if (!input.historyMore()) break
-    }
-
-    if (added <= 0) return
-    if (state.prefetchNoGrowth) setState("prefetchNoGrowth", 0)
-
-    const growth = afterVisible - beforeVisible
-    if (growth <= 0) return
-    if (turnStart() !== 0) return
-
-    const target = Math.min(afterVisible, beforeVisible + turnBatch)
-    setTurnStart(Math.max(0, afterVisible - target))
-  }
-
-  /** Scroll/prefetch path: fetch older history from server. */
-  const fetchOlderMessages = async (opts?: { prefetch?: boolean }) => {
-    const id = input.sessionID()
-    if (!id) return
-    if (!input.historyMore() || input.historyLoading()) return
-
-    if (opts?.prefetch) {
-      const now = Date.now()
-      if (state.prefetchUntil > now) return
-      if (state.prefetchNoGrowth >= prefetchNoGrowthLimit) return
-      setState("prefetchUntil", now + prefetchCooldownMs)
-    }
-
-    const start = turnStart()
-    const beforeVisible = input.visibleUserMessages().length
-    const beforeRendered = start <= 0 ? beforeVisible : renderedUserMessages().length
-    let loaded = input.loaded()
-    let added = 0
-    let growth = 0
-
-    while (true) {
-      await input.loadMore(id)
-      if (input.sessionID() !== id) return
-
-      const nextLoaded = input.loaded()
-      const raw = nextLoaded - loaded
-      added += raw
-      loaded = nextLoaded
-      growth = input.visibleUserMessages().length - beforeVisible
-
-      if (growth > 0) break
-      if (raw <= 0) break
-      if (opts?.prefetch) break
-      if (!input.historyMore()) break
-    }
-
-    const afterVisible = input.visibleUserMessages().length
-
-    if (opts?.prefetch) {
-      setState("prefetchNoGrowth", added > 0 ? 0 : state.prefetchNoGrowth + 1)
-    } else if (added > 0 && state.prefetchNoGrowth) {
-      setState("prefetchNoGrowth", 0)
-    }
-
-    if (added <= 0) return
-    if (growth <= 0) return
-
-    if (opts?.prefetch) {
-      const current = turnStart()
-      preserveScroll(() => setTurnStart(current + growth))
-      return
-    }
-
-    if (turnStart() !== start) return
-
-    const currentRendered = renderedUserMessages().length
-    const base = Math.max(beforeRendered, currentRendered)
-    const target = Math.min(afterVisible, base + turnBatch)
-    preserveScroll(() => setTurnStart(Math.max(0, afterVisible - target)))
-  }
-
-  const onScrollerScroll = () => {
-    if (!input.userScrolled()) return
-    const el = input.scroller()
-    if (!el) return
-    if (el.scrollTop >= turnScrollThreshold) return
-
-    const start = turnStart()
-    if (start > 0) {
-      if (start <= turnPrefetchBuffer) {
-        void fetchOlderMessages({ prefetch: true })
-      }
-      backfillTurns()
-      return
-    }
-
-    void fetchOlderMessages()
-  }
-
-  createEffect(
-    on(
-      input.sessionID,
-      () => {
-        setState({ prefetchUntil: 0, prefetchNoGrowth: 0 })
-      },
-      { defer: true },
-    ),
-  )
-
-  createEffect(
-    on(
-      () => [input.sessionID(), input.messagesReady()] as const,
-      ([id, ready]) => {
-        if (!id || !ready) return
-        setTurnStart(initialTurnStart(input.visibleUserMessages().length))
-      },
-      { defer: true },
-    ),
-  )
-
-  return {
-    turnStart,
-    setTurnStart,
-    renderedUserMessages,
-    loadAndReveal,
-    onScrollerScroll,
-  }
-}
+const MAX_FULL_REVIEW_FILES = 5000
 
 export default function Page() {
+  if (typeof window !== "undefined") {
+    window.__LFCODE__ ??= {}
+    window.__LFCODE__.sessionModuleSentinel = "pages/session.tsx:v1-filetab"
+  }
   const globalSync = useGlobalSync()
   const layout = useLayout()
   const local = useLocal()
@@ -341,6 +162,8 @@ export default function Page() {
   const prompt = usePrompt()
   const comments = useComments()
   const terminal = useTerminal()
+  const routeLocation = useLocation()
+  const routeMessageHash = createMemo(() => messageIdFromHash(routeLocation.hash))
   const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string; agentID?: string }>()
   const { params, sessionKey, tabs, view } = useSessionLayout()
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
@@ -357,7 +180,6 @@ export default function Page() {
   })
 
   const [ui, setUi] = createStore({
-    pendingMessage: undefined as string | undefined,
     reviewSnap: false,
     scrollGesture: 0,
     scroll: {
@@ -368,7 +190,7 @@ export default function Page() {
   })
 
   const composer = createSessionComposerState()
-  const sessionActors = createMemo(() => (params.id ? (sync.data.actor ?? {})[params.id] ?? [] : []))
+  const sessionActors = createMemo(() => (params.id ? ((sync.data.actor ?? {})[params.id] ?? []) : []))
   const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent"))
   const selectedViewAgentID = createMemo(() => {
     const agentID = searchParams.agentID ?? "main"
@@ -376,6 +198,11 @@ export default function Page() {
     if (subagents().some((actor) => actor.actorID === agentID)) return agentID
     return "main"
   })
+  const [mainSelectionRoot, setMainSelectionRoot] = createSignal<HTMLElement>()
+  const [activeSideChatContentRoot, setActiveSideChatContentRoot] = createSignal<HTMLDivElement>()
+  const [activeSideChatInputRoot, setActiveSideChatInputRoot] = createSignal<HTMLDivElement>()
+  const [activeMainTimelineSurface, setActiveMainTimelineSurface] = createSignal<MainTimelineSurfaceState>()
+  const activeHistoryWindow = () => activeMainTimelineSurface()?.history
 
   createEffect(
     on(
@@ -390,8 +217,15 @@ export default function Page() {
     ),
   )
 
-  const workspaceKey = createMemo(() => params.dir ?? "")
+  const workspaceKey = createMemo(() => createSessionStorageKey(params.dir))
   const workspaceTabs = createMemo(() => layout.tabs(workspaceKey))
+  const openCodeEditorPath = createOpenCodeEditorPath({
+    normalizePath: file.normalize,
+    loadFile: file.load,
+    tabForPath: file.tab,
+    openTab: tabs().open,
+    setActiveTab: tabs().setActive,
+  })
 
   createEffect(
     on(
@@ -409,7 +243,7 @@ export default function Page() {
 
         if (pending.id !== id) return
         layout.handoff.clearTabs()
-        if (pending.dir !== (params.dir ?? "")) return
+        if (pending.dir !== workspaceKey()) return
 
         const from = workspaceTabs().tabs()
         if (from.all.length === 0 && !from.active) return
@@ -432,17 +266,33 @@ export default function Page() {
   createEffect(() => {
     const id = params.id
     if (!id) return
-    const handoff = getSessionHandoff(sessionKey())
+    const key = sessionKey()
+    const handoff = getSessionHandoff(key)
     const browser = handoff?.browser
     if (!browser?.url) return
+    const consumedKey = `${key}\n${browser.url}\n${browser.title ?? ""}`
+    if (consumedBrowserHandoffs.has(consumedKey)) return
+    consumedBrowserHandoffs.add(consumedKey)
 
-    const browserID = createBrowserTabID()
-    const tab = browserTab(browserID)
-    view().reviewPanel.open()
-    layout.view(sessionKey()).browser.open(browserID, browser.url, browser.title)
-    tabs().setActive(tab)
-    requestAnimationFrame(() => tabs().setActive(tab))
-    setSessionHandoff(sessionKey(), { browser: undefined })
+    openBrowserTab(browser.url, browser.title)
+    setSessionHandoff(key, { browser: undefined })
+  })
+
+  onMount(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ key?: string; value?: { browser?: { url: string; title?: string } } }>)
+        .detail
+      if (detail?.key !== sessionKey()) return
+      const browser = detail.value?.browser
+      if (!browser?.url) return
+      const consumedKey = `${detail.key}\n${browser.url}\n${browser.title ?? ""}`
+      if (consumedBrowserHandoffs.has(consumedKey)) return
+      consumedBrowserHandoffs.add(consumedKey)
+      openBrowserTab(browser.url, browser.title)
+      setSessionHandoff(detail.key, { browser: undefined })
+    }
+
+    makeEventListener(window, SESSION_HANDOFF_EVENT, handler as EventListener)
   })
 
   const isDesktop = createMemo(() => platform.platform === "desktop")
@@ -478,10 +328,116 @@ export default function Page() {
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
   }
 
+  let pendingDeferredTabActivationFrame: number | undefined
+  let pendingSideChatFocusFrame: number | undefined
+  const activateSessionTabWhenReady = (tab: string, remaining = 8) => {
+    if (pendingDeferredTabActivationFrame !== undefined) cancelAnimationFrame(pendingDeferredTabActivationFrame)
+    pendingDeferredTabActivationFrame = requestAnimationFrame(() => {
+      pendingDeferredTabActivationFrame = undefined
+      if (tabs().active() === tab) return
+      if (!tabs().all().includes(tab)) {
+        if (remaining <= 0) return
+        activateSessionTabWhenReady(tab, remaining - 1)
+        return
+      }
+
+      tabs().setActive(tab)
+      if (tabs().active() === tab || remaining <= 0) return
+      activateSessionTabWhenReady(tab, remaining - 1)
+    })
+  }
+
+  const openBrowserTab = (url: string, title?: string) => {
+    const id = createBrowserTabID()
+    const tab = browserTab(id)
+    batch(() => {
+      layout.view(sessionKey()).browser.open(id, url, title)
+      openReviewPanel()
+      void tabs().open(tab)
+      tabs().setActive(tab)
+    })
+    if (tabs().active() !== tab) activateSessionTabWhenReady(tab)
+  }
+
+  const focusWithoutScroll = (el: HTMLDivElement | undefined) => {
+    if (!el) return
+    try {
+      el.focus({ preventScroll: true })
+    } catch {
+      el.focus()
+    }
+  }
+
+  const scheduleSideChatInputFocus = () => {
+    if (pendingSideChatFocusFrame !== undefined) cancelAnimationFrame(pendingSideChatFocusFrame)
+    pendingSideChatFocusFrame = requestAnimationFrame(() => {
+      pendingSideChatFocusFrame = requestAnimationFrame(() => {
+        pendingSideChatFocusFrame = undefined
+        focusWithoutScroll(activeSideChatInputRoot())
+      })
+    })
+  }
+
+  const openSideChatTab = (sideSessionID: string) => {
+    const tab = sideChatTab(sideSessionID)
+    preserveMainTimelineViewport(() => {
+      batch(() => {
+        openReviewPanel()
+        void tabs().open(tab)
+        tabs().setActive(tab)
+      })
+    })
+    if (tabs().active() !== tab) activateSessionTabWhenReady(tab)
+    scheduleSideChatInputFocus()
+  }
+
+  onMount(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<BrowserOpenRequestDetail>).detail
+      if (detail?.sessionKey && normalizeSessionStorageKey(detail.sessionKey) !== sessionKey()) return
+      if (detail?.requestID) {
+        const consumed = ((
+          window as typeof window & {
+            __LFCODE_BROWSER_REQUESTS__?: Map<string, number>
+          }
+        ).__LFCODE_BROWSER_REQUESTS__ ??= new Map<string, number>())
+        const now = Date.now()
+        for (const [key, at] of consumed) {
+          if (now - at <= 10_000) continue
+          consumed.delete(key)
+        }
+        if (consumed.has(detail.requestID)) {
+          event.preventDefault()
+          return
+        }
+        consumed.set(detail.requestID, now)
+      }
+      const next = normalizeBrowserRequestURL(detail?.url)
+      if (!next) {
+        showToast({
+          title: language.t("toast.browser.invalidUrl.title"),
+          description: language.t("toast.browser.invalidUrl.description"),
+          variant: "error",
+        })
+        return
+      }
+
+      event.preventDefault()
+      openBrowserTab(next)
+    }
+
+    makeEventListener(window, BROWSER_REQUEST_OPEN_EVENT, handler as EventListener)
+  })
+
+  onCleanup(() => {
+    if (pendingDeferredTabActivationFrame !== undefined) cancelAnimationFrame(pendingDeferredTabActivationFrame)
+    if (pendingSideChatFocusFrame !== undefined) cancelAnimationFrame(pendingSideChatFocusFrame)
+  })
+
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
   const canReview = createMemo(() => !!sync.project)
-  const reviewTab = createMemo(() => isDesktop())
+  const reviewTab = createMemo(() => isDesktop() && view().reviewEnabled())
   const tabState = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,
@@ -498,49 +454,19 @@ export default function Page() {
     if (!id) return true
     return sync.data.message[id] !== undefined
   })
-  const historyMore = createMemo(() => {
-    const id = params.id
-    if (!id) return false
-    return sync.session.history.more(id)
+  const messageViews = createMemo(() =>
+    buildSessionMessageViews({
+      messages: messages(),
+      revertMessageID: revertMessageID(),
+      viewAgentID: selectedViewAgentID(),
+    }),
+  )
+  const mainUserMessages = createMemo(() => messageViews().mainUserMessages, emptyUserMessages, { equals: same })
+  const visibleUserMessages = createMemo(() => messageViews().visibleUserMessages, emptyUserMessages, {
+    equals: same,
   })
-  const historyLoading = createMemo(() => {
-    const id = params.id
-    if (!id) return false
-    return sync.session.history.loading(id)
-  })
-  const mainUserMessages = createMemo(
-    () => messages().filter((m) => (m.agentID ?? "main") === "main" && m.role === "user") as UserMessage[],
-    emptyUserMessages,
-    { equals: same },
-  )
-  const visibleUserMessages = createMemo(
-    () => {
-      const revert = revertMessageID()
-      if (!revert) return mainUserMessages()
-      return mainUserMessages().filter((m) => m.id < revert)
-    },
-    emptyUserMessages,
-    {
-      equals: same,
-    },
-  )
-  const viewUserMessages = createMemo(
-    () => {
-      const agentID = selectedViewAgentID()
-      const list =
-        agentID === "main"
-          ? messages().filter((m) => (m.agentID ?? "main") === "main")
-          : messages().filter((m) => (m.agentID ?? "main") === agentID)
-      const user = list.filter((m) => m.role === "user") as UserMessage[]
-      const revert = revertMessageID()
-      return revert ? user.filter((m) => m.id < revert) : user
-    },
-    emptyUserMessages,
-    {
-      equals: same,
-    },
-  )
   const lastUserMessage = createMemo(() => visibleUserMessages().at(-1))
+  const latestMainContextMessageID = createMemo(() => messageViews().latestMainContextMessageID)
 
   createEffect(() => {
     const tab = activeFileTab()
@@ -578,7 +504,11 @@ export default function Page() {
     mobileTab: "session" as "session" | "changes",
     changes: "recent-1" as ReviewMode,
     newSessionWorktree: "main",
-    deferRender: false,
+  })
+  const [timelinePreparing, setTimelinePreparing] = createSignal(false)
+  const mainComposerScope = createMemo(() => {
+    if (!params.id) return
+    return { dir: sdk.directory, id: params.id }
   })
 
   const [followup, setFollowup] = persisted(
@@ -596,20 +526,7 @@ export default function Page() {
     }),
   )
 
-  createComputed((prev) => {
-    const key = sessionKey()
-    if (key !== prev) {
-      setStore("deferRender", true)
-      requestAnimationFrame(() => {
-        setTimeout(() => setStore("deferRender", false), 0)
-      })
-    }
-    return key
-  }, sessionKey())
-
   let reviewFrame: number | undefined
-  let refreshFrame: number | undefined
-  let refreshTimer: number | undefined
   let todoFrame: number | undefined
   let todoTimer: number | undefined
   let diffFrame: number | undefined
@@ -635,27 +552,44 @@ export default function Page() {
       : store.mobileTab === "changes",
   )
   const reviewModeOptions = createMemo<ReviewMode[]>(() => ["recent-1", "recent-15", "full"])
+  const fullReviewFileCount = createMemo(() => {
+    if (store.changes !== "full") return 0
+    return info()?.summary?.files ?? 0
+  })
+  const fullReviewBlocked = createMemo(() => {
+    if (!wantsReview()) return false
+    if (store.changes !== "full") return false
+    return fullReviewFileCount() > MAX_FULL_REVIEW_FILES
+  })
   const reviewWindowRequest = createMemo(() => {
     const id = params.id
     if (!id || !wantsReview()) return
     if (store.changes === "full") return
     return { sessionID: id, turns: store.changes === "recent-15" ? 15 : 1 }
   })
-  const [reviewWindowDiffs, { refetch: refetchReviewWindowDiffs }] = createResource(reviewWindowRequest, async (input) => {
-    return sdk.client.session
-      .diff({
-        sessionID: input.sessionID,
-        turns: input.turns,
-      })
-      .then((result) => list(result.data))
-      .catch((error) => {
-        console.debug("[session-review] failed to load session diff window", { sessionID: input.sessionID, turns: input.turns, error })
-        return []
-      })
-  })
+  const [reviewWindowDiffs, { refetch: refetchReviewWindowDiffs }] = createResource(
+    reviewWindowRequest,
+    async (input) => {
+      return sdk.client.session
+        .diff({
+          sessionID: input.sessionID,
+          turns: input.turns,
+        })
+        .then((result) => list(result.data))
+        .catch((error) => {
+          console.debug("[session-review] failed to load session diff window", {
+            sessionID: input.sessionID,
+            turns: input.turns,
+            error,
+          })
+          return []
+        })
+    },
+  )
   const reviewLoading = createMemo(() => {
     const id = params.id
     if (!id || !wantsReview()) return false
+    if (fullReviewBlocked()) return false
     if (store.changes === "full") return sync.status === "loading" || sync.data.session_diff[id] === undefined
     return reviewWindowDiffs.loading
   })
@@ -663,12 +597,17 @@ export default function Page() {
   const reviewDiffs = createMemo(() => {
     const id = params.id
     if (!id || !wantsReview() || !reviewReady()) return []
+    if (fullReviewBlocked()) return []
     if (store.changes === "full") return list(sync.data.session_diff[id])
     return reviewWindowDiffs() ?? []
   })
-  const reviewCount = () => reviewDiffs().length
+  const reviewCount = () => (fullReviewBlocked() ? fullReviewFileCount() : reviewDiffs().length)
   const hasReview = () => reviewCount() > 0
-
+  const sessionStreaming = createMemo(() => {
+    const id = params.id
+    if (!id) return false
+    return isSessionStreaming(sync.data.session_status[id])
+  })
   const newSessionWorktree = createMemo(() => {
     if (store.newSessionWorktree === "create") return "create"
     const project = sync.project
@@ -683,35 +622,12 @@ export default function Page() {
 
   const anchor = (id: string) => `message-${id}`
 
+  const viewportAnchorFor = findTimelineViewportAnchor
+
   const cursor = () => {
     const root = scroller
     if (!root) return store.messageId
-
-    const box = root.getBoundingClientRect()
-    const line = box.top + 100
-    const list = [...root.querySelectorAll<HTMLElement>("[data-message-id]")]
-      .map((el) => {
-        const id = el.dataset.messageId
-        if (!id) return
-
-        const rect = el.getBoundingClientRect()
-        return { id, top: rect.top, bottom: rect.bottom }
-      })
-      .filter((item): item is { id: string; top: number; bottom: number } => !!item)
-
-    const shown = list.filter((item) => item.bottom > box.top && item.top < box.bottom)
-    const hit = shown.find((item) => item.top <= line && item.bottom >= line)
-    if (hit) return hit.id
-
-    const near = [...shown].sort((a, b) => {
-      const da = Math.abs(a.top - line)
-      const db = Math.abs(b.top - line)
-      if (da !== db) return da - db
-      return a.top - b.top
-    })[0]
-    if (near) return near.id
-
-    return list.filter((item) => item.top <= line).at(-1)?.id ?? list[0]?.id ?? store.messageId
+    return viewportAnchorFor(root)?.turnID ?? store.messageId
   }
 
   function navigateMessageByOffset(offset: number) {
@@ -725,7 +641,7 @@ export default function Page() {
     if (targetIndex < 0 || targetIndex > msgs.length) return
 
     if (targetIndex === msgs.length) {
-      resumeScroll()
+      resumeTimelineToBottom()
       return
     }
 
@@ -737,11 +653,19 @@ export default function Page() {
   let promptDock: HTMLDivElement | undefined
   let dockHeight = 0
   let scroller: HTMLDivElement | undefined
+  const [scrollRefVersion, setScrollRefVersion] = createSignal(0)
   let content: HTMLDivElement | undefined
   let scrollMark = 0
   let messageMark = 0
+  let viewportController: TimelineVirtualController | undefined
+  let timelineVirtualizer: VirtualizerHandle | undefined
+  let timelineSnapshotHost: HTMLDivElement | undefined
+  let timelineSnapshotTimer: number | undefined
+  let timelineSnapshotFrame: number | undefined
+  let timelineSnapshotKey: string | undefined
 
   const scrollGestureWindowMs = 250
+  const scrollGestureThrottleMs = 64
 
   const markScrollGesture = (target?: EventTarget | null) => {
     const root = scroller
@@ -751,7 +675,9 @@ export default function Page() {
     const nested = el?.closest("[data-scrollable]")
     if (nested && nested !== root) return
 
-    setUi("scrollGesture", Date.now())
+    const now = Date.now()
+    if (now - ui.scrollGesture < scrollGestureThrottleMs) return
+    setUi("scrollGesture", now)
   }
 
   const hasScrollGesture = () => Date.now() - ui.scrollGesture < scrollGestureWindowMs
@@ -759,33 +685,12 @@ export default function Page() {
   const [sessionSync] = createResource(
     () => [sdk.directory, params.id] as const,
     ([directory, id]) => {
-      if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
-      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
-      refreshFrame = undefined
-      refreshTimer = undefined
       if (!id) return
 
       const cached = untrack(() => sync.data.message[id] !== undefined)
-      const stale = !cached
-        ? false
-        : (() => {
-            const info = getSessionPrefetch(directory, id)
-            if (!info) return true
-            return Date.now() - info.at > SESSION_PREFETCH_TTL
-          })()
-
-      refreshFrame = requestAnimationFrame(() => {
-        refreshFrame = undefined
-        refreshTimer = window.setTimeout(() => {
-          refreshTimer = undefined
-          if (params.id !== id) return
-          untrack(() => {
-            if (stale) void sync.session.sync(id, { force: true })
-          })
-        }, 0)
-      })
-
-      return sync.session.sync(id)
+      const prefetch = cached ? getSessionPrefetch(directory, id) : undefined
+      const force = !cached && (!prefetch || Date.now() - prefetch.at > SESSION_PREFETCH_TTL)
+      return sync.session.sync(id, force ? { force: true } : undefined)
     },
   )
 
@@ -800,13 +705,13 @@ export default function Page() {
           id ? composer.blocked() : false,
         ] as const
       },
-      ([dir, id, status, blocked]) => {
+      ([dir, id, _status, blocked]) => {
         if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
         if (todoTimer !== undefined) window.clearTimeout(todoTimer)
         todoFrame = undefined
         todoTimer = undefined
         if (!id) return
-        if (status === "idle" && !blocked) return
+        if (!isSessionStreaming(sync.data.session_status[id]) && !blocked) return
         const cached = untrack(() => sync.data.todo[id] !== undefined || globalSync.data.session_todo[id] !== undefined)
 
         todoFrame = requestAnimationFrame(() => {
@@ -826,23 +731,10 @@ export default function Page() {
 
   createEffect(
     on(
-      () => visibleUserMessages().at(-1)?.id,
-      (lastId, prevLastId) => {
-        if (lastId && prevLastId && lastId > prevLastId) {
-          setStore("messageId", undefined)
-        }
-      },
-      { defer: true },
-    ),
-  )
-
-  createEffect(
-    on(
       sessionKey,
       () => {
         setStore("messageId", undefined)
         setStore("changes", "recent-1")
-        setUi("pendingMessage", undefined)
       },
       { defer: true },
     ),
@@ -973,11 +865,14 @@ export default function Page() {
     on(
       () => sync.data.session_status[params.id ?? ""]?.type,
       (next, prev) => {
-        if (next !== "idle" || prev === undefined || prev === "idle") return
+        const streaming = next === "busy" || next === "retry"
+        const wasStreaming = prev === "busy" || prev === "retry"
+        if (streaming || prev === undefined || !wasStreaming) return
 
         const id = params.id
         if (!id || !wantsReview()) return
         if (store.changes === "full") {
+          if (fullReviewBlocked()) return
           void sync.session.diff(id, { force: true })
           return
         }
@@ -996,8 +891,9 @@ export default function Page() {
 
         const id = params.id
         if (!id || !wantsReview()) return
-        if ((sync.data.session_status[id]?.type ?? "idle") !== "idle") return
+        if (isSessionStreaming(sync.data.session_status[id])) return
         if (store.changes === "full") {
+          if (fullReviewBlocked()) return
           void sync.session.diff(id, { force: true })
           return
         }
@@ -1016,6 +912,7 @@ export default function Page() {
     pendingDiff: undefined as string | undefined,
     activeDiff: undefined as string | undefined,
   })
+  const consumedBrowserHandoffs = new Set<string>()
 
   createEffect(
     on(
@@ -1103,26 +1000,23 @@ export default function Page() {
   const htmlPreviewable = (path: string) => /\.(?:html?|xhtml)$/iu.test(path)
 
   const openBrowserPreview = (path: string) => {
-    const browserID = createBrowserTabID()
-    const tab = browserTab(browserID)
     const url = `file://${encodeFilePath(path)}`
-    tabs().open(tab)
-    tabs().setActive(tab)
-    openReviewPanel()
-    layout.view(sessionKey()).browser.open(browserID, url, file.normalize(path))
+    openBrowserTab(url, file.normalize(path))
   }
 
   const previewConversationPath = (path: string) => {
-    const normalized = file.normalize(path)
+    const absolute = resolveFileReferencePath(path, projectDirectory()) ?? path
+    const normalized = file.normalize(absolute)
+    const tab = file.tab(normalized)
+    const canonical = file.pathFromTab(tab) ?? normalized
     openReviewPanel()
-    if (htmlPreviewable(normalized)) {
-      openBrowserPreview(normalized)
+    if (htmlPreviewable(absolute)) {
+      openBrowserPreview(absolute)
       return
     }
-    const tab = file.tab(normalized)
     tabs().open(tab)
     tabs().setActive(tab)
-    void file.load(normalized)
+    void file.load(canonical)
   }
 
   const copyConversationPath = (path: string) =>
@@ -1197,6 +1091,18 @@ export default function Page() {
 
   const reviewEmpty = (input: { loadingClass: string; emptyClass: string }) => {
     if (!reviewReady()) return <div class={input.loadingClass}>{language.t("session.review.loadingChanges")}</div>
+    if (fullReviewBlocked()) {
+      return (
+        <div class="h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-3 px-6">
+          <div class="text-14-medium text-text-strong">全量变更过大，已阻止应用内加载</div>
+          <div class="text-13-regular text-text-weak max-w-[32rem] leading-6">
+            当前会话记录了 {reviewCount().toLocaleString()}{" "}
+            个文件变更。一次性加载会导致渲染线程卡死或崩溃，因此这里不再直接渲染。 请改用“最近 1 轮”或“最近 15
+            轮”，如果确实要看完整列表，请在仓库里直接查看 Git 变更。
+          </div>
+        </div>
+      )
+    }
     return empty(reviewEmptyText())
   }
 
@@ -1207,30 +1113,28 @@ export default function Page() {
     loadingClass: string
     emptyClass: string
   }) => (
-    <Show when={!store.deferRender}>
-      <SessionReviewTab
-        title={changesTitle()}
-        empty={reviewEmpty(input)}
-        diffs={reviewDiffs}
-        view={view}
-        diffStyle={input.diffStyle}
-        onDiffStyleChange={input.onDiffStyleChange}
-        onScrollRef={(el) => setTree("reviewScroll", el)}
-        focusedFile={tree.activeDiff}
-        onLineComment={(comment) => addCommentToContext({ ...comment, origin: "review" })}
-        onLineCommentUpdate={updateCommentInContext}
-        onLineCommentDelete={removeCommentFromContext}
-        lineCommentActions={reviewCommentActions()}
-        commentMentions={{
-          items: file.searchFilesAndDirectories,
-        }}
-        comments={comments.all()}
-        focusedComment={comments.focus()}
-        onFocusedCommentChange={comments.setFocus}
-        onViewFile={openReviewFile}
-        classes={input.classes}
-      />
-    </Show>
+    <SessionReviewTab
+      title={changesTitle()}
+      empty={reviewEmpty(input)}
+      diffs={reviewDiffs}
+      view={view}
+      diffStyle={input.diffStyle}
+      onDiffStyleChange={input.onDiffStyleChange}
+      onScrollRef={(el) => setTree("reviewScroll", el)}
+      focusedFile={tree.activeDiff}
+      onLineComment={(comment) => addCommentToContext({ ...comment, origin: "review" })}
+      onLineCommentUpdate={updateCommentInContext}
+      onLineCommentDelete={removeCommentFromContext}
+      lineCommentActions={reviewCommentActions()}
+      commentMentions={{
+        items: file.searchFilesAndDirectories,
+      }}
+      comments={comments.all()}
+      focusedComment={comments.focus()}
+      onFocusedCommentChange={comments.setFocus}
+      onViewFile={openReviewFile}
+      classes={input.classes}
+    />
   )
 
   const reviewPanel = () => (
@@ -1347,6 +1251,7 @@ export default function Page() {
 
     if (!wantsReview()) return
     if (store.changes !== "full") return
+    if (fullReviewBlocked()) return
     if (sync.data.session_diff[id] !== undefined) return
     if (sync.status === "loading") return
 
@@ -1366,6 +1271,7 @@ export default function Page() {
         const id = params.id
         if (!id) return
         if (mode !== "full") return
+        if (untrack(fullReviewBlocked)) return
         if (!untrack(() => sync.data.session_diff[id] !== undefined)) return
 
         diffFrame = requestAnimationFrame(() => {
@@ -1409,15 +1315,111 @@ export default function Page() {
   )
 
   const autoScroll = createAutoScroll({
-    working: () => true,
-    overflowAnchor: "dynamic",
+    working: sessionStreaming,
+    overflowAnchor: "none",
+    onUserInteracted: () => {
+      if (!hasScrollGesture()) return
+      viewportController?.cancelForUserInput()
+      scrollMark += 1
+      captureTimelineViewport()
+    },
   })
 
   let scrollStateFrame: number | undefined
-  let scrollStateTarget: HTMLDivElement | undefined
+  let scrollStateTarget:
+    | {
+        el: HTMLDivElement
+        sessionID: string | undefined
+        capture: boolean
+      }
+    | undefined
   let fillFrame: number | undefined
-
+  let mainViewportPreserveFrame: number | undefined
+  let mainViewportMutationLock:
+    | {
+        root: HTMLDivElement
+        sessionID: string
+        token: number
+      }
+    | undefined
   const jumpThreshold = (el: HTMLDivElement) => Math.max(400, el.clientHeight)
+  const scrollerOwner = (el: HTMLDivElement | undefined) => el?.dataset.sessionScrollerId
+  const setScrollerOwner = (el: HTMLDivElement | undefined, sessionID: string | undefined) => {
+    if (!el) return
+    if (!sessionID) {
+      delete el.dataset.sessionScrollerId
+      return
+    }
+    el.dataset.sessionScrollerId = sessionID
+  }
+  const matchesScrollerOwner = (el: HTMLDivElement, sessionID: string | undefined) =>
+    !sessionID || scrollerOwner(el) === sessionID
+  const messageElement = (root: HTMLDivElement, messageID: string) =>
+    [...root.querySelectorAll<HTMLElement>("[data-message-id]")].find((el) => el.dataset.messageId === messageID)
+  const anchorElement = (root: HTMLDivElement, blockID: string) =>
+    [...root.querySelectorAll<HTMLElement>("[data-viewport-anchor]")].find(
+      (el) => el.dataset.viewportAnchor === blockID,
+    )
+  const turnElement = (root: HTMLDivElement, turnID: string) =>
+    [...root.querySelectorAll<HTMLElement>("[data-viewport-turn]")].find((el) => el.dataset.viewportTurn === turnID)
+
+  const clearTimelineVisualSnapshot = () => {
+    if (timelineSnapshotTimer !== undefined) window.clearTimeout(timelineSnapshotTimer)
+    if (timelineSnapshotFrame !== undefined) cancelAnimationFrame(timelineSnapshotFrame)
+    timelineSnapshotTimer = undefined
+    timelineSnapshotFrame = undefined
+    timelineSnapshotKey = undefined
+    timelineSnapshotHost?.replaceChildren()
+  }
+
+  const showTimelineVisualSnapshot = (input: { key: string; revision: string }) => {
+    if (!timelineSnapshotHost) return false
+    const snapshot = readSessionTimelineVisualSnapshot(input)
+    if (!snapshot) return false
+    timelineSnapshotHost.replaceChildren(snapshot.root)
+    timelineSnapshotKey = input.key
+    if (timelineSnapshotFrame !== undefined) cancelAnimationFrame(timelineSnapshotFrame)
+    timelineSnapshotFrame = requestAnimationFrame(() => {
+      timelineSnapshotFrame = undefined
+      snapshot.root.scrollTop = snapshot.scrollTop
+      snapshot.root.scrollLeft = snapshot.scrollLeft
+    })
+    if (timelineSnapshotTimer !== undefined) window.clearTimeout(timelineSnapshotTimer)
+    timelineSnapshotTimer = window.setTimeout(clearTimelineVisualSnapshot, 3_000)
+    return true
+  }
+
+  const captureTimelineVisualSnapshot = () => {
+    const root = scroller
+    const surface = activeMainTimelineSurface()
+    if (!root || !surface) return
+    if (!matchesScrollerOwner(root, surface.sessionID)) return
+    const turnIDs = surface.history.renderedUserMessages().map((message) => message.id)
+    const revision = String(surface.contentRevision())
+    rememberSessionTimelineVisualSnapshot({
+      key: `${surface.key}/main`,
+      sessionID: surface.sessionID,
+      revision,
+      turnIDs,
+      root,
+    })
+    if (timelineSnapshotHost?.childElementCount) return
+    showTimelineVisualSnapshot({ key: `${surface.key}/main`, revision })
+  }
+
+  const captureTimelineHotState = () => {
+    const surface = activeMainTimelineSurface()
+    if (surface && timelineVirtualizer && scroller && matchesScrollerOwner(scroller, surface.sessionID)) {
+      rememberSessionVirtualCache({
+        key: `${surface.key}/main`,
+        sessionID: surface.sessionID,
+        turnIDs: surface.history.renderedUserMessages().map((message) => message.id),
+        revision: String(surface.contentRevision()),
+        cache: timelineVirtualizer.cache,
+      })
+    }
+    captureTimelineVisualSnapshot()
+  }
 
   const updateScrollState = (el: HTMLDivElement) => {
     const max = el.scrollHeight - el.clientHeight
@@ -1430,8 +1432,15 @@ export default function Page() {
     setUi("scroll", { overflow, bottom, jump })
   }
 
-  const scheduleScrollState = (el: HTMLDivElement) => {
-    scrollStateTarget = el
+  const scheduleScrollState = (
+    el: HTMLDivElement,
+    options?: {
+      capture?: boolean
+      sessionID?: string
+    },
+  ) => {
+    const sessionID = options?.sessionID ?? params.id
+    scrollStateTarget = { el, sessionID, capture: options?.capture !== false }
     if (scrollStateFrame !== undefined) return
 
     scrollStateFrame = requestAnimationFrame(() => {
@@ -1440,28 +1449,101 @@ export default function Page() {
       const target = scrollStateTarget
       scrollStateTarget = undefined
       if (!target) return
+      if (target.el !== scroller) return
+      if (target.sessionID && target.sessionID !== params.id) return
+      if (!matchesScrollerOwner(target.el, target.sessionID)) return
+      if (
+        mainViewportMutationLock &&
+        mainViewportMutationLock.root === target.el &&
+        mainViewportMutationLock.sessionID === target.sessionID
+      ) {
+        updateScrollState(target.el)
+        return
+      }
 
-      updateScrollState(target)
+      if (target.capture) viewportController?.scheduleCapture()
+      updateScrollState(target.el)
     })
   }
 
-  const resumeScroll = () => {
-    setStore("messageId", undefined)
-    autoScroll.forceScrollToBottom()
-    clearMessageHash()
-
-    const el = scroller
-    if (el) scheduleScrollState(el)
+  const captureTimelineViewport = () => {
+    viewportController?.scheduleCapture()
   }
 
-  // When the user returns to the bottom, treat the active message as "latest".
+  const preserveMainTimelineViewport = (action: () => void) => {
+    const root = scroller
+    const sessionID = params.id
+    if (!root || !sessionID || !matchesScrollerOwner(root, sessionID)) {
+      action()
+      return
+    }
+
+    const token = Date.now() + Math.random()
+    mainViewportMutationLock = { root, sessionID, token }
+    const box = root.getBoundingClientRect()
+    const anchorID = viewportAnchorFor(root)?.turnID
+    const anchorOffset = anchorID
+      ? (messageElement(root, anchorID)?.getBoundingClientRect().top ?? box.top) - box.top
+      : undefined
+    const fallback = { left: root.scrollLeft, top: root.scrollTop }
+    const restore = () => {
+      if (params.id !== sessionID || scroller !== root || !matchesScrollerOwner(root, sessionID)) return false
+
+      const anchor = anchorID ? messageElement(root, anchorID) : undefined
+      if (anchor && anchorOffset !== undefined) {
+        const nextOffset = anchor.getBoundingClientRect().top - root.getBoundingClientRect().top
+        root.scrollTo({
+          left: fallback.left,
+          top: Math.max(0, root.scrollTop + nextOffset - anchorOffset),
+          behavior: "auto",
+        })
+        return true
+      }
+
+      root.scrollTo({
+        left: fallback.left,
+        top: fallback.top,
+        behavior: "auto",
+      })
+      return true
+    }
+
+    try {
+      action()
+      restore()
+    } catch (error) {
+      if (mainViewportMutationLock?.token === token) mainViewportMutationLock = undefined
+      throw error
+    }
+
+    if (mainViewportPreserveFrame !== undefined) cancelAnimationFrame(mainViewportPreserveFrame)
+    mainViewportPreserveFrame = requestAnimationFrame(() => {
+      mainViewportPreserveFrame = undefined
+      restore()
+      if (mainViewportMutationLock?.token === token) mainViewportMutationLock = undefined
+      scheduleScrollState(root, { capture: false, sessionID })
+    })
+  }
+
+  let clearMessageHashRef = () => {}
+  const resumeTimelineToBottom = () => {
+    setStore("messageId", undefined)
+    viewportController?.cancelRestore()
+    autoScroll.forceScrollToBottom()
+    clearMessageHashRef()
+    const el = scroller
+    if (el) scheduleScrollState(el, { capture: false, sessionID: params.id })
+    captureTimelineViewport()
+  }
+
   createEffect(
     on(
       autoScroll.userScrolled,
       (scrolled) => {
         if (scrolled) return
         setStore("messageId", undefined)
-        clearMessageHash()
+        clearMessageHashRef()
+        captureTimelineViewport()
       },
       { defer: true },
     ),
@@ -1470,36 +1552,150 @@ export default function Page() {
   let fill = () => {}
 
   const setScrollRef = (el: HTMLDivElement | undefined) => {
+    if (scroller && scroller !== el) {
+      delete scroller.dataset.sessionScroller
+      delete scroller.dataset.sessionScrollerId
+    }
     scroller = el
+    setScrollRefVersion((value) => value + 1)
+    if (el) {
+      el.dataset.sessionScroller = "true"
+      setScrollerOwner(el, params.id)
+    }
     autoScroll.scrollRef(el)
-    if (!el) return
-    scheduleScrollState(el)
+    if (!el) {
+      viewportController?.setRoot(undefined)
+      return
+    }
+    viewportController?.setRoot(el)
+    viewportController?.activate()
+    scheduleScrollState(el, { capture: false, sessionID: params.id })
     fill()
   }
 
   const markUserScroll = () => {
-    scrollMark += 1
+    if (hasScrollGesture()) viewportController?.cancelForUserInput()
+    autoScroll.markUserScrolled()
   }
 
   createResizeObserver(
     () => content,
     () => {
       const el = scroller
-      if (el) scheduleScrollState(el)
+      if (el) scheduleScrollState(el, { capture: false, sessionID: params.id })
+      viewportController?.notifyLayout()
       fill()
     },
   )
 
-  const historyWindow = createSessionHistoryWindow({
-    sessionID: () => params.id,
-    messagesReady,
-    loaded: () => viewUserMessages().length,
-    visibleUserMessages: viewUserMessages,
-    historyMore,
-    historyLoading,
-    loadMore: (sessionID) => sync.session.history.loadMore(sessionID),
-    userScrolled: autoScroll.userScrolled,
-    scroller: () => scroller,
+  viewportController = new TimelineVirtualController({
+    active: () => {
+      const surface = activeMainTimelineSurface()
+      if (!surface) return
+      return {
+        key: surface.key,
+        sessionID: surface.sessionID,
+        assistantRevision: String(surface.contentRevision()),
+        streaming: isSessionStreaming(sync.data.session_status[surface.sessionID]),
+      }
+    },
+    ready: () => activeMainTimelineSurface()?.ready() ?? false,
+    root: () => scroller,
+    virtualizer: () => timelineVirtualizer,
+    state: (key) => layout.view(key).sessionState(),
+    persist: (key, state) => layout.view(key).setSessionState(state),
+    turnStart: () => activeHistoryWindow()?.turnStart() ?? 0,
+    setTurnStart: (value) => activeHistoryWindow()?.setTurnStart(value),
+    resetHistoryToRecent: () => activeHistoryWindow()?.resetToRecent(),
+    prepareAnchorWindow: (turnID, fallbackStart) =>
+      activeHistoryWindow()?.prepareAnchorWindow(turnID, fallbackStart) ?? false,
+    historyMore: () => activeMainTimelineSurface()?.historyMore() ?? false,
+    historyLoading: () => activeMainTimelineSurface()?.historyLoading() ?? false,
+    loadHistory: async () => activeHistoryWindow()?.loadForRestore(),
+    findAnchor: viewportAnchorFor,
+    anchorElement,
+    turnElement,
+    pauseAutoScroll: autoScroll.pause,
+    scrollToBottom: autoScroll.forceScrollToBottom,
+    turnIDs: () =>
+      activeHistoryWindow()
+        ?.renderedUserMessages()
+        .map((message) => message.id) ?? [],
+    onPhase: (phase, detail) => {
+      setTimelinePreparing(phase === "requested" || phase === "preparing")
+      if (phase === "requested" || phase === "preparing") {
+        const surface = activeMainTimelineSurface()
+        if (surface) {
+          showTimelineVisualSnapshot({
+            key: `${surface.key}/main`,
+            revision: String(surface.contentRevision()),
+          })
+        }
+      }
+      if (phase === "committed") {
+        requestAnimationFrame(clearTimelineVisualSnapshot)
+      }
+      document.documentElement.dataset.timelineSurfacePhase = phase
+      document.documentElement.dataset.timelineVirtualItems = String(detail.virtualItems)
+      document.documentElement.dataset.timelineContentRevision = String(
+        activeMainTimelineSurface()?.contentRevision() ?? 0,
+      )
+    },
+  })
+
+  createEffect(
+    on(
+      () => {
+        const surface = activeMainTimelineSurface()
+        return [
+          surface?.key,
+          surface?.ready(),
+          surface?.history.turnStart(),
+          surface?.history.renderedUserMessages().length,
+        ] as const
+      },
+      () => viewportController?.notifyDataReady(),
+      { defer: true },
+    ),
+  )
+
+  createEffect(() => {
+    const surface = activeMainTimelineSurface()
+    const root = scroller
+    scrollRefVersion()
+    if (!surface || !root) return
+    if (!matchesScrollerOwner(root, surface.sessionID)) return
+    const unregisterViewport = registerSessionViewport({
+      key: surface.key,
+      flush: () => viewportController?.flush(),
+      snapshot: captureTimelineHotState,
+    })
+    const unregisterSurface = registerSessionViewSurface({
+      key: surface.key,
+      sessionID: surface.sessionID,
+      surface: "main",
+      phase: "active",
+      freeze: () => {
+        captureTimelineHotState()
+        viewportController?.flush()
+        viewportController?.cancelRestore()
+        autoScroll.pause()
+      },
+      resume: () => {
+        viewportController?.activate()
+        viewportController?.notifyDataReady()
+      },
+      cool: () => {
+        captureTimelineHotState()
+        viewportController?.deactivate()
+      },
+      estimateWeight: () => surface.history.renderedUserMessages().length,
+    })
+    activateSessionViewSurface(surface.key)
+    onCleanup(() => {
+      unregisterSurface()
+      unregisterViewport()
+    })
   })
 
   fill = () => {
@@ -1508,15 +1704,16 @@ export default function Page() {
     fillFrame = requestAnimationFrame(() => {
       fillFrame = undefined
 
-      if (!params.id || !messagesReady()) return
-      if (autoScroll.userScrolled() || historyLoading()) return
+      const surface = activeMainTimelineSurface()
+      if (!surface?.ready()) return
+      if (autoScroll.userScrolled() || surface.historyLoading()) return
 
       const el = scroller
       if (!el) return
       if (el.scrollHeight > el.clientHeight + 1) return
-      if (historyWindow.turnStart() <= 0 && !historyMore()) return
+      if (surface.history.turnStart() <= 0 && !surface.historyMore()) return
 
-      void historyWindow.loadAndReveal()
+      surface.history.fillViewport()
     })
   }
 
@@ -1524,16 +1721,17 @@ export default function Page() {
     on(
       () =>
         [
-          params.id,
-          messagesReady(),
-          historyWindow.turnStart(),
-          historyMore(),
-          historyLoading(),
+          activeMainTimelineSurface()?.key,
+          activeMainTimelineSurface()?.ready(),
+          activeMainTimelineSurface()?.history.turnStart(),
+          activeMainTimelineSurface()?.historyMore(),
+          activeMainTimelineSurface()?.historyLoading(),
           autoScroll.userScrolled(),
-          viewUserMessages().length,
+          activeMainTimelineSurface()?.source.userMessages().length,
         ] as const,
       ([id, ready, start, more, loading, scrolled]) => {
         if (!id || !ready || loading || scrolled) return
+        if (start === undefined) return
         if (start <= 0 && !more) return
         fill()
       },
@@ -1574,6 +1772,1458 @@ export default function Page() {
       return out
     })
 
+  const seedSession = (next: Session) =>
+    sync.set("session", (list) => {
+      const result = Binary.search(list, next.id, (item) => item.id)
+      const out = list.slice()
+      if (result.found) {
+        out[result.index] = next
+        return out
+      }
+      out.splice(result.index, 0, next)
+      return out
+    })
+
+  const appendSelectionToPrompt = (input: { text: string; messageID?: string; sessionID?: string }) => {
+    const scope = input.sessionID ? { dir: sdk.directory, id: input.sessionID } : undefined
+    const current = scope ? prompt.scope(scope).current() : prompt.current()
+    const next = [
+      ...current,
+      {
+        type: "selected-text" as const,
+        text: input.text,
+        messageID: input.messageID,
+        content: "",
+        start: 0,
+        end: 0,
+        selection: undefined,
+      },
+    ]
+    prompt.set(
+      next,
+      next.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      scope,
+    )
+    requestAnimationFrame(() => {
+      if (scope?.id && sideChatTab(scope.id) === tabs().active()) {
+        activeSideChatInputRoot()?.focus()
+        return
+      }
+      inputRef?.focus()
+    })
+  }
+
+  const createSideChat = async (input: { text: string; messageID?: string }) => {
+    const sessionID = params.id
+    if (!sessionID) return
+    const contextWatermark = input.messageID ?? latestMainContextMessageID()
+    return sdk.client.session
+      .create({
+        parentID: sessionID,
+        contextFrom: sessionID,
+        contextWatermark,
+        title: language.t("session.sideChat.title"),
+      })
+      .then((result) => {
+        if (!result.data) throw new Error(language.t("common.requestFailed"))
+        const sideSessionID = result.data.id
+        seedSession(result.data)
+        sync.set("message", sideSessionID, (messages) => messages ?? [])
+        if (input.text) {
+          prompt.set(
+            [
+              {
+                type: "selected-text",
+                text: input.text,
+                messageID: input.messageID,
+                content: "",
+                start: 0,
+                end: 0,
+                selection: undefined,
+              },
+            ],
+            0,
+            { dir: sdk.directory, id: sideSessionID },
+          )
+        }
+        openSideChatTab(sideSessionID)
+        void sync.session.sync(sideSessionID, { force: true })
+        return sideSessionID
+      })
+      .catch((err) => {
+        fail(err)
+        return undefined
+      })
+  }
+
+  const askInSideChat = (input: { text: string; messageID?: string; sessionID?: string }) => {
+    const activeSideSessionID = sideChatTabID(tabs().active() ?? "")
+    if (activeSideSessionID && tabs().all().includes(sideChatTab(activeSideSessionID))) {
+      appendSelectionToPrompt({ ...input, sessionID: activeSideSessionID })
+      return
+    }
+    void createSideChat({ text: input.text, messageID: input.messageID })
+  }
+
+  const closeSideChatSession = async (sideSessionID: string) => {
+    const tab = sideChatTab(sideSessionID)
+    await sdk.client.session
+      .delete({ sessionID: sideSessionID })
+      .then(() => {
+        prompt.reset({ dir: sdk.directory, id: sideSessionID })
+        preserveMainTimelineViewport(() => {
+          sync.set(
+            produce((draft) => {
+              draft.session = draft.session.filter((item) => item.id !== sideSessionID)
+              delete draft.message[sideSessionID]
+              delete draft.session_diff[sideSessionID]
+              delete draft.todo[sideSessionID]
+              delete draft.actor[sideSessionID]
+            }),
+          )
+          tabs().close(tab)
+        })
+      })
+      .catch((error) => {
+        showToast({
+          variant: "error",
+          title: language.t("session.delete.failed.title"),
+          description: formatServerError(error, language.t, language.t("common.requestFailed")),
+        })
+        throw error
+      })
+  }
+
+  const waitForAutomationFrames = async (count = 2) => {
+    for (let index = 0; index < count; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    }
+  }
+
+  const waitForFileTabMode = async (mode: "edit" | "preview", attempts = 90) => {
+    for (let index = 0; index < attempts; index += 1) {
+      const state = readSessionAutomationState().fileTab
+      if (mode === "preview") {
+        if (activeCppToolbarButton("preview")?.getAttribute("data-variant") === "secondary") return state
+      }
+      if (mode === "edit") {
+        if (
+          activeCppToolbarButton("edit")?.getAttribute("data-variant") === "secondary" &&
+          state.loaded &&
+          state.editor.implementation !== "none"
+        ) {
+          return state
+        }
+      }
+      await waitForAutomationFrames(1)
+    }
+    return readSessionAutomationState().fileTab
+  }
+
+  const findCodeEditorAutomation = (root?: ParentNode | null) => {
+    const host =
+      root instanceof HTMLDivElement && root.dataset.automationId === "code-editor-phase0"
+        ? root
+        : root?.querySelector('[data-automation-id="code-editor-phase0"]')
+    if (!(host instanceof HTMLDivElement)) return
+    const automation = (host as HTMLDivElement & { __lfcodeCodeEditorAutomation?: LfcodeCodeEditorAutomationHandle })
+      .__lfcodeCodeEditorAutomation
+    if (!automation) return
+    return {
+      host,
+      automation,
+    }
+  }
+
+  const visibleRect = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect()
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    }
+  }
+
+  const snapshotUiElement = (token: UiDriverToken, element?: HTMLElement): UiDriverNodeSnapshot => {
+    const promptValue = automationPromptValueForToken(token)
+    const promptParts = automationPromptPartsForToken(token)
+    const selectedTexts = promptParts?.filter((part) => part.type === "selected-text").map((part) => part.text) ?? []
+    if (!element) {
+      return {
+        token,
+        found: false,
+        visible: false,
+        draftText: promptValue,
+        selectedTextCount: selectedTexts.length,
+        selectedTexts,
+      }
+    }
+    const dataset = Object.fromEntries(
+      Object.entries(element.dataset).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    )
+    const editor = findCodeEditorAutomation(element)
+    const value =
+      promptValue ??
+      (editor
+        ? editor.automation.getState().value
+        : "value" in element && typeof (element as HTMLInputElement | HTMLTextAreaElement).value === "string"
+          ? (element as HTMLInputElement | HTMLTextAreaElement).value
+          : undefined)
+    return {
+      token,
+      found: true,
+      visible: !!(element.offsetParent || element.getClientRects().length > 0),
+      text: element.textContent ?? "",
+      value,
+      draftText: promptValue,
+      selectedTextCount: selectedTexts.length,
+      selectedTexts,
+      dataset,
+      rect: visibleRect(element),
+      tagName: element.tagName,
+    }
+  }
+
+  const resolveUiToken = (input: UiDriverQueryInput) => {
+    if (input.token === "composer.main.input") {
+      return inputRef
+    }
+    if (input.token === "composer.main.submit") {
+      const button = inputRef?.closest("form")?.querySelector('[data-action="prompt-submit"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "sidechat.active.input") {
+      const sideSessionID = sideChatTabID(tabs().active() ?? "")
+      if (!sideSessionID) return
+      return automationPromptRoot(sideSessionID)
+    }
+    if (input.token === "sidechat.active.submit") {
+      const sideSessionID = sideChatTabID(tabs().active() ?? "")
+      if (!sideSessionID) return
+      const editor = automationPromptRoot(sideSessionID)
+      const button = editor?.closest("form")?.querySelector('[data-action="prompt-submit"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "filetab.active.panel") {
+      return activeFileTabPanel()
+    }
+    if (input.token === "filetab.active.editor") {
+      const editor = activeFileTabEditor()
+      return editor?.implementation === "phase0" ? editor.host : activeCppEditorTextarea()
+    }
+    if (input.token === "filetab.active.mode.edit") return activeCppToolbarButton("edit")
+    if (input.token === "filetab.active.mode.preview") return activeCppToolbarButton("preview")
+    if (input.token === "filetab.active.mode.save") return activeCppToolbarButton("save")
+    const root = messageCodeBlockRoot(input.blockKey)
+    if (input.token === "messageblock.root") return root
+    if (input.token === "messageblock.editor") {
+      const editor = messageCodeBlockEditor(root)
+      return editor?.implementation === "phase0"
+        ? editor.host
+        : editor?.implementation === "fallback"
+          ? editor.textarea
+          : undefined
+    }
+    if (input.token === "messageblock.mode.edit") return messageCodeBlockButton(root, "edit")
+    if (input.token === "messageblock.mode.preview") return messageCodeBlockButton(root, "preview")
+    if (input.token === "messageblock.mode.save") return messageCodeBlockButton(root, "save")
+    if (input.token === "messageblock.mode.reload") return messageCodeBlockButton(root, "reload")
+    if (input.token === "messageblock.mode.open-sidebar") return messageCodeBlockButton(root, "open-sidebar")
+    if (input.token === "messageblock.mode.bind-file") return messageCodeBlockButton(root, "bind-file")
+  }
+
+  const uiReadText = (input: UiDriverReadTextInput) => {
+    const promptValue = automationPromptValueForToken(input.token)
+    if (promptValue !== undefined) {
+      const selectedTexts =
+        automationPromptPartsForToken(input.token)
+          ?.filter((part) => part.type === "selected-text")
+          .map((part) => part.text) ?? []
+      if (selectedTexts.length === 0) return promptValue
+      return [promptValue, ...selectedTexts].filter(Boolean).join("\n")
+    }
+    const node = resolveUiToken(input)
+    if (!node) return ""
+    if ("value" in node && typeof (node as HTMLInputElement | HTMLTextAreaElement).value === "string") {
+      return (node as HTMLInputElement | HTMLTextAreaElement).value
+    }
+    const editor = findCodeEditorAutomation(node)
+    if (editor) return editor.automation.getState().value
+    return node.textContent ?? ""
+  }
+
+  const uiQuery = (input: UiDriverQueryInput) => snapshotUiElement(input.token, resolveUiToken(input))
+
+  const uiClick = async (input: UiDriverQueryInput) => {
+    if (input.token === "composer.main.submit") {
+      await submitAutomationPrompt("main")
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    if (input.token === "sidechat.active.submit") {
+      await submitAutomationPrompt("active-side")
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    const node = resolveUiToken(input)
+    if (!node) {
+      if (input.token === "messageblock.mode.reload") {
+        const root = messageCodeBlockRoot(input.blockKey)
+        const automation = messageCodeBlockAutomation(root)
+        if (!automation) throw new Error(`UI token was not found: ${input.token}`)
+        await automation.reload()
+        await waitForAutomationFrames(2)
+        return snapshotUiElement(input.token, resolveUiToken(input))
+      }
+      throw new Error(`UI token was not found: ${input.token}`)
+    }
+    if (node instanceof HTMLButtonElement || node instanceof HTMLAnchorElement || node instanceof HTMLDivElement) {
+      node.click()
+    } else {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    }
+    await waitForAutomationFrames(2)
+    return snapshotUiElement(input.token, resolveUiToken(input))
+  }
+
+  const uiType = async (input: UiDriverTypeInput) => {
+    const node = resolveUiToken(input)
+    if (!node) throw new Error(`UI token was not found: ${input.token}`)
+    const editor = findCodeEditorAutomation(node)
+    if (editor) {
+      const current = editor.automation.getState().value
+      editor.automation.setValue(input.append ? `${current}${input.text}` : input.text)
+      editor.automation.focus()
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    if (node === inputRef || node.dataset.component === "prompt-input") {
+      const target = input.token === "sidechat.active.input" ? "active-side" : "main"
+      setAutomationPromptText(input.text, target, undefined, input.append)
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    if ("value" in node && typeof (node as HTMLTextAreaElement | HTMLInputElement).value === "string") {
+      const field = node as HTMLTextAreaElement | HTMLInputElement
+      const next = input.append ? `${field.value}${input.text}` : input.text
+      field.value = next
+      field.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.text }))
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    throw new Error(`UI token does not support typing: ${input.token}`)
+  }
+
+  const uiWait = async (input: UiDriverWaitInput) => {
+    const timeoutMs = input.timeoutMs ?? 10_000
+    const intervalMs = input.intervalMs ?? 120
+    const startedAt = Date.now()
+    while (Date.now() - startedAt <= timeoutMs) {
+      const snapshot = uiQuery(input)
+      if (snapshot.found && (input.visible === undefined || snapshot.visible === input.visible)) return snapshot
+      await new Promise((resolve) => setTimeout(resolve, intervalMs))
+    }
+    return uiQuery(input)
+  }
+
+  const uiEditor = async (input: UiDriverEditorInput) => {
+    const node = resolveUiToken(input)
+    if (!node) throw new Error(`UI token was not found: ${input.token}`)
+    const editor = findCodeEditorAutomation(node)
+    if (!editor) throw new Error(`UI token is not backed by a phase0 editor: ${input.token}`)
+    if (input.action === "getState") return editor.automation.getState()
+    if (input.action === "focus") {
+      editor.automation.focus()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "save") {
+      await editor.automation.save()
+      await waitForAutomationFrames(2)
+      return editor.automation.getState()
+    }
+    if (input.action === "undo") {
+      await editor.automation.undo()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "redo") {
+      await editor.automation.redo()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "navigateBack") {
+      await editor.automation.navigateBack()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "navigateForward") {
+      await editor.automation.navigateForward()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openCommandPalette") {
+      await editor.automation.openCommandPalette()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openQuickOutline") {
+      await editor.automation.openQuickOutline()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "setSelection") {
+      editor.automation.setSelection(input.selection)
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openFind") {
+      await editor.automation.openFind()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openReplace") {
+      await editor.automation.openReplace()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "findPrevious") {
+      await editor.automation.findPrevious()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "findNext") {
+      await editor.automation.findNext()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openGoToLine") {
+      await editor.automation.openGoToLine()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openQuickFix") {
+      await editor.automation.openQuickFix()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "renameSymbol") {
+      await editor.automation.renameSymbol()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "showHover") {
+      await editor.automation.showHover()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "triggerSuggest") {
+      await editor.automation.triggerSuggest()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "triggerParameterHints") {
+      await editor.automation.triggerParameterHints()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "openProblems") {
+      await editor.automation.openProblems()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "nextProblem") {
+      await editor.automation.nextProblem()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "previousProblem") {
+      await editor.automation.previousProblem()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "organizeImports") {
+      await editor.automation.organizeImports()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "expandSelection") {
+      await editor.automation.expandSelection()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "shrinkSelection") {
+      await editor.automation.shrinkSelection()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "moveLineUp") {
+      await editor.automation.moveLineUp()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "moveLineDown") {
+      await editor.automation.moveLineDown()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "copyLineUp") {
+      await editor.automation.copyLineUp()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "copyLineDown") {
+      await editor.automation.copyLineDown()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "deleteLine") {
+      await editor.automation.deleteLine()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "addNextMatchToSelection") {
+      await editor.automation.addNextMatchToSelection()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "duplicateSelection") {
+      await editor.automation.duplicateSelection()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "insertCursorAbove") {
+      await editor.automation.insertCursorAbove()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "insertCursorBelow") {
+      await editor.automation.insertCursorBelow()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "joinLines") {
+      await editor.automation.joinLines()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "trimTrailingWhitespace") {
+      await editor.automation.trimTrailingWhitespace()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "toggleWordWrap") {
+      await editor.automation.toggleWordWrap()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "foldCurrent") {
+      await editor.automation.foldCurrent()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "unfoldCurrent") {
+      await editor.automation.unfoldCurrent()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "foldAll") {
+      await editor.automation.foldAll()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "unfoldAll") {
+      await editor.automation.unfoldAll()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "peekDefinition") {
+      await editor.automation.peekDefinition()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "peekDeclaration") {
+      await editor.automation.peekDeclaration()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "peekTypeDefinition") {
+      await editor.automation.peekTypeDefinition()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "peekImplementation") {
+      await editor.automation.peekImplementation()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "peekReferences") {
+      await editor.automation.peekReferences()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "formatDocument") {
+      await editor.automation.formatDocument()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "formatSelection") {
+      await editor.automation.formatSelection()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "toggleLineComment") {
+      await editor.automation.toggleLineComment()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "toggleBlockComment") {
+      await editor.automation.toggleBlockComment()
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "getHover") {
+      return editor.automation.getHover()
+    }
+    if (input.action === "getDocumentSymbols") {
+      return editor.automation.getDocumentSymbols()
+    }
+    if (input.action === "getWorkspaceSymbols") {
+      return editor.automation.getWorkspaceSymbols(input.query)
+    }
+    if (input.action === "getIncomingCalls") {
+      return editor.automation.getIncomingCalls()
+    }
+    if (input.action === "getOutgoingCalls") {
+      return editor.automation.getOutgoingCalls()
+    }
+    if (input.action === "getDeclarations") {
+      return editor.automation.getDeclarations()
+    }
+    if (input.action === "getDefinitions") {
+      return editor.automation.getDefinitions()
+    }
+    if (input.action === "getTypeDefinitions") {
+      return editor.automation.getTypeDefinitions()
+    }
+    if (input.action === "getImplementations") {
+      return editor.automation.getImplementations()
+    }
+    if (input.action === "getReferences") {
+      return editor.automation.getReferences()
+    }
+    if (input.action === "getDocumentHighlights") {
+      return editor.automation.getDocumentHighlights()
+    }
+    if (input.action === "openNavigationTarget") {
+      await editor.automation.openNavigationTarget(input.target)
+      await waitForAutomationFrames(1)
+      return editor.automation.getState()
+    }
+    if (input.action === "inspectLanguage") {
+      return editor.automation.inspectLanguage(input.inspect)
+    }
+    return editor.automation.getState()
+  }
+
+  const findEditorTextarea = (root?: ParentNode | null) => {
+    const textarea = root?.querySelector("textarea")
+    return textarea instanceof HTMLTextAreaElement ? textarea : undefined
+  }
+
+  const findCodeEditorFailureMessage = (root?: ParentNode | null) => {
+    const host =
+      root instanceof HTMLDivElement && root.dataset.automationId === "code-editor-phase0"
+        ? root
+        : root?.querySelector('[data-automation-id="code-editor-phase0"]')
+    if (host instanceof HTMLDivElement && host.parentElement?.dataset.editorFailureMessage) {
+      return host.parentElement.dataset.editorFailureMessage
+    }
+    const error = root?.querySelector('[data-automation-id="code-editor-phase0-error"]')
+    if (error instanceof HTMLElement) return error.textContent ?? ""
+    return ""
+  }
+
+  const activeCppEditorTextarea = () => {
+    return findEditorTextarea(activeFileTabPanel())
+  }
+
+  const activeFileTabPanel = () => {
+    const tab = activeFileTab()
+    if (!tab) return
+    const panel = document.querySelector(`[data-automation-id="session-file-tab-panel"][data-key="${CSS.escape(tab)}"]`)
+    return panel instanceof HTMLElement ? panel : undefined
+  }
+
+  const activeCodeEditorHost = () => {
+    return findCodeEditorAutomation(activeFileTabPanel())
+  }
+
+  const activeFileTabEditor = () => {
+    const phase0 = activeCodeEditorHost()
+    if (phase0) {
+      return {
+        implementation: "phase0" as const,
+        ...phase0,
+      }
+    }
+
+    const textarea = activeCppEditorTextarea()
+    if (textarea) {
+      return {
+        implementation: "fallback" as const,
+        textarea,
+        failureMessage: findCodeEditorFailureMessage(activeFileTabPanel()),
+      }
+    }
+  }
+
+  const activeCppToolbarButton = (kind: "edit" | "preview" | "save" | "run" | "reload") => {
+    const panel = activeFileTabPanel()
+    if (!(panel instanceof HTMLElement)) return
+    const selectors = {
+      edit: '[data-automation-id="cpp-file-edit"]',
+      preview: '[data-automation-id="cpp-file-preview"]',
+      save: '[data-automation-id="cpp-file-save"]',
+      run: '[data-automation-id="cpp-file-run"]',
+      reload: '[data-automation-id="cpp-file-reload"]',
+    } as const
+    const button = panel.querySelector(selectors[kind])
+    return button instanceof HTMLButtonElement ? button : undefined
+  }
+
+  const messageCodeBlockRoots = () =>
+    Array.from(document.querySelectorAll('[data-automation-id="session-message-code-block"]')).filter(
+      (node): node is HTMLElement => node instanceof HTMLElement,
+    )
+
+  const messageCodeBlockRoot = (blockKey?: string) => {
+    if (blockKey) {
+      const root = document.querySelector(
+        `[data-automation-id="session-message-code-block"][data-block-key="${CSS.escape(blockKey)}"]`,
+      )
+      return root instanceof HTMLElement ? root : undefined
+    }
+    return messageCodeBlockRoots()[0]
+  }
+
+  const messageCodeBlockEditor = (root?: HTMLElement) => {
+    const phase0 = findCodeEditorAutomation(root)
+    if (phase0) {
+      return {
+        implementation: "phase0" as const,
+        ...phase0,
+      }
+    }
+
+    const textarea = findEditorTextarea(root)
+    if (textarea) {
+      return {
+        implementation: "fallback" as const,
+        textarea,
+        failureMessage: findCodeEditorFailureMessage(root),
+      }
+    }
+  }
+
+  const messageCodeBlockAutomation = (root?: HTMLElement) => {
+    const automation = (
+      root as
+        | (HTMLElement & {
+            __lfcodeMessageCodeBlockAutomation?: LfcodeMessageCodeBlockAutomationHandle
+          })
+        | undefined
+    )?.__lfcodeMessageCodeBlockAutomation
+    if (!automation) return
+    return automation
+  }
+
+  const readMessageCodeBlockState = (root: HTMLElement) => {
+    const editor = messageCodeBlockEditor(root)
+    return {
+      blockKey: root.dataset.blockKey ?? "",
+      languageID: root.dataset.languageId ?? "",
+      path: root.dataset.bindingPath ?? "",
+      mode: root.dataset.editorMode === "edit" ? ("edit" as const) : ("preview" as const),
+      externalChanged: root.dataset.externalChanged === "true",
+      saveConflict: root.dataset.saveConflict === "true",
+      editor:
+        editor?.implementation === "phase0"
+          ? editor.automation.getState()
+          : editor?.implementation === "fallback"
+            ? {
+                implementation: "fallback" as const,
+                value: editor.textarea.value,
+                ...(editor.failureMessage ? { failureMessage: editor.failureMessage } : {}),
+              }
+            : {
+                implementation: "none" as const,
+              },
+    }
+  }
+
+  const messageCodeBlockButton = (
+    root: HTMLElement | undefined,
+    kind: "edit" | "preview" | "open-sidebar" | "bind-file" | "save" | "reload",
+  ) => {
+    if (!root) return
+    const selectors = {
+      edit: '[data-automation-id="message-code-block-edit"]',
+      preview: '[data-automation-id="message-code-block-preview"]',
+      "open-sidebar": '[data-automation-id="message-code-block-open-sidebar"]',
+      "bind-file": '[data-automation-id="message-code-block-bind-file"]',
+      save: '[data-automation-id="message-code-block-save"]',
+      reload: '[data-automation-id="message-code-block-reload"]',
+    } as const
+    const button = root.querySelector(selectors[kind])
+    return button instanceof HTMLButtonElement ? button : undefined
+  }
+
+  const waitForMessageCodeBlockMode = async (blockKey: string | undefined, mode: "edit" | "preview", attempts = 90) => {
+    for (let index = 0; index < attempts; index += 1) {
+      const root = messageCodeBlockRoot(blockKey)
+      if (root) {
+        const state = readMessageCodeBlockState(root)
+        if (
+          mode === "preview" &&
+          root.dataset.editorMode === "preview" &&
+          messageCodeBlockButton(root, "preview")?.getAttribute("data-variant") === "secondary"
+        ) {
+          return state
+        }
+        if (
+          mode === "edit" &&
+          root.dataset.editorMode === "edit" &&
+          messageCodeBlockButton(root, "edit")?.getAttribute("data-variant") === "secondary" &&
+          state.editor.implementation !== "none"
+        ) {
+          return state
+        }
+      }
+      await waitForAutomationFrames(1)
+    }
+    const root = messageCodeBlockRoot(blockKey)
+    return root ? readMessageCodeBlockState(root) : undefined
+  }
+
+  const automationPromptScope = (target?: string, explicitSessionID?: string) => {
+    const sideSessionID =
+      explicitSessionID && explicitSessionID.length > 0
+        ? explicitSessionID
+        : target === "active-side"
+          ? sideChatTabID(tabs().active() ?? "")
+          : undefined
+    if (sideSessionID) {
+      return {
+        scope: { dir: sdk.directory, id: sideSessionID },
+        target: sideSessionID,
+      }
+    }
+    return {
+      scope: mainComposerScope(),
+      target: "main",
+    }
+  }
+
+  const automationPromptValueForToken = (token: UiDriverToken) => {
+    if (token === "composer.main.input") {
+      return automationPromptText(mainComposerScope())
+    }
+    if (token === "sidechat.active.input") {
+      const sideSessionID = sideChatTabID(tabs().active() ?? "")
+      if (!sideSessionID) return ""
+      return automationPromptText({ dir: sdk.directory, id: sideSessionID })
+    }
+  }
+
+  const automationPromptText = (scope?: { dir: string; id?: string }) =>
+    (scope ? prompt.scope(scope).current() : prompt.current())
+      .map((part) => ("content" in part ? part.content : ""))
+      .join("")
+
+  const automationPromptPartsForToken = (token: UiDriverToken) => {
+    if (token === "composer.main.input") {
+      return prompt.current()
+    }
+    if (token === "sidechat.active.input") {
+      const sideSessionID = sideChatTabID(tabs().active() ?? "")
+      if (!sideSessionID) return []
+      return prompt.scope({ dir: sdk.directory, id: sideSessionID }).current()
+    }
+  }
+
+  const automationPromptWithText = (parts: Prompt, text: string) => {
+    const next: Prompt = [{ type: "text", content: text, start: 0, end: text.length }]
+    let position = text.length
+    for (const part of parts) {
+      if (part.type === "text") continue
+      if (part.type === "image") {
+        next.push(part)
+        continue
+      }
+      if (part.type === "selected-text") {
+        next.push({ ...part, content: "", start: position, end: position })
+        continue
+      }
+      next.push({
+        ...part,
+        start: position,
+        end: position + part.content.length,
+      })
+      position += part.content.length
+    }
+    return next
+  }
+
+  const automationPromptRoot = (target: string) => {
+    if (target === "main") return inputRef
+    const panel = document.querySelector(`[data-component="side-chat-panel"][data-session-id="${CSS.escape(target)}"]`)
+    const editor = panel?.querySelector('[contenteditable="true"]')
+    return editor instanceof HTMLDivElement ? editor : undefined
+  }
+
+  const readSessionAutomationState = () => {
+    const active = tabs().active()
+    const activeSideSessionID = sideChatTabID(active ?? "")
+    const activeBrowserTabID = active ? browserTabID(active) : undefined
+    const activeFileTabValue = activeFileTab()
+    const activeFilePath = activeFileTabValue ? file.pathFromTab(activeFileTabValue) : undefined
+    const activeFileState = activeFilePath ? file.get(activeFilePath) : undefined
+    const sideChatItems = tabs()
+      .all()
+      .filter(isSideChatTab)
+      .map((tab) => ({
+        tab,
+        sessionID: sideChatTabID(tab) ?? "",
+      }))
+      .filter((item) => !!item.sessionID)
+    const browserItems = Object.entries(view().browser.tabs()).map(([id, item]) => ({
+      id,
+      url: item.url,
+      input: item.input,
+      title: item.title,
+      loading: !!item.loading,
+      error: item.error,
+    }))
+    const activeFileEditor = activeFileTabEditor()
+    const activeComposer = automationPromptScope(activeSideSessionID ? "active-side" : "main")
+    const messageBlocks = messageCodeBlockRoots().map(readMessageCodeBlockState)
+    return {
+      automationVersion: "session-automation-filetab-v2",
+      sessionID: params.id,
+      sessionKey: sessionKey(),
+      directory: sdk.directory,
+      messagesReady: messagesReady(),
+      streaming: sessionStreaming(),
+      loading: !messagesReady(),
+      tabs: {
+        active,
+        all: tabs().all(),
+      },
+      sideChat: {
+        activeSessionID: activeSideSessionID,
+        items: sideChatItems,
+      },
+      browser: {
+        activeTabID: activeBrowserTabID,
+        items: browserItems,
+      },
+      composer: {
+        activeTarget: activeComposer.target,
+        mainText: automationPromptText(mainComposerScope()),
+        activeText: automationPromptText(activeComposer.scope),
+      },
+      fileTabSummary: {
+        active: activeFileTabValue ?? null,
+        path: activeFilePath ?? null,
+        loaded: activeFileState?.loaded ?? false,
+        loading: activeFileState?.loading ?? false,
+      },
+      fileTab: {
+        active: activeFileTabValue,
+        path: activeFilePath,
+        loaded: activeFileState?.loaded ?? false,
+        loading: activeFileState?.loading ?? false,
+        error: activeFileState?.error,
+        editor:
+          activeFileEditor?.implementation === "phase0"
+            ? activeFileEditor.automation.getState()
+            : activeFileEditor?.implementation === "fallback"
+              ? {
+                  implementation: "fallback",
+                  value: activeFileEditor.textarea.value,
+                  ...(activeFileEditor.failureMessage ? { failureMessage: activeFileEditor.failureMessage } : {}),
+                }
+              : {
+                  implementation: "none",
+                },
+      },
+      messageBlocks,
+      timeline: {
+        scrollTop: scroller?.scrollTop ?? 0,
+        scrollHeight: scroller?.scrollHeight ?? 0,
+        clientHeight: scroller?.clientHeight ?? 0,
+        atBottom: scroller ? scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 4 : true,
+        phase: document.documentElement.dataset.timelineSurfacePhase ?? "idle",
+        virtualItems: Number(document.documentElement.dataset.timelineVirtualItems ?? 0),
+        contentRevision: Number(document.documentElement.dataset.timelineContentRevision ?? 0),
+        viewport: viewportController?.inspect(),
+        surfaces: sessionViewSurfaceDiagnostics(),
+        cache: sessionVirtualCacheDiagnostics(),
+        visualCache: sessionTimelineVisualSnapshotDiagnostics(),
+      },
+    }
+  }
+
+  const setAutomationPromptText = (text: string, target?: string, explicitSessionID?: string, append?: boolean) => {
+    const resolved = automationPromptScope(target, explicitSessionID)
+    const current = resolved.scope ? prompt.scope(resolved.scope).current() : prompt.current()
+    const next = `${append ? automationPromptText(resolved.scope) : ""}${text}`
+    prompt.set(automationPromptWithText(current, next), next.length, resolved.scope)
+    return resolved
+  }
+
+  const submitAutomationPrompt = async (target?: string, explicitSessionID?: string) => {
+    const resolved = automationPromptScope(target, explicitSessionID)
+    if (resolved.target !== "main") {
+      openSideChatTab(resolved.target)
+      await waitForAutomationFrames(2)
+    }
+    const form = automationPromptRoot(resolved.target)?.closest("form")
+    if (!(form instanceof HTMLFormElement)) {
+      throw new Error(`Prompt form is not available for target: ${resolved.target}`)
+    }
+    form.requestSubmit()
+    await waitForAutomationFrames(2)
+    return resolved
+  }
+
+  const callSessionAutomation = async (action: string, input?: unknown) => {
+    if (action === "session.create") {
+      const value = input as { title?: unknown; open?: unknown } | undefined
+      const result = await sdk.client.session.create({
+        title: typeof value?.title === "string" && value.title.trim() ? value.title.trim() : undefined,
+      })
+      if (!result.data) throw new Error(language.t("common.requestFailed"))
+      const sessionID = result.data.id
+      seedSession(result.data)
+      sync.set("message", sessionID, (messages) => messages ?? [])
+      void sync.session.sync(sessionID, { force: true })
+      if (value?.open !== false) {
+        window.__LFCODE__?.navigate?.(`/${params.dir}/session/${sessionID}`)
+        await waitForAutomationFrames(3)
+      }
+      return {
+        sessionID,
+        route: `/${params.dir}/session/${sessionID}`,
+        opened: value?.open !== false,
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "sidechat.create") {
+      const value = input as { text?: unknown; messageID?: unknown } | undefined
+      const sideSessionID = await createSideChat({
+        text: typeof value?.text === "string" ? value.text : "",
+        messageID: typeof value?.messageID === "string" ? value.messageID : undefined,
+      })
+      await waitForAutomationFrames(3)
+      return { sideSessionID, state: readSessionAutomationState() }
+    }
+    if (action === "sidechat.open") {
+      const value = input as { sessionID?: unknown } | undefined
+      const sideSessionID = typeof value?.sessionID === "string" ? value.sessionID : ""
+      if (!sideSessionID) throw new Error("Missing sessionID")
+      openSideChatTab(sideSessionID)
+      await waitForAutomationFrames(2)
+      return { sideSessionID, state: readSessionAutomationState() }
+    }
+    if (action === "sidechat.close") {
+      const value = input as { sessionID?: unknown } | undefined
+      const sideSessionID = typeof value?.sessionID === "string" ? value.sessionID : ""
+      if (!sideSessionID) throw new Error("Missing sessionID")
+      await closeSideChatSession(sideSessionID)
+      await waitForAutomationFrames(2)
+      return { sideSessionID, state: readSessionAutomationState() }
+    }
+    if (action === "composer.setText") {
+      const value = input as { text?: unknown; target?: unknown; sessionID?: unknown; append?: unknown } | undefined
+      const resolved = setAutomationPromptText(
+        typeof value?.text === "string" ? value.text : "",
+        typeof value?.target === "string" ? value.target : undefined,
+        typeof value?.sessionID === "string" ? value.sessionID : undefined,
+        value?.append === true,
+      )
+      if (resolved.target !== "main") {
+        openSideChatTab(resolved.target)
+        await waitForAutomationFrames(2)
+      }
+      focusWithoutScroll(automationPromptRoot(resolved.target))
+      return {
+        target: resolved.target,
+        text: automationPromptText(resolved.scope),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "composer.submit") {
+      const value = input as { target?: unknown; sessionID?: unknown } | undefined
+      const resolved = await submitAutomationPrompt(
+        typeof value?.target === "string" ? value.target : undefined,
+        typeof value?.sessionID === "string" ? value.sessionID : undefined,
+      )
+      return {
+        target: resolved.target,
+        submitted: true,
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "timeline.inspect") {
+      return readSessionAutomationState().timeline
+    }
+    if (action === "timeline.scroll") {
+      const value = input as { position?: unknown; top?: unknown } | undefined
+      const root = scroller
+      const sessionID = params.id
+      if (!root || !sessionID || !matchesScrollerOwner(root, sessionID)) {
+        throw new Error("Timeline scroller is not available")
+      }
+      const max = Math.max(0, root.scrollHeight - root.clientHeight)
+      const position = typeof value?.position === "string" ? value.position : undefined
+      const top =
+        typeof value?.top === "number" && Number.isFinite(value.top)
+          ? Math.max(0, Math.min(max, value.top))
+          : position === "top"
+            ? 0
+            : position === "middle"
+              ? Math.round(max / 2)
+              : max
+      viewportController?.cancelForUserInput()
+      root.scrollTo({ top, behavior: "auto" })
+      scheduleScrollState(root, { sessionID })
+      viewportController?.flush()
+      await waitForAutomationFrames(2)
+      return readSessionAutomationState().timeline
+    }
+    if (action === "messageblock.setMode") {
+      const value = input as { blockKey?: unknown; mode?: unknown } | undefined
+      const mode = typeof value?.mode === "string" ? value.mode : ""
+      if (mode !== "edit" && mode !== "preview") throw new Error("Missing message block mode")
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const button = messageCodeBlockButton(root, mode)
+      if (!button) throw new Error(`Message code block ${mode} button is not available`)
+      button.click()
+      const block = await waitForMessageCodeBlockMode(root.dataset.blockKey, mode)
+      await waitForAutomationFrames(2)
+      return {
+        block,
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "messageblock.setText") {
+      const value = input as { blockKey?: unknown; text?: unknown; append?: unknown } | undefined
+      const text = typeof value?.text === "string" ? value.text : ""
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const editor = messageCodeBlockEditor(root)
+      if (!editor) throw new Error("Message code block editor is not available")
+      if (editor.implementation === "phase0") {
+        const current = editor.automation.getState().value
+        editor.automation.setValue(value?.append === true ? `${current}${text}` : text)
+        editor.automation.focus()
+      } else {
+        const next = value?.append === true ? `${editor.textarea.value}${text}` : text
+        editor.textarea.value = next
+        editor.textarea.dispatchEvent(new InputEvent("input", { bubbles: true, data: next }))
+      }
+      await waitForAutomationFrames(2)
+      return {
+        block: readMessageCodeBlockState(root),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "messageblock.save") {
+      const value = input as { blockKey?: unknown } | undefined
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const button = messageCodeBlockButton(root, "save")
+      if (!button) throw new Error("Message code block save button is not available")
+      button.click()
+      await waitForAutomationFrames(4)
+      return {
+        block: readMessageCodeBlockState(root),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "messageblock.bindFileToPath") {
+      const value = input as { blockKey?: unknown; path?: unknown } | undefined
+      const path = typeof value?.path === "string" ? value.path.trim() : ""
+      if (!path) throw new Error("Missing path")
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const automation = messageCodeBlockAutomation(root)
+      if (!automation) throw new Error("Message code block bindFile automation is not available")
+      const saved = await automation.bindFileToPath(path)
+      await waitForAutomationFrames(4)
+      return {
+        saved,
+        block: readMessageCodeBlockState(root),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "messageblock.reload") {
+      const value = input as { blockKey?: unknown } | undefined
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const automation = messageCodeBlockAutomation(root)
+      if (automation) {
+        await automation.reload()
+      } else {
+        const button = messageCodeBlockButton(root, "reload")
+        if (!button) throw new Error("Message code block reload button is not available")
+        button.click()
+      }
+      await waitForAutomationFrames(4)
+      return {
+        block: readMessageCodeBlockState(root),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "messageblock.openInSidebar") {
+      const value = input as { blockKey?: unknown } | undefined
+      const root = messageCodeBlockRoot(typeof value?.blockKey === "string" ? value.blockKey : undefined)
+      if (!root) throw new Error("Message code block was not found")
+      const button = messageCodeBlockButton(root, "open-sidebar")
+      if (!button) throw new Error("Message code block open in sidebar button is not available")
+      button.click()
+      await waitForAutomationFrames(4)
+      return {
+        block: readMessageCodeBlockState(root),
+        state: readSessionAutomationState(),
+      }
+    }
+    if (action === "browser.open") {
+      const value = input as { url?: unknown; title?: unknown } | undefined
+      const url = typeof value?.url === "string" ? value.url : ""
+      if (!url) throw new Error("Missing url")
+      openBrowserTab(url, typeof value?.title === "string" ? value.title : undefined)
+      await waitForAutomationFrames(3)
+      return { state: readSessionAutomationState() }
+    }
+    if (action === "browser.close") {
+      const value = input as { tabID?: unknown } | undefined
+      const tabID = typeof value?.tabID === "string" ? value.tabID : browserTabID(tabs().active() ?? "")
+      if (!tabID) throw new Error("No active browser tab to close")
+      layout.view(sessionKey()).browser.close(tabID)
+      tabs().close(browserTab(tabID))
+      await waitForAutomationFrames(2)
+      return { tabID, state: readSessionAutomationState() }
+    }
+    if (action === "browser.focusTab") {
+      const value = input as { tabID?: unknown } | undefined
+      const tabID = typeof value?.tabID === "string" ? value.tabID : ""
+      if (!tabID) throw new Error("Missing tabID")
+      const tab = browserTab(tabID)
+      if (!tabs().all().includes(tab)) {
+        throw new Error(`Browser tab was not found: ${tabID}`)
+      }
+      openReviewPanel()
+      tabs().setActive(tab)
+      if (tabs().active() !== tab) activateSessionTabWhenReady(tab)
+      await waitForAutomationFrames(2)
+      return { tabID, state: readSessionAutomationState() }
+    }
+    if (action === "filetab.focus") {
+      const value = input as { tab?: unknown; path?: unknown } | undefined
+      const targetTab =
+        typeof value?.tab === "string"
+          ? normalizeTab(value.tab)
+          : typeof value?.path === "string"
+            ? file.tab(value.path)
+            : activeFileTab()
+      if (!targetTab) throw new Error("Missing file tab target")
+      openReviewPanel()
+      const targetPath = file.pathFromTab(targetTab)
+      if (targetPath) {
+        await file.load(targetPath)
+      }
+      if (!tabs().all().includes(targetTab)) {
+        await tabs().open(targetTab)
+      }
+      tabs().setActive(targetTab)
+      if (tabs().active() !== targetTab) activateSessionTabWhenReady(targetTab)
+      await waitForAutomationFrames(3)
+      return { tab: targetTab, state: readSessionAutomationState() }
+    }
+    if (action === "filetab.openPath") {
+      const value = input as
+        | {
+            path?: unknown
+            selection?: {
+              startLineNumber?: unknown
+              startColumn?: unknown
+              endLineNumber?: unknown
+              endColumn?: unknown
+            }
+          }
+        | undefined
+      const targetPath = typeof value?.path === "string" ? value.path.trim() : ""
+      if (!targetPath) throw new Error("Missing path")
+      const selection = value?.selection
+      const startLineNumber = typeof selection?.startLineNumber === "number" ? selection.startLineNumber : undefined
+      const startColumn = typeof selection?.startColumn === "number" ? selection.startColumn : undefined
+      await openCodeEditorPath({
+        path: targetPath,
+        selection:
+          startLineNumber && startColumn
+            ? {
+                startLineNumber,
+                startColumn,
+                ...(typeof selection?.endLineNumber === "number" ? { endLineNumber: selection.endLineNumber } : {}),
+                ...(typeof selection?.endColumn === "number" ? { endColumn: selection.endColumn } : {}),
+              }
+            : undefined,
+      })
+      openReviewPanel()
+      const targetTab = file.tab(targetPath)
+      if (tabs().active() !== targetTab) activateSessionTabWhenReady(targetTab)
+      await waitForAutomationFrames(3)
+      return { tab: targetTab, state: readSessionAutomationState() }
+    }
+    if (action === "filetab.setMode") {
+      const value = input as { mode?: unknown } | undefined
+      const mode = typeof value?.mode === "string" ? value.mode : ""
+      if (mode !== "edit" && mode !== "preview") throw new Error("Missing file tab mode")
+      const button = activeCppToolbarButton(mode)
+      if (!button) throw new Error(`Active file tab ${mode} button is not available`)
+      button.click()
+      await waitForFileTabMode(mode)
+      await waitForAutomationFrames(2)
+      return { mode, state: readSessionAutomationState() }
+    }
+    if (action === "filetab.setText") {
+      const value = input as { text?: unknown; append?: unknown } | undefined
+      const text = typeof value?.text === "string" ? value.text : ""
+      const editor = activeFileTabEditor()
+      if (!editor) throw new Error("Active file editor is not available")
+      if (editor.implementation === "phase0") {
+        const current = editor.automation.getState().value
+        editor.automation.setValue(value?.append === true ? `${current}${text}` : text)
+        editor.automation.focus()
+      } else {
+        const next = value?.append === true ? `${editor.textarea.value}${text}` : text
+        editor.textarea.value = next
+        editor.textarea.dispatchEvent(new InputEvent("input", { bubbles: true, data: next }))
+      }
+      await waitForAutomationFrames(2)
+      const state = readSessionAutomationState()
+      return {
+        editor: state.fileTab.editor,
+        state,
+      }
+    }
+    if (action === "filetab.save") {
+      const button = activeCppToolbarButton("save")
+      if (!button) throw new Error("Active file save button is not available")
+      button.click()
+      await waitForAutomationFrames(4)
+      return { saved: true, state: readSessionAutomationState() }
+    }
+    throw new Error(`Unsupported session automation action: ${action}`)
+  }
+
+  createEffect(() => {
+    window.__LFCODE__ ??= {}
+    const bridge: LfcodeRendererAutomation = {
+      getState: readSessionAutomationState,
+      call: callSessionAutomation,
+      ui: {
+        query: uiQuery,
+        click: uiClick,
+        type: uiType,
+        readText: uiReadText,
+        wait: uiWait,
+        editor: uiEditor,
+      },
+    }
+    window.__LFCODE__.sessionAutomation = bridge
+    onCleanup(() => {
+      if (window.__LFCODE__?.sessionAutomation === bridge) {
+        window.__LFCODE__.sessionAutomation = undefined
+      }
+    })
+  })
+
+  const emitSessionAutomationEvent = (type: string, data?: unknown) => {
+    ;(
+      window as Window & {
+        api?: {
+          automationEvent?: (payload: { type: string; data?: unknown }) => Promise<void>
+        }
+      }
+    ).api?.automationEvent?.({ type, data })
+  }
+
+  createEffect(
+    on(
+      () => params.id,
+      (sessionID) => {
+        emitSessionAutomationEvent("session.active", { sessionID, sessionKey: sessionKey(), directory: sdk.directory })
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => tabs().active(),
+      (tab) => {
+        emitSessionAutomationEvent("session.tab.active", { sessionID: params.id, tab })
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      () =>
+        tabs()
+          .all()
+          .filter(isSideChatTab)
+          .map((tab) => sideChatTabID(tab) ?? "")
+          .filter(Boolean)
+          .join(","),
+      (value) => {
+        emitSessionAutomationEvent("session.sidechat.tabs", {
+          sessionID: params.id,
+          sessionIDs: value ? value.split(",") : [],
+        })
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => Object.keys(view().browser.tabs()).join(","),
+      (value) => {
+        emitSessionAutomationEvent("session.browser.tabs", {
+          sessionID: params.id,
+          tabIDs: value ? value.split(",") : [],
+        })
+      },
+      { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      () => sync.data.session_status[params.id ?? ""]?.type ?? "idle",
+      (status) => {
+        emitSessionAutomationEvent("session.status", { sessionID: params.id, status })
+      },
+      { defer: true },
+    ),
+  )
+
   const roll = (sessionID: string, next: NonNullable<ReturnType<typeof info>>["revert"]) =>
     sync.set("session", (list) => {
       const idx = list.findIndex((item) => item.id === sessionID)
@@ -1583,7 +3233,28 @@ export default function Page() {
       return out
     })
 
-  const busy = (sessionID: string) => isSessionWorking(sync.data.session_status[sessionID])
+  const busy = (sessionID: string) => isSessionStreaming(sync.data.session_status[sessionID])
+  const sessionGoal = createMemo(() => {
+    const id = params.id
+    if (!id) return
+    return sync.data.session_goal[id]
+  })
+  const latestGoalVerdict = createMemo(() => {
+    const goal = sessionGoal()
+    if (!goal?.lastMessageID) return
+    return goal.verdicts[goal.lastMessageID]
+  })
+  const goalStatusLabel = createMemo(() => {
+    const state = sessionGoal()?.state
+    const verdict = latestGoalVerdict()
+    if (state?.status === "blocked") return "Blocked"
+    if (verdict?.error) return "Judge error"
+    if (verdict?.impossible) return "Impossible"
+    if (state?.status === "complete" || verdict?.ok) return "Complete"
+    if (verdict) return `Attempt ${verdict.attempt}: not met`
+    if (state?.status === "active") return "Active"
+    return undefined
+  })
 
   const queuedFollowups = createMemo(() => {
     const id = params.id
@@ -1619,7 +3290,7 @@ export default function Page() {
       if (!ok) return
 
       setFollowup("items", input.sessionID, (items) => (items ?? []).filter((entry) => entry.id !== input.id))
-      if (input.manual) resumeScroll()
+      if (input.manual) resumeTimelineToBottom()
     },
   }))
 
@@ -1633,11 +3304,13 @@ export default function Page() {
     return followupMutation.variables?.id
   })
 
-  const queueEnabled = createMemo(() => {
+  const followupMode = createMemo(() => {
     const id = params.id
-    if (!id) return false
-    return settings.general.followup() === "queue" && busy(id) && !composer.blocked() && !isChildSession()
+    if (!id) return
+    if (!busy(id) || composer.blocked() || isChildSession()) return
+    return settings.general.followup()
   })
+  const queueEnabled = createMemo(() => followupMode() === "queue")
 
   const followupText = (item: FollowupDraft) => {
     const text = item.prompt
@@ -1663,6 +3336,64 @@ export default function Page() {
     ])
     setFollowup("failed", draft.sessionID, undefined)
     setFollowup("paused", draft.sessionID, undefined)
+  }
+
+  const handleHtmlComponentEvent = (detail: HtmlComponentEventDetail) => {
+    const sessionID = params.id
+    if (!sessionID) return
+    if (detail.context?.sessionID && detail.context.sessionID !== sessionID) return
+    if (sync.session.get(sessionID)?.parentID) return
+
+    const currentModel = local.model.current()
+    const currentAgent = local.agent.current()
+    const fallbackModel =
+      detail.context?.modelProviderID && detail.context?.modelID
+        ? {
+            providerID: detail.context.modelProviderID,
+            modelID: detail.context.modelID,
+          }
+        : undefined
+    const providerID = currentModel?.provider.id ?? fallbackModel?.providerID
+    const modelID = currentModel?.id ?? fallbackModel?.modelID
+    const agent = currentAgent?.name ?? detail.context?.agent
+    if (!providerID || !modelID || !agent) {
+      showToast({
+        title: language.t("prompt.toast.modelAgentRequired.title"),
+        description: language.t("prompt.toast.modelAgentRequired.description"),
+      })
+      return
+    }
+
+    const draft = buildHtmlComponentFollowupDraft(detail, {
+      sessionID,
+      sessionDirectory: sdk.directory,
+      agent,
+      model: {
+        providerID,
+        modelID,
+      },
+      variant: local.model.variant.current() ?? detail.context?.variant,
+      questionGuidance: local.questionGuidance.current(),
+    })
+
+    if (queueEnabled() || followupBusy(sessionID)) {
+      queueFollowup(draft)
+      return
+    }
+
+    void sendFollowupDraft({
+      client: sdk.client,
+      sync,
+      globalSync,
+      draft,
+      optimisticBusy: true,
+    }).catch((err) => {
+      showToast({
+        title: language.t("prompt.toast.promptSendFailed.title"),
+        description: formatServerError(err, language.t, language.t("common.requestFailed")),
+      })
+      queueFollowup(draft)
+    })
   }
 
   const followupDock = createMemo(() => queuedFollowups().map((item) => ({ id: item.id, text: followupText(item) })))
@@ -1700,7 +3431,9 @@ export default function Page() {
   }
 
   const halt = (sessionID: string) =>
-    busy(sessionID) ? sdk.client.session.abort({ sessionID }).catch(() => {}) : Promise.resolve()
+    (sync.data.session_status[sessionID]?.type ?? "idle") !== "idle"
+      ? sdk.client.session.abort({ sessionID }).catch(() => {})
+      : Promise.resolve()
 
   const revertMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; messageID: string }) => {
@@ -1823,31 +3556,176 @@ export default function Page() {
 
       if (stick) autoScroll.forceScrollToBottom()
 
-      if (el) scheduleScrollState(el)
+      if (el) scheduleScrollState(el, { capture: false, sessionID: params.id })
       fill()
     },
   )
 
-  const { clearMessageHash, scrollToMessage } = useSessionHashScroll({
-    sessionKey,
+  const hashScroll = useSessionHashScroll({
     sessionID: () => params.id,
     messagesReady,
-    visibleUserMessages: viewUserMessages,
-    historyMore,
-    historyLoading,
-    loadMore: (sessionID) => sync.session.history.loadMore(sessionID),
-    turnStart: historyWindow.turnStart,
+    streaming: sessionStreaming,
+    messages: () => activeMainTimelineSurface()?.source.timelineMessages() ?? emptyMessages,
+    visibleUserMessages: () => activeMainTimelineSurface()?.source.userMessages() ?? emptyUserMessages,
+    turnStart: () => activeHistoryWindow()?.turnStart() ?? 0,
     currentMessageId: () => store.messageId,
-    pendingMessage: () => ui.pendingMessage,
-    setPendingMessage: (value) => setUi("pendingMessage", value),
     setActiveMessage,
-    setTurnStart: historyWindow.setTurnStart,
+    setTurnStart: (value) => activeHistoryWindow()?.setTurnStart(value),
     autoScroll,
     scroller: () => scroller,
     anchor,
-    scheduleScrollState,
-    consumePendingMessage: layout.pendingMessage.consume,
   })
+  const { scrollToMessage } = hashScroll
+  clearMessageHashRef = hashScroll.clearMessageHash
+
+  const bindTimelineContent = (el: HTMLDivElement) => {
+    content = el
+    setMainSelectionRoot(el)
+    autoScroll.contentRef(el)
+    const root = scroller
+    if (root) scheduleScrollState(root, { capture: false, sessionID: params.id })
+  }
+
+  const MainTimelineSurface = (props: { sessionID: string; sessionKey: string }) => {
+    const source = createSessionTimelineMessageSource({
+      sessionID: props.sessionID,
+      messages: (sessionID) => sync.data.message[sessionID],
+      revertMessageID: (sessionID) => sync.session.get(sessionID)?.revert?.messageID,
+      viewAgentID: selectedViewAgentID,
+    })
+    const ready = () => sync.data.message[props.sessionID] !== undefined
+    const historyMoreForSurface = () => sync.session.history.more(props.sessionID)
+    const historyLoadingForSurface = () => sync.session.history.loading(props.sessionID)
+    const history = createSessionHistoryWindow({
+      sessionID: () => props.sessionID,
+      messagesReady: ready,
+      loaded: () => source.userMessages().length,
+      visibleUserMessages: source.userMessages,
+      historyMore: historyMoreForSurface,
+      historyLoading: historyLoadingForSurface,
+      loadMore: (sessionID) => sync.session.history.loadMore(sessionID),
+      userScrolled: autoScroll.userScrolled,
+      scroller: () => scroller,
+      storedTurnStart: () => layout.view(props.sessionKey).turnStart(),
+      setStoredTurnStart: (value) => layout.view(props.sessionKey).setTurnStart(value),
+    })
+    const contentRevision = createMemo(() => {
+      const timeline = source.timelineMessages()
+      const tail = timeline.at(-1)
+      return sessionContentRevision(
+        props.sessionKey,
+        createSessionContentSignature({
+          status: sync.data.session_status[props.sessionID]?.type ?? "idle",
+          updatedAt: sync.session.get(props.sessionID)?.time.updated,
+          messageCount: timeline.length,
+          tailMessage: tail,
+          tailParts: tail ? sync.data.part[tail.id] : undefined,
+        }),
+      )
+    })
+
+    onMount(() => {
+      const surface = {
+        sessionID: props.sessionID,
+        key: props.sessionKey,
+        source,
+        history,
+        ready,
+        historyMore: historyMoreForSurface,
+        historyLoading: historyLoadingForSurface,
+        contentRevision,
+      } satisfies MainTimelineSurfaceState
+      setActiveMainTimelineSurface(surface)
+      requestAnimationFrame(() => {
+        if (activeMainTimelineSurface()?.key !== props.sessionKey) return
+        if (scroller) setScrollerOwner(scroller, props.sessionID)
+        viewportController?.activate()
+        viewportController?.notifyDataReady()
+      })
+    })
+
+    onCleanup(() => {
+      if (activeMainTimelineSurface()?.key !== props.sessionKey) return
+      if (scroller && matchesScrollerOwner(scroller, props.sessionID)) viewportController?.deactivate()
+      else viewportController?.cancelRestore()
+      setActiveMainTimelineSurface()
+    })
+
+    return (
+      <SessionTimelineSurface
+        surface="main"
+        sessionID={() => props.sessionID}
+        sessionKey={() => props.sessionKey}
+        mobileChanges={mobileChanges()}
+        mobileFallback={reviewContent({
+          diffStyle: "unified",
+          classes: {
+            root: "pb-8",
+            header: "px-4",
+            container: "px-4",
+          },
+          loadingClass: "px-4 py-4 text-text-weak",
+          emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
+        })}
+        timelineVisible
+        actions={actions}
+        scroll={ui.scroll}
+        onResumeScroll={resumeTimelineToBottom}
+        setScrollRef={setScrollRef}
+        onScheduleScrollState={scheduleScrollState}
+        onAutoScrollHandleScroll={autoScroll.handleScroll}
+        onMarkScrollGesture={markScrollGesture}
+        hasScrollGesture={hasScrollGesture}
+        onUserScroll={markUserScroll}
+        onTurnBackfillScroll={history.onScrollerScroll}
+        onAutoScrollInteraction={autoScroll.handleInteraction}
+        onVirtualizerRef={(handle) => {
+          timelineVirtualizer = handle
+          viewportController?.setVirtualizer(handle)
+        }}
+        turnIDs={() => history.renderedUserMessages().map((message) => message.id)}
+        contentRevision={() => String(contentRevision())}
+        centered={centered()}
+        setContentRef={bindTimelineContent}
+        turnStart={history.turnStart()}
+        historyMore={historyMoreForSurface()}
+        historyLoading={historyLoadingForSurface()}
+        onLoadEarlier={() => void history.loadAndReveal()}
+        timelineMessages={source.timelineMessages()}
+        renderedUserMessages={history.renderedUserMessages()}
+        viewAgentID={selectedViewAgentID()}
+        sessionActors={(sync.data.actor ?? {})[props.sessionID] ?? []}
+        onViewAgentChange={(agentID) => setSearchParams({ agentID: agentID === "main" ? undefined : agentID })}
+        anchor={anchor}
+        fileReferences={fileReferences()}
+        onOpenSideChat={() => void createSideChat({ text: "" })}
+        onHtmlComponentEvent={handleHtmlComponentEvent}
+      />
+    )
+  }
+
+  const SessionTimelineViewport = () => (
+    <div
+      class="relative size-full min-h-0 overflow-hidden"
+      data-component="session-timeline-viewport"
+      classList={{ invisible: timelinePreparing() }}
+    >
+      <Show
+        when={
+          params.id && messagesReady()
+            ? { id: params.id, key: createSessionStorageKey(params.dir, params.id) }
+            : undefined
+        }
+        keyed
+      >
+        {(surface) => <MainTimelineSurface sessionID={surface.id} sessionKey={surface.key} />}
+      </Show>
+      <div
+        ref={(el) => (timelineSnapshotHost = el)}
+        class="absolute inset-0 z-20 overflow-hidden pointer-events-none"
+      />
+    </div>
+  )
 
   createEffect(
     on(
@@ -1860,30 +3738,37 @@ export default function Page() {
 
   onMount(() => {
     makeEventListener(document, "keydown", handleKeyDown)
+    if (platform.getRendererMemoryInfo) onCleanup(startSessionViewMemoryGuard(platform.getRendererMemoryInfo))
   })
 
   onCleanup(() => {
+    viewportController?.dispose()
     if (reviewFrame !== undefined) cancelAnimationFrame(reviewFrame)
-    if (refreshFrame !== undefined) cancelAnimationFrame(refreshFrame)
-    if (refreshTimer !== undefined) window.clearTimeout(refreshTimer)
     if (todoFrame !== undefined) cancelAnimationFrame(todoFrame)
     if (todoTimer !== undefined) window.clearTimeout(todoTimer)
     if (diffFrame !== undefined) cancelAnimationFrame(diffFrame)
     if (diffTimer !== undefined) window.clearTimeout(diffTimer)
     if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame)
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
+    if (mainViewportPreserveFrame !== undefined) cancelAnimationFrame(mainViewportPreserveFrame)
+    clearTimelineVisualSnapshot()
+    if (pendingSideChatFocusFrame !== undefined) cancelAnimationFrame(pendingSideChatFocusFrame)
+    mainViewportMutationLock = undefined
   })
 
   if (detachedContext()) {
     return <DetachedSidePanelView context={detachedContext()!} reviewPanel={reviewPanel} />
   }
 
+  let browserKeepaliveMount: HTMLDivElement | undefined
+  let sessionDropRoot: HTMLDivElement | undefined
+
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
       {sessionSync() ?? ""}
       <SessionHeader />
       <div
-        class="flex-1 min-h-0 flex"
+        class="relative flex-1 min-h-0 flex"
         classList={{
           "flex-row": isDesktop(),
           "flex-col": !isDesktop(),
@@ -1916,6 +3801,8 @@ export default function Page() {
 
         {/* Session panel */}
         <div
+          ref={(el) => (sessionDropRoot = el)}
+          data-session-dropzone={sessionKey()}
           classList={{
             "@container relative shrink-0 flex flex-col min-h-0 h-full bg-background-stronger flex-1 md:flex-none": true,
             "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
@@ -1928,52 +3815,32 @@ export default function Page() {
           <div class="flex-1 min-h-0 overflow-hidden">
             <Switch>
               <Match when={params.id}>
-                <Show when={messagesReady()}>
-                  <MessageTimeline
-                    mobileChanges={mobileChanges()}
-                    mobileFallback={reviewContent({
-                      diffStyle: "unified",
-                      classes: {
-                        root: "pb-8",
-                        header: "px-4",
-                        container: "px-4",
-                      },
-                      loadingClass: "px-4 py-4 text-text-weak",
-                      emptyClass: "h-full pb-64 -mt-4 flex flex-col items-center justify-center text-center gap-6",
-                    })}
-                    actions={actions}
-                    scroll={ui.scroll}
-                    onResumeScroll={resumeScroll}
-                    setScrollRef={setScrollRef}
-                    onScheduleScrollState={scheduleScrollState}
-                    onAutoScrollHandleScroll={autoScroll.handleScroll}
-                    onMarkScrollGesture={markScrollGesture}
-                    hasScrollGesture={hasScrollGesture}
-                    onUserScroll={markUserScroll}
-                    onTurnBackfillScroll={historyWindow.onScrollerScroll}
-                    onAutoScrollInteraction={autoScroll.handleInteraction}
-                    centered={centered()}
-                    setContentRef={(el) => {
-                      content = el
-                      autoScroll.contentRef(el)
-
-                      const root = scroller
-                      if (root) scheduleScrollState(root)
-                    }}
-                    turnStart={historyWindow.turnStart()}
-                    historyMore={historyMore()}
-                    historyLoading={historyLoading()}
-                    onLoadEarlier={() => {
-                      void historyWindow.loadAndReveal()
-                    }}
-                    renderedUserMessages={historyWindow.renderedUserMessages()}
-                    viewAgentID={selectedViewAgentID()}
-                    sessionActors={sessionActors()}
-                    onViewAgentChange={(agentID) => setSearchParams({ agentID: agentID === "main" ? undefined : agentID })}
-                    anchor={anchor}
-                    fileReferences={fileReferences()}
-                  />
+                <Show when={sessionGoal()?.state || latestGoalVerdict()}>
+                  <div class="border-b border-border bg-background-base/80 px-4 py-3">
+                    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                      <Show when={sessionGoal()?.state?.objective ?? sessionGoal()?.state?.condition}>
+                        {(objective) => (
+                          <div class="flex min-w-0 items-center gap-2">
+                            <span class="text-text-dim">Goal</span>
+                            <span class="truncate text-text">{objective()}</span>
+                          </div>
+                        )}
+                      </Show>
+                      <Show when={goalStatusLabel()}>
+                        {(label) => (
+                          <div class="flex items-center gap-2 text-text-dim">
+                            <span>Judge</span>
+                            <span>{label()}</span>
+                          </div>
+                        )}
+                      </Show>
+                    </div>
+                    <Show when={latestGoalVerdict()?.reason}>
+                      {(reason) => <p class="mt-2 text-xs text-text-dim">{reason()}</p>}
+                    </Show>
+                  </div>
                 </Show>
+                <SessionTimelineViewport />
               </Match>
               <Match when={true}>
                 <NewSessionView worktree={newSessionWorktree()} />
@@ -1983,8 +3850,10 @@ export default function Page() {
 
           <SessionComposerRegion
             state={composer}
-            ready={!store.deferRender && messagesReady()}
+            ready={messagesReady()}
             centered={centered()}
+            scope={mainComposerScope()}
+            dropRoot={() => sessionDropRoot}
             inputRef={(el) => {
               inputRef = el
             }}
@@ -1992,13 +3861,13 @@ export default function Page() {
             onNewSessionWorktreeReset={() => setStore("newSessionWorktree", "main")}
             onSubmit={() => {
               comments.clear()
-              resumeScroll()
+              resumeTimelineToBottom()
             }}
-            onResponseSubmit={resumeScroll}
+            onResponseSubmit={resumeTimelineToBottom}
             followup={
               params.id && !isChildSession()
                 ? {
-                    queue: queueEnabled,
+                    mode: followupMode,
                     items: followupDock(),
                     sending: sendingFollowup(),
                     edit: editingFollowup(),
@@ -2059,10 +3928,23 @@ export default function Page() {
           focusReviewDiff={focusReviewDiff}
           reviewSnap={ui.reviewSnap}
           size={size}
+          onOpenSideChat={() => void createSideChat({ text: "" })}
+          onCloseSideChat={(sideSessionID) => void closeSideChatSession(sideSessionID)}
+          onAddToChat={appendSelectionToPrompt}
+          onAskSideChat={askInSideChat}
+          setActiveSideChatContentRef={setActiveSideChatContentRoot}
+          setActiveSideChatInputRef={setActiveSideChatInputRoot}
         />
+        <div ref={browserKeepaliveMount} class="pointer-events-none absolute inset-0 z-20 overflow-hidden" />
+        <BrowserKeepaliveHost activeSessionKey={sessionKey} mount={() => browserKeepaliveMount} />
       </div>
 
       <TerminalPanel />
+      <SelectionToolbar
+        roots={() => [mainSelectionRoot(), activeSideChatContentRoot()]}
+        onAddToChat={appendSelectionToPrompt}
+        onAskSideChat={askInSideChat}
+      />
     </div>
   )
 }

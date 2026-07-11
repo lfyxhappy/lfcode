@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "fs"
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "fs"
 import path from "path"
 import os from "os"
 import { type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
@@ -41,6 +41,15 @@ type MarkerSignature = {
 type MergeMarker = {
   version: 1
   sources: MarkerSignature[]
+}
+
+type MergeCheck = {
+  message: boolean
+  part: boolean
+  permission: boolean
+  project: boolean
+  session: boolean
+  todo: boolean
 }
 
 function rawStatement(client: RawClient, sqlText: string) {
@@ -125,6 +134,119 @@ function writeMarker(markerPath: string, sources: MarkerSignature[]) {
   writeFileSync(markerPath, JSON.stringify({ version: 1, sources } satisfies MergeMarker))
 }
 
+function hasMissingRows(db: SQLiteBunDatabase, sourcePath: string, alias: string) {
+  const permissionColumns = inspectColumns(sourcePath, "permission")
+  const checks: MergeCheck = {
+    project: false,
+    session: false,
+    message: false,
+    part: false,
+    todo: false,
+    permission: false,
+  }
+
+  db.run(`attach database ${sqlString(sourcePath)} as ${alias}`)
+  try {
+    checks.project =
+      rawAll<{ missing?: number }>(
+        db,
+        `
+        select exists(
+          select 1
+          from ${alias}.project
+          left join main.project on main.project.id = ${alias}.project.id
+          where main.project.id is null
+          limit 1
+        ) as missing
+        `,
+      )[0]?.missing === 1
+
+    checks.session =
+      rawAll<{ missing?: number }>(
+        db,
+        `
+        select exists(
+          select 1
+          from ${alias}.session
+          left join main.session on main.session.id = ${alias}.session.id
+          where main.session.id is null
+          limit 1
+        ) as missing
+        `,
+      )[0]?.missing === 1
+
+    checks.message =
+      rawAll<{ missing?: number }>(
+        db,
+        `
+        select exists(
+          select 1
+          from ${alias}.message
+          left join main.message on main.message.id = ${alias}.message.id
+          where main.message.id is null
+          limit 1
+        ) as missing
+        `,
+      )[0]?.missing === 1
+
+    checks.part =
+      rawAll<{ missing?: number }>(
+        db,
+        `
+        select exists(
+          select 1
+          from ${alias}.part
+          left join main.part on main.part.id = ${alias}.part.id
+          where main.part.id is null
+          limit 1
+        ) as missing
+        `,
+      )[0]?.missing === 1
+
+    checks.todo =
+      rawAll<{ missing?: number }>(
+        db,
+        `
+        select exists(
+          select 1
+          from ${alias}.todo
+          left join main.todo
+            on main.todo.session_id = ${alias}.todo.session_id
+           and main.todo.position = ${alias}.todo.position
+          where main.todo.session_id is null
+          limit 1
+        ) as missing
+        `,
+      )[0]?.missing === 1
+
+    if (permissionColumns.has("data")) {
+      checks.permission =
+        rawAll<{ missing?: number }>(
+          db,
+          `
+          select exists(
+            select 1
+            from ${alias}.permission
+            left join main.permission on main.permission.project_id = ${alias}.permission.project_id
+            where main.permission.project_id is null
+            limit 1
+          ) as missing
+          `,
+        )[0]?.missing === 1
+    }
+  } finally {
+    db.run(`detach database ${alias}`)
+  }
+
+  return checks
+}
+
+function hasMissingLegacyRows(db: SQLiteBunDatabase, sources: string[]) {
+  return sources
+    .map((source, index) => ({ source, checks: hasMissingRows(db, source, `legacy_check_${index}`) }))
+    .find((item) => Object.values(item.checks).some(Boolean))
+}
+
 function mergeSource(db: SQLiteBunDatabase, sourcePath: string, alias: string) {
   const projectColumns = inspectColumns(sourcePath, "project")
   const sessionColumns = inspectColumns(sourcePath, "session")
@@ -178,6 +300,7 @@ function mergeSource(db: SQLiteBunDatabase, sourcePath: string, alias: string) {
         summary_diffs,
         revert,
         permission,
+        interaction,
         time_created,
         time_updated,
         time_compacting,
@@ -202,6 +325,7 @@ function mergeSource(db: SQLiteBunDatabase, sourcePath: string, alias: string) {
         ${alias}.session.summary_diffs,
         ${alias}.session.revert,
         ${alias}.session.permission,
+        ${sourceColumn(alias, "session", sessionColumns, "interaction", "null")},
         ${alias}.session.time_created,
         ${alias}.session.time_updated,
         ${alias}.session.time_compacting,
@@ -281,6 +405,7 @@ export function mergeLegacyDatabases(
   db: SQLiteBunDatabase,
   targetPath: string,
   options?: {
+    cleanup?: boolean
     legacyDataDir?: string
   },
 ) {
@@ -294,8 +419,10 @@ export function mergeLegacyDatabases(
 
   const markerPath = `${targetPath}${LEGACY_DB_MARKER_SUFFIX}`
   const signatures = sources.map(sourceSignature)
-  if (sameMarker(readMarker(markerPath), signatures)) {
+  const marker = readMarker(markerPath)
+  if (sameMarker(marker, signatures)) {
     log.info("legacy db merge skipped", { reason: "marker matches", targetPath })
+    cleanupDeprecatedDatabases(sources, options?.cleanup)
     return
   }
 
@@ -310,7 +437,23 @@ export function mergeLegacyDatabases(
     })
   }
 
-  writeMarker(markerPath, signatures)
+  cleanupDeprecatedDatabases(sources, options?.cleanup)
+  writeMarker(markerPath, sources.filter(existsSync).map(sourceSignature))
+}
+
+function cleanupDeprecatedDatabases(sources: string[], cleanup = true) {
+  if (!cleanup) return
+  for (const source of sources) {
+    const filename = path.basename(source)
+    if (filename !== "opencode.db" && filename !== "mimocode.db") continue
+    try {
+      for (const suffix of ["", "-wal", "-shm"]) rmSync(source + suffix, { force: true })
+      log.info("removed deprecated database after verified migration", { source })
+    } catch (err) {
+      // SQLite can retain a Windows file handle briefly after DETACH; retry on the next startup.
+      log.warn("deferred deprecated database cleanup", { err, source })
+    }
+  }
 }
 
 export function legacyDatabaseSources(dataDir: string, legacyDataDir = LEGACY_XDG_DATA_DIR) {

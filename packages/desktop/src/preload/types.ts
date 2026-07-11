@@ -1,4 +1,5 @@
 import type {
+  BrowserCacheOverview,
   BrowserCookieIdentity,
   BrowserCookieRecord,
   BrowserPasswordCapturePrompt,
@@ -32,12 +33,39 @@ export type WindowConfig = {
 export type BrowserGuestTarget = {
   sourceWindowID: number
   tabID: string
+  sessionKey?: string
+  sessionID?: string
+}
+
+export type BrowserGuestReadyTarget = BrowserGuestTarget & {
+  guestID: number
 }
 
 export type BrowserSiteDataResult = {
   url: string
   origin?: string
   clearedCookies: number
+}
+
+export type BrowserReferenceCandidate = {
+  label?: string
+  text?: string
+  url?: string
+  title?: string
+  selector?: string
+  mode?: "selection" | "element"
+}
+
+export type BrowserReferenceState = {
+  selection?: BrowserReferenceCandidate
+  element?: BrowserReferenceCandidate
+}
+
+export type BrowserWindowOpenRequest = {
+  sessionKey?: string
+  sessionID?: string
+  url: string
+  reason?: "human" | "tool"
 }
 
 export type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
@@ -73,6 +101,18 @@ export type DetachedSidePanelEvent =
         beforeTab?: string
       }
     }
+
+export type AutomationEventPayload = {
+  type: string
+  windowID?: number
+  data?: unknown
+}
+
+export type NativeFileTransfer = {
+  dropzone?: string
+  paths: string[]
+  images: string[]
+}
 
 export type ElectronAPI = {
   killSidecar: () => Promise<void>
@@ -119,12 +159,15 @@ export type ElectronAPI = {
 
   getWindowCount: () => Promise<number>
   getWindowID: () => Promise<number | null>
+  getRendererMemoryInfo: () => Promise<{ private: number; shared: number; residentSet: number }>
   onSqliteMigrationProgress: (cb: (progress: SqliteMigrationProgress) => void) => () => void
   onMenuCommand: (cb: (id: string) => void) => () => void
   onDeepLink: (cb: (urls: string[]) => void) => () => void
-  onBrowserWindowOpen: (cb: (url: string) => void) => () => void
+  onBrowserWindowOpen: (cb: (detail: BrowserWindowOpenRequest) => void) => () => void
   onBrowserPasswordCapture: (cb: (event: BrowserPasswordCapturePrompt) => void) => () => void
   onDetachedSidePanelEvent: (cb: (event: DetachedSidePanelEvent) => void) => () => void
+  onNativeFileTransfer: (cb: (transfer: NativeFileTransfer) => void) => () => void
+  automationEvent: (payload: AutomationEventPayload) => void
 
   openDirectoryPicker: (opts?: {
     multiple?: boolean
@@ -143,6 +186,9 @@ export type ElectronAPI = {
   openExternalLink: (url: string) => void
   openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void>
   clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult>
+  getBrowserReferenceState: (target: BrowserGuestTarget) => Promise<BrowserReferenceState | null>
+  getBrowserCacheOverview: () => Promise<BrowserCacheOverview>
+  clearBrowserCache: () => Promise<BrowserCacheOverview>
   listBrowserCookies: () => Promise<BrowserCookieRecord[]>
   removeBrowserCookie: (cookie: BrowserCookieIdentity) => Promise<void>
   clearBrowserCookiesByDomain: (domain: string) => Promise<number>
@@ -153,10 +199,13 @@ export type ElectronAPI = {
   deleteSavedBrowserLogin: (id: string) => Promise<void>
   acknowledgeBrowserSavePasswordPrompt: (input: BrowserPasswordPromptAck) => Promise<SavedBrowserLoginRecord | null>
   registerBrowserGuest: (target: BrowserGuestTarget & { guestID: number }) => Promise<void>
+  markBrowserGuestReady: (target: BrowserGuestReadyTarget) => Promise<void>
   unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void>
   setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void>
   openPath: (path: string, app?: string) => Promise<void>
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
+  getPathForFile: (file: File) => string
+  readDroppedImage: (path: string) => Promise<{ dataUrl: string; filename: string; mime: string } | null>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   setWindowFocus: () => Promise<void>

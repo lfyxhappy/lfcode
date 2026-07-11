@@ -15,6 +15,30 @@ async function tmpdir() {
 }
 
 describe("desktop bootstrap paths", () => {
+  const codegraphCommand = [
+    "{env:LFCODE_CODEGRAPH_NODE_EXE}",
+    "--liftoff-only",
+    "{env:LFCODE_CODEGRAPH_ENTRY}",
+    "serve",
+    "--mcp",
+  ]
+  const codegraphConfig = {
+    type: "local",
+    command: codegraphCommand,
+    environment: {
+      NODE_PATH: "{env:LFCODE_CODEGRAPH_NODE_PATH}",
+    },
+    enabled: true,
+  }
+  const shimCodegraphConfig = {
+    type: "local",
+    command: codegraphCommand,
+    environment: {
+      ELECTRON_RUN_AS_NODE: "1",
+      CODEGRAPH_INSTALL_DIR: "{env:LFCODE_CACHE_DIR}/codegraph",
+    },
+    enabled: true,
+  }
   const playwrightLegacyCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"]
   const playwrightRemoteConfig = {
     type: "remote",
@@ -177,6 +201,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [migrationSources],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -185,6 +210,36 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
       mcp: {
+        codegraph: codegraphConfig,
+        playwright: playwrightRemoteConfig,
+        "windows-computer-use": windowsComputerUseConfig,
+      },
+    })
+  })
+
+  test("writes shim codegraph config when the bundled platform runtime is unavailable", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      codegraphMode: "shim",
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        codegraph: shimCodegraphConfig,
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
@@ -219,6 +274,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -232,12 +288,13 @@ describe("desktop bootstrap paths", () => {
         },
       },
       mcp: {
+        codegraph: codegraphConfig,
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
     })
     expect(JSON.parse(await fs.readFile(path.join(root, "state", "migration.json"), "utf8"))).toMatchObject({
-      bundledMcpVersion: 2,
+      bundledMcpVersion: 3,
     })
   })
 
@@ -281,6 +338,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -295,9 +353,7 @@ describe("desktop bootstrap paths", () => {
           enabled: true,
         },
         codegraph: {
-          type: "local",
-          command: ["codegraph", "serve", "--mcp"],
-          enabled: true,
+          ...codegraphConfig,
         },
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
@@ -338,6 +394,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -346,6 +403,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
       mcp: {
+        codegraph: codegraphConfig,
         playwright: customPlaywright,
         "windows-computer-use": windowsComputerUseConfig,
       },
@@ -382,6 +440,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -390,6 +449,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
       mcp: {
+        codegraph: codegraphConfig,
         "windows-computer-use": windowsComputerUseConfig,
         playwright: playwrightRemoteConfig,
       },
@@ -426,6 +486,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -434,6 +495,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
       mcp: {
+        codegraph: codegraphConfig,
         "windows-computer-use": windowsComputerUseConfig,
         playwright: playwrightRemoteConfig,
       },
@@ -470,6 +532,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
       portableRoot: root,
     })
@@ -478,6 +541,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
       mcp: {
+        codegraph: codegraphConfig,
         "windows-computer-use": windowsComputerUseConfig,
         playwright: playwrightRemoteConfig,
       },
@@ -506,6 +570,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
     })
 
@@ -515,6 +580,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
       providers: { root: true },
       mcp: {
+        codegraph: codegraphConfig,
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
@@ -531,7 +597,7 @@ describe("desktop bootstrap paths", () => {
     )
   })
 
-  test("promotes a managed-root opencode.jsonc into lfcode.jsonc even when migration already ran", async () => {
+  test("imports a managed-root opencode.jsonc once and removes the deprecated source", async () => {
     await using tmp = await tmpdir()
     const home = path.join(tmp.path, "home")
     const managedRoot = path.join(home, ".lfcode")
@@ -548,6 +614,7 @@ describe("desktop bootstrap paths", () => {
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
+      codegraphMode: "bundled",
       platform: "win32",
     })
 
@@ -559,6 +626,87 @@ describe("desktop bootstrap paths", () => {
       mcp: {
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
+      },
+    })
+    expect(await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(() => true, () => false)).toBe(false)
+  })
+
+  test("does not resurrect a deprecated config after its one-time import completed", async () => {
+    await using tmp = await tmpdir()
+    const home = path.join(tmp.path, "home")
+    const managedRoot = path.join(home, ".lfcode")
+
+    await fs.mkdir(path.join(managedRoot, "state"), { recursive: true })
+    await fs.writeFile(path.join(managedRoot, "opencode.jsonc"), "{\"providers\":{\"legacy\":true}}")
+    await fs.writeFile(
+      path.join(managedRoot, "state", "migration.json"),
+      JSON.stringify({ deprecatedConfigMigrationVersion: 1 }),
+    )
+
+    await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(tmp.path, "Program Files", "Lfcode", "Lfcode.exe"),
+      homeDir: home,
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      codegraphMode: "bundled",
+      platform: "win32",
+    })
+
+    expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
+      $schema: "https://lfcode.ai/config.json",
+      mcp: {
+        playwright: playwrightRemoteConfig,
+        "windows-computer-use": windowsComputerUseConfig,
+      },
+    })
+    expect(await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(() => true, () => false)).toBe(true)
+  })
+
+  test("normalizes stale loopback playwright remote config back to env placeholders", async () => {
+    await using tmp = await tmpdir()
+    const home = path.join(tmp.path, "home")
+    const managedRoot = path.join(home, ".lfcode")
+
+    await fs.mkdir(path.join(managedRoot, "state"), { recursive: true })
+    await fs.writeFile(
+      path.join(managedRoot, "lfcode.jsonc"),
+      JSON.stringify(
+        {
+          mcp: {
+            playwright: {
+              type: "remote",
+              url: "http://127.0.0.1:8131/global/mcp/playwright",
+              headers: {
+                authorization: "Basic stale-token",
+              },
+              enabled: true,
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    )
+    await fs.writeFile(path.join(managedRoot, "state", "migration.json"), "{\"version\":1,\"bundledMcpVersion\":3}")
+
+    await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      execPath: path.join(tmp.path, "Program Files", "Lfcode", "Lfcode.exe"),
+      homeDir: home,
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      codegraphMode: "bundled",
+      platform: "win32",
+    })
+
+    expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
+      mcp: {
+        playwright: playwrightRemoteConfig,
       },
     })
   })

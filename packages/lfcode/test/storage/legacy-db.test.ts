@@ -63,6 +63,7 @@ function createSchema(dbPath: string, variant: "target" | "mimocode" | "opencode
         summary_diffs text,
         revert text,
         permission text,
+        interaction text,
         time_created integer not null,
         time_updated integer not null,
         time_compacting integer,
@@ -165,6 +166,7 @@ function seedLegacy(dbPath: string, prefix: string, withPermission: boolean) {
         null,
         null,
         null,
+        null,
         3,
         4,
         null,
@@ -249,8 +251,8 @@ describe("mergeLegacyDatabases", () => {
 
     const target = init(targetPath)
     try {
-      mergeLegacyDatabases(target, targetPath)
-      mergeLegacyDatabases(target, targetPath)
+      mergeLegacyDatabases(target, targetPath, { cleanup: false })
+      mergeLegacyDatabases(target, targetPath, { cleanup: false })
 
       const counts = (table: string) =>
         Number((target.$client as { query: (sqlText: string) => { all: () => Array<{ count: number }> } })
@@ -309,6 +311,54 @@ describe("mergeLegacyDatabases", () => {
       expect(count("session")).toBe(1)
     } finally {
       ;(target.$client as { close?: () => void }).close?.()
+    }
+  })
+
+  test("does not reopen legacy sources after a completed merge", async () => {
+    const dir = await tempDir()
+    const currentPath = path.join(dir, "lfcode.db")
+    const mimocodePath = path.join(dir, "mimocode.db")
+    const opencodePath = path.join(dir, "opencode.db")
+
+    createSchema(currentPath, "target")
+    createSchema(mimocodePath, "mimocode")
+    createSchema(opencodePath, "opencode")
+    seedLegacy(mimocodePath, "mimo", true)
+    seedLegacy(opencodePath, "open", false)
+
+    const initial = init(currentPath)
+    try {
+      mergeLegacyDatabases(initial, currentPath, { cleanup: false })
+    } finally {
+      ;(initial.$client as { close?: () => void }).close?.()
+    }
+
+    const trimmed = init(currentPath)
+    try {
+      trimmed.run("delete from part where id = 'open_part'")
+      trimmed.run("delete from message where id = 'open_msg'")
+      trimmed.run("delete from todo where session_id = 'open_ses'")
+      trimmed.run("delete from session where id = 'open_ses'")
+      trimmed.run("delete from project where id = 'open_proj'")
+    } finally {
+      ;(trimmed.$client as { close?: () => void }).close?.()
+    }
+
+    const replayed = init(currentPath)
+    try {
+      mergeLegacyDatabases(replayed, currentPath, { cleanup: false })
+
+      const counts = (table: string) =>
+        Number((replayed.$client as { query: (sqlText: string) => { all: () => Array<{ count: number }> } })
+          .query(`select count(*) as count from ${table}`)
+          .all()[0]?.count ?? 0)
+
+      expect(counts("project")).toBe(1)
+      expect(counts("session")).toBe(1)
+      expect(counts("message")).toBe(1)
+      expect(counts("part")).toBe(1)
+    } finally {
+      ;(replayed.$client as { close?: () => void }).close?.()
     }
   })
 })

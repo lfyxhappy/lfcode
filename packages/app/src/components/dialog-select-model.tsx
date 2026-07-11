@@ -9,9 +9,12 @@ import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Tag } from "@lfcode-ai/ui/tag"
 import { Dialog } from "@lfcode-ai/ui/dialog"
 import { List } from "@lfcode-ai/ui/list"
+import { Select } from "@lfcode-ai/ui/select"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
+import { displayModelVariant } from "@/context/model-variant"
+import { QUESTION_GUIDANCE_OPTIONS } from "@/utils/question-guidance"
 
 const isFree = (provider: string, cost: { input: number } | undefined) =>
   provider === "lfcode" && (!cost || cost.input === 0)
@@ -104,7 +107,9 @@ export function ModelSelectorPopover(props: {
     dismiss: null,
   })
   const dialog = useDialog()
-
+  const local = useLocal()
+  const model = props.model ?? local.model
+  
   const close = (dismiss: Dismiss) => {
     setStore("dismiss", dismiss)
     setStore("open", false)
@@ -124,6 +129,15 @@ export function ModelSelectorPopover(props: {
     })
   }
   const language = useLanguage()
+  const variants = createMemo(() => ["default", ...model.variant.list()])
+  const currentVariant = createMemo(
+    () =>
+      displayModelVariant({
+        variants: model.variant.list(),
+        selected: model.variant.selected(),
+        configured: model.variant.configured(),
+      }) ?? "default",
+  )
 
   return (
     <Kobalte
@@ -162,7 +176,7 @@ export function ModelSelectorPopover(props: {
           <Kobalte.Title class="sr-only">{language.t("dialog.model.select.title")}</Kobalte.Title>
           <ModelList
             provider={props.provider}
-            model={props.model}
+            model={model}
             onSelect={() => close("select")}
             class="p-1"
             action={
@@ -190,6 +204,33 @@ export function ModelSelectorPopover(props: {
               </div>
             }
           />
+          <div class="mt-2 border-t border-border-weak-base px-1 pt-2 flex items-center gap-1.5 shrink-0">
+            <Select
+              size="normal"
+              options={variants()}
+              current={currentVariant()}
+              label={(value) => (value === "default" ? language.t("common.default") : value)}
+              onSelect={(value) => model.variant.set(value === "default" ? undefined : value)}
+              class="max-w-[132px] text-text-base"
+              valueClass="truncate text-12-regular text-text-base"
+              triggerStyle={{ height: "28px" }}
+              variant="ghost"
+            />
+            <Select
+              size="normal"
+              options={[...QUESTION_GUIDANCE_OPTIONS]}
+              current={local.questionGuidance.current()}
+              label={(value) => language.t(`prompt.questionGuidance.${value}` as Parameters<typeof language.t>[0])}
+              onSelect={(value) => {
+                if (!value) return
+                local.questionGuidance.set(value)
+              }}
+              class="max-w-[120px] text-text-base"
+              valueClass="truncate text-12-regular text-text-base"
+              triggerStyle={{ height: "28px" }}
+              variant="ghost"
+            />
+          </div>
         </Kobalte.Content>
       </Kobalte.Portal>
     </Kobalte>

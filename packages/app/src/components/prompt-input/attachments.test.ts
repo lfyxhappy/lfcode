@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { transferredFilePaths } from "./attachments"
 import { attachmentMime } from "./files"
 import { pasteMode } from "./paste"
 
@@ -40,5 +41,27 @@ describe("pasteMode", () => {
 
   test("uses manual paste for large text", () => {
     expect(pasteMode("x".repeat(8000))).toBe("manual")
+  })
+})
+
+describe("transferredFilePaths", () => {
+  test("accepts Windows paths and file URIs from Explorer", () => {
+    const data = {
+      getData(type: string) {
+        if (type === "text/uri-list") return "file:///C:/work/demo.ts\r\nfile:///D:/docs/guide.pdf"
+        if (type === "text/plain") return "C:\\work\\demo.ts"
+        return ""
+      },
+    }
+
+    expect(transferredFilePaths(data)).toEqual(["C:/work/demo.ts", "D:/docs/guide.pdf"])
+  })
+
+  test("does not turn ordinary pasted text into a file attachment", () => {
+    expect(
+      transferredFilePaths({
+        getData: () => "please review this file",
+      }),
+    ).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import { app } from "electron"
 import log from "electron-log/main.js"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { CHANNEL } from "./constants"
@@ -9,6 +9,8 @@ import { getStore } from "./store"
 
 const TAURI_MIGRATED_KEY = "tauriMigrated"
 const LEGACY_ELECTRON_STORE_MIGRATED_KEY = "legacyElectronStoreMigratedV2"
+const DEPRECATED_ELECTRON_STORE_CLEANUP_KEY = "deprecatedElectronStoreCleanupV1"
+const DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY = "deprecatedBrowserPartitionCleanupV1"
 
 // Resolve the directory where Tauri stored its .dat files for the given app identifier.
 // Mirrors Tauri's AppLocalData / AppData resolution per OS.
@@ -84,6 +86,38 @@ function migrateLegacyElectronStores() {
   getStore().set(LEGACY_ELECTRON_STORE_MIGRATED_KEY, true)
 }
 
+function cleanupDeprecatedElectronStores() {
+  if (getStore().get(DEPRECATED_ELECTRON_STORE_CLEANUP_KEY)) return
+  const dir = app.getPath("userData")
+  const removed = existsSync(dir)
+    ? readdirSync(dir)
+        .filter((filename) => filename.startsWith("opencode.") || filename.startsWith("mimocode."))
+        .flatMap((filename) => {
+          try {
+            unlinkSync(join(dir, filename))
+            return [filename]
+          } catch (err) {
+            log.warn("deprecated electron store cleanup: failed", filename, err)
+            return []
+          }
+        })
+    : []
+  log.log("deprecated electron store cleanup: complete", { removed })
+  getStore().set(DEPRECATED_ELECTRON_STORE_CLEANUP_KEY, true)
+}
+
+function cleanupDeprecatedBrowserPartition() {
+  if (getStore().get(DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY)) return
+  const partition = join(app.getPath("userData"), "Partitions", "opencode-browser")
+  try {
+    rmSync(partition, { force: true, recursive: true })
+    log.log("deprecated browser partition cleanup: complete", { partition })
+    getStore().set(DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY, true)
+  } catch (err) {
+    log.warn("deprecated browser partition cleanup: failed", { partition, err })
+  }
+}
+
 // Migrate a single Tauri .dat file into the corresponding electron-store.
 // `lfcode.settings.dat` is special: it maps to the `lfcode.settings` store
 // (the electron-store name without the `.dat` extension). All other .dat files
@@ -139,4 +173,6 @@ export function migrate() {
   }
 
   migrateLegacyElectronStores()
+  cleanupDeprecatedElectronStores()
+  cleanupDeprecatedBrowserPartition()
 }

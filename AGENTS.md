@@ -1,6 +1,13 @@
 - To regenerate the JavaScript SDK, run `bun run --cwd packages/sdk/js build`.
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
+- Treat `.codex/*.md` plans as execution-tracking documents, not just notes: before starting plan-scoped work, read the referenced plan and respect its current `Status:`.
+- If the user asks for a plan first, or the task is being tracked in `.codex/`, create or update the relevant plan file before implementation starts and give it an explicit `Status:`.
+- Keep the plan lifecycle synchronized with reality: use `planned`/`pending` before execution, switch to `in_progress` once implementation actually starts, and leave it non-completed if work is only partially done or verification is still missing.
+- When implementing a task from a plan under `.codex/`, update that plan in the same change flow: adjust scope/details if they changed, record any remaining gaps, and mark the plan's `Status:` as `completed` only after the task is fully implemented and verified.
+- When a `.codex/` plan is completed and its changes affect the desktop app, runtime, settings, MCP/tools, or other behavior the user is expected to test in the local use-copy, do not stop at code/test completion: finish the same flow with `bun run package:win`, sync to `C:\算法\小应用\Lfcode`, and relaunch the use-copy unless the user explicitly says not to sync.
+- Keep `.codex/*.md` reserved for plans and execution tracking. Store standalone HTML design mockups, visual replicas, and reviewable static UI drafts under `.codex/design-html/` instead of `output/` or scattered temp locations.
+- When creating a design draft in `.codex/design-html/`, prefer a self-contained `.html` file with inline CSS/assets when practical so it can be opened and reviewed directly without extra build steps.
 
 ## Project Structure
 
@@ -14,6 +21,14 @@
 - App settings surfaces now include `packages/app/src/components/settings-skills.tsx` and `packages/app/src/components/settings-archives.tsx`; skill-management and archive changes should be validated through those settings views, not only through server routes.
 - Instance-side skill APIs live under `packages/lfcode/src/server/routes/instance/skills.ts`; when changing local skill import, discovery, hiding, or deletion flows, keep the app settings UI and this route in sync.
 
+## Issue Records
+
+- Keep repository issue investigations and recommended solutions under `issue/`.
+- Use one Markdown file for one problem. Each file must contain `问题`, `原因`, `推荐解决方案`, and `状态` sections.
+- Allowed status values are `未解决`, `解决中`, and `已解决`. Update the status only when code or runtime verification supports the change.
+- Issue records describe findings and solution direction; they are not execution plans. Use `.codex/*.md` for implementation tracking when a task becomes plan-scoped.
+- Include concrete source paths in issue records when the finding is grounded in repository code. Do not include secrets, tokens, cookies, or full sensitive command output.
+
 ## Build and Test
 
 - Package management is pinned to Bun (`packageManager: bun@1.3.11`); use Bun scripts rather than npm or yarn.
@@ -22,11 +37,17 @@
 - Root validation commands are `bun run lint` and `bun run typecheck`; today those resolve to `oxlint` and `bun turbo typecheck`.
 - The root `bun run test` command is a guard that intentionally fails; run tests from package directories instead.
 - From `packages/lfcode`, run targeted tests with `bun test path/to/test.ts` or the package suite with `bun test --timeout 30000`.
-- From `packages/app`, run unit tests with `bun run test:unit`; run Playwright coverage with `bun run test:e2e` when browser behavior is affected.
+- From `packages/app`, run unit tests with `bun run test:unit`.
+- Do not run `bun run test:e2e`, `bunx playwright test`, or any isolated source/Electron E2E suite. For all desktop or UI automation, first package and sync the current build to `C:\算法\小应用\Lfcode`, then drive only the running installed use-copy through `bun run app:control` or its installed automation bridge. Do not treat a source dev server or temporary sandbox as product verification.
 - `packages/app` uses `happydom.ts` for unit tests; when adding narrow UI helpers, prefer package-local `bun test --preload ./happydom.ts ./src/...` over root-level test commands.
-- After completing changes in this repo, always rerun the Windows desktop package build with `bun run package:win` from `packages/desktop` and verify the refreshed output under `packages/desktop/dist/win-unpacked`.
-- For desktop/runtime changes that the user will test in the local installed-use copy, do the development checks, rebuild the Windows desktop package, then sync the refreshed app into `C:\算法\小应用\Lfcode` from `packages/desktop` with `$env:LFCODE_USE_COPY_DIR='C:\算法\小应用\Lfcode'; bun run sync:win-use-copy`; do not stop at dev-server validation. Close the use copy before syncing because running Electron files are locked. Without `LFCODE_USE_COPY_DIR`, the sync script defaults to `%USERPROFILE%\.lfcode`.
-- When the user explicitly asks to sync the installed-use copy, default to the full flow: stop `C:\算法\小应用\Lfcode\Lfcode.exe`, run `sync:win-use-copy`, then relaunch the synced copy. If Windows leaves `Lfcode.exe` in `Status=Unknown` or `sync:win-use-copy` fails with `EACCES` on `resources\app.asar.unpacked`, treat it as a local OS-level stuck-process/lock condition and restart Explorer or Windows before retrying.
+- After completing changes in this repo, default to the fast Windows desktop packaging path: run `bun run package:win:fast` from `packages/desktop` unless the user explicitly asks for the full slow package flow.
+- When a task includes pushing changes to GitHub, treat the push as release-facing work by default: update the GitHub release for that pushed version in the same flow, attach the Windows installer produced by `packages/desktop/dist/lfcode-win-x64.exe`, and include a concise release summary. Do not stop at `git push` unless the user explicitly says to skip the release update.
+- For desktop/runtime changes that the user will test in the local installed-use copy, do the development checks, then default to the fast sync flow from `packages/desktop`: `$env:LFCODE_USE_COPY_DIR='C:\算法\小应用\Lfcode'; bun run sync:win-use-copy:fast`; do not stop at dev-server validation. Close the use copy before syncing because running Electron files are locked. Without `LFCODE_USE_COPY_DIR`, the sync script defaults to `%USERPROFILE%\.lfcode`.
+- Unless the user explicitly says not to, treat verified desktop/runtime changes as sync-followed work by default: after code changes land, automatically stop `C:\算法\小应用\Lfcode\Lfcode.exe`, run `sync:win-use-copy:fast`, and relaunch the synced use copy instead of asking again whether to sync.
+- For desktop app testing/debugging, default to the installed use-copy workflow instead of lingering in source `dev` mode: build or use the latest packaged output, sync to `C:\算法\小应用\Lfcode`, launch `C:\算法\小应用\Lfcode\Lfcode.exe`, and reproduce/debug there unless the user explicitly asks for source-mode or CI-only verification.
+- Unless the user explicitly narrows the scope, apply the same fast package-sync-relaunch rule when closing out a completed `.codex/` plan whose result is user-testable in the local use-copy; “plan 完成” itself should be treated as a sync trigger for this repo, not just an internal documentation update.
+- When the user explicitly asks to sync the installed-use copy, default to the fast flow: stop `C:\算法\小应用\Lfcode\Lfcode.exe`, run `sync:win-use-copy:fast`, then relaunch the synced copy. If Windows leaves `Lfcode.exe` in `Status=Unknown` or `sync:win-use-copy` fails with `EACCES` on `resources\app.asar.unpacked`, treat it as a local OS-level stuck-process/lock condition and restart Explorer or Windows before retrying.
+- Future default behavior in this repo: after each completed code change, automatically use the fast sync chain (`bun run sync:win-use-copy:fast`) unless the user explicitly asks not to sync or explicitly asks for the full packaging path.
 - `bun run package:win` round-trips the current Windows runtime entries listed in `packages/desktop/scripts/preserve-win-runtime.ts`: `cache`, `data`, `state`, `config.json`, `lfcode.json`, `lfcode.jsonc`, and `opencode.jsonc`. Keep new persistent runtime data under those preserved entries, or update the preserve/restore scripts before relying on packaging.
 - Packaged Windows root config is preserved through `packages/desktop/local-config/lfcode.jsonc`; `packages/desktop/scripts/sync-local-config.ts` refreshes that template from the current `dist/win-unpacked/lfcode.jsonc`, and `packages/desktop/electron-builder.config.ts` copies it back into the packaged app root via `extraFiles`.
 

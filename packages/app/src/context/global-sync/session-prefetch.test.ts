@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  cancelSessionPrefetch,
   clearSessionPrefetch,
   clearSessionPrefetchDirectory,
   getSessionPrefetch,
@@ -56,6 +57,35 @@ describe("session prefetch", () => {
     expect(calls).toBe(1)
     expect(a).toEqual({ scope: "all", limit: 100, cursor: "next", complete: true, at: 456 })
     expect(b).toEqual({ scope: "all", limit: 100, cursor: "next", complete: true, at: 456 })
+  })
+
+  test("cancels speculative work without clearing an existing warm cache", async () => {
+    clearSessionPrefetch("/tmp/cancel", ["ses_3"])
+    setSessionPrefetch({
+      directory: "/tmp/cancel",
+      sessionID: "ses_3",
+      scope: "all",
+      limit: 24,
+      complete: false,
+      at: 1,
+    })
+
+    let signal: AbortSignal | undefined
+    const pending = runSessionPrefetch({
+      directory: "/tmp/cancel",
+      sessionID: "ses_3",
+      task: ({ signal: nextSignal }) =>
+        new Promise((resolve) => {
+          signal = nextSignal
+          nextSignal.addEventListener("abort", () => resolve(undefined))
+        }),
+    })
+
+    cancelSessionPrefetch("/tmp/cancel", ["ses_3"])
+    await pending
+
+    expect(signal?.aborted).toBe(true)
+    expect(getSessionPrefetch("/tmp/cancel", "ses_3")).toMatchObject({ limit: 24 })
   })
 
   test("clears a whole directory", () => {

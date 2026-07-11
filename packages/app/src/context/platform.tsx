@@ -1,6 +1,7 @@
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 import type {
+  BrowserCacheOverview,
   BrowserCookieIdentity,
   BrowserCookieRecord,
   BrowserPasswordCapturePrompt,
@@ -17,14 +18,37 @@ type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
 type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: string[]; extensions?: string[] }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type UpdateInfo = { updateAvailable: boolean; version?: string }
+type RendererMemoryInfo = { private: number; shared: number; residentSet: number }
 type BrowserGuestTarget = {
   sourceWindowID: number
   tabID: string
+  sessionKey?: string
+  sessionID?: string
+}
+type BrowserGuestReadyTarget = BrowserGuestTarget & {
+  guestID: number
 }
 type BrowserSiteDataResult = {
   url: string
   origin?: string
   clearedCookies: number
+}
+type BrowserReferenceCandidate = {
+  label?: string
+  text?: string
+  url?: string
+  title?: string
+  selector?: string
+  mode?: "selection" | "element"
+}
+type BrowserReferenceState = {
+  selection?: BrowserReferenceCandidate
+  element?: BrowserReferenceCandidate
+}
+type BrowserOpenRequestDetail = {
+  sessionKey?: string
+  sessionID?: string
+  reason?: "human" | "tool"
 }
 type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
 type DetachedSidePanelRecord = {
@@ -59,9 +83,10 @@ export type Platform = {
   version?: string
 
   getWindowID?(): Promise<number | null>
+  getRendererMemoryInfo?(): Promise<RendererMemoryInfo>
 
   /** Open a URL in the default browser */
-  openLink(url: string): void
+  openLink(url: string, detail?: BrowserOpenRequestDetail): void
 
   /** Open a URL in the system browser */
   openExternalLink?(url: string): void
@@ -69,6 +94,12 @@ export type Platform = {
   openBrowserDevTools?(target: BrowserGuestTarget): Promise<void>
 
   clearBrowserSiteData?(target: BrowserGuestTarget): Promise<BrowserSiteDataResult>
+
+  getBrowserReferenceState?(target: BrowserGuestTarget): Promise<BrowserReferenceState | null>
+
+  getBrowserCacheOverview?(): Promise<BrowserCacheOverview>
+
+  clearBrowserCache?(): Promise<BrowserCacheOverview>
 
   listBrowserCookies?(): Promise<BrowserCookieRecord[]>
 
@@ -91,6 +122,8 @@ export type Platform = {
   onBrowserPasswordCapture?(cb: (event: BrowserPasswordCapturePrompt) => void): () => void
 
   registerBrowserGuest?(target: BrowserGuestTarget & { guestID: number }): Promise<void>
+
+  markBrowserGuestReady?(target: BrowserGuestReadyTarget): Promise<void>
 
   unregisterBrowserGuest?(target: BrowserGuestTarget & { guestID?: number }): Promise<void>
 
@@ -161,6 +194,15 @@ export type Platform = {
 
   /** Read image from clipboard (desktop only) */
   readClipboardImage?(): Promise<File | null>
+
+  /** Resolve a native desktop file object to its filesystem path. */
+  getPathForFile?(file: File): string
+
+  /** Read a user-dropped image from an already-resolved absolute path. */
+  readDroppedImage?(path: string): Promise<{ dataUrl: string; filename: string; mime: string } | null>
+
+  /** Receive desktop-native file transfers resolved by the preload bridge. */
+  onNativeFileTransfer?(cb: (transfer: { dropzone?: string; paths: string[]; images: string[] }) => void): () => void
 
   createDetachedSidePanelWindow?(input: {
     detachedWindowID: string

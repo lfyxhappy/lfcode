@@ -1,21 +1,26 @@
 import { accessSync, copyFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { copyFile, readFile } from "node:fs/promises"
 import { access, mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import type { App } from "electron"
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 
-const CONFIG_FILES = [
+const LFCODE_CONFIG_FILES = [
   "lfcode.jsonc",
   "lfcode.json",
+  "config.json",
+] as const
+const DEPRECATED_CONFIG_FILES = [
   "opencode.jsonc",
   "opencode.json",
   "mimocode.jsonc",
   "mimocode.json",
-  "config.json",
 ] as const
+const CONFIG_FILES = [...LFCODE_CONFIG_FILES, ...DEPRECATED_CONFIG_FILES] as const
 const MANAGED_ROOT_DIR = ".lfcode"
+const require = createRequire(import.meta.url)
 const PLAYWRIGHT_MCP_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
 const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
 const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--browser", "chrome"] as const
@@ -38,25 +43,11 @@ const WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT = {
   ELECTRON_RUN_AS_NODE: "1",
 } as const
 const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
+const PLAYWRIGHT_MCP_REMOTE_KEYS = ["type", "url", "headers", "enabled"] as const
 const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
-const BUNDLED_MCP_MIGRATION_VERSION = 2
-const DEFAULT_ROOT_CONFIG = {
-  $schema: "https://lfcode.ai/config.json",
-  mcp: {
-    playwright: {
-      type: "remote",
-      url: PLAYWRIGHT_MCP_REMOTE_URL,
-      headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
-      enabled: true,
-    },
-    "windows-computer-use": {
-      type: "local",
-      command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
-      environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
-      enabled: true,
-    },
-  },
-} as const
+const BUNDLED_MCP_MIGRATION_VERSION = 3
+const DEPRECATED_CONFIG_MIGRATION_VERSION = 1
+const DEFAULT_LSP_MIGRATION_VERSION = 1
 
 type RootEnv = {
   readonly LFCODE_CONFIG_DIR: string
@@ -87,6 +78,7 @@ export type MigrationSummary = {
 export type DesktopBootstrapState = {
   readonly appId: string
   readonly appName: string
+  readonly codegraph: CodegraphBootstrap
   readonly env: Partial<RootEnv>
   readonly fallbackReason?: string
   readonly layout?: RootLayout
@@ -109,10 +101,13 @@ type BootstrapTargetInput = {
 type DesktopBootstrapInput = {
   readonly appId: string
   readonly appName: string
+  readonly arch?: string
+  readonly codegraphMode?: "bundled" | "shim" | "external"
   readonly execPath: string
   readonly homeDir?: string
   readonly isPackaged: boolean
   readonly legacyUserDataDir: string
+  readonly legacyUserDataOverride?: string
   readonly migrationSources?: readonly Partial<MigrationSources>[]
   readonly platform: string
   readonly portableRoot?: string
@@ -128,19 +123,105 @@ type MigrationSources = {
 
 let bootstrapState: DesktopBootstrapState | undefined
 
+type CodegraphBootstrap = {
+  readonly kind: "bundled" | "shim" | "external"
+  readonly entry?: string
+  readonly nodePath?: string
+  readonly platformDir?: string
+}
+
+function defaultRootConfig() {
+  return {
+    $schema: "https://lfcode.ai/config.json",
+    lsp: true,
+    mcp: {
+      playwright: {
+        type: "remote",
+        url: PLAYWRIGHT_MCP_REMOTE_URL,
+        headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
+        enabled: true,
+      },
+      "windows-computer-use": {
+        type: "local",
+        command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
+        environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
+        enabled: true,
+      },
+    },
+  } as const
+}
+
 export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
   app.setName(state.appName)
   app.setAppUserModelId(state.appId)
   if (state.layout) ensureRootLayoutSync(state.layout)
   process.env.LFCODE_BUNDLED_NODE = process.execPath.replaceAll("\\", "/")
+  delete process.env.LFCODE_CODEGRAPH_NODE_EXE
+  delete process.env.LFCODE_CODEGRAPH_ENTRY
+  delete process.env.LFCODE_CODEGRAPH_NODE_PATH
+  delete process.env.LFCODE_CODEGRAPH_RUN_AS_NODE
+  delete process.env.LFCODE_CODEGRAPH_INSTALL_DIR
+  delete process.env.LFCODE_GIT_PATH
+  delete process.env.LFCODE_GIT_SSH_PATH
+  delete process.env.LFCODE_GIT_LESS_PATH
   process.env.LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR = app.isPackaged
     ? join(process.resourcesPath, "mcp", "windows-computer-use-mcp").replaceAll("\\", "/")
     : join(app.getAppPath(), "../../.windows-computer-use-mcp").replaceAll("\\", "/")
+  if (process.platform === "win32") {
+    const managedPythonRoot = state.layout ? join(state.layout.dataDir, "python", "runtime") : undefined
+    const managedPythonPath = managedPythonRoot ? join(managedPythonRoot, "Scripts", "python.exe").replaceAll("\\", "/") : ""
+    const managedScriptsPath = managedPythonRoot ? join(managedPythonRoot, "Scripts").replaceAll("\\", "/") : ""
+    const bundledGitRoot = app.isPackaged ? join(process.resourcesPath, "git") : ""
+    const bundledGitCmdPath = bundledGitRoot ? join(bundledGitRoot, "cmd").replaceAll("\\", "/") : ""
+    const bundledGitUsrBinPath = bundledGitRoot ? join(bundledGitRoot, "usr", "bin").replaceAll("\\", "/") : ""
+    const bundledGitMingwBinPath = bundledGitRoot ? join(bundledGitRoot, "mingw64", "bin").replaceAll("\\", "/") : ""
+    const bundledGitPath =
+      bundledGitRoot && pathExistsSync(join(bundledGitRoot, "cmd", "git.exe"))
+        ? join(bundledGitRoot, "cmd", "git.exe").replaceAll("\\", "/")
+        : bundledGitRoot && pathExistsSync(join(bundledGitRoot, "mingw64", "bin", "git.exe"))
+          ? join(bundledGitRoot, "mingw64", "bin", "git.exe").replaceAll("\\", "/")
+          : ""
+    process.env.LFCODE_PWSH_PATH = app.isPackaged
+      ? join(process.resourcesPath, "pwsh", "pwsh.exe").replaceAll("\\", "/")
+      : ""
+    process.env.LFCODE_GIT_PATH = bundledGitPath
+    process.env.LFCODE_GIT_SSH_PATH = bundledGitRoot
+      ? join(bundledGitRoot, "usr", "bin", "ssh.exe").replaceAll("\\", "/")
+      : ""
+    process.env.LFCODE_GIT_LESS_PATH = bundledGitRoot
+      ? join(bundledGitRoot, "usr", "bin", "less.exe").replaceAll("\\", "/")
+      : ""
+    process.env.LFCODE_MANAGED_PYTHON_PATH = managedPythonPath
+    const pythonPath = app.isPackaged ? join(process.resourcesPath, "python", "python.exe").replaceAll("\\", "/") : ""
+    process.env.LFCODE_PYTHON_PATH = pythonPath
+    prependPath([bundledGitCmdPath, bundledGitUsrBinPath, bundledGitMingwBinPath, managedScriptsPath])
+    if (pythonPath) prependPath([dirname(pythonPath), join(dirname(pythonPath), "Scripts").replaceAll("\\", "/")])
+  }
   for (const [key, value] of Object.entries(state.env)) {
     if (!value) continue
     process.env[key] = value
   }
   app.setPath("userData", state.userDataDir)
+}
+
+function prependPath(entries: string[]) {
+  const next = entries.filter(Boolean)
+  if (next.length === 0) return
+  const key = resolvePathKey()
+  const current = (process.env[key] ?? "").split(delimiter).filter(Boolean)
+  const merged = [...next, ...current].filter(
+    (value, index, list) =>
+      list.findIndex((item) =>
+        process.platform === "win32" ? item.toLowerCase() === value.toLowerCase() : item === value,
+      ) === index,
+  )
+  process.env[key] = merged.join(delimiter)
+  if (key !== "PATH") process.env.PATH = process.env[key]
+}
+
+function resolvePathKey() {
+  if (process.platform !== "win32") return "PATH"
+  return Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "Path"
 }
 
 export async function canWriteDirectory(directory: string) {
@@ -177,6 +258,7 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
     return {
       appId: input.appId,
       appName: input.appName,
+      codegraph: { kind: "external" },
       env: {},
       mode: "legacy",
       notes: ["desktop bootstrap using legacy user directory mode"],
@@ -188,6 +270,7 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
     return {
       appId: input.appId,
       appName: input.appName,
+      codegraph: { kind: "external" },
       env: {},
       fallbackReason: `desktop root is not writable: ${input.root}`,
       mode: "legacy",
@@ -200,6 +283,7 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
   return {
     appId: input.appId,
     appName: input.appName,
+    codegraph: { kind: "external" },
     env: {
       LFCODE_CONFIG_DIR: layout.configDir,
       LFCODE_DATA_DIR: layout.dataDir,
@@ -239,14 +323,20 @@ function resolveInstalledWindowsRootDirectory(input: {
 export function resolveDesktopBootstrap(input: DesktopBootstrapInput) {
   const rootKind = input.portableRoot ? "portable" : "managed"
   const root = input.portableRoot ?? resolveManagedRootDirectory(input)
-  return resolveBootstrapTarget({
+  const target = resolveBootstrapTarget({
     appId: input.appId,
     appName: input.appName,
-    legacyUserDataDir: input.legacyUserDataDir,
+    legacyUserDataDir: input.legacyUserDataOverride ?? input.legacyUserDataDir,
     root,
     rootKind,
     rootWritable: root ? canWriteDirectorySync(root) : false,
   })
+  const next: DesktopBootstrapState = {
+    ...target,
+    notes: [...target.notes, "desktop bootstrap codegraph disabled"],
+    codegraph: { kind: "external" },
+  }
+  return next
 }
 
 export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
@@ -261,9 +351,10 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
     appId: input.appId,
     sources: getMigrationSources(input, state),
   })
+  await migrateDeprecatedRootConfig(state.layout)
   await ensureRootConfigFile(state.layout)
   const managedMcpMigrated = await upgradeManagedRootConfigFile(state.layout)
-  const next = {
+  const next: DesktopBootstrapState = {
     ...state,
     migration,
     notes: [
@@ -333,7 +424,7 @@ async function copyConfigDirectory(sourceDir: string, layout: RootLayout, copied
   const sourceInfo = await safeStat(sourceDir)
   if (!sourceInfo?.isDirectory()) return
 
-  const configSource = await findLegacyConfigFile(sourceDir)
+  const configSource = await findConfigForOneTimeMigration(sourceDir)
   if (configSource) {
     await copyMissingPath(configSource, layout.configFile, copied, preserved)
   }
@@ -383,12 +474,21 @@ async function ensureRootLayout(layout: RootLayout) {
 
 async function ensureRootConfigFile(layout: RootLayout) {
   if (await pathExists(layout.configFile)) return
-  const legacy = await findLegacyConfigFile(layout.root)
-  if (legacy && legacy !== layout.configFile) {
-    await copyFile(legacy, layout.configFile)
+  const current = await findLfcodeConfigFile(layout.root)
+  if (current && current !== layout.configFile) {
+    await copyFile(current, layout.configFile)
     return
   }
-  await writeFile(layout.configFile, `${JSON.stringify(DEFAULT_ROOT_CONFIG, null, 2)}\n`)
+  await writeFile(layout.configFile, `${JSON.stringify(defaultRootConfig(), null, 2)}\n`)
+}
+
+async function migrateDeprecatedRootConfig(layout: RootLayout) {
+  const marker = await readMigrationMarker(layout)
+  if (marker?.deprecatedConfigMigrationVersion === DEPRECATED_CONFIG_MIGRATION_VERSION) return
+  const legacy = await findDeprecatedConfigFile(layout.root)
+  if (legacy && !(await pathExists(layout.configFile))) await copyFile(legacy, layout.configFile)
+  await Promise.all(DEPRECATED_CONFIG_FILES.map((name) => unlink(join(layout.root, name)).catch(() => undefined)))
+  await writeMigrationMarker(layout, { deprecatedConfigMigrationVersion: DEPRECATED_CONFIG_MIGRATION_VERSION })
 }
 
 async function upgradeManagedRootConfigFile(layout: RootLayout) {
@@ -398,6 +498,8 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
   const marker = await readMigrationMarker(layout)
   const bundledMcpVersion = typeof marker?.bundledMcpVersion === "number" ? marker.bundledMcpVersion : 0
   const bundledMcpMigrationPending = bundledMcpVersion < BUNDLED_MCP_MIGRATION_VERSION
+  const lspVersion = typeof marker?.defaultLspVersion === "number" ? marker.defaultLspVersion : 0
+  const defaultLspMigrationPending = lspVersion < DEFAULT_LSP_MIGRATION_VERSION
   const parsed = parseJsonc(text)
   if (!isRecord(parsed)) return false
 
@@ -405,10 +507,23 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
   let changed = false
   const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined
 
+  if (defaultLspMigrationPending && parsed.lsp === undefined) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["lsp"], true, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      }),
+    )
+    changed = true
+  }
+
   if (bundledMcpMigrationPending && !mcp) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp"], DEFAULT_ROOT_CONFIG.mcp, {
+      modify(updated, ["mcp"], defaultRootConfig().mcp, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -420,10 +535,15 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
 
   if (mcp) {
     const playwright = mcp.playwright
-    if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright) || (bundledMcpMigrationPending && playwright === undefined)) {
+    if (
+      isLegacyPlaywrightConfig(playwright) ||
+      isPlaywrightCdpConfig(playwright) ||
+      isStaleBundledPlaywrightRemoteConfig(playwright) ||
+      (bundledMcpMigrationPending && playwright === undefined)
+    ) {
       updated = applyEdits(
         updated,
-        modify(updated, ["mcp", "playwright"], DEFAULT_ROOT_CONFIG.mcp.playwright, {
+        modify(updated, ["mcp", "playwright"], defaultRootConfig().mcp.playwright, {
           formattingOptions: {
             insertSpaces: true,
             tabSize: 2,
@@ -440,7 +560,7 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
     ) {
       updated = applyEdits(
         updated,
-        modify(updated, ["mcp", "windows-computer-use"], DEFAULT_ROOT_CONFIG.mcp["windows-computer-use"], {
+        modify(updated, ["mcp", "windows-computer-use"], defaultRootConfig().mcp["windows-computer-use"], {
           formattingOptions: {
             insertSpaces: true,
             tabSize: 2,
@@ -457,6 +577,11 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
       bundledMcpVersion: BUNDLED_MCP_MIGRATION_VERSION,
     })
   }
+  if (defaultLspMigrationPending) {
+    await writeMigrationMarker(layout, {
+      defaultLspVersion: DEFAULT_LSP_MIGRATION_VERSION,
+    })
+  }
 
   if (!changed) return false
   return true
@@ -469,11 +594,22 @@ function ensureRootLayoutSync(layout: RootLayout) {
   mkdirSync(layout.userDataDir, { recursive: true })
 }
 
-async function findLegacyConfigFile(directory: string) {
-  for (const name of CONFIG_FILES) {
+async function findLfcodeConfigFile(directory: string) {
+  for (const name of LFCODE_CONFIG_FILES) {
     const file = join(directory, name)
     if (await pathExists(file)) return file
   }
+}
+
+async function findDeprecatedConfigFile(directory: string) {
+  for (const name of DEPRECATED_CONFIG_FILES) {
+    const file = join(directory, name)
+    if (await pathExists(file)) return file
+  }
+}
+
+async function findConfigForOneTimeMigration(directory: string) {
+  return (await findLfcodeConfigFile(directory)) ?? findDeprecatedConfigFile(directory)
 }
 
 function getLegacyMigrationSources(appId: string, home = homedir(), appData = process.env.APPDATA ?? join(home, "AppData", "Roaming")): MigrationSources {
@@ -550,6 +686,24 @@ function isPlaywrightCdpConfig(value: unknown) {
   return isStringArray(value.command, [...PLAYWRIGHT_MCP_CDP_COMMAND])
 }
 
+function isStaleBundledPlaywrightRemoteConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (!hasExactKeys(value, PLAYWRIGHT_MCP_REMOTE_KEYS)) return false
+  if (value.type !== "remote") return false
+  if (value.enabled !== true) return false
+  if (typeof value.url !== "string" || !isLoopbackPlaywrightRemoteUrl(value.url)) return false
+  if (!isRecord(value.headers)) return false
+  if (Object.keys(value.headers).length !== 1) return false
+  return typeof value.headers.authorization === "string"
+}
+
+function isLoopbackPlaywrightRemoteUrl(value: string) {
+  return (
+    (value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:")) &&
+    value.endsWith("/global/mcp/playwright")
+  )
+}
+
 function isLegacyWindowsComputerUseConfig(value: unknown) {
   if (!isRecord(value)) return false
   if (!hasExactKeys(value, WINDOWS_COMPUTER_USE_MCP_KEYS)) return false
@@ -571,6 +725,15 @@ function isBrokenWindowsComputerUseCommand(value: unknown) {
     target === "{env:lfcode_windows_computer_use_mcp_dir}/bundle/index.js" ||
     (target.includes("windows-computer-use-mcp") && target.endsWith("/bundle/index.js"))
   )
+}
+
+function pathExistsSync(file: string) {
+  try {
+    accessSync(file)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function resolveProbeDirectory(directory: string) {

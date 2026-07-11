@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process"
+import { readFile } from "node:fs/promises"
+import { basename, extname, isAbsolute } from "node:path"
 import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type {
+  BrowserCacheOverview,
   BrowserCookieIdentity,
   BrowserPasswordCapturePrompt,
   BrowserPasswordCapturePayload,
@@ -12,8 +15,10 @@ import type {
 } from "@lfcode-ai/shared/desktop-browser-management"
 
 import type {
+  AutomationEventPayload,
   BrowserGuestTarget,
   BrowserSiteDataResult,
+  BrowserWindowOpenRequest,
   DetachedSidePanelEvent,
   DetachedSidePanelRecord,
   InitStep,
@@ -24,8 +29,23 @@ import type {
   WslConfig,
 } from "../preload/types"
 import { openExternal } from "./external"
+import { clipboardFilePaths } from "./clipboard-files"
 import { getStore } from "./store"
 import { setTitlebar } from "./windows"
+
+type BrowserReferenceCandidate = {
+  label?: string
+  text?: string
+  url?: string
+  title?: string
+  selector?: string
+  mode?: "selection" | "element"
+}
+
+type BrowserReferenceState = {
+  selection?: BrowserReferenceCandidate
+  element?: BrowserReferenceCandidate
+}
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -34,6 +54,7 @@ const pickerFilters = (ext?: string[]) => {
 
 type Deps = {
   killSidecar: () => void
+  installCli: () => Promise<string> | string
   awaitInitialization: (sendStep: (step: InitStep) => void) => Promise<ServerReadyData>
   getWindowConfig: () => Promise<WindowConfig> | WindowConfig
   consumeInitialDeepLinks: () => Promise<string[]> | string[]
@@ -52,6 +73,7 @@ type Deps = {
   checkUpdate: () => Promise<{ updateAvailable: boolean; version?: string }>
   installUpdate: () => Promise<void> | void
   setBackgroundColor: (color: string) => void
+  automationEvent: (payload: AutomationEventPayload) => Promise<void> | void
   createDetachedSidePanelWindow: (input: {
     detachedWindowID: string
     route: string
@@ -77,9 +99,13 @@ type Deps = {
   ) => Promise<void> | void
   clearDetachedDockTarget: (senderWindowID: number) => Promise<void> | void
   registerBrowserGuest: (target: BrowserGuestTarget & { guestID: number }) => Promise<void> | void
+  markBrowserGuestReady: (target: BrowserGuestTarget & { guestID: number }) => Promise<void> | void
   unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void> | void
   openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void> | void
   clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult> | BrowserSiteDataResult
+  getBrowserReferenceState: (target: BrowserGuestTarget) => Promise<BrowserReferenceState | null> | BrowserReferenceState | null
+  getBrowserCacheOverview: () => Promise<BrowserCacheOverview> | BrowserCacheOverview
+  clearBrowserCache: () => Promise<BrowserCacheOverview> | BrowserCacheOverview
   listBrowserCookies: () => Promise<any[]> | any[]
   removeBrowserCookie: (cookie: BrowserCookieIdentity) => Promise<void> | void
   clearBrowserCookiesByDomain: (domain: string) => Promise<number> | number
@@ -94,8 +120,18 @@ type Deps = {
   setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void> | void
 }
 
+const droppedImageMime = (path: string) => {
+  const extension = extname(path).toLowerCase()
+  if (extension === ".gif") return "image/gif"
+  if (extension === ".jpeg" || extension === ".jpg") return "image/jpeg"
+  if (extension === ".png") return "image/png"
+  if (extension === ".webp") return "image/webp"
+  if (extension === ".avif") return "image/avif"
+}
+
 export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("kill-sidecar", () => deps.killSidecar())
+  ipcMain.handle("install-cli", () => deps.installCli())
   ipcMain.handle("await-initialization", (event: IpcMainInvokeEvent) => {
     const send = (step: InitStep) => event.sender.send("init-step", step)
     return deps.awaitInitialization(send)
@@ -123,6 +159,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("check-update", () => deps.checkUpdate())
   ipcMain.handle("install-update", () => deps.installUpdate())
   ipcMain.handle("set-background-color", (_event: IpcMainInvokeEvent, color: string) => deps.setBackgroundColor(color))
+  ipcMain.on("automation-event", (_event: IpcMainEvent, payload: AutomationEventPayload) => deps.automationEvent(payload))
   ipcMain.handle(
     "create-detached-side-panel-window",
     (event: IpcMainInvokeEvent, input: Omit<DetachedSidePanelRecord, "sourceWindowID"> & { route: string }) => {
@@ -152,6 +189,9 @@ export function registerIpcHandlers(deps: Deps) {
   })
   ipcMain.handle("register-browser-guest", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { guestID: number }) => {
     return deps.registerBrowserGuest(target)
+  })
+  ipcMain.handle("mark-browser-guest-ready", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { guestID: number }) => {
+    return deps.markBrowserGuestReady(target)
   })
   ipcMain.handle("unregister-browser-guest", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { guestID?: number }) => {
     return deps.unregisterBrowserGuest(target)
@@ -222,9 +262,39 @@ export function registerIpcHandlers(deps: Deps) {
     },
   )
 
-  ipcMain.on("open-link", (_event: IpcMainEvent, url: string) => {
+  ipcMain.on("open-link", (_event: IpcMainEvent, detail: BrowserWindowOpenRequest | string) => {
     const win = BrowserWindow.fromWebContents(_event.sender)
-    win?.webContents.send("browser-window-open", url)
+    const payload = typeof detail === "string" ? { url: detail } : detail
+    if (!payload?.url) return
+    win?.webContents.send("browser-window-open", payload)
+  })
+
+  ipcMain.handle("read-dropped-image", async (_event: IpcMainInvokeEvent, path: string) => {
+    if (!isAbsolute(path)) return null
+    const mime = droppedImageMime(path)
+    if (!mime) return null
+    const bytes = await readFile(path)
+    if (bytes.byteLength > 20 * 1024 * 1024) return null
+    return {
+      dataUrl: `data:${mime};base64,${bytes.toString("base64")}`,
+      filename: basename(path),
+      mime,
+    }
+  })
+
+  ipcMain.handle("read-clipboard-file-paths", () => {
+    const read = (format: string) => {
+      try {
+        return clipboard.readBuffer(format)
+      } catch {
+        return undefined
+      }
+    }
+    return clipboardFilePaths({
+      fileDrop: read("FileDrop"),
+      fileNameWide: read("FileNameW"),
+      fileName: read("FileName"),
+    })
   })
 
   ipcMain.on("open-external-link", (_event: IpcMainEvent, url: string) => {
@@ -236,6 +306,11 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("clear-browser-site-data", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
     return deps.clearBrowserSiteData(target)
   })
+  ipcMain.handle("get-browser-reference-state", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
+    return deps.getBrowserReferenceState(target)
+  })
+  ipcMain.handle("get-browser-cache-overview", () => deps.getBrowserCacheOverview())
+  ipcMain.handle("clear-browser-cache", () => deps.clearBrowserCache())
   ipcMain.handle("list-browser-cookies", () => deps.listBrowserCookies())
   ipcMain.handle("remove-browser-cookie", (_event: IpcMainInvokeEvent, cookie: BrowserCookieIdentity) => {
     return deps.removeBrowserCookie(cookie)
@@ -294,6 +369,7 @@ export function registerIpcHandlers(deps: Deps) {
     const win = BrowserWindow.fromWebContents(event.sender)
     return win?.id ?? null
   })
+  ipcMain.handle("get-renderer-memory-info", (event: IpcMainInvokeEvent) => event.sender.getProcessMemoryInfo())
 
   ipcMain.handle("get-window-focused", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)

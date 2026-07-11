@@ -20,17 +20,17 @@ export type ResolvedPaths = {
  * from environment variables.
  *
  * If LFCODE_HOME is set and non-empty, the four paths are subdirectories
- * of it. Legacy OPENCODE_* and MIMOCODE_HOME values remain as fallbacks.
+ * of it. Legacy application environment variables are intentionally ignored.
  * On Windows, the default profile root is `%USERPROFILE%\\.lfcode`.
  * Otherwise, falls through to XDG Base Directory defaults.
  *
  * @throws if LFCODE_HOME is set but not an absolute path
  */
 export function resolveLfcodeHome(env: NodeJS.ProcessEnv = process.env): ResolvedPaths {
-  const config = env.LFCODE_CONFIG_DIR ?? env.OPENCODE_CONFIG_DIR
-  const data = env.LFCODE_DATA_DIR ?? env.OPENCODE_DATA_DIR
-  const state = env.LFCODE_STATE_DIR ?? env.OPENCODE_STATE_DIR
-  const cache = env.LFCODE_CACHE_DIR ?? env.OPENCODE_CACHE_DIR
+  const config = env.LFCODE_CONFIG_DIR
+  const data = env.LFCODE_DATA_DIR
+  const state = env.LFCODE_STATE_DIR
+  const cache = env.LFCODE_CACHE_DIR
   if (config || data || state || cache) {
     if (!config || !data || !state || !cache) {
       throw new Error("LFCODE_CONFIG_DIR, LFCODE_DATA_DIR, LFCODE_STATE_DIR, and LFCODE_CACHE_DIR must all be set together")
@@ -54,7 +54,7 @@ export function resolveLfcodeHome(env: NodeJS.ProcessEnv = process.env): Resolve
     }
   }
 
-  const home = chooseHome(env.LFCODE_HOME, env.MIMOCODE_HOME)
+  const home = chooseHome(env.LFCODE_HOME)
   if (process.platform === "win32") {
     const root = home ?? path.join(env.USERPROFILE ?? os.homedir(), WINDOWS_HOME_ROOT)
     if (home && !path.isAbsolute(home)) {

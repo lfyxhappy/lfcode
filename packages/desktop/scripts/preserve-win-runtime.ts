@@ -6,7 +6,7 @@ import path from "node:path"
 const distDir = path.resolve(import.meta.dir, "../dist")
 const sourceDir = path.join(distDir, "win-unpacked")
 const backupDir = path.join(distDir, ".win-unpacked-runtime")
-const entries = ["cache", "data", "state", "config.json", "lfcode.json", "lfcode.jsonc", "opencode.jsonc"]
+const entries = ["cache", "data", "state", "config.json", "lfcode.json", "lfcode.jsonc"]
 
 if (process.platform !== "win32") process.exit(0)
 

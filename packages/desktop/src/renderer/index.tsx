@@ -15,6 +15,8 @@ import {
   ServerConnection,
   useCommand,
 } from "@lfcode-ai/app"
+import { base64Encode } from "@lfcode-ai/shared/util/encode"
+import type { BrowserWindowOpenRequest } from "../preload/types"
 import type { AsyncStorage } from "@solid-primitives/storage"
 import type { BaseRouterProps } from "@solidjs/router"
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router"
@@ -36,6 +38,118 @@ void initI18n()
 const deepLinkEvent = "lfcode:deep-link"
 const browserOpenEvent = "lfcode:browser-request-open"
 
+window.__LFCODE__ ??= {}
+window.__LFCODE__.detachedSidePanel = getDetachedSidePanelContext()
+
+const currentRendererRoute = () => window.location.hash.slice(1) || "/"
+const emitAutomationEvent = (type: string, data?: unknown) => {
+  window.api.automationEvent({
+    type,
+    data,
+  })
+}
+
+const routerHistory = createMemoryHistory()
+const initialRoute = (() => {
+  const detachedRoute = window.__LFCODE__.detachedSidePanel?.route
+  if (detachedRoute) return detachedRoute
+  const hashRoute = window.location.hash.slice(1)
+  if (hashRoute) return hashRoute
+  return "/"
+})()
+if (initialRoute !== "/") {
+  routerHistory.set({ value: initialRoute, replace: true, scroll: false })
+}
+const syncRendererRoute = (route: string) => {
+  const url = new URL(window.location.href)
+  const nextHash = route === "/" ? "" : `#${route}`
+  if (url.hash === nextHash) return
+  url.hash = route === "/" ? "" : route
+  window.history.replaceState(window.history.state, "", url)
+}
+routerHistory.listen((route) => {
+  syncRendererRoute(route)
+  emitAutomationEvent("route.changed", { route })
+})
+syncRendererRoute(initialRoute)
+window.__LFCODE__.navigate = (route: string) => {
+  routerHistory.set({ value: route, replace: true, scroll: false })
+}
+window.__LFCODE__.automation = {
+  getState: () => ({
+    route: currentRendererRoute(),
+    title: document.title,
+    windowFocused: document.hasFocus(),
+    detachedSidePanel: !!window.__LFCODE__?.detachedSidePanel,
+    session: window.__LFCODE__?.sessionAutomation?.getState?.() ?? null,
+  }),
+  call: async (action, input) => {
+    if (action === "ui.query") {
+      const result = await window.__LFCODE__?.sessionAutomation?.ui?.query?.(input as never)
+      if (!result) throw new Error("Renderer UI automation query is not available")
+      return result
+    }
+    if (action === "ui.click") {
+      const result = await window.__LFCODE__?.sessionAutomation?.ui?.click?.(input as never)
+      if (!result) throw new Error("Renderer UI automation click is not available")
+      return result
+    }
+    if (action === "ui.type") {
+      const result = await window.__LFCODE__?.sessionAutomation?.ui?.type?.(input as never)
+      if (!result) throw new Error("Renderer UI automation type is not available")
+      return result
+    }
+    if (action === "ui.readText") {
+      const result = window.__LFCODE__?.sessionAutomation?.ui?.readText?.(input as never)
+      if (result === undefined) throw new Error("Renderer UI automation readText is not available")
+      return result
+    }
+    if (action === "ui.wait") {
+      const result = await window.__LFCODE__?.sessionAutomation?.ui?.wait?.(input as never)
+      if (!result) throw new Error("Renderer UI automation wait is not available")
+      return result
+    }
+    if (action === "ui.editor") {
+      if (!window.__LFCODE__?.sessionAutomation?.ui?.editor) {
+        throw new Error("Renderer UI automation editor is not available")
+      }
+      return window.__LFCODE__.sessionAutomation.ui.editor(input as never)
+    }
+    if (action === "route.navigate") {
+      const route = typeof input === "object" && input && "route" in input ? String((input as { route: unknown }).route ?? "") : ""
+      if (!route) throw new Error("Missing route")
+      window.__LFCODE__?.navigate?.(route)
+      return { route: currentRendererRoute() }
+    }
+    if (action === "session.open") {
+      const value = input as { directory?: unknown; sessionID?: unknown } | undefined
+      const directory = typeof value?.directory === "string" ? value.directory : ""
+      const sessionID = typeof value?.sessionID === "string" ? value.sessionID : ""
+      if (!directory || !sessionID) throw new Error("Missing directory or sessionID")
+      const route = `/${base64Encode(directory)}/session/${sessionID}`
+      window.__LFCODE__?.navigate?.(route)
+      return { route }
+    }
+    const bridge = window.__LFCODE__?.sessionAutomation
+    if (!bridge?.call) throw new Error(`Renderer automation action is not available: ${action}`)
+    return bridge.call(action, input)
+  },
+}
+window.addEventListener("error", (event) => {
+  emitAutomationEvent("renderer.error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+  })
+})
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason instanceof Error
+    ? { name: event.reason.name, message: event.reason.message, stack: event.reason.stack }
+    : String(event.reason)
+  emitAutomationEvent("renderer.unhandledrejection", { reason })
+})
+
 const emitDeepLinks = (urls: string[]) => {
   if (urls.length === 0) return
   window.__LFCODE__ ??= {}
@@ -49,9 +163,9 @@ const listenForDeepLinks = () => {
   return window.api.onDeepLink((urls) => emitDeepLinks(urls))
 }
 
-const emitBrowserOpen = (url: string) => {
-  if (!url) return
-  window.dispatchEvent(new CustomEvent(browserOpenEvent, { detail: { url }, cancelable: true }))
+const emitBrowserOpen = (detail: BrowserWindowOpenRequest) => {
+  if (!detail?.url) return
+  window.dispatchEvent(new CustomEvent(browserOpenEvent, { detail, cancelable: true }))
 }
 
 const createPlatform = (): Platform => {
@@ -115,6 +229,7 @@ const createPlatform = (): Platform => {
     platform: "desktop",
     os,
     version: pkg.version,
+    getRendererMemoryInfo: () => window.api.getRendererMemoryInfo(),
 
     async openDirectoryPickerDialog(opts) {
       const defaultPath = await wslHome()
@@ -144,8 +259,8 @@ const createPlatform = (): Platform => {
       return handleWslPicker(result)
     },
 
-    openLink(url: string) {
-      emitBrowserOpen(url)
+    openLink(url: string, detail) {
+      emitBrowserOpen({ url, ...detail })
     },
     openExternalLink(url: string) {
       window.api.openExternalLink(url)
@@ -155,6 +270,15 @@ const createPlatform = (): Platform => {
     },
     clearBrowserSiteData: async (target) => {
       return window.api.clearBrowserSiteData(target)
+    },
+    getBrowserReferenceState: async (target) => {
+      return window.api.getBrowserReferenceState(target)
+    },
+    getBrowserCacheOverview: async () => {
+      return window.api.getBrowserCacheOverview()
+    },
+    clearBrowserCache: async () => {
+      return window.api.clearBrowserCache()
     },
     listBrowserCookies: async () => {
       return window.api.listBrowserCookies()
@@ -186,6 +310,9 @@ const createPlatform = (): Platform => {
     onBrowserPasswordCapture: (cb) => window.api.onBrowserPasswordCapture(cb),
     registerBrowserGuest: async (target) => {
       await window.api.registerBrowserGuest(target)
+    },
+    markBrowserGuestReady: async (target) => {
+      await window.api.markBrowserGuestReady(target)
     },
     unregisterBrowserGuest: async (target) => {
       await window.api.unregisterBrowserGuest(target)
@@ -300,6 +427,9 @@ const createPlatform = (): Platform => {
         type: "image/png",
       })
     },
+    getPathForFile: (file: File) => window.api.getPathForFile(file),
+    readDroppedImage: (path: string) => window.api.readDroppedImage(path),
+    onNativeFileTransfer: (cb) => window.api.onNativeFileTransfer(cb),
     createDetachedSidePanelWindow: async (input) => {
       await window.api.createDetachedSidePanelWindow(input)
     },
@@ -317,11 +447,8 @@ const createPlatform = (): Platform => {
 }
 
 function DetachedRouter(props: BaseRouterProps) {
-  const route = window.__LFCODE__?.detachedSidePanel?.route
-  const history = createMemoryHistory()
-  if (route) history.set({ value: route, replace: true, scroll: false })
   return (
-    <MemoryRouter history={history} root={props.root}>
+    <MemoryRouter history={routerHistory} root={props.root}>
       {props.children}
     </MemoryRouter>
   )
@@ -332,9 +459,7 @@ window.api.onMenuCommand((id) => {
   menuTrigger?.(id)
 })
 listenForDeepLinks()
-window.api.onBrowserWindowOpen((url) => emitBrowserOpen(url))
-window.__LFCODE__ ??= {}
-window.__LFCODE__.detachedSidePanel = getDetachedSidePanelContext()
+window.api.onBrowserWindowOpen((detail) => emitBrowserOpen(detail))
 
 render(() => {
   const platform = createPlatform()

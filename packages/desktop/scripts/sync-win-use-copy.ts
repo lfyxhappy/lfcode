@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync } from "node:fs"
-import { cp, mkdir, readdir, rm } from "node:fs/promises"
+import { copyFile, mkdir, readdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 
@@ -16,7 +16,6 @@ const skippedEntries = new Set([
   "lfcode.json",
   "lfcode.jsonc",
   "node_modules",
-  "opencode.jsonc",
   "state",
 ])
 const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
@@ -34,7 +33,7 @@ const windowsComputerUseLegacyCommand = [
   "cmd",
   "/c",
   "node",
-  "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
+  '"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js"',
 ] as const
 const windowsComputerUsePreviousCommand = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
 const windowsComputerUseCommand = [
@@ -60,11 +59,17 @@ async function clearDirectory(target: string) {
 async function copyDirectoryContents(source: string, target: string) {
   await mkdir(target, { recursive: true })
   for (const entry of await readdir(source, { withFileTypes: true })) {
-    await cp(path.join(source, entry.name), path.join(target, entry.name), {
-      force: true,
-      recursive: entry.isDirectory(),
-    })
+    await copyEntry(path.join(source, entry.name), path.join(target, entry.name), entry.isDirectory())
   }
+}
+
+async function copyEntry(source: string, target: string, directory: boolean) {
+  if (directory) {
+    await copyDirectoryContents(source, target)
+    return
+  }
+  await mkdir(path.dirname(target), { recursive: true })
+  await copyFile(source, target)
 }
 
 async function assertSyncedFile(source: string, target: string) {
@@ -85,6 +90,7 @@ if (process.platform !== "win32") process.exit(0)
 if (!existsSync(sourceDir)) throw new Error(`Packaged Windows app not found: ${sourceDir}`)
 
 await mkdir(targetDir, { recursive: true })
+await rm(path.join(targetDir, "opencode.jsonc"), { force: true })
 
 for (const directory of replacedDirectories) {
   await clearDirectory(path.join(targetDir, directory))
@@ -98,10 +104,7 @@ for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
     await copyDirectoryContents(source, target)
     continue
   }
-  await cp(source, target, {
-    force: true,
-    recursive: entry.isDirectory(),
-  })
+  await copyEntry(source, target, entry.isDirectory())
 }
 
 await assertSyncedFile(path.join(sourceDir, "Lfcode.exe"), path.join(targetDir, "Lfcode.exe"))
@@ -118,16 +121,25 @@ function upgradeBundledCommands(text: string) {
   if (!mcp) {
     return applyEdits(
       updated,
-      modify(updated, ["mcp"], { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig }, {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
+      modify(
+        updated,
+        ["mcp"],
+        { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig },
+        {
+          formattingOptions: {
+            insertSpaces: true,
+            tabSize: 2,
+          },
         },
-      }),
+      ),
     )
   }
   const playwright = mcp.playwright
-  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+  if (
+    isLegacyPlaywrightConfig(playwright) ||
+    isPlaywrightCdpConfig(playwright) ||
+    isStaleBundledPlaywrightRemoteConfig(playwright)
+  ) {
     updated = applyEdits(
       updated,
       modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
@@ -158,15 +170,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isExactCommand(value: unknown, expected: readonly string[]) {
-  return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+  return (
+    Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index])
+  )
 }
 
 function isLegacyPlaywrightConfig(value: unknown) {
-  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightLegacyCommand)
+  return (
+    isRecord(value) &&
+    value.type === "local" &&
+    value.enabled === true &&
+    isExactCommand(value.command, playwrightLegacyCommand)
+  )
 }
 
 function isPlaywrightCdpConfig(value: unknown) {
-  return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightCdpCommand)
+  return (
+    isRecord(value) &&
+    value.type === "local" &&
+    value.enabled === true &&
+    isExactCommand(value.command, playwrightCdpCommand)
+  )
+}
+
+function isStaleBundledPlaywrightRemoteConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (value.type !== "remote") return false
+  if (value.enabled !== true) return false
+  if (typeof value.url !== "string" || !isLoopbackPlaywrightRemoteUrl(value.url)) return false
+  if (!isRecord(value.headers)) return false
+  if (Object.keys(value.headers).length !== 1) return false
+  return typeof value.headers.authorization === "string"
+}
+
+function isLoopbackPlaywrightRemoteUrl(value: string) {
+  return (
+    (value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:")) &&
+    value.endsWith("/global/mcp/playwright")
+  )
 }
 
 function isLegacyWindowsComputerUseConfig(value: unknown) {
@@ -174,11 +215,9 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
     isRecord(value) &&
     value.type === "local" &&
     value.enabled === true &&
-    (
-      isExactCommand(value.command, windowsComputerUsePreviousCommand) ||
+    (isExactCommand(value.command, windowsComputerUsePreviousCommand) ||
       isExactCommand(value.command, windowsComputerUseLegacyCommand) ||
-      isBrokenWindowsComputerUseCommand(value.command)
-    )
+      isBrokenWindowsComputerUseCommand(value.command))
   )
 }
 
@@ -186,7 +225,10 @@ function isBrokenWindowsComputerUseCommand(value: unknown) {
   if (!Array.isArray(value) || value.length !== 4) return false
   if (value[0] !== "cmd" || value[1] !== "/c" || value[2] !== "node") return false
   if (typeof value[3] !== "string") return false
-  const target = value[3].replace(/^"+|"+$/g, "").replaceAll("\\", "/").toLowerCase()
+  const target = value[3]
+    .replace(/^"+|"+$/g, "")
+    .replaceAll("\\", "/")
+    .toLowerCase()
   return (
     target === "{env:lfcode_windows_computer_use_mcp_dir}/bundle/index.js" ||
     (target.includes("windows-computer-use-mcp") && target.endsWith("/bundle/index.js"))

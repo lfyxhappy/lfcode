@@ -2,6 +2,10 @@
   content-visibility: auto;
 }
 
+[data-virtual-timeline-item] [data-component="file"] {
+  content-visibility: visible;
+}
+
 [data-component="file"][data-mode="text"] {
   overflow: hidden;
 }
