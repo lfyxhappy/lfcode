@@ -22,9 +22,14 @@ import { Effect, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as BashInteractive from "./bash-interactive"
+import { BackgroundJobPersistence } from "@/background-job/persistence"
+import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
+import { Identifier } from "@/id/id"
+import * as PatchRecovery from "./patch-recovery"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.LFCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const RETRY_WINDOW_MS = 10 * 60 * 1000
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -53,7 +58,11 @@ const FLAGS = new Set(["-destination", "-literalpath", "-path"])
 const SWITCHES = new Set(["-confirm", "-debug", "-force", "-nonewline", "-recurse", "-verbose", "-whatif"])
 
 const Parameters = z.object({
-  command: z.string().describe("The command to execute"),
+  command: z
+    .string()
+    .describe(
+      "The command to execute. On Windows, this `shell` tool is actually a PowerShell 7 (`pwsh`) terminal. Generate `pwsh` syntax only; do not use cmd.exe, Bash, or Windows PowerShell 5-only syntax.",
+    ),
   timeout: z.number().describe("Optional timeout in milliseconds").optional(),
   workdir: z
     .string()
@@ -67,12 +76,27 @@ const Parameters = z.object({
       "Set to true when the command requires user interaction (password input, y/N confirmation, SSH key passphrase, etc). The terminal will be handed to the user for direct interaction.",
     )
     .optional(),
+  background: z
+    .boolean()
+    .describe(
+      "Set to true to start this command as a durable background shell job. Background jobs continue after this tool call returns and can later be inspected or awaited with the background_job tool.",
+    )
+    .optional(),
   description: z
     .string()
     .describe(
       "Clear, concise description of what this command does in 5-10 words. Examples:\nInput: ls\nOutput: Lists files in current directory\n\nInput: git status\nOutput: Shows working tree status\n\nInput: npm install\nOutput: Installs package dependencies\n\nInput: mkdir foo\nOutput: Creates directory 'foo'",
     ),
 })
+
+export type ShellToolInput = z.infer<typeof Parameters>
+export type PreparedShellExecution = {
+  shell: string
+  shellName: string
+  cwd: string
+  env: NodeJS.ProcessEnv
+  timeout: number
+}
 
 type Part = {
   type: string
@@ -91,6 +115,8 @@ type Chunk = {
 }
 
 export const log = Log.create({ service: "bash-tool" })
+
+const failedCommands = new Map<string, { failures: number; updatedAt: number }>()
 
 const resolveWasm = (asset: string) => {
   if (asset.startsWith("file://")) return fileURLToPath(asset)
@@ -277,6 +303,51 @@ function tail(text: string, maxLines: number, maxBytes: number) {
   }
 }
 
+function pwshGuardMessage(command: string) {
+  const trimmed = command.trimStart()
+
+  const exportMatch = trimmed.match(/^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$/s)
+  if (exportMatch) {
+    return [
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.",
+      `Bash-style \`export\` is not supported here. Rewrite it as \`$env:${exportMatch[1]} = ${exportMatch[2].trim()}\`.`,
+    ].join(" ")
+  }
+
+  const inlineEnvMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=([^\s;|&]+)\s+(.+)$/s)
+  if (inlineEnvMatch) {
+    return [
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.",
+      `Inline Bash environment assignment is not supported here. Rewrite it as \`$env:${inlineEnvMatch[1]} = ${inlineEnvMatch[2]}; ${inlineEnvMatch[3].trim()}\`.`,
+    ].join(" ")
+  }
+
+  const sourceMatch = trimmed.match(/^source\s+(.+)$/s)
+  if (sourceMatch) {
+    return [
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.",
+      `Bash-style \`source\` is not supported here. Use \`. ${sourceMatch[1].trim()}\` to dot-source a PowerShell script, or \`& ${sourceMatch[1].trim()}\` to run it.`,
+    ].join(" ")
+  }
+
+  const heredocMatch = trimmed.match(/^[^\r\n]*<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/)
+  if (heredocMatch) {
+    return [
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.",
+      "Bash heredocs are not supported here.",
+      "Use a PowerShell here-string like `@' ... '@` or `@\" ... \"@` instead.",
+    ].join(" ")
+  }
+
+  const testMatch = trimmed.match(/^(?:if\s+)?\[\[.*\]\]/s)
+  if (testMatch) {
+    return [
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.",
+      "Bash `[[ ... ]]` tests are not supported here. Rewrite them with PowerShell conditionals such as `if (Test-Path ...) { ... }` or `if ($value -eq ... ) { ... }`.",
+    ].join(" ")
+  }
+}
+
 const parse = Effect.fn("BashTool.parse")(function* (command: string, ps: boolean) {
   const tree = yield* Effect.promise(() => parser().then((p) => (ps ? p.ps : p.bash).parse(command)))
   if (!tree) throw new Error("Failed to parse command")
@@ -299,16 +370,187 @@ const ask = Effect.fn("BashTool.ask")(function* (ctx: Tool.Context, scan: Scan) 
 
   if (scan.patterns.size === 0) return
   yield* ctx.ask({
-    permission: "bash",
+    permission: "shell",
     patterns: Array.from(scan.patterns),
     always: Array.from(scan.always),
     metadata: {},
   })
 })
 
+const cygpath = Effect.fn("BashTool.cygpath")(function* (shell: string, text: string) {
+  const spawner = yield* ChildProcessSpawner
+  const lines = yield* spawner
+    .lines(ChildProcess.make(shell, ["-lc", 'cygpath -w -- "$1"', "_", text]))
+    .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+  const file = lines[0]?.trim()
+  if (!file) return
+  return AppFileSystem.normalizePath(file)
+})
+
+export const resolveShellPath = Effect.fn("BashTool.resolvePath")(function* (
+  text: string,
+  root: string,
+  shell: string,
+) {
+  if (process.platform === "win32") {
+    if (Shell.posix(shell) && text.startsWith("/") && AppFileSystem.windowsPath(text) === text) {
+      const file = yield* cygpath(shell, text)
+      if (file) return file
+    }
+    return AppFileSystem.normalizePath(path.resolve(root, AppFileSystem.windowsPath(text)))
+  }
+  return path.resolve(root, text)
+})
+
+const argPath = Effect.fn("BashTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
+  const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
+  const file = text && prefix(text)
+  if (!file || dynamic(file, ps)) return
+  const next = ps ? provider(file) : file
+  if (!next) return
+  return yield* resolveShellPath(next, cwd, shell)
+})
+
+const collectPermissionScan = Effect.fn("BashTool.collect")(function* (
+  root: Node,
+  cwd: string,
+  ps: boolean,
+  shell: string,
+) {
+  const fs = yield* AppFileSystem.Service
+  const scan: Scan = {
+    dirs: new Set<string>(),
+    patterns: new Set<string>(),
+    always: new Set<string>(),
+  }
+
+  for (const node of commands(root)) {
+    const command = parts(node)
+    const tokens = command.map((item) => item.text)
+    const cmd = ps ? tokens[0]?.toLowerCase() : tokens[0]
+
+    if (cmd && FILES.has(cmd)) {
+      for (const arg of pathArgs(command, ps)) {
+        const resolved = yield* argPath(arg, cwd, ps, shell)
+        log.info("resolved path", { arg, resolved })
+        if (!resolved || Instance.containsPath(resolved)) continue
+        const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
+        scan.dirs.add(dir)
+      }
+    }
+
+    if (tokens.length && (!cmd || !CWD.has(cmd))) {
+      scan.patterns.add(source(node))
+      scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+    }
+  }
+
+  return scan
+})
+
+const shellEnv = Effect.fn("BashTool.shellEnv")(function* (ctx: Tool.Context, cwd: string) {
+  const plugin = yield* Plugin.Service
+  const extra = yield* plugin.trigger("shell.env", { cwd, sessionID: ctx.sessionID, callID: ctx.callID }, { env: {} })
+  return {
+    ...process.env,
+    ...extra.env,
+  }
+})
+
+function shouldRunInBackground(command: string) {
+  return /\b(?:vite|next|nuxt|astro|webpack|parcel|storybook)\s+(?:dev|serve|watch)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|watch)\b|\bjupyter\s+(?:lab|notebook)\b|\b(?:node|python|python3|pwsh)\b[^\n]*(?:--watch|\bserve\b)/i.test(
+    command,
+  )
+}
+
+function classifyShellFailure(input: { code: number | null; expired: boolean; aborted: boolean; output: string }) {
+  if (input.aborted) return "aborted"
+  if (input.expired) return "timeout"
+  if (input.code === 0) return
+  if (/parsererror|unexpected token|syntax error|not recognized as the name of a cmdlet/i.test(input.output))
+    return "syntax"
+  if (/cannot find path|no such file|does not exist|path not found|file not found/i.test(input.output)) return "path"
+  if (/access is denied|permission denied|unauthorized|not permitted/i.test(input.output)) return "permission"
+  return "process"
+}
+
+function commandSignature(sessionID: string, cwd: string, command: string) {
+  return `${sessionID}\0${cwd}\0${command.toLowerCase().replace(/[\s'"`()\[\]{}]+/g, "")}`
+}
+
+function assertRetryBudget(sessionID: string, cwd: string, command: string) {
+  const entry = failedCommands.get(commandSignature(sessionID, cwd, command))
+  if (!entry || Date.now() - entry.updatedAt > RETRY_WINDOW_MS) return
+  if (entry.failures < 2) return
+  throw new Error(
+    "This equivalent shell command has already failed twice in this session. Stop retrying it, summarize the classified failure, then inspect the relevant path, permission, process state, or syntax before choosing a different verified approach.",
+  )
+}
+
+function rememberCommandResult(
+  sessionID: string,
+  cwd: string,
+  command: string,
+  failed: boolean,
+) {
+  const signature = commandSignature(sessionID, cwd, command)
+  if (!failed) {
+    failedCommands.delete(signature)
+    return
+  }
+  const previous = failedCommands.get(signature)
+  failedCommands.set(signature, {
+    failures: (previous?.failures ?? 0) + 1,
+    updatedAt: Date.now(),
+  })
+}
+
+export const prepareShellExecution = Effect.fn("BashTool.prepareShellExecution")(function* (
+  params: Pick<ShellToolInput, "command" | "timeout" | "workdir" | "interactive" | "background">,
+  ctx: Tool.Context,
+) {
+  const shell = Shell.acceptable()
+  const shellName = Shell.name(shell)
+  const effectiveCwd = SessionCwd.get(ctx.sessionID)
+  const cwd = params.workdir ? yield* resolveShellPath(params.workdir, effectiveCwd, shell) : effectiveCwd
+  if (params.timeout !== undefined && params.timeout < 0) {
+    throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
+  }
+  if (params.interactive && params.background) {
+    throw new Error("`interactive: true` cannot be combined with `background: true`.")
+  }
+  if (params.background && params.timeout !== undefined) {
+    throw new Error(
+      '`timeout` only applies to blocking shell execution. Start the job in background mode, then use `background_job` with `operation="wait"` and `timeout_ms` if you need bounded waiting.',
+    )
+  }
+  const ps = PS.has(shellName)
+  if (process.platform === "win32" && ps) {
+    const guard = pwshGuardMessage(params.command)
+    if (guard) throw new Error(guard)
+  }
+  const root = yield* parse(params.command, ps)
+  const scan = yield* collectPermissionScan(root, cwd, ps, shell)
+  if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
+  yield* ask(ctx, scan)
+  const env = yield* shellEnv(ctx, cwd)
+  return {
+    shell,
+    shellName,
+    cwd,
+    env,
+    timeout: params.timeout ?? DEFAULT_TIMEOUT,
+  } satisfies PreparedShellExecution
+})
+
 function cmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && PS.has(name)) {
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
+    const utf8 = [
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      "$OutputEncoding = [Console]::OutputEncoding",
+      `& { ${command} }`,
+    ].join("; ")
+    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", utf8], {
       cwd,
       env,
       stdin: "ignore",
@@ -352,346 +594,428 @@ const parser = lazy(async () => {
   return { bash, ps }
 })
 
-// TODO: we may wanna rename this tool so it works better on other shells
-export const BashTool = Tool.define(
-  "bash",
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner
-    const fs = yield* AppFileSystem.Service
-    const trunc = yield* Truncate.Service
-    const plugin = yield* Plugin.Service
+function defineShellTool(id: "shell" | "bash", legacy: boolean) {
+  return Tool.define(
+    id,
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner
+      const trunc = yield* Truncate.Service
 
-    const cygpath = Effect.fn("BashTool.cygpath")(function* (shell: string, text: string) {
-      const lines = yield* spawner
-        .lines(ChildProcess.make(shell, ["-lc", 'cygpath -w -- "$1"', "_", text]))
-        .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-      const file = lines[0]?.trim()
-      if (!file) return
-      return AppFileSystem.normalizePath(file)
-    })
-
-    const resolvePath = Effect.fn("BashTool.resolvePath")(function* (text: string, root: string, shell: string) {
-      if (process.platform === "win32") {
-        if (Shell.posix(shell) && text.startsWith("/") && AppFileSystem.windowsPath(text) === text) {
-          const file = yield* cygpath(shell, text)
-          if (file) return file
-        }
-        return AppFileSystem.normalizePath(path.resolve(root, AppFileSystem.windowsPath(text)))
-      }
-      return path.resolve(root, text)
-    })
-
-    const argPath = Effect.fn("BashTool.argPath")(function* (arg: string, cwd: string, ps: boolean, shell: string) {
-      const text = ps ? expand(arg, cwd, shell) : home(unquote(arg))
-      const file = text && prefix(text)
-      if (!file || dynamic(file, ps)) return
-      const next = ps ? provider(file) : file
-      if (!next) return
-      return yield* resolvePath(next, cwd, shell)
-    })
-
-    const collect = Effect.fn("BashTool.collect")(function* (root: Node, cwd: string, ps: boolean, shell: string) {
-      const scan: Scan = {
-        dirs: new Set<string>(),
-        patterns: new Set<string>(),
-        always: new Set<string>(),
-      }
-
-      for (const node of commands(root)) {
-        const command = parts(node)
-        const tokens = command.map((item) => item.text)
-        const cmd = ps ? tokens[0]?.toLowerCase() : tokens[0]
-
-        if (cmd && FILES.has(cmd)) {
-          for (const arg of pathArgs(command, ps)) {
-            const resolved = yield* argPath(arg, cwd, ps, shell)
-            log.info("resolved path", { arg, resolved })
-            if (!resolved || Instance.containsPath(resolved)) continue
-            const dir = (yield* fs.isDir(resolved)) ? resolved : path.dirname(resolved)
-            scan.dirs.add(dir)
-          }
-        }
-
-        if (tokens.length && (!cmd || !CWD.has(cmd))) {
-          scan.patterns.add(source(node))
-          scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
-        }
-      }
-
-      return scan
-    })
-
-    const shellEnv = Effect.fn("BashTool.shellEnv")(function* (ctx: Tool.Context, cwd: string) {
-      const extra = yield* plugin.trigger(
-        "shell.env",
-        { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
-        { env: {} },
-      )
-      return {
-        ...process.env,
-        ...extra.env,
-      }
-    })
-
-    const run = Effect.fn("BashTool.run")(function* (
-      input: {
-        shell: string
-        name: string
-        command: string
-        cwd: string
-        env: NodeJS.ProcessEnv
-        timeout: number
-        description: string
-      },
-      ctx: Tool.Context,
-    ) {
-      const bytes = Truncate.MAX_BYTES
-      const lines = Truncate.MAX_LINES
-      const keep = bytes * 2
-      let full = ""
-      let last = ""
-      const list: Chunk[] = []
-      let used = 0
-      let file = ""
-      let sink: ReturnType<typeof createWriteStream> | undefined
-      let cut = false
-      let expired = false
-      let aborted = false
-
-      yield* ctx.metadata({
-        metadata: {
-          output: "",
-          description: input.description,
+      const run = Effect.fn("BashTool.run")(function* (
+        input: {
+          shell: string
+          name: string
+          command: string
+          cwd: string
+          env: NodeJS.ProcessEnv
+          timeout: number
+          description: string
         },
-      })
+        ctx: Tool.Context,
+      ) {
+        const patchBypass = PatchRecovery.blockedShellWrite(ctx.sessionID, ctx.messageID, input.cwd, input.command)
+        if (patchBypass) throw new Error(patchBypass)
+        assertRetryBudget(ctx.sessionID, input.cwd, input.command)
+        const bytes = Truncate.MAX_BYTES
+        const lines = Truncate.MAX_LINES
+        const keep = bytes * 2
+        let full = ""
+        let last = ""
+        const list: Chunk[] = []
+        let used = 0
+        let file = ""
+        let sink: ReturnType<typeof createWriteStream> | undefined
+        let cut = false
+        let expired = false
+        let aborted = false
+        let foregroundJobID: string | undefined
+        let foregroundJobLogSequence = 0
+        let pendingForegroundJobLog = ""
 
-      const code: number | null = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const handle = yield* spawner.spawn(cmd(input.shell, input.name, input.command, input.cwd, input.env))
-
-          yield* Effect.forkScoped(
-            Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
-              const size = Buffer.byteLength(chunk, "utf-8")
-              list.push({ text: chunk, size })
-              used += size
-              while (used > keep && list.length > 1) {
-                const item = list.shift()
-                if (!item) break
-                used -= item.size
-                cut = true
-              }
-
-              last = preview(last + chunk)
-
-              if (file) {
-                sink?.write(chunk)
-              } else {
-                full += chunk
-                if (Buffer.byteLength(full, "utf-8") > bytes) {
-                  return trunc.write(full).pipe(
-                    Effect.andThen((next) =>
-                      Effect.sync(() => {
-                        file = next
-                        cut = true
-                        sink = createWriteStream(next, { flags: "a" })
-                        full = ""
-                      }),
-                    ),
-                    Effect.andThen(
-                      ctx.metadata({
-                        metadata: {
-                          output: last,
-                          description: input.description,
-                        },
-                      }),
-                    ),
-                  )
-                }
-              }
-
-              return ctx.metadata({
-                metadata: {
-                  output: last,
-                  description: input.description,
-                },
-              })
-            }),
-          )
-
-          const abort = Effect.callback<void>((resume) => {
-            if (ctx.abort.aborted) return resume(Effect.void)
-            const handler = () => resume(Effect.void)
-            ctx.abort.addEventListener("abort", handler, { once: true })
-            return Effect.sync(() => ctx.abort.removeEventListener("abort", handler))
+        const flushForegroundJobLog = () => {
+          const jobID = foregroundJobID
+          if (!jobID || !pendingForegroundJobLog) return
+          const job = BackgroundJobPersistence.load(jobID)
+          if (!job || job.status !== "running") return
+          BackgroundJobPersistence.appendLog({
+            jobID,
+            sessionID: job.sessionID,
+            seq: ++foregroundJobLogSequence,
+            stream: "stdout",
+            text: pendingForegroundJobLog,
           })
-
-          const timeout = Effect.sleep(`${input.timeout + 100} millis`)
-
-          const exit = yield* Effect.raceAll([
-            handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
-            abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
-            timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
-          ])
-
-          if (exit.kind === "abort") {
-            aborted = true
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
-          }
-          if (exit.kind === "timeout") {
-            expired = true
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
-          }
-
-          return exit.kind === "exit" ? exit.code : null
-        }),
-      ).pipe(Effect.orDie)
-
-      const meta: string[] = []
-      if (expired) {
-        meta.push(
-          `bash tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
-        )
-      }
-      if (aborted) meta.push("User aborted the command")
-      const raw = list.map((item) => item.text).join("")
-      const end = tail(raw, lines, bytes)
-      if (end.cut) cut = true
-      if (!file && end.cut) {
-        file = yield* trunc.write(raw)
-      }
-
-      let output = end.text
-      if (!output) output = "(no output)"
-
-      if (cut && file) {
-        // Check if tail contains error patterns — if so, prepend head for context
-        const tailScan = end.text.length > 2048 ? end.text.slice(-2048) : end.text
-        const hasErrors = ERROR_PATTERN.test(tailScan)
-        if (hasErrors) {
-          let fileContent: string | undefined
-          try {
-            fileContent = readFileSync(file, "utf-8")
-          } catch {
-            fileContent = undefined
-          }
-          if (fileContent) {
-            const headText = head(fileContent, HEAD_LINES, HEAD_BYTES)
-            output = `...output truncated (head+tail shown due to errors)...\n\nFull output saved to: ${file}\n\n${headText}\n\n...middle omitted...\n\n${end.text}`
-          } else {
-            output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
-          }
-        } else {
-          output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
+          pendingForegroundJobLog = ""
         }
-      }
 
-      if (meta.length > 0) {
-        output += "\n\n<bash_metadata>\n" + meta.join("\n") + "\n</bash_metadata>"
-      }
-      if (sink) {
-        const stream = sink
-        yield* Effect.promise(
-          () =>
-            new Promise<void>((resolve) => {
-              stream.end(() => resolve())
-              stream.on("error", () => resolve())
-            }),
-        )
-      }
+        const flushForegroundJobLogIfNeeded = () => {
+          if (pendingForegroundJobLog.length < 4096) return Effect.void
+          return Effect.sync(flushForegroundJobLog).pipe(Effect.ignore)
+        }
 
-      return {
-        title: input.description,
-        metadata: {
-          output: last || preview(output),
-          exit: code,
-          description: input.description,
-          truncated: cut,
-          ...(cut && file ? { outputPath: file } : {}),
-        },
-        output,
-      }
-    })
+        yield* ctx.metadata({
+          metadata: {
+            output: "",
+            description: input.description,
+          },
+        })
 
-    return () =>
-      Effect.sync(() => {
-        const shell = Shell.acceptable()
-        const name = Shell.name(shell)
-        const chain =
-          name === "powershell"
-            ? "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell 5.1 does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
-            : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
-        log.info("bash tool using shell", { shell })
+        const code: number | null = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* spawner.spawn(cmd(input.shell, input.name, input.command, input.cwd, input.env))
+            foregroundJobID = Identifier.ascending("job")
+            BackgroundJobPersistence.recordStart({
+              id: foregroundJobID,
+              sessionID: ctx.sessionID,
+              kind: "shell",
+              source: "shell",
+              title: input.description,
+              cwd: input.cwd,
+              payload: {
+                command: input.command,
+                shell: input.shell,
+                shellName: input.name,
+              },
+              env: Object.fromEntries(
+                Object.entries(input.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+              ),
+              ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
+              ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
+              metadata: { mode: "foreground" },
+            })
+            BackgroundJobPersistence.attachProcess({
+              id: foregroundJobID,
+              pid: Number(handle.pid),
+            })
+
+            yield* Effect.forkScoped(
+              Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
+                const safeChunk = Truncate.redact(chunk)
+                const size = Buffer.byteLength(safeChunk, "utf-8")
+                pendingForegroundJobLog += safeChunk
+                list.push({ text: safeChunk, size })
+                used += size
+                while (used > keep && list.length > 1) {
+                  const item = list.shift()
+                  if (!item) break
+                  used -= item.size
+                  cut = true
+                }
+
+                last = preview(last + safeChunk)
+
+                if (file) {
+                  sink?.write(safeChunk)
+                } else {
+                  full += safeChunk
+                  if (Buffer.byteLength(full, "utf-8") > bytes) {
+                    return trunc.write(full).pipe(
+                      Effect.andThen((next) =>
+                        Effect.sync(() => {
+                          file = next
+                          cut = true
+                          sink = createWriteStream(next, { flags: "a" })
+                          full = ""
+                        }),
+                      ),
+                      Effect.andThen(
+                        ctx.metadata({
+                          metadata: {
+                            output: last,
+                            description: input.description,
+                          },
+                        }),
+                      ),
+                      Effect.andThen(flushForegroundJobLogIfNeeded()),
+                    )
+                  }
+                }
+
+                return flushForegroundJobLogIfNeeded().pipe(
+                  Effect.andThen(
+                    ctx.metadata({
+                      metadata: {
+                        output: last,
+                        description: input.description,
+                      },
+                    }),
+                  ),
+                )
+              }),
+            )
+
+            const abort = Effect.callback<void>((resume) => {
+              if (ctx.abort.aborted) return resume(Effect.void)
+              const handler = () => resume(Effect.void)
+              ctx.abort.addEventListener("abort", handler, { once: true })
+              return Effect.sync(() => ctx.abort.removeEventListener("abort", handler))
+            })
+
+            const timeout = Effect.sleep(`${input.timeout + 100} millis`)
+
+            const exit = yield* Effect.raceAll([
+              handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
+              abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
+              timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
+            ])
+
+            if (exit.kind === "abort") {
+              aborted = true
+              yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
+            }
+            if (exit.kind === "timeout") {
+              expired = true
+              yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
+            }
+
+            return exit.kind === "exit" ? exit.code : null
+          }),
+        ).pipe(Effect.orDie)
+
+        const meta: string[] = []
+        if (expired) {
+          meta.push(
+            `terminal tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
+          )
+        }
+        if (aborted) meta.push("User aborted the command")
+        const raw = list.map((item) => item.text).join("")
+        const end = tail(raw, lines, bytes)
+        if (end.cut) cut = true
+        if (!file && end.cut) {
+          file = yield* trunc.write(raw)
+        }
+
+        let output = end.text
+        if (!output) output = "(no output)"
+
+        const outputRef = file ? Truncate.outputReference(file) : undefined
+        if (cut && file && outputRef) {
+          // Check if tail contains error patterns — if so, prepend head for context
+          const tailScan = end.text.length > 2048 ? end.text.slice(-2048) : end.text
+          const hasErrors = ERROR_PATTERN.test(tailScan)
+          if (hasErrors) {
+            let fileContent: string | undefined
+            try {
+              fileContent = readFileSync(file, "utf-8")
+            } catch {
+              fileContent = undefined
+            }
+            if (fileContent) {
+              const headText = head(fileContent, HEAD_LINES, HEAD_BYTES)
+              output = `...output truncated (head+tail shown due to errors)...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n${headText}\n\n...middle omitted...\n\n${end.text}`
+            } else {
+              output = `...output truncated...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n` + output
+            }
+          } else {
+            output = `...output truncated...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n` + output
+          }
+        }
+
+        if (meta.length > 0) {
+          output += "\n\n<bash_metadata>\n" + meta.join("\n") + "\n</bash_metadata>"
+        }
+        const errorKind = classifyShellFailure({ code, expired, aborted, output: raw })
+        rememberCommandResult(ctx.sessionID, input.cwd, input.command, Boolean(errorKind && errorKind !== "aborted"))
+        if (errorKind) output += `\n\n<bash_error_kind>${errorKind}</bash_error_kind>`
+        if (foregroundJobID) {
+          yield* Effect.sync(() => {
+            const job = BackgroundJobPersistence.load(foregroundJobID!)
+            if (!job || job.status !== "running") return
+            flushForegroundJobLog()
+            const status = aborted ? "cancelled" : expired || errorKind || code !== 0 ? "failed" : "completed"
+            BackgroundJobPersistence.recordTerminal({
+              id: job.id,
+              status,
+              ...(code === null ? {} : { exitCode: code }),
+              ...(status === "failed"
+                ? {
+                    error: expired
+                      ? `Shell command exceeded timeout ${input.timeout} ms.`
+                      : errorKind
+                        ? `Shell command failed: ${errorKind}.`
+                        : "Shell command exited with a non-zero status.",
+                  }
+                : {}),
+              pid: null,
+            })
+          }).pipe(Effect.ignore)
+        }
+        if (sink) {
+          const stream = sink
+          yield* Effect.promise(
+            () =>
+              new Promise<void>((resolve) => {
+                stream.end(() => resolve())
+                stream.on("error", () => resolve())
+              }),
+          )
+        }
 
         return {
-          description: DESCRIPTION.replaceAll("${directory}", Instance.directory)
-            .replaceAll("${os}", process.platform)
-            .replaceAll("${shell}", name)
-            .replaceAll("${chaining}", chain)
-            .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
-            .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
-          parameters: Parameters,
-          execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
-            Effect.gen(function* () {
-              const effectiveCwd = SessionCwd.get(ctx.sessionID)
-              const cwd = params.workdir
-                ? yield* resolvePath(params.workdir, effectiveCwd, shell)
-                : effectiveCwd
-              if (params.timeout !== undefined && params.timeout < 0) {
-                throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
-              }
-              const timeout = params.timeout ?? DEFAULT_TIMEOUT
-              const ps = PS.has(name)
-              const root = yield* parse(params.command, ps)
-              const scan = yield* collect(root, cwd, ps, shell)
-              if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
-              yield* ask(ctx, scan)
-
-              // Interactive mode: hand terminal to user for direct interaction
-              if (params.interactive) {
-                const env = yield* shellEnv(ctx, cwd)
-                yield* ctx.metadata({
-                  metadata: {
-                    output: "(waiting for user interaction...)",
-                    description: params.description,
-                  },
-                })
-                const interactiveResult = yield* Effect.tryPromise(() =>
-                  BashInteractive.request({
-                    command: params.command,
-                    cwd,
-                    env: env as Record<string, string>,
-                    description: params.description,
-                  }),
-                ).pipe(Effect.orDie)
-                return {
-                  title: params.description,
-                  metadata: {
-                    output: interactiveResult.output || "(interactive command completed)",
-                    exit: interactiveResult.exitCode,
-                    description: params.description,
-                    truncated: false,
-                  },
-                  output:
-                    interactiveResult.output ||
-                    `(interactive command completed with exit code ${interactiveResult.exitCode})`,
-                }
-              }
-
-              return yield* run(
-                {
-                  shell,
-                  name,
-                  command: params.command,
-                  cwd,
-                  env: yield* shellEnv(ctx, cwd),
-                  timeout,
-                  description: params.description,
-                },
-                ctx,
-              )
-            }),
+          title: input.description,
+          metadata: {
+            output: last || preview(output),
+            exit: code,
+            description: input.description,
+            truncated: cut,
+            ...(errorKind ? { errorKind } : {}),
+            ...(outputRef ? { outputRef } : {}),
+          },
+          output,
         }
       })
-  }),
-)
 
+      return () =>
+        Effect.sync(() => {
+          const shell = Shell.acceptable()
+          const name = Shell.name(shell)
+          const shellContract =
+            process.platform === "win32"
+              ? legacy
+                ? "On Windows, this legacy `bash` alias always runs PowerShell 7 (`pwsh`). Treat every invocation as a `pwsh` terminal. Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior."
+                : "On Windows, this `shell` tool always runs PowerShell 7 (`pwsh`). Treat every invocation as a `pwsh` terminal. Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior."
+              : "On macOS and Linux, this tool runs the current POSIX shell. Generate shell syntax that matches the reported shell."
+          const shellQuickstart =
+            process.platform === "win32"
+              ? [
+                  "PowerShell 7 quick reference:",
+                  legacy
+                    ? "- Treat this tool as `pwsh` even though the compatibility alias is `bash`."
+                    : "- Treat this tool as `pwsh`.",
+                  "- Dependent commands: prefer `cmd1; if ($?) { cmd2 }`.",
+                  '- Environment variables: use `$env:NAME = "value"`, and read them with `$env:NAME`.',
+                  "- Multi-line scripts: use PowerShell here-strings such as `$script = @' ... '@` or `$script = @\" ... \"@`.",
+                  "- File and directory listing: use `Get-ChildItem` or `Get-ChildItem -Force`.",
+                  "- Current directory: use `Get-Location`.",
+                  "- Search text/files: prefer `rg`, `Get-ChildItem -Recurse`, or dedicated tools.",
+                  '- Read file content when the terminal is truly needed: use `Get-Content -LiteralPath "path"`.',
+                  "- Filesystem mutations: prefer `New-Item`, `Copy-Item`, `Move-Item`, `Remove-Item`, and use `-LiteralPath` when paths may contain special characters.",
+                  "- Paths with spaces: always wrap them in double quotes.",
+                  "- Do NOT use Bash-only forms such as `export NAME=value`, `source file.sh`, `VAR=value cmd`, or Bash heredocs.",
+                ].join("\n")
+              : [
+                  "POSIX shell quick reference:",
+                  "- Dependent commands: use `cmd1 && cmd2` when later commands require earlier success.",
+                  "- Environment variables: use `NAME=value cmd` or `export NAME=value` as appropriate for the shell.",
+                  "- Paths with spaces: always wrap them in double quotes.",
+                ].join("\n")
+          const chain =
+            process.platform === "win32" && PS.has(name)
+              ? "If the commands depend on each other and must run sequentially in `pwsh`, prefer `cmd1; if ($?) { cmd2 }` or separate tool calls. Use `;` only when later commands should run even if earlier commands fail."
+              : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
+          log.info("terminal tool using shell", { shell })
+
+          return {
+            description: DESCRIPTION.replaceAll("${directory}", Instance.directory)
+              .replaceAll("${os}", process.platform)
+              .replaceAll("${shell}", name)
+              .replaceAll("${shell_contract}", shellContract)
+              .replaceAll("${shell_quickstart}", shellQuickstart)
+              .replaceAll(
+                "${tool_identity}",
+                legacy
+                  ? "This legacy compatibility alias still routes to the public `shell` tool. Prefer `shell` in new calls."
+                  : "The public tool name is `shell`. Use it for all terminal operations.",
+              )
+              .replaceAll("${chaining}", chain)
+              .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
+              .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
+            parameters: Parameters,
+            execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
+              Effect.gen(function* () {
+                const execution = {
+                  ...params,
+                  background:
+                    params.background ??
+                    (!params.interactive && params.timeout === undefined && shouldRunInBackground(params.command)),
+                }
+                const prepared = yield* prepareShellExecution(execution, ctx)
+
+                // Interactive mode: hand terminal to user for direct interaction
+                if (params.interactive) {
+                  yield* ctx.metadata({
+                    metadata: {
+                      output: "(waiting for user interaction...)",
+                      description: params.description,
+                    },
+                  })
+                  const interactiveResult = yield* Effect.tryPromise(() =>
+                    BashInteractive.request({
+                      command: params.command,
+                      cwd: prepared.cwd,
+                      env: prepared.env as Record<string, string>,
+                      description: params.description,
+                    }),
+                  ).pipe(Effect.orDie)
+                  return {
+                    title: params.description,
+                    metadata: {
+                      output: interactiveResult.output || "(interactive command completed)",
+                      exit: interactiveResult.exitCode,
+                      description: params.description,
+                      truncated: false,
+                    },
+                    output:
+                      interactiveResult.output ||
+                      `(interactive command completed with exit code ${interactiveResult.exitCode})`,
+                  }
+                }
+
+                if (execution.background) {
+                  const runtime = shellBackgroundRuntimeRef.current
+                  if (!runtime) {
+                    throw new Error("Shell background runtime is not available in this process.")
+                  }
+                  const job = yield* runtime.start({
+                    sessionID: ctx.sessionID,
+                    title: params.description,
+                    command: params.command,
+                    cwd: prepared.cwd,
+                    env: prepared.env as Record<string, string>,
+                    shell: prepared.shell,
+                    shellName: prepared.shellName,
+                    source: "shell",
+                    ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
+                    ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
+                  })
+                  return {
+                    title: params.description,
+                    metadata: {
+                      output: `Started background shell job ${job.id}`,
+                      description: params.description,
+                      exit: null,
+                      truncated: false,
+                      jobID: job.id,
+                      status: job.status,
+                    },
+                    output: [
+                      `Started durable background shell job.`,
+                      `<job_id>${job.id}</job_id>`,
+                      `<status>${job.status}</status>`,
+                      `<cwd>${job.cwd}</cwd>`,
+                      `<title>${job.title}</title>`,
+                    ].join("\n"),
+                  }
+                }
+
+                return yield* run(
+                  {
+                    shell: prepared.shell,
+                    name: prepared.shellName,
+                    command: params.command,
+                    cwd: prepared.cwd,
+                    env: prepared.env,
+                    timeout: prepared.timeout,
+                    description: params.description,
+                  },
+                  ctx,
+                )
+              }),
+          }
+        })
+    }),
+  )
+}
+
+export const ShellTool = defineShellTool("shell", false)
+export const BashTool = defineShellTool("bash", true)

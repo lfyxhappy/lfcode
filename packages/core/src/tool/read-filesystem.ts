@@ -112,6 +112,35 @@ const binary = (resource: string, bytes: Uint8Array) => {
   return nonPrintable / bytes.length > 0.3
 }
 
+type TextEncoding = "utf-8" | "utf-16le" | "utf-16be" | "gb18030"
+
+const detectTextEncoding = (bytes: Uint8Array): TextEncoding | undefined => {
+  if (bytes.length >= 3 && startsWith(bytes, [0xef, 0xbb, 0xbf])) return "utf-8"
+  if (bytes.length >= 2 && startsWith(bytes, [0xff, 0xfe])) return "utf-16le"
+  if (bytes.length >= 2 && startsWith(bytes, [0xfe, 0xff])) return "utf-16be"
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    return "utf-8"
+  } catch {}
+
+  let even = 0
+  let odd = 0
+  for (let index = 0; index < bytes.length; index += 2) {
+    if (bytes[index] === 0) even += 1
+    if (bytes[index + 1] === 0) odd += 1
+  }
+  const pairs = Math.ceil(bytes.length / 2)
+  if (pairs > 0 && odd / pairs >= 0.35) return "utf-16le"
+  if (pairs > 0 && even / pairs >= 0.35) return "utf-16be"
+}
+
+const contentEncoding = (encoding: TextEncoding) => {
+  if (encoding === "utf-8") return "utf8" as const
+  if (encoding === "utf-16le") return "utf16le" as const
+  if (encoding === "utf-16be") return "utf16be" as const
+  return "gb18030" as const
+}
+
 export const inspect = Effect.fn("ReadTool.inspect")(function* (fs: FSUtil.Interface, input: string) {
   const info = yield* fs.stat(input).pipe(Effect.orDie)
   const type = info.type === "File" ? "file" : info.type === "Directory" ? "directory" : undefined
@@ -162,11 +191,13 @@ export const read = Effect.fn("ReadTool.read")(function* (
           mime,
         }
       }
-      if (startsWith(first, [0x25, 0x50, 0x44, 0x46]) || binary(resource, first))
+      const detectedEncoding = detectTextEncoding(first)
+      if (startsWith(first, [0x25, 0x50, 0x44, 0x46]) || (!detectedEncoding && binary(resource, first)))
         return yield* Effect.die(new BinaryFileError(resource))
+      const encoding = detectedEncoding ?? "gb18030"
       const paged = info.size > MAX_READ_BYTES || page.offset !== undefined || page.limit !== undefined
       if (!paged) {
-        const decoder = new TextDecoder("utf-8", { fatal: true })
+        const decoder = new TextDecoder(encoding)
         const text = [yield* Effect.sync(() => decoder.decode(first, { stream: true }))]
         while (true) {
           const chunk = yield* file.readAlloc(64 * 1024).pipe(Effect.orDie)
@@ -179,14 +210,14 @@ export const read = Effect.fn("ReadTool.read")(function* (
           uri: pathToFileURL(real).href,
           name: path.basename(real),
           content: text.join(""),
-          encoding: "utf8" as const,
+          encoding: contentEncoding(encoding),
           mime: FSUtil.mimeType(real),
         }
       }
       const offset = page.offset ?? 1
       const limit = Math.min(page.limit ?? MAX_READ_LINES, MAX_READ_LINES)
       const lines: string[] = []
-      const decoder = new TextDecoder("utf-8", { fatal: true })
+      const decoder = new TextDecoder(encoding)
       let pending = ""
       let discard = false
       let line = 1

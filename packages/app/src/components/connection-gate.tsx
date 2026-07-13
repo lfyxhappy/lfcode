@@ -1,6 +1,6 @@
 import { Splash } from "@lfcode-ai/ui/logo"
 import { Effect } from "effect"
-import { createMemo, createResource, createSignal, For, onCleanup, type ParentProps, Show, Suspense } from "solid-js"
+import { createMemo, createResource, createSignal, For, onCleanup, type ParentProps, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useCheckServerHealth } from "@/utils/server-health"
@@ -46,23 +46,24 @@ export function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean
   )
 
   const blocking = createMemo(() => checkMode() === "blocking" && !hasSettled())
+  const checking = createMemo(() => blocking() && (startupHealthCheck.state === "unresolved" || startupHealthCheck.state === "pending"))
   const checkResult = createMemo(() =>
     resolveConnectionGateResult({
       blocking: blocking(),
-      current: startupHealthCheck(),
+      current: startupHealthCheck.latest,
       latest: startupHealthCheck.latest,
     }),
   )
 
   return (
-    <Suspense
+    <Show
+      when={!checking()}
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
           <Splash class="w-16 h-20 opacity-50 animate-pulse" />
         </div>
       }
     >
-      {checkResult()}
       <Show
         when={checkResult()}
         fallback={
@@ -81,7 +82,7 @@ export function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean
       >
         {props.children}
       </Show>
-    </Suspense>
+    </Show>
   )
 }
 

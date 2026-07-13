@@ -7,7 +7,7 @@ const cache = new Map<string, Store>()
 // We cannot instantiate the electron-store at module load time because
 // module import hoisting causes this to run before app.setPath("userData", ...)
 // in index.ts has executed, which would result in files being written to the default directory
-// (e.g. bad: %APPDATA%\@opencode-ai\desktop\lfcode.settings vs good: %APPDATA%\ai.lfcode.desktop.dev\lfcode.settings).
+// Keep desktop settings scoped to Lfcode's app identity.
 export function getStore(name = SETTINGS_STORE) {
   const cached = cache.get(name)
   if (cached) return cached

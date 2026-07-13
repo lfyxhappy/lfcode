@@ -9,7 +9,14 @@ import { PositiveInt } from "../schema"
 import { PermissionV2 } from "../permission"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
-import { checksum } from "../util/encode"
+import {
+  extractWebSearchSources,
+  getWebSearchProviderOrder,
+  isRetryableWebSearchFailure,
+  type WebSearchFailureClass,
+  type WebSearchProvider,
+  type WebSearchSource,
+} from "@lfcode-ai/shared/web-search"
 
 export const name = "websearch"
 export const NO_RESULTS = "No search results found. Please try a different query."
@@ -79,15 +86,8 @@ export const defaultConfigLayer = Layer.sync(ConfigService, () =>
   }),
 )
 
-export function selectProvider(
-  sessionID: string,
-  flags: Pick<Config, "enableExa" | "enableParallel"> = { enableExa: false, enableParallel: false },
-  override?: Provider,
-): Provider {
-  if (override) return override
-  if (flags.enableParallel) return "parallel"
-  if (flags.enableExa) return "exa"
-  return Number.parseInt(checksum(sessionID) ?? "0", 36) % 2 === 0 ? "exa" : "parallel"
+export function selectProvider(_sessionID: string, _flags?: Pick<Config, "enableExa" | "enableParallel">, override?: Provider): Provider {
+  return getWebSearchProviderOrder(override)[0] ?? "exa"
 }
 
 const McpResult = Schema.Struct({
@@ -165,13 +165,12 @@ const callMcp = <F extends Schema.Struct.Fields>(
     return yield* Effect.gen(function* () {
       const response = yield* HttpClient.filterStatusOk(http).execute(request)
       const body = yield* response.text
-      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES)
-        return yield* Effect.fail(new Error(`${tool} response exceeded ${MAX_RESPONSE_BYTES} bytes`))
+      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES) return yield* Effect.fail(new Error("response_too_large"))
       return yield* parseResponse(body)
     }).pipe(
       Effect.timeoutOrElse({
-        duration: Duration.seconds(25),
-        orElse: () => Effect.fail(new Error(`${tool} request timed out`)),
+        duration: Duration.seconds(20),
+        orElse: () => Effect.fail(new Error("request_timed_out")),
       }),
     )
   })
@@ -179,7 +178,150 @@ const callMcp = <F extends Schema.Struct.Fields>(
 const Output = Schema.Struct({
   provider: Provider,
   text: Schema.String,
+  attemptedProviders: Schema.Array(Provider),
+  sources: Schema.Array(
+    Schema.Struct({
+      url: Schema.String,
+      domain: Schema.String,
+      sourceTier: Schema.Literals(["primary", "authoritative-secondary", "practitioner", "discovery-only"]),
+      title: Schema.optional(Schema.String),
+      snippet: Schema.optional(Schema.String),
+      publishedAt: Schema.optional(Schema.String),
+    }),
+  ),
+  warnings: Schema.Array(Schema.String),
 })
+
+type SearchFailure = {
+  provider: WebSearchProvider
+  classification: WebSearchFailureClass
+  retryable: boolean
+  status?: number
+}
+
+function extractHttpStatus(error: unknown) {
+  if (!error || typeof error !== "object") return
+  const reason = "reason" in error ? error.reason : error
+  if (!reason || typeof reason !== "object") return
+  if ("response" in reason && reason.response && typeof reason.response === "object" && "status" in reason.response) {
+    const status = reason.response.status
+    if (typeof status === "number") return status
+  }
+}
+
+function classifySearchFailure(provider: WebSearchProvider, error: unknown): SearchFailure {
+  const status = extractHttpStatus(error)
+  if (status !== undefined) {
+    const classification: WebSearchFailureClass = status >= 500 ? "http_5xx" : "http_4xx"
+    return { provider, classification, retryable: isRetryableWebSearchFailure(classification), status }
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  const classification: WebSearchFailureClass = message.includes("timed_out") || message.includes("timeout")
+    ? "timeout"
+    : message.includes("credential") || message.includes("unauthorized") || message.includes("forbidden")
+      ? "missing_credentials"
+      : message.includes("parse")
+        ? "parse_failure"
+        : message.includes("empty")
+          ? "empty_response"
+          : "transport"
+  return { provider, classification, retryable: isRetryableWebSearchFailure(classification) }
+}
+
+function formatSearchFailure(failure: SearchFailure) {
+  return `${failure.provider}:${failure.classification}${failure.status ? ` (${failure.status})` : ""}`
+}
+
+const callSearchProvider = (input: {
+  http: HttpClient.HttpClient
+  config: Config
+  provider: WebSearchProvider
+  sessionID: string
+  query: typeof Input.Type
+}) => {
+  const result = input.provider === "exa"
+    ? callMcp(input.http, exaUrl(input.config.exaApiKey), "web_search_exa", ExaArgs, {
+        query: input.query.query,
+        type: input.query.type || "auto",
+        numResults: input.query.numResults || 8,
+        livecrawl: input.query.livecrawl || "fallback",
+        contextMaxCharacters: input.query.contextMaxCharacters,
+      })
+    : callMcp(
+        input.http,
+        PARALLEL_URL,
+        "web_search",
+        ParallelArgs,
+        {
+          objective: input.query.query,
+          search_queries: [input.query.query],
+          session_id: input.sessionID,
+        },
+        {
+          "User-Agent": `lfcode/${InstallationVersion}`,
+          ...(input.config.parallelApiKey ? { Authorization: `Bearer ${input.config.parallelApiKey}` } : {}),
+        },
+      )
+  return result.pipe(
+    Effect.flatMap((text) => text?.trim() ? Effect.succeed(text) : Effect.fail(new Error("empty_response"))),
+    Effect.mapError((error) => classifySearchFailure(input.provider, error)),
+  )
+}
+
+export const runSearchWithFallback = Effect.fn("WebSearchTool.runSearchWithFallback")(function* (input: {
+  http: HttpClient.HttpClient
+  config: Config
+  sessionID: string
+  query: typeof Input.Type
+}) {
+  return yield* Effect.gen(function* () {
+    const providers = getWebSearchProviderOrder(input.config.provider)
+    const attemptedProviders: WebSearchProvider[] = []
+    const warnings: string[] = []
+
+    for (const provider of providers) {
+      attemptedProviders.push(provider)
+      const attempt = yield* callSearchProvider({ ...input, provider }).pipe(
+        Effect.match({
+          onFailure: (failure) => ({ ok: false as const, failure }),
+          onSuccess: (text) => ({ ok: true as const, text }),
+        }),
+      )
+      if (attempt.ok) {
+        return {
+          provider,
+          text: attempt.text,
+          attemptedProviders,
+          sources: extractWebSearchSources(attempt.text),
+          warnings,
+        }
+      }
+      warnings.push(formatSearchFailure(attempt.failure))
+      if (!attempt.failure.retryable || providers.at(-1) === provider) return yield* Effect.fail(attempt.failure)
+    }
+
+    return yield* Effect.fail({ provider: "exa", classification: "transport", retryable: true } satisfies SearchFailure)
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(45),
+      orElse: () => Effect.fail({ provider: "exa", classification: "timeout", retryable: true } satisfies SearchFailure),
+    }),
+  )
+})
+
+export function formatWebSearchModelOutput(output: {
+  text: string
+  provider: WebSearchProvider
+  sources: WebSearchSource[]
+  warnings: string[]
+}) {
+  const provenance = output.sources.slice(0, 12).map((source) => {
+    const label = source.title ?? source.domain
+    return `- [${source.sourceTier}] ${label}: ${source.url}`
+  })
+  if (provenance.length === 0) return output.text
+  return `${output.text}\n\nSources (${output.provider}):\n${provenance.join("\n")}`
+}
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -194,10 +336,10 @@ export const layer = Layer.effectDiscard(
           description,
           input: Input,
           output: Output,
-          toModelOutput: ({ output }) => [{ type: "text", text: output.text }],
+          toModelOutput: ({ output }) => [{ type: "text", text: formatWebSearchModelOutput(output) }],
           execute: (input, context) => {
-            const provider = selectProvider(context.sessionID, config, config.provider)
             return Effect.gen(function* () {
+              const provider = selectProvider(context.sessionID, config, config.provider)
               yield* permission.assert({
                 action: name,
                 resources: [input.query],
@@ -208,36 +350,14 @@ export const layer = Layer.effectDiscard(
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
 
-              const text =
-                provider === "exa"
-                  ? yield* callMcp(http, exaUrl(config.exaApiKey), "web_search_exa", ExaArgs, {
-                      query: input.query,
-                      type: input.type || "auto",
-                      numResults: input.numResults || 8,
-                      livecrawl: input.livecrawl || "fallback",
-                      contextMaxCharacters: input.contextMaxCharacters,
-                    })
-                  : yield* callMcp(
-                      http,
-                      PARALLEL_URL,
-                      "web_search",
-                      ParallelArgs,
-                      {
-                        objective: input.query,
-                        search_queries: [input.query],
-                        session_id: context.sessionID,
-                        // V2 invocation context does not safely expose the model yet.
-                      },
-                      {
-                        "User-Agent": `lfcode/${InstallationVersion}`,
-                        ...(config.parallelApiKey ? { Authorization: `Bearer ${config.parallelApiKey}` } : {}),
-                      },
-                    )
-              return {
-                provider,
-                text: text ?? NO_RESULTS,
-              }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to search the web for ${input.query}` })))
+              return yield* runSearchWithFallback({ http, config, sessionID: context.sessionID, query: input })
+            }).pipe(
+              Effect.mapError((failure) =>
+                new ToolFailure({
+                  message: `Unable to search the web for ${input.query} (${formatSearchFailure(failure)})`,
+                }),
+              ),
+            )
           },
         }),
       })

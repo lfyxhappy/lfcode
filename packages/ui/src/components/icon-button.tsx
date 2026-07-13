@@ -9,11 +9,17 @@ export interface IconButtonProps extends ComponentProps<typeof Kobalte> {
   variant?: "primary" | "secondary" | "ghost"
 }
 
+export function getIconButtonTitle(props: Pick<ComponentProps<"button">, "aria-label" | "title">) {
+  if (props.title !== undefined) return props.title
+  return typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
+}
+
 export function IconButton(props: ComponentProps<"button"> & IconButtonProps) {
   const [split, rest] = splitProps(props, ["variant", "size", "iconSize", "class", "classList"])
   return (
     <Kobalte
       {...rest}
+      title={getIconButtonTitle(props)}
       data-component="icon-button"
       data-icon={props.icon}
       data-size={split.size || "normal"}

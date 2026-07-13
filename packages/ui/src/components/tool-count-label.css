@@ -30,7 +30,11 @@
     overflow: hidden;
     transform: translateX(-0.04em);
     transition-property: grid-template-columns, opacity, filter, transform;
-    transition-duration: 250ms, 250ms, 250ms, 250ms;
+    transition-duration:
+      var(--tool-motion-fade-ms, var(--motion-content-ms)),
+      var(--tool-motion-fade-ms, var(--motion-content-ms)),
+      var(--tool-motion-fade-ms, var(--motion-content-ms)),
+      var(--tool-motion-fade-ms, var(--motion-content-ms));
     transition-timing-function:
       var(--tool-motion-ease, cubic-bezier(0.22, 1, 0.36, 1)), ease-out, ease-out,
       var(--tool-motion-ease, cubic-bezier(0.22, 1, 0.36, 1));

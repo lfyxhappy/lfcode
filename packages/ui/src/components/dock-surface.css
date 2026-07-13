@@ -23,8 +23,9 @@
 }
 
 [data-prompt-composer="true"] {
-  background-color: var(--surface-raised-stronger-non-alpha);
-  box-shadow: var(--shadow-xs-border);
+  --prompt-composer-surface: var(--surface-base-active);
+  background-color: var(--prompt-composer-surface);
+  box-shadow: none;
   border-radius: 24px;
   overflow: clip;
   position: relative;

@@ -2,18 +2,15 @@ import z from "zod"
 import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import * as Tool from "../tool"
-import * as McpExa from "../mcp-exa"
-import * as MimoWebsearch from "./mimo"
-import { supportsXiaomiWebsearch } from "./provider"
-import { Auth } from "@/auth"
-import { Provider } from "@/provider"
-import { ProviderID } from "@/provider/schema"
 import DESCRIPTION from "./websearch.txt"
+import {
+  formatLegacyWebSearchOutput,
+  formatWebSearchFailure,
+  runLegacyWebSearchWithFallback,
+} from "./fallback"
 
 const WEBFETCH_FALLBACK =
-  "Web search unavailable. Use `webfetch` with a relevant URL instead, or enable the Web Search plugin at https://platform.xiaomimimo.com/console/plugin."
-const MAX_TIMEOUT = 120 * 1000 // 2 minutes
-
+  "Web search unavailable. Use `webfetch` with a relevant URL instead."
 const Parameters = z.object({
   query: z.string().describe("Websearch query"),
   numResults: z.number().optional().describe("Number of search results to return (default: 8)"),
@@ -38,8 +35,6 @@ export const WebSearchTool = Tool.define(
   "websearch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const auth = yield* Auth.Service
-    const provider = yield* Provider.Service
 
     return {
       get description() {
@@ -62,53 +57,31 @@ export const WebSearchTool = Tool.define(
             },
           })
 
-          const model = (ctx.extra as { model?: Provider.Model })?.model
-          const timeout = params.timeout === undefined ? undefined : Math.min(params.timeout * 1000, MAX_TIMEOUT)
-          const shouldUseXiaomiWebsearch = model && supportsXiaomiWebsearch(model.providerID)
-
-          const result =
-            shouldUseXiaomiWebsearch
-              ? yield* Effect.catchCause(
-                  Effect.gen(function* () {
-                    const currentProvider = yield* provider.getProvider(ProviderID.make(model.providerID))
-                    const key =
-                      currentProvider.key ??
-                      (yield* auth.get(model.providerID).pipe(
-                        Effect.map((info) => (info?.type === "api" ? info.key : undefined)),
-                        Effect.orDie,
-                      ))
-                    if (!key) return undefined
-                    return yield* MimoWebsearch.call(
-                      http,
-                      typeof currentProvider.options.baseURL === "string" && currentProvider.options.baseURL !== ""
-                        ? currentProvider.options.baseURL
-                        : model.api.url,
-                      key,
-                      params.query,
-                      "mimo-v2.5",
-                      timeout ?? "30 seconds",
-                    )
-                  }),
-                  () => Effect.succeed(undefined),
-                )
-              : yield* McpExa.call(
-                  http,
-                  "web_search_exa",
-                  McpExa.SearchArgs,
-                  {
-                    query: params.query,
-                    type: params.type || "auto",
-                    numResults: params.numResults || 8,
-                    livecrawl: params.livecrawl || "fallback",
-                    contextMaxCharacters: params.contextMaxCharacters,
-                  },
-                  timeout ?? "25 seconds",
-                )
+          const result = yield* runLegacyWebSearchWithFallback({
+            http,
+            sessionID: ctx.sessionID,
+            query: params,
+          }).pipe(
+            Effect.catchAll((failure) =>
+              Effect.succeed({
+                provider: failure.provider,
+                attemptedProviders: [failure.provider],
+                text: WEBFETCH_FALLBACK,
+                sources: [],
+                warnings: [formatWebSearchFailure(failure)],
+              }),
+            ),
+          )
 
           return {
-            output: result ?? WEBFETCH_FALLBACK,
+            output: formatLegacyWebSearchOutput(result),
             title: `Web search: ${params.query}`,
-            metadata: {},
+            metadata: {
+              provider: result.provider,
+              attemptedProviders: result.attemptedProviders,
+              sources: result.sources,
+              warnings: result.warnings,
+            },
           }
         }).pipe(Effect.orDie),
     }

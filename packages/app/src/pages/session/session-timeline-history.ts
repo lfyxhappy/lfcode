@@ -6,6 +6,10 @@ import { same } from "@/utils/same"
 const emptyUserMessages: UserMessage[] = []
 const emptyMessages: Message[] = []
 
+export function retainTimelineMessages(next: Message[] | undefined, previous: Message[] | undefined) {
+  return next ?? previous ?? emptyMessages
+}
+
 export type SessionHistoryWindowInput = {
   sessionID: () => string | undefined
   messagesReady: () => boolean
@@ -294,7 +298,18 @@ export function createSessionTimelineMessageSource(input: {
   revertMessageID: (sessionID: string) => string | undefined
   viewAgentID: Accessor<string>
 }): SessionTimelineMessageSource {
-  const messages = createMemo(() => input.messages(input.sessionID) ?? emptyMessages, emptyMessages, { equals: same })
+  let lastReadyMessages: Message[] | undefined
+  // `undefined` means this session page is loading or being refreshed. Keep
+  // the last confirmed projection visible instead of presenting it as an empty
+  // conversation; an explicit empty array still renders the true empty state.
+  const messages = createMemo(() => {
+    const next = input.messages(input.sessionID)
+    if (next !== undefined) {
+      lastReadyMessages = next
+      return next
+    }
+    return retainTimelineMessages(next, lastReadyMessages)
+  }, emptyMessages, { equals: same })
   const views = createMemo(() =>
     buildSessionMessageViews({
       messages: messages(),

@@ -2,7 +2,7 @@ export * as PluginV2 from "./plugin"
 
 import { createDraft, finishDraft, type Draft } from "immer"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
-import { Context, Effect, Exit, Layer, Schema, Scope } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Schema, Scope } from "effect"
 import type { ModelV2 } from "./model"
 import type { Catalog } from "./catalog"
 import { EventV2 } from "./event"
@@ -11,11 +11,38 @@ import { KeyedMutex } from "./effect/keyed-mutex"
 export const ID = Schema.String.pipe(Schema.brand("Plugin.ID"))
 export type ID = typeof ID.Type
 
+export const Lifecycle = Schema.Literal("discovered", "installed", "resolved", "active", "degraded", "disabled", "removed")
+export type Lifecycle = typeof Lifecycle.Type
+
+export type Identity = {
+  id: ID
+  name?: string
+  source: "bundled" | "official" | "dev-local" | "external" | "legacy"
+  trust: "bundled" | "official" | "dev-local" | "external"
+  apiVersion?: string
+  capabilities: string[]
+  order: number
+}
+
+export type Status = {
+  identity: Identity
+  lifecycle: Lifecycle
+  error?: string
+}
+
 export const Event = {
   Added: EventV2.define({
     type: "plugin.added",
     schema: {
       id: ID,
+    },
+  }),
+  StatusChanged: EventV2.define({
+    type: "plugin.status.changed",
+    schema: {
+      id: ID,
+      lifecycle: Lifecycle,
+      error: Schema.optional(Schema.String),
     },
   }),
 }
@@ -64,11 +91,24 @@ export type HookOutput<Name extends keyof Hooks> = HookSpec[Name]["output"]
 
 export type Effect<R = never> = Effect.Effect<HookFunctions | void, never, R | Scope.Scope>
 
+export type Registration = {
+  id: ID
+  identity?: Partial<Omit<Identity, "id" | "order" | "capabilities">> & {
+    capabilities?: readonly string[]
+    order?: number
+  }
+  effect: Effect.Effect<void | HookFunctions, never, Scope.Scope>
+}
+
 export function define<R>(input: { id: ID; effect: Effect.Effect<HookFunctions | void, never, R> }) {
   return input
 }
 
 export interface Interface {
+  readonly register: (input: Registration) => Effect.Effect<void>
+  readonly activate: (id: ID) => Effect.Effect<void>
+  readonly deactivate: (id: ID) => Effect.Effect<void>
+  readonly inspect: () => Effect.Effect<Status[]>
   readonly add: (input: {
     id: ID
     effect: Effect.Effect<void | HookFunctions, never, Scope.Scope>
@@ -92,42 +132,129 @@ export class Service extends Context.Service<Service, Interface>()("@lfcode/v2/P
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    let hooks: {
-      id: ID
-      hooks: HookFunctions
-      scope: Scope.Closeable
-    }[] = []
+    type Entry = Registration & {
+      identity: Identity
+      lifecycle: Lifecycle
+      error?: string
+      hooks?: HookFunctions
+      scope?: Scope.Closeable
+    }
+
+    let entries: Entry[] = []
     const events = yield* EventV2.Service
     const scope = yield* Scope.Scope
     const locks = KeyedMutex.makeUnsafe<ID>()
 
-    const svc = Service.of({
-      add: Effect.fn("Plugin.add")(function* (input) {
-        yield* locks.withLock(input.id)(
-          Effect.gen(function* () {
-            const existing = hooks.find((item) => item.id === input.id)
-            if (existing) yield* Scope.close(existing.scope, Exit.void).pipe(Effect.ignore)
-            const childScope = yield* Scope.fork(scope)
-            const result = yield* input.effect.pipe(
-              Scope.provide(childScope),
-              Effect.withSpan("Plugin.load", {
-                attributes: {
-                  "plugin.id": input.id,
-                },
-              }),
-              Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void)),
-            )
-            hooks = [
-              ...hooks.filter((item) => item.id !== input.id),
-              {
-                id: input.id,
-                hooks: result ?? {},
-                scope: childScope,
+    const find = (id: ID) => entries.find((item) => item.id === id)
+    const publishStatus = (entry: Entry) =>
+      events.publish(Event.StatusChanged, {
+        id: entry.id,
+        lifecycle: entry.lifecycle,
+        ...(entry.error ? { error: entry.error } : {}),
+      })
+    const deactivate = Effect.fn("Plugin.deactivate")(function* (id: ID) {
+      yield* locks.withLock(id)(
+        Effect.gen(function* () {
+          const entry = find(id)
+          if (!entry || entry.lifecycle === "disabled") return
+          const scope = entry.scope
+          entry.scope = undefined
+          entry.hooks = undefined
+          entry.lifecycle = "disabled"
+          entry.error = undefined
+          if (scope) yield* Scope.close(scope, Exit.void).pipe(Effect.ignore)
+          yield* publishStatus(entry)
+        }),
+      )
+    })
+    const activate = Effect.fn("Plugin.activate")(function* (id: ID) {
+      yield* locks.withLock(id)(
+        Effect.gen(function* () {
+          const entry = find(id)
+          if (!entry) throw new Error(`Plugin ${id} is not registered`)
+          if (entry.lifecycle === "active") return
+
+          const childScope = yield* Scope.fork(scope)
+          const result = yield* entry.effect.pipe(
+            Scope.provide(childScope),
+            Effect.withSpan("Plugin.activate", {
+              attributes: {
+                "plugin.id": entry.id,
               },
-            ]
-            yield* events.publish(Event.Added, { id: input.id })
-          }),
-        )
+            }),
+            Effect.onExit((exit) => {
+              if (Exit.isSuccess(exit)) return Effect.void
+              entry.scope = undefined
+              entry.hooks = undefined
+              entry.lifecycle = "degraded"
+              entry.error = Cause.pretty(exit.cause).slice(0, 1_000)
+              return Scope.close(childScope, exit).pipe(Effect.zipRight(publishStatus(entry)))
+            }),
+          )
+          entry.scope = childScope
+          entry.hooks = result ?? {}
+          entry.lifecycle = "active"
+          entry.error = undefined
+          yield* publishStatus(entry)
+          yield* events.publish(Event.Added, { id: entry.id })
+        }),
+      )
+    })
+    const register = Effect.fn("Plugin.register")(function* (input: Registration) {
+      yield* locks.withLock(input.id)(
+        Effect.gen(function* () {
+          const existing = find(input.id)
+          if (existing?.scope) yield* Scope.close(existing.scope, Exit.void).pipe(Effect.ignore)
+          const next: Entry = {
+            ...input,
+            identity: {
+              id: input.id,
+              source: input.identity?.source ?? "bundled",
+              trust: input.identity?.trust ?? "bundled",
+              ...(input.identity?.name ? { name: input.identity.name } : {}),
+              ...(input.identity?.apiVersion ? { apiVersion: input.identity.apiVersion } : {}),
+              capabilities: [...(input.identity?.capabilities ?? [])],
+              order: input.identity?.order ?? 0,
+            },
+            lifecycle: "resolved",
+          }
+          entries = [...entries.filter((item) => item.id !== input.id), next].toSorted(
+            (a, b) => a.identity.order - b.identity.order || a.identity.id.localeCompare(b.identity.id),
+          )
+          yield* publishStatus(next)
+        }),
+      )
+    })
+    const inspect = Effect.fn("Plugin.inspect")(function* () {
+      return entries.map((entry) => ({
+        identity: { ...entry.identity, capabilities: [...entry.identity.capabilities] },
+        lifecycle: entry.lifecycle,
+        ...(entry.error ? { error: entry.error } : {}),
+      }))
+    })
+    const remove = Effect.fn("Plugin.remove")(function* (id: ID) {
+      yield* locks.withLock(id)(
+        Effect.gen(function* () {
+          const existing = find(id)
+          entries = entries.filter((item) => item.id !== id)
+          if (!existing) return
+          if (existing.scope) yield* Scope.close(existing.scope, Exit.void).pipe(Effect.ignore)
+          existing.scope = undefined
+          existing.hooks = undefined
+          existing.lifecycle = "removed"
+          yield* publishStatus(existing)
+        }),
+      )
+    })
+
+    const svc = Service.of({
+      register,
+      activate,
+      deactivate,
+      inspect,
+      add: Effect.fn("Plugin.add")(function* (input) {
+        yield* register({ id: input.id, effect: input.effect })
+        yield* activate(input.id)
       }),
       trigger: Effect.fn("Plugin.trigger")(function* (name, input, output) {
         return yield* svc.triggerFor(ID.make("*"), name, input, output)
@@ -146,9 +273,10 @@ export const layer = Layer.effect(
           }
         }
 
-        for (const item of hooks) {
+        for (const item of entries) {
           if (id !== ID.make("*") && item.id !== id) continue
-          const match = item.hooks[name]
+          if (item.lifecycle !== "active") continue
+          const match = item.hooks?.[name]
           if (!match) continue
           yield* match(event as any).pipe(
             Effect.withSpan(`Plugin.hook.${name}`, {
@@ -166,15 +294,7 @@ export const layer = Layer.effect(
 
         return event as any
       }),
-      remove: Effect.fn("Plugin.remove")(function* (id) {
-        yield* locks.withLock(id)(
-          Effect.gen(function* () {
-            const existing = hooks.find((item) => item.id === id)
-            hooks = hooks.filter((item) => item.id !== id)
-            if (existing) yield* Scope.close(existing.scope, Exit.void).pipe(Effect.ignore)
-          }),
-        )
-      }),
+      remove,
     })
     return svc
   }),

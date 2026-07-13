@@ -133,18 +133,11 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
         Effect.catch(() => Effect.succeed({ code: ChildProcessSpawner.ExitCode(1), stdout: "", stderr: "" })),
       )
 
-      // TODO(lfcode): uncomment when lfcode is published to homebrew
-      // const getBrewFormula = Effect.fnUntraced(function* () {
-      //   const tapFormula = yield* text(["brew", "list", "--formula", "anomalyco/tap/opencode"])
-      //   if (tapFormula.includes("lfcode")) return "anomalyco/tap/opencode"
-      //   const coreFormula = yield* text(["brew", "list", "--formula", "lfcode"])
-      //   if (coreFormula.includes("lfcode")) return "lfcode"
-      //   return "lfcode"
-      // })
-
       const upgradeCurl = Effect.fnUntraced(
         function* (target: string) {
-          const response = yield* httpOk.execute(HttpClientRequest.get("https://mimo.xiaomi.com/install"))
+          const response = yield* httpOk.execute(
+            HttpClientRequest.get(process.env["LFCODE_INSTALL_URL"] ?? "https://lfcode.ai/install"),
+          )
           const body = yield* response.text
           const bodyBytes = new TextEncoder().encode(body)
           const proc = ChildProcess.make("bash", [], {
@@ -173,10 +166,6 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
           { name: "npm", command: () => text(["npm", "list", "-g", "--depth=0"]) },
           { name: "pnpm", command: () => text(["pnpm", "list", "-g", "--depth=0"]) },
           { name: "bun", command: () => text(["bun", "pm", "ls", "-g"]) },
-          // TODO(lfcode): uncomment when lfcode is published to these channels
-          // { name: "brew", command: () => text(["brew", "list", "--formula", "lfcode"]) },
-          // { name: "scoop", command: () => text(["scoop", "list", "lfcode"]) },
-          // { name: "choco", command: () => text(["choco", "list", "--limit-output", "lfcode"]) },
         ]
 
         checks.sort((a, b) => {
@@ -230,37 +219,6 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
           return data.version
         }
 
-        // TODO(lfcode): uncomment when lfcode is published to chocolatey
-        // if (detectedMethod === "choco") {
-        //   const response = yield* httpOk.execute(
-        //     HttpClientRequest.get(
-        //       "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
-        //     ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json;odata=verbose" })),
-        //   )
-        //   const data = yield* HttpClientResponse.schemaBodyJson(ChocoPackage)(response)
-        //   return data.d.results[0].Version
-        // }
-
-        // TODO(lfcode): uncomment when lfcode is published to scoop
-        // if (detectedMethod === "scoop") {
-        //   const response = yield* httpOk.execute(
-        //     HttpClientRequest.get(
-        //       "https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/lfcode.json",
-        //     ).pipe(HttpClientRequest.setHeaders({ Accept: "application/json" })),
-        //   )
-        //   const data = yield* HttpClientResponse.schemaBodyJson(ScoopManifest)(response)
-        //   return data.version
-        // }
-
-        // TODO(lfcode): uncomment when lfcode has github releases
-        // const response = yield* httpOk.execute(
-        //   HttpClientRequest.get("https://api.github.com/repos/anomalyco/opencode/releases/latest").pipe(
-        //     HttpClientRequest.acceptJson,
-        //   ),
-        // )
-        // const data = yield* HttpClientResponse.schemaBodyJson(GitHubRelease)(response)
-        // return data.tag_name.replace(/^v/, "")
-
         log.warn("unsupported update channel, skipping", { method: detectedMethod })
         return yield* Effect.die(new Error(`unsupported update channel: ${detectedMethod}`))
       }, Effect.orDie)
@@ -306,10 +264,6 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
           // TODO(lfcode): uncomment when lfcode is published to chocolatey
           // case "choco":
           //   result = yield* run(["choco", "upgrade", "lfcode", `--version=${target}`, "-y"])
-          //   break
-          // TODO(lfcode): uncomment when lfcode is published to scoop
-          // case "scoop":
-          //   result = yield* run(["scoop", "install", `opencode@${target}`])
           //   break
           default:
             return yield* new UpgradeFailedError({ stderr: `Unknown method: ${m}` })

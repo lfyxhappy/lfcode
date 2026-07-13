@@ -1,19 +1,13 @@
 import { app } from "electron"
 import log from "electron-log/main.js"
-import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { CHANNEL } from "./constants"
-import { mergeLegacyStoreValue, renameLegacyStore } from "./legacy-store"
 import { getStore } from "./store"
 
 const TAURI_MIGRATED_KEY = "tauriMigrated"
-const LEGACY_ELECTRON_STORE_MIGRATED_KEY = "legacyElectronStoreMigratedV2"
-const DEPRECATED_ELECTRON_STORE_CLEANUP_KEY = "deprecatedElectronStoreCleanupV1"
-const DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY = "deprecatedBrowserPartitionCleanupV1"
 
-// Resolve the directory where Tauri stored its .dat files for the given app identifier.
-// Mirrors Tauri's AppLocalData / AppData resolution per OS.
 function tauriDir(id: string) {
   switch (process.platform) {
     case "darwin":
@@ -28,120 +22,25 @@ function tauriDir(id: string) {
 const TAURI_APP_IDS: Record<string, string> = {
   stable: "com.lfyxhappy.lfcode",
 }
+
 function tauriAppId() {
   return app.isPackaged ? TAURI_APP_IDS[CHANNEL] : "com.lfyxhappy.lfcode.dev"
 }
 
-function migrateLegacyStoreFile(sourceFile: string, sourceName: string, targetName: string) {
-  let sourceData: Record<string, unknown>
-  try {
-    sourceData = JSON.parse(readFileSync(sourceFile, "utf-8"))
-  } catch (err) {
-    log.warn("legacy electron migration: failed to parse", sourceName, err)
-    return
-  }
-
-  const target = getStore(targetName)
-  const migrated: string[] = []
-  const merged: string[] = []
-  const skipped: string[] = []
-
-  for (const [key, legacyValue] of Object.entries(sourceData)) {
-    const next = mergeLegacyStoreValue(key, target.get(key), legacyValue)
-    const previous = target.get(key)
-    if (previous === next) {
-      skipped.push(key)
-      continue
-    }
-    target.set(key, next)
-    if (previous === undefined) migrated.push(key)
-    else merged.push(key)
-  }
-
-  log.log("legacy electron migration: migrated", sourceName, "→", targetName, { merged, migrated, skipped })
-}
-
-function migrateLegacyElectronStores() {
-  if (getStore().get(LEGACY_ELECTRON_STORE_MIGRATED_KEY)) {
-    log.log("legacy electron migration: already done, skipping")
-    return
-  }
-
-  const dir = app.getPath("userData")
-  log.log("legacy electron migration: starting", { dir })
-
-  if (!existsSync(dir)) {
-    log.log("legacy electron migration: no userData directory found, nothing to migrate")
-    getStore().set(LEGACY_ELECTRON_STORE_MIGRATED_KEY, true)
-    return
-  }
-
-  for (const filename of readdirSync(dir)) {
-    const target = renameLegacyStore(filename)
-    if (!target) continue
-    migrateLegacyStoreFile(join(dir, filename), filename, target)
-  }
-
-  log.log("legacy electron migration: complete")
-  getStore().set(LEGACY_ELECTRON_STORE_MIGRATED_KEY, true)
-}
-
-function cleanupDeprecatedElectronStores() {
-  if (getStore().get(DEPRECATED_ELECTRON_STORE_CLEANUP_KEY)) return
-  const dir = app.getPath("userData")
-  const removed = existsSync(dir)
-    ? readdirSync(dir)
-        .filter((filename) => filename.startsWith("opencode.") || filename.startsWith("mimocode."))
-        .flatMap((filename) => {
-          try {
-            unlinkSync(join(dir, filename))
-            return [filename]
-          } catch (err) {
-            log.warn("deprecated electron store cleanup: failed", filename, err)
-            return []
-          }
-        })
-    : []
-  log.log("deprecated electron store cleanup: complete", { removed })
-  getStore().set(DEPRECATED_ELECTRON_STORE_CLEANUP_KEY, true)
-}
-
-function cleanupDeprecatedBrowserPartition() {
-  if (getStore().get(DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY)) return
-  const partition = join(app.getPath("userData"), "Partitions", "opencode-browser")
-  try {
-    rmSync(partition, { force: true, recursive: true })
-    log.log("deprecated browser partition cleanup: complete", { partition })
-    getStore().set(DEPRECATED_BROWSER_PARTITION_CLEANUP_KEY, true)
-  } catch (err) {
-    log.warn("deprecated browser partition cleanup: failed", { partition, err })
-  }
-}
-
-// Migrate a single Tauri .dat file into the corresponding electron-store.
-// `lfcode.settings.dat` is special: it maps to the `lfcode.settings` store
-// (the electron-store name without the `.dat` extension). All other .dat files
-// keep their full filename as the electron-store name so they match what the
-// renderer already passes via IPC (e.g. `"default.dat"`, `"lfcode.global.dat"`).
 function migrateFile(datPath: string, filename: string) {
   let data: Record<string, unknown>
   try {
     data = JSON.parse(readFileSync(datPath, "utf-8"))
-  } catch (err) {
-    log.warn("tauri migration: failed to parse", filename, err)
+  } catch (error) {
+    log.warn("tauri migration: failed to parse", filename, error)
     return
   }
 
-  // lfcode.settings.dat → the electron settings store ("lfcode.settings").
-  // All other .dat files keep their full filename as the store name so they match
-  // what the renderer passes via IPC (e.g. "default.dat", "lfcode.global.dat").
   const storeName = filename === "lfcode.settings.dat" ? "lfcode.settings" : filename
   const target = getStore(storeName)
   const migrated: string[] = []
   const skipped: string[] = []
-
   for (const [key, value] of Object.entries(data)) {
-    // Don't overwrite values the user has already set in the Electron app.
     if (target.has(key)) {
       skipped.push(key)
       continue
@@ -149,30 +48,22 @@ function migrateFile(datPath: string, filename: string) {
     target.set(key, value)
     migrated.push(key)
   }
-
-  log.log("tauri migration: migrated", filename, "→", storeName, { migrated, skipped })
+  log.log("tauri migration: migrated", filename, "to", storeName, { migrated, skipped })
 }
 
 export function migrate() {
-  if (!getStore().get(TAURI_MIGRATED_KEY)) {
-    const dir = tauriDir(tauriAppId())
-    log.log("tauri migration: starting", { dir })
-
-    if (!existsSync(dir)) {
-      log.log("tauri migration: no tauri data directory found, nothing to migrate")
-      getStore().set(TAURI_MIGRATED_KEY, true)
-    } else {
-      for (const filename of readdirSync(dir)) {
-        if (!filename.endsWith(".dat")) continue
-        migrateFile(join(dir, filename), filename)
-      }
-
-      log.log("tauri migration: complete")
-      getStore().set(TAURI_MIGRATED_KEY, true)
-    }
+  if (getStore().get(TAURI_MIGRATED_KEY)) return
+  const directory = tauriDir(tauriAppId())
+  log.log("tauri migration: starting", { directory })
+  if (!existsSync(directory)) {
+    log.log("tauri migration: no data directory found, nothing to migrate")
+    getStore().set(TAURI_MIGRATED_KEY, true)
+    return
   }
-
-  migrateLegacyElectronStores()
-  cleanupDeprecatedElectronStores()
-  cleanupDeprecatedBrowserPartition()
+  for (const filename of readdirSync(directory)) {
+    if (!filename.endsWith(".dat")) continue
+    migrateFile(join(directory, filename), filename)
+  }
+  log.log("tauri migration: complete")
+  getStore().set(TAURI_MIGRATED_KEY, true)
 }

@@ -36,6 +36,21 @@ export interface RunResult {
   readonly stderrTruncated: boolean
 }
 
+export function decodeProcessText(bytes: Uint8Array) {
+  const source = Buffer.from(bytes)
+  if (source.length === 0) return ""
+  if (source[0] === 0xff && source[1] === 0xfe) return new TextDecoder("utf-16le").decode(source.subarray(2))
+  if (source[0] === 0xfe && source[1] === 0xff) return new TextDecoder("utf-16be").decode(source.subarray(2))
+  if (source[0] === 0xef && source[1] === 0xbb && source[2] === 0xbf)
+    return new TextDecoder("utf-8").decode(source.subarray(3))
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(source)
+  } catch {
+    if (process.platform === "win32") return new TextDecoder("gb18030").decode(source)
+    return new TextDecoder("utf-8").decode(source)
+  }
+}
+
 export type Interface = ChildProcessSpawner["Service"] & {
   readonly run: (command: ChildProcess.Command, options?: RunOptions) => Effect.Effect<RunResult, AppProcessError>
   readonly runStream: (
@@ -53,7 +68,7 @@ export const requireSuccess = (result: RunResult): Effect.Effect<RunResult, AppP
         new AppProcessError({
           command: result.command,
           exitCode: result.exitCode,
-          stderr: result.stderr.toString("utf8"),
+          stderr: decodeProcessText(result.stderr),
         }),
       )
 
@@ -66,7 +81,7 @@ export const requireExitIn =
           new AppProcessError({
             command: result.command,
             exitCode: result.exitCode,
-            stderr: result.stderr.toString("utf8"),
+            stderr: decodeProcessText(result.stderr),
           }),
         )
 
@@ -195,7 +210,7 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const handle = yield* spawner.spawn(command)
           const stderrFiber = yield* Effect.forkScoped(
-            collectStream(handle.stderr, options?.maxErrorBytes).pipe(Effect.map((x) => x.buffer.toString("utf8"))),
+            collectStream(handle.stderr, options?.maxErrorBytes).pipe(Effect.map((x) => decodeProcessText(x.buffer))),
           )
           const source = options?.includeStderr === true ? handle.all : handle.stdout
           const lines = source.pipe(

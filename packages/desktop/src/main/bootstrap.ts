@@ -12,13 +12,7 @@ const LFCODE_CONFIG_FILES = [
   "lfcode.json",
   "config.json",
 ] as const
-const DEPRECATED_CONFIG_FILES = [
-  "opencode.jsonc",
-  "opencode.json",
-  "mimocode.jsonc",
-  "mimocode.json",
-] as const
-const CONFIG_FILES = [...LFCODE_CONFIG_FILES, ...DEPRECATED_CONFIG_FILES] as const
+const ROOT_CONFIG_ARTIFACTS = ["tui.json"] as const
 const MANAGED_ROOT_DIR = ".lfcode"
 const require = createRequire(import.meta.url)
 const PLAYWRIGHT_MCP_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
@@ -46,7 +40,6 @@ const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
 const PLAYWRIGHT_MCP_REMOTE_KEYS = ["type", "url", "headers", "enabled"] as const
 const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
 const BUNDLED_MCP_MIGRATION_VERSION = 3
-const DEPRECATED_CONFIG_MIGRATION_VERSION = 1
 const DEFAULT_LSP_MIGRATION_VERSION = 1
 
 type RootEnv = {
@@ -351,7 +344,7 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
     appId: input.appId,
     sources: getMigrationSources(input, state),
   })
-  await migrateDeprecatedRootConfig(state.layout)
+  await compactMigrationMarker(state.layout)
   await ensureRootConfigFile(state.layout)
   const managedMcpMigrated = await upgradeManagedRootConfigFile(state.layout)
   const next: DesktopBootstrapState = {
@@ -402,9 +395,10 @@ export async function migrateRootLayout(
     layout.migrationMarker,
     JSON.stringify(
       {
-        copied,
+        copiedEntries: copied.length,
         completedAt: new Date().toISOString(),
-        preserved,
+        preservedEntries: preserved.length,
+        scope: "lfcode-root-layout",
         version: 1,
       },
       null,
@@ -432,9 +426,15 @@ async function copyConfigDirectory(sourceDir: string, layout: RootLayout, copied
   const entries = await readdir(sourceDir)
   await Promise.all(
     entries
-      .filter((entry) => !CONFIG_FILES.includes(entry as (typeof CONFIG_FILES)[number]))
+      .filter(shouldCopyConfigArtifact)
       .map((entry) => copyMissingPath(join(sourceDir, entry), join(layout.root, entry), copied, preserved)),
   )
+}
+
+function shouldCopyConfigArtifact(entry: string) {
+  if (LFCODE_CONFIG_FILES.includes(entry as (typeof LFCODE_CONFIG_FILES)[number])) return false
+  if (ROOT_CONFIG_ARTIFACTS.includes(entry as (typeof ROOT_CONFIG_ARTIFACTS)[number])) return true
+  return !entry.endsWith(".json") && !entry.endsWith(".jsonc")
 }
 
 async function copyMissingPath(source: string, target: string, copied: string[], preserved: string[]) {
@@ -482,13 +482,25 @@ async function ensureRootConfigFile(layout: RootLayout) {
   await writeFile(layout.configFile, `${JSON.stringify(defaultRootConfig(), null, 2)}\n`)
 }
 
-async function migrateDeprecatedRootConfig(layout: RootLayout) {
+async function compactMigrationMarker(layout: RootLayout) {
   const marker = await readMigrationMarker(layout)
-  if (marker?.deprecatedConfigMigrationVersion === DEPRECATED_CONFIG_MIGRATION_VERSION) return
-  const legacy = await findDeprecatedConfigFile(layout.root)
-  if (legacy && !(await pathExists(layout.configFile))) await copyFile(legacy, layout.configFile)
-  await Promise.all(DEPRECATED_CONFIG_FILES.map((name) => unlink(join(layout.root, name)).catch(() => undefined)))
-  await writeMigrationMarker(layout, { deprecatedConfigMigrationVersion: DEPRECATED_CONFIG_MIGRATION_VERSION })
+  if (!marker) return
+  if (!Array.isArray(marker.copied) && !Array.isArray(marker.preserved) && marker.deprecatedConfigMigrationVersion === undefined) return
+
+  const { copied, deprecatedConfigMigrationVersion, preserved, ...current } = marker
+  await writeFile(
+    layout.migrationMarker,
+    JSON.stringify(
+      {
+        ...current,
+        copiedEntries: Array.isArray(copied) ? copied.length : current.copiedEntries,
+        preservedEntries: Array.isArray(preserved) ? preserved.length : current.preservedEntries,
+        scope: "lfcode-root-layout",
+      },
+      null,
+      2,
+    ),
+  )
 }
 
 async function upgradeManagedRootConfigFile(layout: RootLayout) {
@@ -601,15 +613,8 @@ async function findLfcodeConfigFile(directory: string) {
   }
 }
 
-async function findDeprecatedConfigFile(directory: string) {
-  for (const name of DEPRECATED_CONFIG_FILES) {
-    const file = join(directory, name)
-    if (await pathExists(file)) return file
-  }
-}
-
 async function findConfigForOneTimeMigration(directory: string) {
-  return (await findLfcodeConfigFile(directory)) ?? findDeprecatedConfigFile(directory)
+  return findLfcodeConfigFile(directory)
 }
 
 function getLegacyMigrationSources(appId: string, home = homedir(), appData = process.env.APPDATA ?? join(home, "AppData", "Roaming")): MigrationSources {

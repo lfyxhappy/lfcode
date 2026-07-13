@@ -19,15 +19,8 @@ function number(key: string) {
 
 const LFCODE_EXPERIMENTAL = truthy("LFCODE_EXPERIMENTAL")
 
-// Defaults to false. When enabled, lfcode runs in pure-mimo mode:
-//   — does NOT inherit Claude Code's settings (CLAUDE.md, ~/.claude/skills, etc.)
-//   — does NOT pick up provider API keys from environment variables
-//   — falls back to the mimo-auto model as the default
-// Set LFCODE_MIMO_ONLY=true to disable .claude inheritance and env-based
-// provider auto-detection.
-const LFCODE_MIMO_ONLY = truthy("LFCODE_MIMO_ONLY")
 const LFCODE_DISABLE_CLAUDE_CODE_ENV = truthy("LFCODE_DISABLE_CLAUDE_CODE")
-const LFCODE_DISABLE_CLAUDE_CODE = LFCODE_MIMO_ONLY || LFCODE_DISABLE_CLAUDE_CODE_ENV
+const LFCODE_DISABLE_CLAUDE_CODE = LFCODE_DISABLE_CLAUDE_CODE_ENV
 
 const LFCODE_DISABLE_EXTERNAL_SKILLS = truthy("LFCODE_DISABLE_EXTERNAL_SKILLS")
 const LFCODE_DISABLE_CLAUDE_CODE_SKILLS =
@@ -69,18 +62,15 @@ export const Flag = {
   // bounds the decoded byte size of a single image. Values must be positive integers.
   LFCODE_MAX_PROMPT_IMAGES: number("LFCODE_MAX_PROMPT_IMAGES"),
   LFCODE_MAX_PROMPT_IMAGE_SIZE: number("LFCODE_MAX_PROMPT_IMAGE_SIZE"),
-  LFCODE_MIMO_ONLY,
-  LFCODE_DISABLE_PROVIDER_ENV: LFCODE_MIMO_ONLY || truthy("LFCODE_DISABLE_PROVIDER_ENV"),
+  LFCODE_DISABLE_PROVIDER_ENV: truthy("LFCODE_DISABLE_PROVIDER_ENV"),
   LFCODE_DISABLE_CLAUDE_CODE,
   get LFCODE_DISABLE_CLAUDE_CODE_MCP() {
-    // MCP compatibility stays on in mimo-only mode so users can reuse Claude Code
-    // MCP servers without inheriting prompts, skills, or provider env keys.
     return LFCODE_DISABLE_CLAUDE_CODE_ENV || truthy("LFCODE_DISABLE_CLAUDE_CODE_MCP")
   },
   LFCODE_DISABLE_CLAUDE_CODE_PROMPT: LFCODE_DISABLE_CLAUDE_CODE || truthy("LFCODE_DISABLE_CLAUDE_CODE_PROMPT"),
   // Defaults to false (enabled): markdown commands under ~/.claude/commands and
-  // {project}/.claude/commands load as slash commands. Independent of the
-  // mimo-only master switch. Set LFCODE_DISABLE_CLAUDE_CODE_COMMANDS=true to disable.
+  // {project}/.claude/commands load as slash commands. Set
+  // LFCODE_DISABLE_CLAUDE_CODE_COMMANDS=true to disable.
   LFCODE_DISABLE_CLAUDE_CODE_COMMANDS: truthy("LFCODE_DISABLE_CLAUDE_CODE_COMMANDS"),
   LFCODE_DISABLE_CLAUDE_CODE_SKILLS,
   LFCODE_DISABLE_EXTERNAL_SKILLS,

@@ -1,0 +1,73 @@
+:root {
+  --motion-micro-ms: 160ms;
+  --motion-content-ms: 240ms;
+  --motion-surface-ms: 340ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-duration: var(--motion-micro-ms);
+  --transition-easing: var(--motion-ease-out);
+}
+
+:root[data-motion-mode="standard"] {
+  --motion-micro-ms: 100ms;
+  --motion-content-ms: 160ms;
+  --motion-surface-ms: 220ms;
+}
+
+:root[data-motion-mode="off"],
+:root[data-motion-reduced="true"] {
+  --motion-micro-ms: 0ms;
+  --motion-content-ms: 0ms;
+  --motion-surface-ms: 0ms;
+}
+
+:root[data-motion-mode="off"] *,
+:root[data-motion-reduced="true"] * {
+  animation-duration: 0ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+[data-component="motion-presence"] {
+  --motion-presence-distance: 4px;
+  --motion-presence-duration: var(--motion-content-ms);
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition:
+    opacity var(--motion-presence-duration) var(--motion-ease-out),
+    transform var(--motion-presence-duration) var(--motion-ease-out);
+}
+
+[data-component="motion-presence"][data-channel="surface"] {
+  --motion-presence-distance: 6px;
+  --motion-presence-duration: var(--motion-surface-ms);
+}
+
+[data-component="motion-presence"][data-channel="micro"] {
+  --motion-presence-distance: 2px;
+  --motion-presence-duration: var(--motion-micro-ms);
+}
+
+[data-component="motion-presence"][data-phase="entering"],
+[data-component="motion-presence"][data-phase="exiting"] {
+  opacity: 0;
+  transform: translate3d(0, var(--motion-presence-distance), 0);
+}
+
+:root[data-motion-mode="off"] [data-component="motion-presence"],
+:root[data-motion-reduced="true"] [data-component="motion-presence"] {
+  transition-duration: 0ms;
+}
+
+:root[data-motion-mode="off"] [data-component="text-reveal"],
+:root[data-motion-reduced="true"] [data-component="text-reveal"] {
+  --text-reveal-duration: 0ms !important;
+  --text-reveal-travel: 0px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="motion-presence"] {
+    transition-duration: 0ms;
+  }
+}

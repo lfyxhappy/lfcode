@@ -2,7 +2,13 @@
 
 ## 状态
 
-解决中
+已解决
+
+## 当前实现
+
+- `dev`、`serve`、`watch`、Vite/Next/Jupyter 等命令会自动进入已有 durable background-job runtime。
+- 任务使用独立 detached wrapper，不跟随 session abort；状态面板已有状态、PID、日志、reconcile 与停止操作。
+- 仍待在使用版实际启动一个监听服务，再中断会话确认服务持续运行。
 
 ## 问题
 

@@ -17,11 +17,11 @@
   }
 
   &[data-closed] {
-    animation: dropdown-menu-close 0.15s ease-out;
+    animation: dropdown-menu-close var(--motion-micro-ms) var(--motion-ease-in);
   }
 
   &[data-expanded] {
-    animation: dropdown-menu-open 0.15s ease-out;
+    animation: dropdown-menu-open var(--motion-content-ms) var(--motion-ease-out);
   }
 }
 

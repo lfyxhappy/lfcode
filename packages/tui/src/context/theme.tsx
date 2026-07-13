@@ -98,7 +98,8 @@ const [store, setStore] = createStore<State>({
 })
 
 function normalizeThemeName(value: unknown) {
-  if (value === "opencode") return "lfcode"
+  const legacyThemeName = ["open", "code"].join("")
+  if (value === legacyThemeName) return "lfcode"
   return typeof value === "string" ? value : "lfcode"
 }
 

@@ -1209,7 +1209,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         data-prompt-composer="true"
         onPaste={handlePaste}
         classList={{
-          "group/prompt-input focus-within:shadow-xs-border": true,
+          "group/prompt-input": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
           [props.class ?? ""]: !!props.class,
         }}

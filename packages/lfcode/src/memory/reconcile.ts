@@ -3,6 +3,7 @@ import path from "path"
 import { Database, eq } from "../storage"
 import { Log } from "../util"
 import { MemoryFtsTable } from "./fts.sql"
+import { MemoryRecordTable } from "./record.sql"
 import { parsePath, parseCcPath, parseCcFrontmatterType, type MemoryLocator } from "./paths"
 
 const log = Log.create({ service: "memory.reconcile" })
@@ -46,7 +47,7 @@ export async function walkCcRoot(base: string): Promise<string[]> {
 export async function indexFromDisk(
   absPath: string,
   loc: MemoryLocator,
-  bodyType: "mimo" | "cc",
+  bodyType: "lfcode" | "cc",
   oldFingerprint?: string,
 ): Promise<"hit" | "updated" | "skipped"> {
   const stat = await fs.stat(absPath).catch((e: NodeJS.ErrnoException) => {
@@ -63,7 +64,7 @@ export async function indexFromDisk(
   })
   if (body === undefined) return "skipped"
 
-  // For CC files, derive type from frontmatter; mimo files keep loc.type from path.
+  // For external files, derive type from frontmatter; Lfcode files keep loc.type from path.
   const finalType =
     bodyType === "cc" ? (parseCcFrontmatterType(body) ?? "free") : loc.type
 
@@ -92,18 +93,63 @@ export async function indexFromDisk(
       })
       .run(),
   )
+  const now = Date.now()
+  const existing = Database.use((db) =>
+    db.select().from(MemoryRecordTable).where(eq(MemoryRecordTable.projection_path, absPath)).get(),
+  )
+  const preservesDreamRecord = bodyType === "lfcode" && existing?.source === "dream" && existing.body === body
+  Database.use((db) =>
+    db
+      .insert(MemoryRecordTable)
+      .values({
+        id: absPath,
+        layer: bodyType === "cc" ? "external-import" : layerFor(loc.type),
+        scope: loc.scope,
+        scope_id: loc.scope_id,
+        record_kind: finalType,
+        source: bodyType === "cc" ? "claude-code" : preservesDreamRecord ? "dream" : "compat-projection",
+        authority: bodyType === "cc" ? "external-readonly" : preservesDreamRecord ? "consolidated" : "legacy-writer",
+        freshness: fingerprint,
+        search_text: body,
+        body,
+        summary: summarize(body),
+        projection_path: absPath,
+        import_origin: bodyType === "cc" ? absPath : undefined,
+        time_created: now,
+        time_updated: now,
+      })
+      .onConflictDoUpdate({
+        target: MemoryRecordTable.id,
+        set: {
+          layer: bodyType === "cc" ? "external-import" : layerFor(loc.type),
+          scope: loc.scope,
+          scope_id: loc.scope_id,
+          record_kind: finalType,
+          source: bodyType === "cc" ? "claude-code" : preservesDreamRecord ? "dream" : "compat-projection",
+          authority: bodyType === "cc" ? "external-readonly" : preservesDreamRecord ? "consolidated" : "legacy-writer",
+          freshness: fingerprint,
+          search_text: body,
+          body,
+          summary: summarize(body),
+          projection_path: absPath,
+          import_origin: bodyType === "cc" ? absPath : null,
+          time_updated: now,
+        },
+      })
+      .run(),
+  )
   return "updated"
 }
 
 export async function reconcileMemory(
-  roots: { mimo: string; cc?: string },
+  roots: { lfcode: string; cc?: string },
 ): Promise<{ indexed: number; pruned: number }> {
   // Collect disk paths from BOTH roots before pruning. If we pruned per-root,
-  // enabling CC indexing on a fresh run would prune all mimo rows (and vice
+  // enabling CC indexing on a fresh run would prune all Lfcode rows (and vice
   // versa) because each walk's set is missing the other root's paths.
-  const mimoFiles = new Set(await walkMemoryDir(roots.mimo))
+  const lfcodeFiles = new Set(await walkMemoryDir(roots.lfcode))
   const ccFiles = roots.cc ? new Set(await walkCcRoot(roots.cc)) : new Set<string>()
-  const diskPaths = new Set<string>([...mimoFiles, ...ccFiles])
+  const diskPaths = new Set<string>([...lfcodeFiles, ...ccFiles])
 
   const indexed = new Map<string, string>(
     Database.use((db) =>
@@ -119,19 +165,20 @@ export async function reconcileMemory(
   for (const p of indexed.keys()) {
     if (!diskPaths.has(p)) {
       Database.use((db) => db.delete(MemoryFtsTable).where(eq(MemoryFtsTable.path, p)).run())
+      Database.use((db) => db.delete(MemoryRecordTable).where(eq(MemoryRecordTable.id, p)).run())
       pruned++
     }
   }
 
   // Direction A: index disk files. Pick parser by which walk produced the path.
   let indexedCount = 0
-  for (const p of mimoFiles) {
+  for (const p of lfcodeFiles) {
     const loc = parsePath(p)
     if (!loc) {
       log.warn("path outside memory layout, skipping", { path: p })
       continue
     }
-    const result = await indexFromDisk(p, loc, "mimo", indexed.get(p))
+    const result = await indexFromDisk(p, loc, "lfcode", indexed.get(p))
     if (result === "updated") indexedCount++
   }
   for (const p of ccFiles) {
@@ -145,4 +192,15 @@ export async function reconcileMemory(
   }
 
   return { indexed: indexedCount, pruned }
+}
+
+function layerFor(type: MemoryLocator["type"]) {
+  if (type === "checkpoint" || type === "progress") return "session-recovery"
+  if (type === "notes") return "scratch"
+  return "durable-knowledge"
+}
+
+function summarize(body: string) {
+  const normalized = body.replace(/\s+/g, " ").trim()
+  return normalized.length > 500 ? normalized.slice(0, 497) + "..." : normalized
 }

@@ -181,6 +181,11 @@ export type ElectronAPI = {
     accept?: string[]
     extensions?: string[]
   }) => Promise<string | string[] | null>
+  openAttachmentPicker: (opts?: {
+    multiple?: boolean
+    title?: string
+    defaultPath?: string
+  }) => Promise<string | string[] | null>
   saveFilePicker: (opts?: { title?: string; defaultPath?: string }) => Promise<string | null>
   openLink: (url: string) => void
   openExternalLink: (url: string) => void
@@ -206,6 +211,7 @@ export type ElectronAPI = {
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
   getPathForFile: (file: File) => string
   readDroppedImage: (path: string) => Promise<{ dataUrl: string; filename: string; mime: string } | null>
+  readEditorSnippets: (directory: string) => Promise<{ path: string; content: string }[]>
   showNotification: (title: string, body?: string) => void
   getWindowFocused: () => Promise<boolean>
   setWindowFocus: () => Promise<void>

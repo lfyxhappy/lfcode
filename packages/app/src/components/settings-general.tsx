@@ -28,6 +28,7 @@ import {
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { Link } from "./link"
+import { SettingsPageShell, SettingsRow, SettingsSection } from "./settings-page-shell"
 import { SettingsList } from "./settings-list"
 import { isLiquidGlassTheme } from "./liquid-glass-theme"
 
@@ -193,6 +194,12 @@ export const SettingsGeneral: Component = () => {
     { value: "dark", label: language.t("theme.scheme.dark") },
   ])
 
+  const motionOptions = createMemo(() => [
+    { value: "full" as const, label: language.t("settings.general.row.motion.option.full") },
+    { value: "standard" as const, label: language.t("settings.general.row.motion.option.standard") },
+    { value: "off" as const, label: language.t("settings.general.row.motion.option.off") },
+  ])
+
   const languageOptions = createMemo(() =>
     language.locales.map((locale) => ({
       value: locale,
@@ -205,7 +212,6 @@ export const SettingsGeneral: Component = () => {
   const mono = () => monoInput(settings.appearance.font())
   const sans = () => sansInput(settings.appearance.uiFont())
   const terminal = () => terminalInput(settings.appearance.terminalFont())
-
   const soundSelectProps = (
     enabled: () => boolean,
     current: () => string,
@@ -405,6 +411,23 @@ export const SettingsGeneral: Component = () => {
             size="small"
             triggerVariant="settings"
             triggerStyle={{ "min-width": "220px" }}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          title={language.t("settings.general.row.motion.title")}
+          description={language.t("settings.general.row.motion.description")}
+        >
+          <Select
+            data-action="settings-motion-mode"
+            options={motionOptions()}
+            current={motionOptions().find((option) => option.value === settings.general.motionMode())}
+            value={(option) => option.value}
+            label={(option) => option.label}
+            onSelect={(option) => option && settings.general.setMotionMode(option.value)}
+            variant="secondary"
+            size="small"
+            triggerVariant="settings"
           />
         </SettingsRow>
 
@@ -726,14 +749,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   return (
-    <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex flex-col gap-1 pt-6 pb-8">
-          <h2 class="text-16-medium text-text-strong">{language.t("settings.tab.general")}</h2>
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-8 w-full">
+    <SettingsPageShell title={language.t("settings.tab.general")}>
         <GeneralSection />
         <AppearanceSection />
         <NotificationsSection />
@@ -777,41 +793,6 @@ export const SettingsGeneral: Component = () => {
         <Show when={desktop() && import.meta.env.VITE_LFCODE_CHANNEL === "beta"}>
           <AdvancedSection />
         </Show>
-      </div>
-    </div>
-  )
-}
-
-interface SettingsRowProps {
-  title: string | JSX.Element
-  description: string | JSX.Element
-  children: JSX.Element
-}
-
-const SettingsRow: Component<SettingsRowProps> = (props) => {
-  return (
-    <div class="flex flex-wrap items-center gap-4 py-3 border-b border-border-weak-base last:border-none sm:flex-nowrap">
-      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span class="text-14-medium text-text-strong">{props.title}</span>
-        <span class="text-12-regular text-text-weak">{props.description}</span>
-      </div>
-      <div class="flex w-full justify-end sm:w-auto sm:shrink-0">{props.children}</div>
-    </div>
-  )
-}
-
-const SettingsSection: Component<{
-  title: string
-  description?: string | JSX.Element
-  children: JSX.Element
-}> = (props) => {
-  return (
-    <div class="flex flex-col gap-1">
-      <h3 class="text-14-medium text-text-strong pb-2">{props.title}</h3>
-      <Show when={props.description}>
-        {(value) => <div class="pb-2 text-12-regular text-text-weak">{value()}</div>}
-      </Show>
-      {props.children}
-    </div>
+    </SettingsPageShell>
   )
 }

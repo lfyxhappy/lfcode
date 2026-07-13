@@ -103,7 +103,8 @@ export function DialogReleaseNotes(props: { highlights: Highlight[] }) {
                 {props.highlights.map((_, i) => (
                   <button
                     type="button"
-                    class="h-6 flex items-center cursor-pointer bg-transparent border-none p-0 transition-all duration-200"
+                    data-component="release-notes-progress"
+                    class="h-6 flex items-center cursor-pointer bg-transparent border-none p-0"
                     classList={{
                       "w-8": i === index(),
                       "w-3": i !== index(),

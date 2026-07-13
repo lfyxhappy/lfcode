@@ -251,6 +251,16 @@ const createPlatform = (): Platform => {
       return handleWslPicker(result)
     },
 
+    async openAttachmentPickerDialog(opts) {
+      const defaultPath = await wslHome()
+      const result = await window.api.openAttachmentPicker({
+        multiple: opts?.multiple ?? false,
+        title: opts?.title ?? "Attach files or folders",
+        defaultPath,
+      })
+      return handleWslPicker(result)
+    },
+
     async saveFilePickerDialog(opts) {
       const result = await window.api.saveFilePicker({
         title: opts?.title ?? t("desktop.dialog.saveFile"),
@@ -323,6 +333,7 @@ const createPlatform = (): Platform => {
     async openPath(path: string, app?: string) {
       if (os === "windows") {
         const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
+        if (app && !resolvedApp) throw new Error(`The selected application is not available: ${app}`)
         const resolvedPath = await (async () => {
           if (await isWslEnabled()) {
             const converted = await window.api.wslPath(path, "windows").catch(() => null)
@@ -429,6 +440,7 @@ const createPlatform = (): Platform => {
     },
     getPathForFile: (file: File) => window.api.getPathForFile(file),
     readDroppedImage: (path: string) => window.api.readDroppedImage(path),
+    readEditorSnippets: (directory: string) => window.api.readEditorSnippets(directory),
     onNativeFileTransfer: (cb) => window.api.onNativeFileTransfer(cb),
     createDetachedSidePanelWindow: async (input) => {
       await window.api.createDetachedSidePanelWindow(input)

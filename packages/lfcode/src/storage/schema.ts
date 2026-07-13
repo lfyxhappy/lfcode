@@ -4,4 +4,7 @@ export { SessionTable, MessageTable, PartTable, TodoTable, PermissionTable } fro
 export { SessionShareTable } from "../share/share.sql"
 export { WorkspaceTable } from "../control-plane/workspace.sql"
 export { WorkflowRunTable } from "../workflow/workflow.sql"
+export { BackgroundJobTable, BackgroundJobLogTable } from "../background-job/background-job.sql"
 export { HistoryFtsTable } from "../history/fts.sql"
+export { MemoryRecordTable } from "../memory/record.sql"
+export { MaintenanceRunTable, MaintenanceCandidateTable, MaintenanceCandidateEventTable, MaintenanceLockTable } from "../maintenance/maintenance.sql"

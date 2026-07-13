@@ -118,10 +118,10 @@ export function SessionTodoDock(props: {
             class="text-14-regular text-text-strong cursor-default inline-flex items-baseline shrink-0 overflow-visible"
             aria-label={label()}
             style={{
-              "--tool-motion-odometer-ms": "600ms",
+              "--tool-motion-odometer-ms": "var(--motion-content-ms)",
               "--tool-motion-mask": "18%",
               "--tool-motion-mask-height": "0px",
-              "--tool-motion-spring-ms": "560ms",
+              "--tool-motion-spring-ms": "var(--motion-content-ms)",
               "white-space": "pre",
               opacity: `${Math.max(0, Math.min(1, 1 - shut()))}`,
             }}
@@ -223,7 +223,7 @@ function TodoList(props: { todos: Todo[] }) {
               style={{
                 "--checkbox-align": "flex-start",
                 "--checkbox-offset": "1px",
-                transition: "opacity 220ms var(--tool-motion-ease, cubic-bezier(0.22, 1, 0.36, 1))",
+                transition: "opacity var(--motion-micro-ms) var(--tool-motion-ease, var(--motion-ease-out))",
                 opacity: todo().status === "pending" ? "0.94" : "1",
               }}
             >
@@ -234,7 +234,7 @@ function TodoList(props: { todos: Todo[] }) {
                 style={{
                   "line-height": "var(--line-height-normal)",
                   transition:
-                    "color 220ms var(--tool-motion-ease, cubic-bezier(0.22, 1, 0.36, 1)), opacity 220ms var(--tool-motion-ease, cubic-bezier(0.22, 1, 0.36, 1))",
+                    "color var(--motion-micro-ms) var(--tool-motion-ease, var(--motion-ease-out)), opacity var(--motion-micro-ms) var(--tool-motion-ease, var(--motion-ease-out))",
                   color:
                     todo().status === "completed" || todo().status === "cancelled"
                       ? "var(--text-weak)"

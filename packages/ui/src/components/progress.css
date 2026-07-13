@@ -43,7 +43,7 @@
     width: var(--kb-progress-fill-width);
     border-radius: inherit;
     background-color: var(--border-active);
-    transition: width 200ms ease;
+    transition: width var(--motion-micro-ms) var(--motion-ease-out);
   }
 
   &[data-indeterminate] [data-slot="progress-fill"] {

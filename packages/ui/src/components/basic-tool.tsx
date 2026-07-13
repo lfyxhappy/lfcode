@@ -4,6 +4,7 @@ import { useI18n } from "../context/i18n"
 import { createStore } from "solid-js/store"
 import { Collapsible } from "./collapsible"
 import type { IconProps } from "./icon"
+import { motionEnabled } from "./motion-presence"
 import { TextShimmer } from "./text-shimmer"
 
 export type TriggerTitle = {
@@ -49,6 +50,7 @@ export function BasicTool(props: BasicToolProps) {
   const open = () => state.open
   const ready = () => state.ready
   const pending = () => props.status === "pending" || props.status === "running"
+  const animated = () => props.animated ?? motionEnabled()
 
   let frame: number | undefined
 
@@ -95,7 +97,7 @@ export function BasicTool(props: BasicToolProps) {
     on(
       open,
       (isOpen) => {
-        if (!props.animated || !contentRef) return
+        if (!animated() || !contentRef) return
         heightAnim?.stop()
         if (isOpen) {
           contentRef.style.overflow = "hidden"
@@ -219,7 +221,7 @@ export function BasicTool(props: BasicToolProps) {
           </Collapsible.Trigger>
         )}
       </Show>
-      <Show when={props.animated && props.children && !props.hideDetails}>
+      <Show when={animated() && props.children && !props.hideDetails}>
         <div
           ref={contentRef}
           data-slot="collapsible-content"
@@ -232,7 +234,7 @@ export function BasicTool(props: BasicToolProps) {
           {props.children}
         </div>
       </Show>
-      <Show when={!props.animated && props.children && !props.hideDetails}>
+      <Show when={!animated() && props.children && !props.hideDetails}>
         <Collapsible.Content>
           <Show when={!props.defer || ready()}>{props.children}</Show>
         </Collapsible.Content>

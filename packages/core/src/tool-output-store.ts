@@ -14,6 +14,7 @@ export const MAX_BYTES = 50 * 1024
 export const RETENTION = Duration.days(7)
 
 export const MANAGED_DIRECTORY = "tool-output"
+const OUTPUT_REFERENCE_PREFIX = "tool-output:"
 
 export interface BoundInput {
   readonly sessionID: SessionSchema.ID
@@ -52,6 +53,17 @@ const takePrefix = (input: string, maximumBytes: number) => {
   }
   return content
 }
+
+const redact = (text: string) =>
+  text
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, "$1[REDACTED]")
+    .replace(/\b(gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|AKIA[A-Z0-9]{16})\b/g, "[REDACTED]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?token|auth(?:orization)?|password|passwd|secret|cookie)\b(\s*(?:=|:|\s)\s*)([^\s,;"'`]{8,})/gi,
+      "$1$2[REDACTED]",
+    )
+
+const outputReference = (outputPath: string) => `${OUTPUT_REFERENCE_PREFIX}${path.basename(outputPath)}`
 
 const takeSuffix = (input: string, maximumBytes: number) => {
   let bytes = 0
@@ -124,7 +136,7 @@ export const layer = Layer.effect(
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
-        .writeFileString(file, content, { flag: "wx" })
+        .writeFileString(file, redact(content), { flag: "wx" })
         .pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       return file
     })
@@ -133,13 +145,14 @@ export const layer = Layer.effect(
       const outputLimits = yield* limits()
       const media = input.output.content.filter((item) => item.type === "file")
       const text = input.output.content.filter((item) => item.type === "text")
-      const contextual =
+      const contextual = redact(
         input.output.content.length === 0
           ? yield* Effect.try({
               try: () => JSON.stringify(input.output.structured, null, 2) ?? String(input.output.structured),
               catch: (cause) => new StorageError({ operation: "encode", cause }),
             })
-          : text.map((item) => item.text).join("")
+          : text.map((item) => item.text).join(""),
+      )
       if (
         lineCount(contextual) <= outputLimits.maxLines &&
         Buffer.byteLength(contextual, "utf-8") <= outputLimits.maxBytes
@@ -150,7 +163,7 @@ export const layer = Layer.effect(
         }
 
       const outputPath = yield* write(contextual)
-      const marker = `... output truncated; full content saved to ${outputPath} ...`
+      const marker = `... output truncated; full content available as ${outputReference(outputPath)} ...`
 
       return {
         output: {

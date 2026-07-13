@@ -4,6 +4,7 @@ import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
+import { getCodeEditorMetricEventName, type CodeEditorMetric } from "@/components/code-editor/core/metrics"
 
 type Mem = Performance & {
   memory?: {
@@ -88,6 +89,12 @@ export function DebugBar() {
       limit: undefined as number | undefined,
       used: undefined as number | undefined,
     },
+    motion: {
+      active: 0,
+      cancelled: 0,
+      mode: "full",
+      phase: "idle",
+    },
     inp: undefined as number | undefined,
     jank: undefined as number | undefined,
     long: {
@@ -98,6 +105,15 @@ export function DebugBar() {
     nav: {
       dur: undefined as number | undefined,
       pending: false,
+    },
+    editor: {
+      path: undefined as string | undefined,
+      language: undefined as string | undefined,
+      runtime: undefined as number | undefined,
+      model: undefined as number | undefined,
+      editor: undefined as number | undefined,
+      total: undefined as number | undefined,
+      failed: false,
     },
   })
 
@@ -110,6 +126,19 @@ export function DebugBar() {
   }
   const longv = () => (state.long.count === undefined ? na() : `${time(state.long.block) ?? na()}/${state.long.count}`)
   const navv = () => (state.nav.pending ? "..." : (time(state.nav.dur) ?? na()))
+  const editorv = () => {
+    if (state.editor.failed) return language.t("debugBar.edit.failed")
+    return time(state.editor.total) ?? na()
+  }
+  const editorTip = () =>
+    language.t("debugBar.edit.tip", {
+      total: ms(state.editor.total) ?? na(),
+      runtime: ms(state.editor.runtime) ?? na(),
+      model: ms(state.editor.model) ?? na(),
+      editor: ms(state.editor.editor) ?? na(),
+      language: state.editor.language ?? na(),
+      path: state.editor.path ?? na(),
+    })
 
   let prev = ""
   let start = 0
@@ -171,6 +200,35 @@ export function DebugBar() {
     let raf = 0
     let last = 0
     let snap = 0
+    const applyEditorMetric = (metric: CodeEditorMetric) => {
+      if (!metric.path) return
+      const nextPath = metric.path
+      const reset = state.editor.path !== nextPath
+      if (reset) {
+        setState("editor", {
+          path: nextPath,
+          language: metric.language,
+          runtime: undefined,
+          model: undefined,
+          editor: undefined,
+          total: undefined,
+          failed: false,
+        })
+      }
+
+      if (metric.language) setState("editor", "language", metric.language)
+      if (metric.stage === "runtime:ready") setState("editor", "runtime", metric.duration)
+      if (metric.stage === "model:ready") setState("editor", "model", metric.duration)
+      if (metric.stage === "editor:ready") setState("editor", "editor", metric.duration)
+      if (metric.stage === "editor:failed") setState("editor", "failed", true)
+
+      const runtime = state.editor.runtime
+      const model = state.editor.model
+      const editor = state.editor.editor
+      if (runtime !== undefined || model !== undefined || editor !== undefined) {
+        setState("editor", "total", (runtime ?? 0) + (model ?? 0) + (editor ?? 0))
+      }
+    }
 
     const trim = (list: Array<{ at: number; dur: number }>, span: number, at: number) => {
       while (list[0] && at - list[0].at > span) list.shift()
@@ -216,6 +274,16 @@ export function DebugBar() {
       const mem = (performance as Mem).memory
       if (!mem) return
       setState("heap", { limit: mem.jsHeapSizeLimit, used: mem.usedJSHeapSize })
+    }
+
+    const syncMotion = () => {
+      const root = document.documentElement.dataset
+      setState("motion", {
+        active: Number(root.motionActive ?? 0),
+        cancelled: Number(root.motionCancelled ?? 0),
+        mode: root.motionReduced === "true" ? "off" : (root.motionMode ?? "full"),
+        phase: root.motionPresencePhase ?? "idle",
+      })
     }
 
     const reset = () => {
@@ -349,13 +417,25 @@ export function DebugBar() {
     }
 
     syncHeap()
+    syncMotion()
     start()
     makeEventListener(document, "visibilitychange", vis)
+    makeEventListener(window, getCodeEditorMetricEventName(), (event) => {
+      const detail = (event as CustomEvent<CodeEditorMetric>).detail
+      if (!detail) return
+      applyEditorMetric(detail)
+    })
+    const motionObserver = new MutationObserver(syncMotion)
+    motionObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-motion-active", "data-motion-cancelled", "data-motion-mode", "data-motion-reduced", "data-motion-presence-phase"],
+    })
 
     onCleanup(() => {
       if (one !== 0) cancelAnimationFrame(one)
       if (two !== 0) cancelAnimationFrame(two)
       stop()
+      motionObserver.disconnect()
       for (const ob of obs) ob.disconnect()
     })
   })
@@ -436,6 +516,23 @@ export function DebugBar() {
           bad={bad(heap(), 0.8)}
           dim={state.heap.used === undefined}
           wide
+        />
+        <Cell
+          label={language.t("debugBar.edit.label")}
+          tip={editorTip()}
+          value={editorv()}
+          bad={state.editor.failed || bad(state.editor.total, 500)}
+          dim={state.editor.total === undefined && !state.editor.failed}
+          wide
+        />
+        <Cell
+          label={language.t("debugBar.motion.label")}
+          tip={language.t("debugBar.motion.tip", {
+            phase: state.motion.phase,
+            cancelled: state.motion.cancelled,
+          })}
+          value={`${state.motion.mode}/${state.motion.active}`}
+          dim={state.motion.active === 0}
         />
       </div>
     </aside>

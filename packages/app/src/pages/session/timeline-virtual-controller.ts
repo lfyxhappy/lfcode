@@ -57,7 +57,7 @@ export type TimelineVirtualControllerOptions = {
   turnElement: (root: HTMLDivElement, turnID: string) => HTMLElement | undefined
   pauseAutoScroll: () => void
   scrollToBottom: () => void
-  onPhase?: (phase: TimelineVirtualPhase, detail: { key?: string; hot: boolean; virtualItems: number }) => void
+  onPhase?: (phase: TimelineVirtualPhase, detail: { key?: string; virtualItems: number }) => void
 }
 
 type RestoreRequest = {
@@ -451,7 +451,6 @@ export class TimelineVirtualController {
     this.#diagnostics = { ...this.#diagnostics, phase, key: key ?? this.#diagnostics.key }
     this.#options.onPhase?.(phase, {
       key,
-      hot: false,
       virtualItems: this.#options.turnIDs().length,
     })
   }

@@ -5,6 +5,7 @@ import type { ComponentProps, ParentProps, Component } from "solid-js"
 export interface TabsProps extends ComponentProps<typeof Kobalte> {
   variant?: "normal" | "alt" | "pill" | "settings"
   orientation?: "horizontal" | "vertical"
+  contentTransition?: boolean
 }
 export interface TabsListProps extends ComponentProps<typeof Kobalte.List> {}
 export interface TabsTriggerProps extends ComponentProps<typeof Kobalte.Trigger> {
@@ -18,7 +19,7 @@ export interface TabsTriggerProps extends ComponentProps<typeof Kobalte.Trigger>
 export interface TabsContentProps extends ComponentProps<typeof Kobalte.Content> {}
 
 function TabsRoot(props: TabsProps) {
-  const [split, rest] = splitProps(props, ["class", "classList", "variant", "orientation"])
+  const [split, rest] = splitProps(props, ["class", "classList", "variant", "orientation", "contentTransition"])
   return (
     <Kobalte
       {...rest}
@@ -26,6 +27,7 @@ function TabsRoot(props: TabsProps) {
       data-component="tabs"
       data-variant={split.variant || "normal"}
       data-orientation={split.orientation || "horizontal"}
+      data-content-transition={split.contentTransition ? "true" : undefined}
       classList={{
         ...split.classList,
         [split.class ?? ""]: !!split.class,

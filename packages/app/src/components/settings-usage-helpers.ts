@@ -14,8 +14,8 @@ export function buildUsageFilters(input: {
   model: string
   project: string
   session: string
-  status: string
-  agentKind: string
+  status: UsageStatus | typeof USAGE_ALL
+  agentKind: UsageAgentKind | typeof USAGE_ALL
   search: string
 }) {
   return {
@@ -24,8 +24,8 @@ export function buildUsageFilters(input: {
     model: input.model && input.model !== USAGE_ALL ? input.model : undefined,
     project: input.project && input.project !== USAGE_ALL ? input.project : undefined,
     session: input.session && input.session !== USAGE_ALL ? input.session : undefined,
-    status: input.status && input.status !== USAGE_ALL ? input.status : undefined,
-    agent_kind: input.agentKind && input.agentKind !== USAGE_ALL ? input.agentKind : undefined,
+    status: input.status !== USAGE_ALL ? input.status : undefined,
+    agent_kind: input.agentKind !== USAGE_ALL ? input.agentKind : undefined,
     search: input.search.trim() || undefined,
     source: "lfcode" as const,
   }

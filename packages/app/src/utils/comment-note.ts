@@ -37,8 +37,10 @@ export function createCommentMetadata(input: PromptComment) {
 
 export function readCommentMetadata(value: unknown) {
   if (!value || typeof value !== "object") return
-  const meta = (value as { lfcodeComment?: unknown; opencodeComment?: unknown }).lfcodeComment
-    ?? (value as { lfcodeComment?: unknown; opencodeComment?: unknown }).opencodeComment
+  const meta = Object.values(value).find((item) => {
+    if (!item || typeof item !== "object") return false
+    return typeof (item as { path?: unknown }).path === "string" && typeof (item as { comment?: unknown }).comment === "string"
+  })
   if (!meta || typeof meta !== "object") return
   const path = (meta as { path?: unknown }).path
   const comment = (meta as { comment?: unknown }).comment

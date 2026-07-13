@@ -20,6 +20,8 @@ export interface Options {
 
 export interface RunOptions extends Omit<Options, "stdout" | "stderr"> {
   nothrow?: boolean
+  onSpawn?: (process: Child) => void
+  onOutput?: (input: { stream: "stdout" | "stderr"; chunk: Buffer }) => void
 }
 
 export interface Result {
@@ -124,6 +126,11 @@ export async function run(cmd: string[], opts: RunOptions = {}): Promise<Result>
   })
 
   if (!proc.stdout || !proc.stderr) throw new Error("Process output not available")
+  opts.onSpawn?.(proc)
+  if (opts.onOutput) {
+    proc.stdout.on("data", (chunk) => opts.onOutput?.({ stream: "stdout", chunk: Buffer.from(chunk) }))
+    proc.stderr.on("data", (chunk) => opts.onOutput?.({ stream: "stderr", chunk: Buffer.from(chunk) }))
+  }
 
   const out = await Promise.all([proc.exited, buffer(proc.stdout), buffer(proc.stderr)])
     .then(([code, stdout, stderr]) => ({

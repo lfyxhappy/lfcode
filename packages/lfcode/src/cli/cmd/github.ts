@@ -138,7 +138,7 @@ type IssueQueryResponse = {
   }
 }
 
-const AGENT_USERNAME = "opencode-agent[bot]"
+const AGENT_USERNAME = "lfcode-agent[bot]"
 const AGENT_REACTION = "eyes"
 const WORKFLOW_FILE = ".github/workflows/lfcode.yml"
 
@@ -334,7 +334,7 @@ export const GithubInstallCommand = cmd({
             if (installation) return s.stop("GitHub app already installed")
 
             // Open browser
-            const url = "https://github.com/apps/opencode-agent"
+            const url = process.env["LFCODE_GITHUB_APP_URL"] ?? "https://github.com/apps/lfcode-agent"
             const command =
               process.platform === "darwin"
                 ? `open "${url}"`
@@ -371,7 +371,7 @@ export const GithubInstallCommand = cmd({
 
             async function getInstallation() {
               return await fetch(
-                `https://api.opencode.ai/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
+                `${(process.env["LFCODE_GITHUB_API_URL"] ?? "https://api.lfcode.ai").replace(/\/+$/, "")}/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
               )
                 .then((res) => res.json() as Promise<{ installation?: unknown }>)
                 .then((data) => data.installation)
@@ -400,9 +400,7 @@ jobs:
       contains(github.event.comment.body, ' /lfcode') ||
       startsWith(github.event.comment.body, '/lfcode') ||
       contains(github.event.comment.body, ' /oc') ||
-      startsWith(github.event.comment.body, '/oc') ||
-      contains(github.event.comment.body, ' /opencode') ||
-      startsWith(github.event.comment.body, '/opencode')
+      startsWith(github.event.comment.body, '/oc')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -486,7 +484,13 @@ export const GithubRunCommand = cmd({
           ? (payload as IssueCommentEvent | IssuesEvent).issue.number
           : (payload as PullRequestEvent | PullRequestReviewCommentEvent).pull_request.number
       const runUrl = `/${owner}/${repo}/actions/runs/${runId}`
-      const shareBaseUrl = isMock ? "https://dev.opencode.ai" : "https://opencode.ai"
+      const shareBaseUrl = isMock
+        ? process.env["LFCODE_GITHUB_DEV_SHARE_URL"] || "https://dev.lfcode.ai"
+        : process.env["LFCODE_GITHUB_SHARE_URL"] || "https://lfcode.ai"
+      const socialCardBaseUrl = (process.env["LFCODE_GITHUB_SOCIAL_CARD_URL"] || `${shareBaseUrl}/api/social-card`).replace(
+        /\/+$/,
+        "",
+      )
 
       let appToken: string
       let octoRest: Octokit
@@ -749,8 +753,8 @@ export const GithubRunCommand = cmd({
       }
 
       function normalizeOidcBaseUrl(): string {
-        const value = process.env["OIDC_BASE_URL"]
-        if (!value) return "https://api.opencode.ai"
+        const value = process.env["LFCODE_GITHUB_API_URL"] || process.env["OIDC_BASE_URL"]
+        if (!value) return "https://api.lfcode.ai"
         return value.replace(/\/+$/, "")
       }
 
@@ -799,7 +803,7 @@ export const GithubRunCommand = cmd({
         }
 
         const reviewContext = getReviewCommentContext()
-        const mentions = (process.env["MENTIONS"] || "/lfcode,/opencode,/oc")
+        const mentions = (process.env["MENTIONS"] || "/lfcode,/oc")
           .split(",")
           .map((m) => m.trim().toLowerCase())
           .filter(Boolean)
@@ -1031,7 +1035,7 @@ export const GithubRunCommand = cmd({
 
       async function getOidcToken() {
         try {
-          return await core.getIDToken("opencode-github-action")
+          return await core.getIDToken("lfcode-github-action")
         } catch (error) {
           console.error("Failed to get OIDC token:", error instanceof Error ? error.message : error)
           throw new Error(
@@ -1408,7 +1412,7 @@ export const GithubRunCommand = cmd({
           const titleAlt = encodeURIComponent(session.title.substring(0, 50))
           const title64 = Buffer.from(session.title.substring(0, 700), "utf8").toString("base64")
 
-          return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/opencode-share/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
+          return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="${socialCardBaseUrl}/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
         })()
         const shareUrl = shareId ? `[lfcode session](${shareBaseUrl}/s/${shareId})&nbsp;&nbsp;|&nbsp;&nbsp;` : ""
         return `\n\n${image}${shareUrl}[github run](${runUrl})`

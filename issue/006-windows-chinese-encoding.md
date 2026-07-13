@@ -6,7 +6,13 @@
 
 ## 状态
 
-未解决
+已解决
+
+## 当前实现
+
+- 前台与后台 PowerShell 7 都显式设置 UTF-8 `[Console]::OutputEncoding` 和 `$OutputEncoding`。
+- 子进程错误文本和 V2 Read 已接入 UTF-8、UTF-16 与 GB18030 检测，工具输出落盘前保持脱敏。
+- 已完成使用版打包启动校验；GBK/UTF-16 文件与中文 stdout/stderr 的真实安装版回归仍待执行。
 
 ## 问题
 

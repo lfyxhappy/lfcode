@@ -1,4 +1,4 @@
-import { createEffect, onCleanup } from "solid-js"
+import { onCleanup } from "solid-js"
 import type { VirtualizerHandle } from "virtua/solid"
 import { MessageTimeline, type MessageTimelineProps } from "./message-timeline"
 import { sessionViewSurfaceKey, type SessionSurface } from "./session-view-state"
@@ -58,16 +58,6 @@ export function SessionTimelineSurface(props: SessionTimelineSurfaceProps) {
         : undefined
     props.onVirtualizerRef?.(handle)
   }
-
-  createEffect(() => {
-    const revision = props.contentRevision()
-    const turnIDs = props.turnIDs()
-    // The ref can outlive a route prop update for one reactive turn. Keep the
-    // cache ownership captured when the ref mounted; the new virtualizer ref
-    // will bind its own key after the keyed list remounts.
-    if (!virtualizer || !cached) return
-    cached = { handle: virtualizer, key: surfaceKey, sessionID: cached.sessionID, revision, turnIDs }
-  })
 
   onCleanup(remember)
 

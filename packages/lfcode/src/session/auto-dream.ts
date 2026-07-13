@@ -1,123 +1,119 @@
 import { Effect } from "effect"
-import { Database, eq, desc, asc, isNull } from "@/storage"
-import { SessionTable } from "./session.sql"
-import { Log } from "@/util"
+import z from "zod"
+import { Maintenance } from "@/maintenance"
+import { MaintenanceScheduler } from "@/maintenance"
 import type { Config } from "@/config"
-
-const log = Log.create({ service: "auto-dream" })
-
-const DAY_MS = 24 * 60 * 60 * 1000
-const DEFAULT_DREAM_INTERVAL_DAYS = 7
-const DEFAULT_DISTILL_INTERVAL_DAYS = 30
-const MIN_SPAWN_GAP_MS = 10_000
 
 export const AUTO_DREAM_TITLE = "Auto Dream"
 export const AUTO_DISTILL_TITLE = "Auto Distill"
 
-let lastDreamSpawnTime = 0
-let lastDistillSpawnTime = 0
-
 export const DREAM_TASK = [
-  "Run one automatic dream memory consolidation pass for the current project.",
+  "Run one automatic Dream consolidation pass for the current project.",
   "",
-  "Use the memory files as the working index and the raw lfcode trajectory database as the source of truth.",
-  "Use bash for read-only SQLite and filesystem inspection. Do not modify the database.",
-  "Consolidate only durable, verified information into project memory.",
+  "Use raw lfcode trajectory as the source of truth. Memory Markdown is only a compatibility projection of typed records.",
+  "Use terminal tools only for read-only SQLite and filesystem inspection. On Windows, use pwsh syntax. Do not modify the database.",
+  "Do not edit memory files directly. After verification, persist each complete durable record with memory(operation=write_project_record).",
+  "Use only MEMORY or MEMORY-<topic> keys and send a complete Markdown body for each record. Do not package workflows in this stage.",
 ].join("\n")
 
 export const DISTILL_TASK = [
-  "Run one automatic distill pass for the current project.",
+  "Run one automatic Distill analysis pass for the current project.",
   "",
-  "Review the past month of sessions and identify repeated manual workflows worth packaging.",
-  "Use the raw lfcode trajectory database as the source of truth and memory files to spot cross-session patterns.",
-  "Inventory existing skills, agents, and commands first so you reuse or extend instead of duplicating.",
-  "Use bash for read-only SQLite and filesystem inspection. Do not modify the database.",
-  "Produce a compact shortlist, then create only the high-confidence missing assets.",
+  "Review recent trajectories for repeated, costly workflows. Inventory existing skills, agents, and commands first.",
+  "Use terminal tools only for read-only SQLite and filesystem inspection. On Windows, use pwsh syntax. Do not modify the database or any asset files.",
+  "Do not create, edit, or delete skills, commands, agents, plugins, or source files. Your only deliverable is a JSON array in a fenced json block.",
+  "Each object must contain candidate_kind, target_kind, optional target_path, evidence (array of session IDs or dated observations), confidence (0-100), proposed_summary, and optional proposed_patch_preview.",
+  "For skill_create or skill_update, target_path must be skills/<name>/SKILL.md and proposed_patch_preview must be the complete UTF-8 SKILL.md document, including YAML frontmatter. Other target kinds remain review-only.",
+  "Use candidate_kind=skip when no workflow meets the evidence bar. Keep the array empty when there are no candidates.",
 ].join("\n")
 
-function shouldAutoRun(input: {
-  enabled: boolean
-  intervalDays: number
-  title: string
-  label: string
-}) {
+const DistillCandidate = z.object({
+  candidate_kind: z.enum([
+    "skill_update",
+    "skill_create",
+    "command_update",
+    "command_create",
+    "agent_update",
+    "agent_create",
+    "skip",
+  ]),
+  target_kind: z.enum(["skill", "command", "agent", "none"]),
+  target_path: z.string().min(1).optional(),
+  evidence: z.array(z.string().min(1)).min(1),
+  confidence: z.number().int().min(0).max(100),
+  proposed_summary: z.string().min(1),
+  proposed_patch_preview: z.string().min(1).optional(),
+})
+
+const DistillCandidates = z.array(DistillCandidate)
+
+export function maintenanceConfig(cfg: Config.Info) {
+  return {
+    enabled: cfg.maintenance?.enabled ?? true,
+    schedulerEnabled: cfg.maintenance?.scheduler_enabled ?? true,
+    dreamEnabled: cfg.maintenance?.dream_enabled ?? cfg.dream?.auto !== false,
+    distillEnabled: cfg.maintenance?.distill_enabled ?? cfg.distill?.auto !== false,
+  }
+}
+
+export function claimAutomaticMaintenance(input: { cfg: Config.Info; projectID: string }) {
+  const config = maintenanceConfig(input.cfg)
+  if (!config.enabled || !config.schedulerEnabled) return Effect.succeed(undefined)
+  if (!config.dreamEnabled && !config.distillEnabled) return Effect.succeed(undefined)
   return Effect.gen(function* () {
-    if (!input.enabled) return false
-
-    const intervalMs = input.intervalDays * DAY_MS
-
-    const lastRun = yield* Effect.sync(() =>
-      Database.use((db) =>
-        db
-          .select({ time_created: SessionTable.time_created })
-          .from(SessionTable)
-          .where(eq(SessionTable.title, input.title))
-          .orderBy(desc(SessionTable.time_created))
-          .limit(1)
-          .get(),
-      ),
-    )
-
-    const now = Date.now()
-    const elapsed = lastRun ? now - lastRun.time_created : Infinity
-
-    // First time ever: check if the project is old enough to have anything worth consolidating.
-    // Look at the earliest top-level session (no parent) as the project start time.
-    if (!lastRun) {
-      const earliest = yield* Effect.sync(() =>
-        Database.use((db) =>
-          db
-            .select({ time_created: SessionTable.time_created })
-            .from(SessionTable)
-            .where(isNull(SessionTable.parent_id))
-            .orderBy(asc(SessionTable.time_created))
-            .limit(1)
-            .get(),
-        ),
-      )
-      if (!earliest || now - earliest.time_created < intervalMs) {
-        log.info(`auto-${input.label} skipped — project too young`, {
-          projectAge: earliest ? Math.round((now - earliest.time_created) / DAY_MS) + "d" : "empty",
-          interval: input.intervalDays + "d",
-        })
-        return false
-      }
-    }
-
-    if (elapsed < intervalMs) {
-      log.info(`auto-${input.label} skipped — last run too recent`, {
-        lastRunAgo: Math.round(elapsed / DAY_MS) + "d",
-        interval: input.intervalDays + "d",
-      })
-      return false
-    }
-
-    log.info(`auto-${input.label} triggering`, {
-      lastRun: lastRun ? new Date(lastRun.time_created).toISOString() : "never",
-      interval: input.intervalDays + "d",
+    const scheduled = yield* Effect.promise(() => MaintenanceScheduler.consumeMarker())
+    const result = Maintenance.claim({
+      jobKind: config.dreamEnabled && config.distillEnabled ? "full" : config.dreamEnabled ? "dream" : "distill",
+      triggerSource: scheduled ? "scheduler" : "automatic",
+      projectIDs: [input.projectID],
     })
-    return true
+    return result.status === "claimed" ? result.run : undefined
   })
 }
 
-export function shouldAutoDream(cfg: Config.Info) {
-  const enabled = cfg.dream?.auto !== false
-  if (!enabled) return Effect.succeed(false)
-  const now = Date.now()
-  if (now - lastDreamSpawnTime < MIN_SPAWN_GAP_MS) return Effect.succeed(false)
-  lastDreamSpawnTime = now
-  const intervalDays = cfg.dream?.interval_days ?? DEFAULT_DREAM_INTERVAL_DAYS
-  return shouldAutoRun({ enabled, intervalDays, title: AUTO_DREAM_TITLE, label: "dream" })
+export function claimManualMaintenance(input: {
+  jobKind: "full" | "dream" | "distill"
+  projectID: string
+  triggerSource?: "manual" | "scheduler"
+}) {
+  return Effect.sync(() => {
+    const result = Maintenance.claim({
+      jobKind: input.jobKind,
+      triggerSource: input.triggerSource ?? "manual",
+      projectIDs: [input.projectID],
+    })
+    return result.status === "claimed" ? result.run : undefined
+  })
 }
 
+export function parseDistillCandidates(text: string) {
+  const fenced = text.match(/```json\s*([\s\S]*?)```/i)?.[1]
+  const source = fenced ?? text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)
+  if (!source.trim()) return []
+  const parsed = safeJson(source)
+  const candidates = DistillCandidates.safeParse(parsed)
+  if (!candidates.success) return []
+  return candidates.data.filter((candidate) => candidate.candidate_kind !== "skip")
+}
+
+function safeJson(value: string) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
+/** @deprecated Use claimAutomaticMaintenance so dream and distill share one host ledger. */
+export function shouldAutoDream(cfg: Config.Info) {
+  const config = maintenanceConfig(cfg)
+  return Effect.succeed(config.enabled && config.schedulerEnabled && config.dreamEnabled)
+}
+
+/** @deprecated Use claimAutomaticMaintenance so dream and distill share one host ledger. */
 export function shouldAutoDistill(cfg: Config.Info) {
-  const enabled = cfg.distill?.auto !== false
-  if (!enabled) return Effect.succeed(false)
-  const now = Date.now()
-  if (now - lastDistillSpawnTime < MIN_SPAWN_GAP_MS) return Effect.succeed(false)
-  lastDistillSpawnTime = now
-  const intervalDays = cfg.distill?.interval_days ?? DEFAULT_DISTILL_INTERVAL_DAYS
-  return shouldAutoRun({ enabled, intervalDays, title: AUTO_DISTILL_TITLE, label: "distill" })
+  const config = maintenanceConfig(cfg)
+  return Effect.succeed(config.enabled && config.schedulerEnabled && config.distillEnabled)
 }
 
 export * as AutoDream from "./auto-dream"

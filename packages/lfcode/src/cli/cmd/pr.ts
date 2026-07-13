@@ -101,7 +101,7 @@ export const PrCommand = cmd({
                 UI.println(`Found lfcode session: ${sessionUrl}`)
                 UI.println(`Importing session...`)
 
-                const importResult = await Process.text(["mimo", "import", sessionUrl], {
+                const importResult = await Process.text(["lfcode", "import", sessionUrl], {
                   nothrow: true,
                 })
                 if (importResult.code === 0) {
@@ -123,15 +123,15 @@ export const PrCommand = cmd({
         UI.println("Starting lfcode...")
         UI.println()
 
-        const mimoArgs = sessionId ? ["-s", sessionId] : []
-        const mimoProcess = Process.spawn(["mimo", ...mimoArgs], {
+        const lfcodeArgs = sessionId ? ["-s", sessionId] : []
+        const lfcodeProcess = Process.spawn(["lfcode", ...lfcodeArgs], {
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
           cwd: process.cwd(),
         })
-        const code = await mimoProcess.exited
-        if (code !== 0) throw new Error(`mimo exited with code ${code}`)
+        const code = await lfcodeProcess.exited
+        if (code !== 0) throw new Error(`lfcode exited with code ${code}`)
       },
     })
   },

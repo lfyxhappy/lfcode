@@ -971,7 +971,7 @@ function captureProcessSnapshot(input: { note: string }) {
 
 function summarizeAppMetrics(metrics: Electron.ProcessMetric[]) {
   const totalWorkingSetSize = metrics.reduce((sum, item) => sum + item.memory.workingSetSize, 0)
-  const totalPrivateBytes = metrics.reduce((sum, item) => sum + item.memory.privateBytes, 0)
+  const totalPrivateBytes = metrics.reduce((sum, item) => sum + (item.memory.privateBytes ?? 0), 0)
   return {
     processCount: metrics.length,
     totalWorkingSetMb: toMb(totalWorkingSetSize),
@@ -984,7 +984,7 @@ function summarizeAppMetrics(metrics: Electron.ProcessMetric[]) {
         type: item.type,
         serviceName: item.serviceName,
         workingSetMb: toMb(item.memory.workingSetSize),
-        privateMb: toMb(item.memory.privateBytes),
+        privateMb: toMb(item.memory.privateBytes ?? 0),
         cpuPercent: Math.round(item.cpu.percentCPUUsage * 10) / 10,
       })),
   }

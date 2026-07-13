@@ -55,7 +55,7 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
 
 function normalizeLoadedConfig(data: unknown, source: string) {
   if (!isRecord(data)) return data
-  const copy = { ...data }
+  const copy = ConfigPlugin.normalizePluginConfigAliases({ ...data })
   const hadLegacy = "theme" in copy || "keybinds" in copy || "tui" in copy || "skills" in copy
   if (!hadLegacy) return copy
   delete copy.theme
@@ -107,7 +107,7 @@ const InfoSchema = Schema.Struct({
   }),
   logLevel: Schema.optional(LogLevelRef).annotate({ description: "Log level" }),
   server: Schema.optional(ConfigServer.Server).annotate({
-    description: "Server configuration for mimo serve and web commands",
+    description: "Server configuration for lfcode serve and web commands",
   }),
   command: Schema.optional(Schema.Record(Schema.String, ConfigCommand.Info)).annotate({
     description: "Command configuration, see https://lfcode.ai/docs/commands",
@@ -123,6 +123,9 @@ const InfoSchema = Schema.Struct({
   }),
   // User-facing plugin config is stored as Specs; provenance gets attached later while configs are merged.
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPlugin.Spec))),
+  plugin_enabled: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
+    description: "Enable or disable configured plugins by their canonical spec without removing their configuration",
+  }),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
     description:
       "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
@@ -232,6 +235,21 @@ const InfoSchema = Schema.Struct({
   ).annotate({
     description: "Tool invocation style configuration (JSON vs shell-style).",
   }),
+  app_control: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable or disable model access to local desktop app-control tools. Default: false.",
+      }),
+      permission: Schema.optional(
+        Schema.Literals(["read_only", "session_control", "browser_control", "full_app_control"]),
+      ).annotate({
+        description:
+          "Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, 'browser_control' additionally allows side-browser actions, and 'full_app_control' reserves broader future control.",
+      }),
+    }),
+  ).annotate({
+    description: "Host-level desktop app-control configuration.",
+  }),
   enterprise: Schema.optional(
     Schema.Struct({
       url: Schema.optional(Schema.String).annotate({ description: "Enterprise URL" }),
@@ -261,7 +279,7 @@ const InfoSchema = Schema.Struct({
     Schema.Struct({
       thresholds: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). Each threshold must be <= window - 20K reserved. Default: [\"40%\", \"60%\", \"80%\"].",
+          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). Each threshold must be <= window - 20K reserved. No default thresholds are applied; direct compaction is the default hot path unless thresholds are explicitly configured.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer reserved for checkpoint operations. Default: 20000.",
@@ -369,6 +387,22 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ),
+  maintenance: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable host-level Dream and Distill memory maintenance. Default: true.",
+      }),
+      scheduler_enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Allow the daily maintenance scheduler to claim automatic runs. Default: true.",
+      }),
+      dream_enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Run Dream consolidation as part of maintenance. Default: true.",
+      }),
+      distill_enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Run Distill candidate analysis as part of maintenance. Default: true.",
+      }),
+    }),
+  ),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),
@@ -460,6 +494,91 @@ export type Info = z.output<typeof Info> & {
 export const Patch = z.object({}).catchall(z.any()).meta({ ref: "ConfigPatch" })
 export type Patch = z.infer<typeof Patch>
 
+export const GlobalPersonalizationMemory = z
+  .object({
+    ccIndex: z.boolean(),
+    autoConsolidation: z.boolean(),
+  })
+  .meta({ ref: "GlobalPersonalizationMemory" })
+export type GlobalPersonalizationMemory = z.infer<typeof GlobalPersonalizationMemory>
+
+export const GlobalPersonalizationMaintenance = z
+  .object({
+    enabled: z.boolean(),
+    schedulerEnabled: z.boolean(),
+    dreamEnabled: z.boolean(),
+    distillEnabled: z.boolean(),
+  })
+  .meta({ ref: "GlobalPersonalizationMaintenance" })
+export type GlobalPersonalizationMaintenance = z.infer<typeof GlobalPersonalizationMaintenance>
+
+export const GlobalPersonalizationSave = z
+  .object({
+    customInstructions: z.string(),
+    memory: GlobalPersonalizationMemory,
+    maintenance: GlobalPersonalizationMaintenance,
+  })
+  .meta({ ref: "GlobalPersonalizationSave" })
+export type GlobalPersonalizationSave = z.infer<typeof GlobalPersonalizationSave>
+
+export const GlobalPersonalization = z
+  .object({
+    customInstructions: z.string(),
+    instructionFile: z.string(),
+    memory: GlobalPersonalizationMemory,
+    maintenance: GlobalPersonalizationMaintenance,
+    config: Info,
+  })
+  .meta({ ref: "GlobalPersonalization" })
+export type GlobalPersonalization = z.infer<typeof GlobalPersonalization>
+
+function resolvePersonalizationMaintenance(config: Info): GlobalPersonalizationMaintenance {
+  return {
+    enabled: config.maintenance?.enabled ?? true,
+    schedulerEnabled: config.maintenance?.scheduler_enabled ?? true,
+    dreamEnabled: config.maintenance?.dream_enabled ?? config.dream?.auto ?? true,
+    distillEnabled: config.maintenance?.distill_enabled ?? config.distill?.auto ?? true,
+  }
+}
+
+export const GlobalAppControlPermission = z
+  .enum(["read_only", "session_control", "browser_control", "full_app_control"])
+  .meta({ ref: "GlobalAppControlPermission" })
+export type GlobalAppControlPermission = z.infer<typeof GlobalAppControlPermission>
+
+export const GlobalAppControlSave = z
+  .object({
+    enabled: z.boolean(),
+    permission: GlobalAppControlPermission,
+  })
+  .meta({ ref: "GlobalAppControlSave" })
+export type GlobalAppControlSave = z.infer<typeof GlobalAppControlSave>
+
+export const GlobalAppControlService = z
+  .object({
+    discoveryFile: z.string(),
+    detected: z.boolean(),
+    host: z.string().optional(),
+    port: z.number().optional(),
+    pid: z.number().optional(),
+    version: z.string().optional(),
+    startedAt: z.number().optional(),
+  })
+  .meta({ ref: "GlobalAppControlService" })
+export type GlobalAppControlService = z.infer<typeof GlobalAppControlService>
+
+export const GlobalAppControl = z
+  .object({
+    enabled: z.boolean(),
+    permission: GlobalAppControlPermission,
+    target: z.literal("app"),
+    availableTargets: z.array(z.literal("app")),
+    service: GlobalAppControlService,
+    config: Info,
+  })
+  .meta({ ref: "GlobalAppControl" })
+export type GlobalAppControl = z.infer<typeof GlobalAppControl>
+
 type State = {
   config: Info
   directories: string[]
@@ -470,9 +589,18 @@ type State = {
 export interface Interface {
   readonly get: () => Effect.Effect<Info>
   readonly getGlobal: () => Effect.Effect<Info>
+  readonly getGlobalPersonalization: () => Effect.Effect<GlobalPersonalization>
+  readonly getGlobalAppControl: () => Effect.Effect<GlobalAppControl>
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Patch) => Effect.Effect<Info>
+  readonly saveGlobalPersonalization: (input: GlobalPersonalizationSave) => Effect.Effect<GlobalPersonalization>
+  readonly saveGlobalAppControl: (input: GlobalAppControlSave) => Effect.Effect<GlobalAppControl>
+  readonly upsertGlobalCustomProvider: (
+    providerID: string,
+    config: ConfigProvider.Info,
+    key?: string,
+  ) => Effect.Effect<Info>
   readonly removeGlobalCustomProvider: (providerID: string) => Effect.Effect<Info>
   readonly upsertMcp: (
     name: string,
@@ -481,6 +609,7 @@ export interface Interface {
   ) => Effect.Effect<Info>
   readonly removeMcp: (name: string) => Effect.Effect<Info>
   readonly updateMcpEnabled: (name: string, enabled: boolean) => Effect.Effect<Info>
+  readonly updatePluginEnabled: (spec: string, enabled: boolean) => Effect.Effect<Info>
   readonly invalidate: (wait?: boolean) => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -508,6 +637,83 @@ function globalConfigFiles() {
   return GLOBAL_CONFIG_FILES.map((file) => path.join(Global.Path.config, file))
 }
 
+function globalPersonalizationFile() {
+  return path.join(Global.Path.config, "instructions", "personalization.md")
+}
+
+function globalAppControlStateFile() {
+  if (process.env.LFCODE_AUTOMATION_STATE_FILE) return process.env.LFCODE_AUTOMATION_STATE_FILE
+  if (process.env.LFCODE_STATE_DIR) return path.join(process.env.LFCODE_STATE_DIR, "automation", "desktop.json")
+  return path.join(Global.Path.home, ".lfcode", "state", "automation", "desktop.json")
+}
+
+async function readGlobalAppControlService() {
+  const discoveryFile = globalAppControlStateFile()
+  const text = await fsNode.readFile(discoveryFile, "utf8").catch(() => undefined)
+  if (!text) {
+    return {
+      discoveryFile,
+      detected: false,
+    } satisfies GlobalAppControlService
+  }
+  try {
+    const parsed = JSON.parse(text) as {
+      host?: unknown
+      pid?: unknown
+      port?: unknown
+      startedAt?: unknown
+      version?: unknown
+    }
+    return {
+      discoveryFile,
+      detected: true,
+      host: typeof parsed.host === "string" ? parsed.host : undefined,
+      port: typeof parsed.port === "number" ? parsed.port : undefined,
+      pid: typeof parsed.pid === "number" ? parsed.pid : undefined,
+      version: typeof parsed.version === "string" ? parsed.version : undefined,
+      startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : undefined,
+    } satisfies GlobalAppControlService
+  } catch {
+    return {
+      discoveryFile,
+      detected: false,
+    } satisfies GlobalAppControlService
+  }
+}
+
+export function resolveGlobalAppControlConfig(config: Info | undefined) {
+  return {
+    enabled: config?.app_control?.enabled ?? false,
+    permission: config?.app_control?.permission ?? "session_control",
+  } satisfies GlobalAppControlSave
+}
+
+function normalizePersonalizationText(input: string) {
+  return input.replace(/\r\n/g, "\n")
+}
+
+function hasPersonalizationText(input: string) {
+  return input.trim().length > 0
+}
+
+function updateManagedInstructionPath(instructions: string[] | undefined, managedPath: string, enabled: boolean) {
+  const result: string[] = []
+  let inserted = false
+  for (const item of instructions ?? []) {
+    if (item !== managedPath) {
+      result.push(item)
+      continue
+    }
+    if (!enabled || inserted) continue
+    result.push(managedPath)
+    inserted = true
+  }
+  if (enabled && !inserted) {
+    result.push(managedPath)
+  }
+  return result.length > 0 ? result : undefined
+}
+
 function patchJsonc(input: string, patch: unknown, path: string[] = []): string {
   if (!isRecord(patch)) {
     const edits = modify(input, path, patch, {
@@ -526,13 +732,24 @@ function patchJsonc(input: string, patch: unknown, path: string[] = []): string 
 }
 
 function deleteJsoncPath(input: string, path: string[]) {
+  if (!input.trim()) return input
+  if (!hasJsoncPath(ConfigParse.jsonc(input, "<delete-jsonc-path>"), path)) return input
   const edits = modify(input, path, undefined, {
     formattingOptions: {
       insertSpaces: true,
       tabSize: 2,
     },
   })
+  if (edits.length === 0) return input
   return applyEdits(input, edits)
+}
+
+function hasJsoncPath(input: unknown, path: string[]): boolean {
+  if (path.length === 0) return true
+  if (!isRecord(input)) return false
+  const [head, ...rest] = path
+  if (!(head in input)) return false
+  return hasJsoncPath((input as Record<string, unknown>)[head], rest)
 }
 
 function collectNullPaths(input: unknown, path: string[] = []): string[][] {
@@ -585,12 +802,30 @@ function isCustomProviderConfig(config: ConfigProvider.Info | undefined) {
   return true
 }
 
-function withoutGlobalCustomProvider(info: Info, providerID: string) {
+export function withoutGlobalCustomProvider(info: Info, providerID: string) {
   const next = mergeDeep({}, writable(info))
 
   if (next.provider?.[providerID]) delete next.provider[providerID]
   if (next.provider && Object.keys(next.provider).length === 0) delete next.provider
 
+  if (!next.disabled_providers) return next
+
+  const filtered = next.disabled_providers.filter((id) => id !== providerID)
+  if (filtered.length === 0) {
+    delete next.disabled_providers
+    return next
+  }
+
+  next.disabled_providers = filtered
+  return next
+}
+
+export function withGlobalCustomProvider(info: Info, providerID: string, provider: ConfigProvider.Info) {
+  const next = mergeDeep({}, writable(info))
+  next.provider = {
+    ...next.provider,
+    [providerID]: provider,
+  }
   if (!next.disabled_providers) return next
 
   const filtered = next.disabled_providers.filter((id) => id !== providerID)
@@ -640,6 +875,29 @@ export const layer = Layer.effect(
         ),
         Effect.orDie,
       )
+    })
+
+    const readOptionalFile = Effect.fnUntraced(function* (filepath: string) {
+      return yield* Effect.promise(() =>
+        fsNode.readFile(filepath, "utf8").catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined
+          throw error
+        }),
+      )
+    })
+
+    const writeFileAtomic = Effect.fnUntraced(function* (filepath: string, content: string) {
+      const dir = path.dirname(filepath)
+      const temp = path.join(dir, `.${path.basename(filepath)}.${process.pid}.${Date.now()}.tmp`)
+      yield* Effect.promise(() => fsNode.mkdir(dir, { recursive: true }))
+      yield* Effect.promise(async () => {
+        try {
+          await fsNode.writeFile(temp, content)
+          await fsNode.rename(temp, filepath)
+        } finally {
+          await fsNode.unlink(temp).catch(() => {})
+        }
+      })
     })
 
     const loadConfig = Effect.fnUntraced(function* (
@@ -830,18 +1088,10 @@ export const layer = Layer.effect(
           if (value.type === "wellknown") {
             const url = key.replace(/\/+$/, "")
             process.env[value.key] = value.token
-            const wellKnownSources = [`${url}/.well-known/lfcode`, `${url}/.well-known/opencode`]
-            log.debug("fetching remote config", { url: wellKnownSources[0] })
-            let response: Response | undefined
-            let source = wellKnownSources[0]
-            for (const candidate of wellKnownSources) {
-              const hit = yield* Effect.promise(() => fetch(candidate, { signal: AbortSignal.timeout(1000) }))
-              if (!hit.ok) continue
-              response = hit
-              source = candidate
-              break
-            }
-            if (!response) {
+            const source = `${url}/.well-known/lfcode`
+            log.debug("fetching remote config", { url: source })
+            const response = yield* Effect.promise(() => fetch(source, { signal: AbortSignal.timeout(1000) }))
+            if (!response.ok) {
               throw new Error(`failed to fetch remote config from ${url}`)
             }
             const wellknown = (yield* Effect.promise(() => response.json())) as { config?: Record<string, unknown> }
@@ -1125,13 +1375,23 @@ export const layer = Layer.effect(
 
     const resolveMcpConfigTarget = Effect.fnUntraced(function* (name: string, current: Info) {
       const origin = current.mcp_origins?.[name]
-      if (!origin) return yield* resolveProjectOverrideFile()
+      if (!origin) return globalConfigFile()
       if (origin.type === "claude") {
         if (origin.source === path.join(Global.Path.home, ".claude.json")) return globalConfigFile()
         return yield* resolveProjectOverrideFile()
       }
       if (origin.source === Global.Path.config) return globalConfigFile()
       if (origin.source.startsWith("http://") || origin.source.startsWith("https://")) return globalConfigFile()
+      return origin.source
+    })
+
+    const resolvePluginConfigTarget = Effect.fnUntraced(function* (spec: string, current: Info) {
+      const origin = current.plugin_origins?.find((item) => ConfigPlugin.pluginSpecifier(item.spec) === spec)
+      if (!origin) throw new Error(`Plugin ${spec} is not configured`)
+      if (origin.source === Global.Path.config) return globalConfigFile()
+      if (origin.source.startsWith("http://") || origin.source.startsWith("https://")) {
+        throw new Error(`Plugin ${spec} was declared by a remote configuration and cannot be updated locally`)
+      }
       return origin.source
     })
 
@@ -1204,6 +1464,18 @@ export const layer = Layer.effect(
       return mergeConfigConcatArrays(current, next)
     })
 
+    const updatePluginEnabled = Effect.fn("Config.updatePluginEnabled")(function* (spec: string, enabled: boolean) {
+      const current = yield* get()
+      const target = yield* resolvePluginConfigTarget(spec, current)
+      yield* Effect.promise(() => fsNode.mkdir(path.dirname(target), { recursive: true }))
+      yield* updateConfigFile(target, { plugin_enabled: { [spec]: enabled } })
+      if (path.dirname(target) === Global.Path.config) {
+        yield* invalidateGlobal
+      }
+      yield* InstanceState.invalidate(state)
+      return yield* get()
+    })
+
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
       const file = path.join(dir, "config.json")
@@ -1231,6 +1503,63 @@ export const layer = Layer.effect(
       else void task
     })
 
+    const invalidateModelSelection = Effect.fn("Config.invalidateModelSelection")(function* () {
+      yield* invalidateGlobal
+      yield* Effect.promise(() => Instance.invalidateAllCaches())
+      GlobalBus.emit("event", {
+        directory: "global",
+        payload: {
+          type: Event.Disposed.type,
+          properties: {},
+        },
+      })
+    })
+
+    const isModelSelectionPatchValue = (value: unknown): boolean => {
+      if (value === null || value === undefined) return true
+      if (typeof value === "string") return true
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false
+      return Object.entries(value).every(([key, next]) => key === "model" && isModelSelectionPatchValue(next))
+    }
+
+    const isModelSelectionPatch = (patch: Patch) =>
+      Object.entries(patch).every(([key, value]) => {
+        if (key === "model" || key === "small_model") return isModelSelectionPatchValue(value)
+        if (key !== "agent") return false
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false
+        return Object.values(value).every((next) => isModelSelectionPatchValue(next))
+      })
+
+    const getGlobalPersonalization = Effect.fn("Config.getGlobalPersonalization")(function* () {
+      const config = yield* getGlobal()
+      const instructionFile = globalPersonalizationFile()
+      const customInstructions = normalizePersonalizationText((yield* readOptionalFile(instructionFile)) ?? "")
+      return {
+        customInstructions,
+        instructionFile,
+        memory: {
+          ccIndex: config.memory?.cc_index ?? false,
+          autoConsolidation: config.dream?.auto ?? true,
+        },
+        maintenance: resolvePersonalizationMaintenance(config),
+        config,
+      }
+    })
+
+    const getGlobalAppControl = Effect.fn("Config.getGlobalAppControl")(function* () {
+      const config = yield* getGlobal()
+      const current = resolveGlobalAppControlConfig(config)
+      const service = yield* Effect.promise(() => readGlobalAppControlService())
+      return {
+        enabled: current.enabled,
+        permission: current.permission,
+        target: "app" as const,
+        availableTargets: ["app"] as const,
+        service,
+        config,
+      }
+    })
+
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Patch) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
@@ -1255,8 +1584,102 @@ export const layer = Layer.effect(
         yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
       }
 
+      if (isModelSelectionPatch(config)) {
+        yield* invalidateModelSelection()
+        return next
+      }
+
       yield* invalidate()
       return next
+    })
+
+    const saveGlobalPersonalization = Effect.fn("Config.saveGlobalPersonalization")(function* (
+      input: GlobalPersonalizationSave,
+    ) {
+      const managedPath = globalPersonalizationFile()
+      const customInstructions = normalizePersonalizationText(input.customInstructions)
+      const keepManagedInstructions = hasPersonalizationText(customInstructions)
+      const current = yield* getGlobal()
+      const nextInstructions = updateManagedInstructionPath(current.instructions, managedPath, keepManagedInstructions)
+      const file = globalConfigFile()
+      const before = (yield* readConfigFile(file)) ?? "{}"
+      const previousManaged = yield* readOptionalFile(managedPath)
+      const patch = {
+        instructions: nextInstructions,
+        memory: {
+          cc_index: input.memory.ccIndex,
+        },
+        dream: {
+          auto: input.maintenance.dreamEnabled,
+        },
+        distill: {
+          auto: input.maintenance.distillEnabled,
+        },
+        maintenance: {
+          enabled: input.maintenance.enabled,
+          scheduler_enabled: input.maintenance.schedulerEnabled,
+          dream_enabled: input.maintenance.dreamEnabled,
+          distill_enabled: input.maintenance.distillEnabled,
+        },
+      } satisfies Patch
+
+      let updated = before
+      if (!file.endsWith(".jsonc")) {
+        const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
+        const merged = mergeDeep(writable(existing), stripNulls(patch) as Record<string, unknown>)
+        if (!nextInstructions) {
+          delete merged.instructions
+        }
+        ConfigParse.schema(Info, merged, file)
+        updated = JSON.stringify(merged, null, 2)
+      } else {
+        updated = patchJsonc(before, stripNulls(patch))
+        if (!nextInstructions) {
+          updated = deleteJsoncPath(updated, ["instructions"])
+        }
+        ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
+      }
+
+      const restoreManaged = () =>
+        previousManaged === undefined
+          ? Effect.promise(() => fsNode.unlink(managedPath).catch(() => {}))
+          : writeFileAtomic(managedPath, previousManaged)
+
+      if (keepManagedInstructions) {
+        yield* writeFileAtomic(managedPath, customInstructions)
+      }
+      if (!keepManagedInstructions) {
+        yield* Effect.promise(() => fsNode.unlink(managedPath).catch(() => {}))
+      }
+
+      try {
+        yield* writeFileAtomic(file, updated)
+      } catch (error) {
+        yield* restoreManaged().pipe(Effect.catch(() => Effect.void))
+        throw error
+      }
+
+      yield* invalidate(true)
+      return yield* getGlobalPersonalization()
+    })
+
+    const saveGlobalAppControl = Effect.fn("Config.saveGlobalAppControl")(function* (input: GlobalAppControlSave) {
+      const next = yield* updateGlobal({
+        app_control: {
+          enabled: input.enabled,
+          permission: input.permission,
+        },
+      })
+      const current = resolveGlobalAppControlConfig(next)
+      const service = yield* Effect.promise(() => readGlobalAppControlService())
+      return {
+        enabled: current.enabled,
+        permission: current.permission,
+        target: "app" as const,
+        availableTargets: ["app"] as const,
+        service,
+        config: next,
+      }
     })
 
     const globalProviderFile = Effect.fnUntraced(function* (providerID: string) {
@@ -1300,16 +1723,87 @@ export const layer = Layer.effect(
       return parsed
     })
 
+    const upsertGlobalCustomProvider = Effect.fn("Config.upsertGlobalCustomProvider")(function* (
+      providerID: string,
+      provider: ConfigProvider.Info,
+      key?: string,
+    ): Effect.Effect<Info, never> {
+      const target = yield* Effect.fn(function* () {
+        for (const file of globalConfigFiles()) {
+          const before = yield* readConfigFile(file)
+          if (!before) continue
+          const config = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
+          const current = config.provider?.[providerID]
+          if (!current) continue
+          return { file, before, config, provider: current }
+        }
+        return {
+          file: globalConfigFile(),
+          before: undefined as string | undefined,
+          config: undefined as Info | undefined,
+          provider: undefined as ConfigProvider.Info | undefined,
+        }
+      })()
+
+      if (target.provider && !isCustomProviderConfig(target.provider)) {
+        throw new Error(`Provider ${providerID} is not a custom provider`)
+      }
+
+      const file = target.file
+      const before = target.before ?? (yield* readConfigFile(file)) ?? "{}"
+      const current = target.config ?? (yield* getGlobal())
+      const next = withGlobalCustomProvider(current, providerID, provider)
+
+      if (!file.endsWith(".jsonc")) {
+        const existingConfig = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
+        const merged = mergeDeep(writable(existingConfig), {
+          provider: next.provider,
+          disabled_providers: next.disabled_providers,
+        })
+        if (!next.provider) delete merged.provider
+        if (!next.disabled_providers) delete merged.disabled_providers
+        ConfigParse.schema(Info, merged, file)
+        yield* fs.writeFileString(file, JSON.stringify(merged, null, 2)).pipe(Effect.orDie)
+      } else {
+        let updated = patchJsonc(before, {
+          provider: {
+            [providerID]: provider,
+          },
+          disabled_providers: next.disabled_providers,
+        })
+        if (!next.provider) updated = deleteJsoncPath(updated, ["provider"])
+        if (!next.disabled_providers) updated = deleteJsoncPath(updated, ["disabled_providers"])
+        ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
+        yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
+      }
+
+      if (key) {
+        yield* authSvc.set(providerID, {
+          type: "api",
+          key,
+        }).pipe(Effect.orDie)
+      }
+
+      yield* invalidate()
+      return yield* getGlobal()
+    })
+
     return Service.of({
       get,
       getGlobal,
+      getGlobalPersonalization,
+      getGlobalAppControl,
       getConsoleState,
       update,
       updateGlobal,
+      saveGlobalPersonalization,
+      saveGlobalAppControl,
+      upsertGlobalCustomProvider,
       removeGlobalCustomProvider,
       upsertMcp,
       removeMcp,
       updateMcpEnabled,
+      updatePluginEnabled,
       invalidate,
       directories,
       waitForDependencies,

@@ -225,7 +225,7 @@ export const dict = {
   "tui.tips.username_toggle":
     "Activa/desactiva la visualización del nombre de usuario desde la paleta de comandos ({highlight}Ctrl+P{/highlight})",
   "tui.tips.docker":
-    "Ejecuta {highlight}docker run -it --rm ghcr.io/anomalyco/opencode{/highlight} para uso en contenedor",
+    "Ejecuta Lfcode en tu entorno de contenedor para un desarrollo aislado",
   "tui.tips.zen":
     "Usa {highlight}/connect{/highlight} con Lfcode Zen para modelos seleccionados y probados",
   "tui.tips.agents_md":
@@ -404,7 +404,7 @@ export const dict = {
   "tui.command.voice.control.title": "Alternar control de voz (multimodal)",
   "tui.command.voice.control.title_on": "Control de voz: activado (multimodal) — clic para desactivar",
   "tui.command.voice.control.title_off": "Control de voz: desactivado (ASR rápido) — clic para activar",
-  "tui.voice.error.no_auth": "Inicia sesión en MiMo primero",
+  "tui.voice.error.no_auth": "Selecciona primero un modelo compatible con OpenAI que admita audio",
   "tui.voice.error.no_recorder": "No se encontró herramienta de grabación, instala sox",
   "tui.voice.error.too_short": "Grabación demasiado corta",
   "tui.voice.error.network": "La transcripción falló, verifica tu red",

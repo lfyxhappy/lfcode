@@ -25,7 +25,11 @@ import { z } from "zod/v4"
 import { convertToOpenAICompatibleChatMessages } from "./convert-to-openai-compatible-chat-messages"
 import { getResponseMetadata } from "./get-response-metadata"
 import { mapOpenAICompatibleFinishReason } from "./map-openai-compatible-finish-reason"
-import { type OpenAICompatibleChatModelId, openaiCompatibleProviderOptions } from "./openai-compatible-chat-options"
+import {
+  type OpenAICompatibleChatModelId,
+  type OpenAICompatibleProviderOptions,
+  openaiCompatibleProviderOptions,
+} from "./openai-compatible-chat-options"
 import { defaultOpenAICompatibleErrorStructure, type ProviderErrorStructure } from "../openai-compatible-error"
 import type { MetadataExtractor } from "./openai-compatible-metadata-extractor"
 import { prepareTools } from "./openai-compatible-prepare-tools"
@@ -103,12 +107,12 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
 
     // Parse provider options
     const compatibleOptions = Object.assign(
-      (await parseProviderOptions({
+      (await parseProviderOptions<OpenAICompatibleProviderOptions>({
         provider: "copilot",
         providerOptions,
         schema: openaiCompatibleProviderOptions,
       })) ?? {},
-      (await parseProviderOptions({
+      (await parseProviderOptions<OpenAICompatibleProviderOptions>({
         provider: this.providerOptionsName,
         providerOptions,
         schema: openaiCompatibleProviderOptions,
@@ -206,7 +210,9 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
       headers: combineHeaders(this.config.headers(), options.headers),
       body: args,
       failedResponseHandler: this.failedResponseHandler,
-      successfulResponseHandler: createJsonResponseHandler(OpenAICompatibleChatResponseSchema),
+      successfulResponseHandler: createJsonResponseHandler<OpenAICompatibleChatResponse>(
+        OpenAICompatibleChatResponseSchema,
+      ),
       abortSignal: options.abortSignal,
       fetch: this.config.fetch,
     })
@@ -774,6 +780,8 @@ const OpenAICompatibleChatResponseSchema = z.object({
   ),
   usage: openaiCompatibleTokenUsageSchema,
 })
+
+type OpenAICompatibleChatResponse = z.infer<typeof OpenAICompatibleChatResponseSchema>
 
 // limited version of the schema, focussed on what is needed for the implementation
 // this approach limits breakages when the API changes and increases efficiency

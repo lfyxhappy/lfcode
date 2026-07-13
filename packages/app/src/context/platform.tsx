@@ -16,6 +16,7 @@ import { ServerConnection } from "./server"
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
 type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: string[]; extensions?: string[] }
+type OpenAttachmentPickerOptions = { title?: string; multiple?: boolean }
 type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type UpdateInfo = { updateAvailable: boolean; version?: string }
 type RendererMemoryInfo = { private: number; shared: number; residentSet: number }
@@ -150,6 +151,9 @@ export type Platform = {
   /** Open native file picker dialog (Tauri only) */
   openFilePickerDialog?(opts?: OpenFilePickerOptions): Promise<PickerPaths>
 
+  /** Open a native picker that accepts files and folders (desktop only) */
+  openAttachmentPickerDialog?(opts?: OpenAttachmentPickerOptions): Promise<PickerPaths>
+
   /** Save file picker dialog (Tauri only) */
   saveFilePickerDialog?(opts?: SaveFilePickerOptions): Promise<string | null>
 
@@ -200,6 +204,9 @@ export type Platform = {
 
   /** Read a user-dropped image from an already-resolved absolute path. */
   readDroppedImage?(path: string): Promise<{ dataUrl: string; filename: string; mime: string } | null>
+
+  /** Read VS Code-compatible snippets from the managed user and project directories. */
+  readEditorSnippets?(directory: string): Promise<{ path: string; content: string }[]>
 
   /** Receive desktop-native file transfers resolved by the preload bridge. */
   onNativeFileTransfer?(cb: (transfer: { dropzone?: string; paths: string[]; images: string[] }) => void): () => void

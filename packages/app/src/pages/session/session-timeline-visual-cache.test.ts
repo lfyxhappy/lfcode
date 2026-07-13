@@ -11,7 +11,7 @@ describe("session timeline visual cache", () => {
 
   test("restores an inert visual handoff only for an identical surface revision", () => {
     const root = document.createElement("div")
-    root.innerHTML = '<div id="message-a">A</div>'
+    root.innerHTML = '<div id="message-a" data-viewport-turn="turn-a">A</div>'
     root.scrollTop = 42
     rememberSessionTimelineVisualSnapshot({
       key: "dir/session/main",
@@ -32,6 +32,7 @@ describe("session timeline visual cache", () => {
 
   test("keeps no more than eight visual handoffs", () => {
     const root = document.createElement("div")
+    root.innerHTML = '<div data-viewport-turn="turn">A</div>'
     for (let index = 0; index < 9; index++) {
       rememberSessionTimelineVisualSnapshot({
         key: `dir/session-${index}/main`,
@@ -44,5 +45,18 @@ describe("session timeline visual cache", () => {
 
     expect(sessionTimelineVisualSnapshotDiagnostics().entries).toHaveLength(8)
     expect(readSessionTimelineVisualSnapshot({ key: "dir/session-0/main", revision: "1" })).toBeUndefined()
+  })
+
+  test("does not retain an empty handoff that could cover a real timeline", () => {
+    const root = document.createElement("div")
+    rememberSessionTimelineVisualSnapshot({
+      key: "dir/session/main",
+      sessionID: "session",
+      revision: "1",
+      turnIDs: [],
+      root,
+    })
+
+    expect(readSessionTimelineVisualSnapshot({ key: "dir/session/main", revision: "1" })).toBeUndefined()
   })
 })

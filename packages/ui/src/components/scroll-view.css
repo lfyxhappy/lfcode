@@ -20,7 +20,7 @@
   right: 0;
   top: 0;
   width: 12px;
-  transition: opacity 200ms ease;
+  transition: opacity var(--motion-micro-ms) var(--motion-ease-out);
   cursor: default;
   user-select: none;
   opacity: 0;
@@ -37,7 +37,7 @@
   border-radius: 9999px;
   background-color: var(--border-weak-base);
   backdrop-filter: blur(4px);
-  transition: background-color 150ms ease;
+  transition: background-color var(--motion-micro-ms) var(--motion-ease-out);
 }
 
 .scroll-view__thumb:hover::after,

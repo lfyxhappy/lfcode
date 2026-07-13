@@ -1,9 +1,10 @@
-import { Component, For, Show } from "solid-js"
+import { Component, For, Show, createSignal } from "solid-js"
 import { FileIcon } from "@lfcode-ai/ui/file-icon"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { getDirectory, getFilename, getFilenameTruncated } from "@lfcode-ai/shared/util/path"
 import type { ContextItem } from "@/context/prompt"
+import { removePromptAttachment } from "./attachment-motion"
 
 type PromptContextItem = ContextItem & { key: string }
 
@@ -25,6 +26,7 @@ export const PromptContextItems: Component<ContextItemsProps> = (props) => {
             const filename = getFilename(item.path)
             const label = getFilenameTruncated(item.path, 14)
             const selected = props.active(item)
+            const [removing, setRemoving] = createSignal(false)
 
             return (
               <Tooltip
@@ -40,8 +42,10 @@ export const PromptContextItems: Component<ContextItemsProps> = (props) => {
                 openDelay={2000}
               >
                 <div
+                  data-component="prompt-context-item"
+                  data-removing={removing() || undefined}
                   classList={{
-                    "group shrink-0 flex flex-col rounded-[6px] pl-2 pr-1 py-1 max-w-[200px] h-12 cursor-default transition-all transition-transform shadow-xs-border hover:shadow-xs-border-hover": true,
+                    "group shrink-0 flex flex-col rounded-[6px] pl-2 pr-1 py-1 max-w-[200px] h-12 cursor-default shadow-xs-border hover:shadow-xs-border-hover": true,
                     "hover:bg-surface-interactive-weak": !!item.commentID && !selected,
                     "bg-surface-interactive-hover hover:bg-surface-interactive-hover shadow-xs-border-hover": selected,
                     "bg-background-stronger": !selected,
@@ -66,10 +70,12 @@ export const PromptContextItems: Component<ContextItemsProps> = (props) => {
                       type="button"
                       icon="close-small"
                       variant="ghost"
-                      class="ml-auto size-3.5 text-text-weak hover:text-text-strong transition-all"
+                      data-component="prompt-context-remove"
+                      class="ml-auto size-3.5 text-text-weak hover:text-text-strong"
                       onClick={(e) => {
                         e.stopPropagation()
-                        props.remove(item)
+                        if (removing()) return
+                        removePromptAttachment(() => props.remove(item), setRemoving)
                       }}
                       aria-label={props.t("prompt.context.removeFile")}
                     />

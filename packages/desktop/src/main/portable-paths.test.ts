@@ -5,7 +5,7 @@ import path from "node:path"
 import { createRootLayout, migrateRootLayout, prepareDesktopBootstrap, resolveBootstrapTarget, resolveManagedRootDirectory } from "./bootstrap"
 
 async function tmpdir() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-desktop-bootstrap-"))
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lfcode-desktop-bootstrap-"))
   return {
     path: dir,
     async [Symbol.asyncDispose]() {
@@ -15,30 +15,6 @@ async function tmpdir() {
 }
 
 describe("desktop bootstrap paths", () => {
-  const codegraphCommand = [
-    "{env:LFCODE_CODEGRAPH_NODE_EXE}",
-    "--liftoff-only",
-    "{env:LFCODE_CODEGRAPH_ENTRY}",
-    "serve",
-    "--mcp",
-  ]
-  const codegraphConfig = {
-    type: "local",
-    command: codegraphCommand,
-    environment: {
-      NODE_PATH: "{env:LFCODE_CODEGRAPH_NODE_PATH}",
-    },
-    enabled: true,
-  }
-  const shimCodegraphConfig = {
-    type: "local",
-    command: codegraphCommand,
-    environment: {
-      ELECTRON_RUN_AS_NODE: "1",
-      CODEGRAPH_INSTALL_DIR: "{env:LFCODE_CACHE_DIR}/codegraph",
-    },
-    enabled: true,
-  }
   const playwrightLegacyCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"]
   const playwrightRemoteConfig = {
     type: "remote",
@@ -56,6 +32,14 @@ describe("desktop bootstrap paths", () => {
       ELECTRON_RUN_AS_NODE: "1",
     },
     enabled: true,
+  }
+  const defaultRootConfig = {
+    $schema: "https://lfcode.ai/config.json",
+    lsp: true,
+    mcp: {
+      playwright: playwrightRemoteConfig,
+      "windows-computer-use": windowsComputerUseConfig,
+    },
   }
   const legacyWindowsComputerUseCommand = [
     "cmd",
@@ -128,9 +112,10 @@ describe("desktop bootstrap paths", () => {
     await fs.mkdir(layout.dataDir, { recursive: true })
     await fs.mkdir(layout.stateDir, { recursive: true })
     await fs.writeFile(path.join(sources.configDir, "lfcode.json"), "{\"providers\":{\"legacy\":true}}")
+    await fs.writeFile(path.join(sources.configDir, "unrecognized-config.jsonc"), "{\"providers\":{\"ignored\":true}}")
     await fs.writeFile(path.join(sources.configDir, "themes", "ocean.json"), "{\"name\":\"ocean\"}")
     await fs.writeFile(path.join(sources.dataDir, "auth.json"), "legacy-data")
-    await fs.writeFile(path.join(sources.stateDir, "opencode.db"), "legacy-db")
+    await fs.writeFile(path.join(sources.stateDir, "session-cache.db"), "legacy-db")
     await fs.writeFile(path.join(sources.cacheDir, "blob.txt"), "legacy-cache")
     await fs.writeFile(path.join(sources.userDataDir, "settings.json"), "{\"from\":\"legacy\"}")
     await fs.writeFile(layout.configFile, "{\"providers\":{\"root\":true}}")
@@ -144,11 +129,19 @@ describe("desktop bootstrap paths", () => {
     expect(migration.performed).toBe(true)
     expect(await fs.readFile(layout.configFile, "utf8")).toBe("{\"providers\":{\"root\":true}}")
     expect(await fs.readFile(path.join(layout.root, "themes", "ocean.json"), "utf8")).toBe("{\"name\":\"ocean\"}")
+    expect(await fs.stat(path.join(layout.root, "unrecognized-config.jsonc")).then(() => true, () => false)).toBe(false)
     expect(await fs.readFile(path.join(layout.dataDir, "auth.json"), "utf8")).toBe("root-data")
-    expect(await fs.readFile(path.join(layout.stateDir, "opencode.db"), "utf8")).toBe("legacy-db")
+    expect(await fs.readFile(path.join(layout.stateDir, "session-cache.db"), "utf8")).toBe("legacy-db")
     expect(await fs.readFile(path.join(layout.cacheDir, "blob.txt"), "utf8")).toBe("legacy-cache")
     expect(await fs.readFile(path.join(layout.userDataDir, "settings.json"), "utf8")).toBe("{\"from\":\"legacy\"}")
-    expect(JSON.parse(await fs.readFile(layout.migrationMarker, "utf8"))).toMatchObject({ version: 1 })
+    expect(JSON.parse(await fs.readFile(layout.migrationMarker, "utf8"))).toMatchObject({
+      copiedEntries: expect.any(Number),
+      preservedEntries: expect.any(Number),
+      scope: "lfcode-root-layout",
+      version: 1,
+    })
+    expect(JSON.parse(await fs.readFile(layout.migrationMarker, "utf8")).copied).toBeUndefined()
+    expect(JSON.parse(await fs.readFile(layout.migrationMarker, "utf8")).preserved).toBeUndefined()
   })
 
   test("skips repeated full migration when the marker already exists", async () => {
@@ -207,17 +200,10 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        codegraph: codegraphConfig,
-        playwright: playwrightRemoteConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-      },
-    })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
-  test("writes shim codegraph config when the bundled platform runtime is unavailable", async () => {
+  test("does not write codegraph MCP config when the bundled platform runtime is unavailable", async () => {
     await using tmp = await tmpdir()
     const root = path.join(tmp.path, "root")
     await fs.mkdir(root, { recursive: true })
@@ -236,14 +222,8 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        codegraph: shimCodegraphConfig,
-        playwright: playwrightRemoteConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-      },
-    })
+    expect(state.codegraph).toEqual({ kind: "external" })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
   test("adds bundled MCP defaults to a migrated legacy config without mcp entries", async () => {
@@ -281,16 +261,11 @@ describe("desktop bootstrap paths", () => {
 
     expect(state.mode).toBe("root")
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
+      ...defaultRootConfig,
       providers: {
         test: {
           npm: "@ai-sdk/openai-compatible",
         },
-      },
-      mcp: {
-        codegraph: codegraphConfig,
-        playwright: playwrightRemoteConfig,
-        "windows-computer-use": windowsComputerUseConfig,
       },
     })
     expect(JSON.parse(await fs.readFile(path.join(root, "state", "migration.json"), "utf8"))).toMatchObject({
@@ -346,6 +321,7 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
+      lsp: true,
       mcp: {
         markitdown: {
           type: "local",
@@ -353,7 +329,9 @@ describe("desktop bootstrap paths", () => {
           enabled: true,
         },
         codegraph: {
-          ...codegraphConfig,
+          type: "local",
+          command: ["codegraph", "serve", "--mcp"],
+          enabled: true,
         },
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
@@ -402,8 +380,8 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
       $schema: "https://lfcode.ai/config.json",
+      lsp: true,
       mcp: {
-        codegraph: codegraphConfig,
         playwright: customPlaywright,
         "windows-computer-use": windowsComputerUseConfig,
       },
@@ -446,14 +424,7 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        codegraph: codegraphConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-        playwright: playwrightRemoteConfig,
-      },
-    })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
   test("upgrades the previous shipped windows-computer-use config to the bundled node launcher", async () => {
@@ -492,14 +463,7 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        codegraph: codegraphConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-        playwright: playwrightRemoteConfig,
-      },
-    })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
   test("upgrades the broken cmd-wrapped windows-computer-use config", async () => {
@@ -538,17 +502,10 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(state.mode).toBe("root")
-    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        codegraph: codegraphConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-        playwright: playwrightRemoteConfig,
-      },
-    })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
-  test("migrates an existing installed-root layout into the managed home root", async () => {
+  test("migrates an existing Lfcode installed-root layout into the managed home root", async () => {
     await using tmp = await tmpdir()
     const home = path.join(tmp.path, "home")
     const installedRoot = path.join(tmp.path, "Program Files", "Lfcode")
@@ -558,7 +515,7 @@ describe("desktop bootstrap paths", () => {
     await fs.mkdir(home, { recursive: true })
     await fs.mkdir(path.join(installedRoot, "data"), { recursive: true })
     await fs.mkdir(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev"), { recursive: true })
-    await fs.writeFile(path.join(installedRoot, "opencode.jsonc"), "{\"providers\":{\"root\":true}}")
+    await fs.writeFile(path.join(installedRoot, "lfcode.jsonc"), "{\"providers\":{\"root\":true}}")
     await fs.writeFile(path.join(installedRoot, "data", "auth.json"), "legacy-root-data")
     await fs.writeFile(path.join(installedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "{\"from\":\"root\"}")
 
@@ -579,31 +536,22 @@ describe("desktop bootstrap paths", () => {
     expect(state.layout?.root).toBe(managedRoot)
     expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
       providers: { root: true },
-      mcp: {
-        codegraph: codegraphConfig,
-        playwright: playwrightRemoteConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-      },
+      lsp: true,
+      mcp: defaultRootConfig.mcp,
     })
-    expect(
-      await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(
-        () => true,
-        () => false,
-      ),
-    ).toBe(false)
     expect(await fs.readFile(path.join(managedRoot, "data", "auth.json"), "utf8")).toBe("legacy-root-data")
     expect(await fs.readFile(path.join(managedRoot, "state", "electron", "com.lfyxhappy.lfcode.dev", "settings.json"), "utf8")).toBe(
       "{\"from\":\"root\"}",
     )
   })
 
-  test("imports a managed-root opencode.jsonc once and removes the deprecated source", async () => {
+  test("ignores unrecognized root config files", async () => {
     await using tmp = await tmpdir()
     const home = path.join(tmp.path, "home")
     const managedRoot = path.join(home, ".lfcode")
 
     await fs.mkdir(path.join(managedRoot, "state"), { recursive: true })
-    await fs.writeFile(path.join(managedRoot, "opencode.jsonc"), "{\"providers\":{\"legacy\":true}}")
+    await fs.writeFile(path.join(managedRoot, "unrecognized-config.jsonc"), "{\"providers\":{\"ignored\":true}}")
     await fs.writeFile(path.join(managedRoot, "state", "migration.json"), "{\"version\":1}")
 
     const state = await prepareDesktopBootstrap({
@@ -622,47 +570,56 @@ describe("desktop bootstrap paths", () => {
     expect(state.rootKind).toBe("managed")
     expect(state.layout?.root).toBe(managedRoot)
     expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
-      providers: { legacy: true },
+      $schema: "https://lfcode.ai/config.json",
+      lsp: true,
       mcp: {
         playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
     })
-    expect(await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(() => true, () => false)).toBe(false)
+    expect(await fs.readFile(path.join(managedRoot, "unrecognized-config.jsonc"), "utf8")).toBe(
+      "{\"providers\":{\"ignored\":true}}",
+    )
   })
 
-  test("does not resurrect a deprecated config after its one-time import completed", async () => {
+  test("compacts historical migration paths into Lfcode-only audit counts", async () => {
     await using tmp = await tmpdir()
-    const home = path.join(tmp.path, "home")
-    const managedRoot = path.join(home, ".lfcode")
+    const layout = createRootLayout(path.join(tmp.path, "root"), "com.lfyxhappy.lfcode.dev")
 
-    await fs.mkdir(path.join(managedRoot, "state"), { recursive: true })
-    await fs.writeFile(path.join(managedRoot, "opencode.jsonc"), "{\"providers\":{\"legacy\":true}}")
+    await fs.mkdir(layout.stateDir, { recursive: true })
     await fs.writeFile(
-      path.join(managedRoot, "state", "migration.json"),
-      JSON.stringify({ deprecatedConfigMigrationVersion: 1 }),
+      layout.migrationMarker,
+      JSON.stringify({
+        copied: ["C:\\previous-root\\old-config.jsonc"],
+        deprecatedConfigMigrationVersion: 1,
+        preserved: ["C:\\previous-root\\settings.json"],
+        version: 1,
+      }),
     )
 
     await prepareDesktopBootstrap({
       appId: "com.lfyxhappy.lfcode.dev",
       appName: "Lfcode Dev",
       execPath: path.join(tmp.path, "Program Files", "Lfcode", "Lfcode.exe"),
-      homeDir: home,
+      homeDir: path.join(tmp.path, "home"),
       isPackaged: true,
       legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
       migrationSources: [],
       codegraphMode: "bundled",
       platform: "win32",
+      portableRoot: layout.root,
     })
 
-    expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
-      $schema: "https://lfcode.ai/config.json",
-      mcp: {
-        playwright: playwrightRemoteConfig,
-        "windows-computer-use": windowsComputerUseConfig,
-      },
+    const marker = JSON.parse(await fs.readFile(layout.migrationMarker, "utf8"))
+    expect(marker).toMatchObject({
+      copiedEntries: 1,
+      preservedEntries: 1,
+      scope: "lfcode-root-layout",
+      version: 1,
     })
-    expect(await fs.stat(path.join(managedRoot, "opencode.jsonc")).then(() => true, () => false)).toBe(true)
+    expect(marker.copied).toBeUndefined()
+    expect(marker.preserved).toBeUndefined()
+    expect(marker.deprecatedConfigMigrationVersion).toBeUndefined()
   })
 
   test("normalizes stale loopback playwright remote config back to env placeholders", async () => {
@@ -705,6 +662,7 @@ describe("desktop bootstrap paths", () => {
     })
 
     expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
+      lsp: true,
       mcp: {
         playwright: playwrightRemoteConfig,
       },

@@ -1,4 +1,4 @@
-import type { Message, UserMessage } from "@lfcode-ai/sdk/v2"
+import type { Message, Part, UserMessage } from "@lfcode-ai/sdk/v2"
 import type { Session } from "@lfcode-ai/sdk/v2/client"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
@@ -31,6 +31,7 @@ import { createAutoScroll } from "@lfcode-ai/ui/hooks"
 import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { Binary } from "@lfcode-ai/shared/util/binary"
+import { getFilename } from "@lfcode-ai/shared/util/path"
 import type { FileReferenceApp } from "@lfcode-ai/ui/context/file-reference"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { useLocation, useSearchParams } from "@solidjs/router"
@@ -69,6 +70,7 @@ import { getSessionHandoff, SESSION_HANDOFF_EVENT, setSessionHandoff } from "@/p
 import { SessionTimelineSurface } from "@/pages/session/session-timeline-surface"
 import { buildHtmlComponentFollowupDraft } from "@/pages/session/html-component-followup"
 import { BrowserKeepaliveHost } from "@/pages/session/browser-keepalive-host"
+import { SessionJobsRail } from "@/components/session/session-jobs-rail"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
@@ -77,7 +79,7 @@ import { SelectionToolbar } from "@/pages/session/selection-toolbar"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { DetachedSidePanelView } from "@/pages/session/detached-side-panel-view"
 import { getDetachedSidePanelContext } from "@/pages/session/detached-side-panel"
-import { createOpenCodeEditorPath } from "@/pages/session/file-tab-navigation"
+import { createLfcodeEditorPath } from "@/pages/session/file-tab-navigation"
 import {
   buildSessionMessageViews,
   createSessionHistoryWindow,
@@ -93,9 +95,8 @@ import {
 } from "@/pages/session/session-viewport-registry"
 import { TimelineVirtualController } from "@/pages/session/timeline-virtual-controller"
 import { findTimelineViewportAnchor } from "@/pages/session/timeline-viewport-anchor"
-import { rememberSessionVirtualCache, sessionVirtualCacheDiagnostics } from "@/pages/session/session-virtual-cache"
+import { sessionVirtualCacheDiagnostics } from "@/pages/session/session-virtual-cache"
 import {
-  readSessionTimelineVisualSnapshot,
   rememberSessionTimelineVisualSnapshot,
   sessionTimelineVisualSnapshotDiagnostics,
 } from "@/pages/session/session-timeline-visual-cache"
@@ -219,7 +220,7 @@ export default function Page() {
 
   const workspaceKey = createMemo(() => createSessionStorageKey(params.dir))
   const workspaceTabs = createMemo(() => layout.tabs(workspaceKey))
-  const openCodeEditorPath = createOpenCodeEditorPath({
+  const openLfcodeEditorPath = createLfcodeEditorPath({
     normalizePath: file.normalize,
     loadFile: file.load,
     tabForPath: file.tab,
@@ -300,6 +301,9 @@ export default function Page() {
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const desktopFileTreeOpen = createMemo(() => isDesktop() && layout.fileTree.opened())
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
+  const desktopSummaryCardVisible = createMemo(
+    () => isDesktop() && !!params.id && !desktopSidePanelOpen() && view().summaryCard.opened(),
+  )
   const sessionPanelWidth = createMemo(() => {
     if (!desktopSidePanelOpen()) return "100%"
     if (desktopReviewOpen()) return `${layout.session.width()}px`
@@ -326,6 +330,11 @@ export default function Page() {
 
   const openReviewPanel = () => {
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
+  }
+
+  const openFileTree = () => {
+    layout.fileTree.open()
+    layout.fileTree.setTab("all")
   }
 
   let pendingDeferredTabActivationFrame: number | undefined
@@ -449,6 +458,27 @@ export default function Page() {
   const activeFileTab = tabState.activeFileTab
   const revertMessageID = createMemo(() => info()?.revert?.messageID)
   const messages = createMemo(() => (params.id ? (sync.data.message[params.id] ?? []) : []))
+  const sources = createMemo(() => {
+    const items = new Map<string, { path: string; title: string }>()
+    const add = (path: string) => {
+      const normalized = path.replaceAll("\\", "/")
+      const key = normalized.toLowerCase()
+      if (items.has(key)) return
+      items.set(key, { path: normalized, title: getFilename(normalized) || normalized })
+    }
+
+    for (const item of prompt.current()) {
+      if (item.type === "file") add(item.path)
+    }
+    for (const message of messages()) {
+      if (message.role !== "user") continue
+      for (const part of (sync.data.part[message.id] ?? []) as Part[]) {
+        if (part.type !== "file" || part.source?.type !== "file") continue
+        add(part.source.path)
+      }
+    }
+    return [...items.values()]
+  })
   const messagesReady = createMemo(() => {
     const id = params.id
     if (!id) return true
@@ -505,11 +535,29 @@ export default function Page() {
     changes: "recent-1" as ReviewMode,
     newSessionWorktree: "main",
   })
-  const [timelinePreparing, setTimelinePreparing] = createSignal(false)
   const mainComposerScope = createMemo(() => {
     if (!params.id) return
     return { dir: sdk.directory, id: params.id }
   })
+  const attachSources = (paths: string[]) => {
+    const current = prompt.current()
+    const existing = new Set(
+      current
+        .filter((item) => item.type === "file")
+        .map((item) => item.path.replaceAll("\\", "/").toLowerCase()),
+    )
+    const next = paths.reduce<Prompt>((result, path) => {
+      const normalized = path.replaceAll("\\", "/")
+      const key = normalized.toLowerCase()
+      if (existing.has(key)) return result
+      existing.add(key)
+      const start = result.reduce((total, item) => total + ("content" in item ? item.content.length : 0), 0)
+      const content = "@" + normalized
+      return [...result, { type: "file", path: normalized, content, start, end: start + content.length }]
+    }, current)
+    if (next === current) return
+    prompt.set(next, next.reduce((total, item) => total + ("content" in item ? item.content.length : 0), 0))
+  }
 
   const [followup, setFollowup] = persisted(
     Persist.workspace(sdk.directory, "followup", ["followup.v1"]),
@@ -660,9 +708,6 @@ export default function Page() {
   let viewportController: TimelineVirtualController | undefined
   let timelineVirtualizer: VirtualizerHandle | undefined
   let timelineSnapshotHost: HTMLDivElement | undefined
-  let timelineSnapshotTimer: number | undefined
-  let timelineSnapshotFrame: number | undefined
-  let timelineSnapshotKey: string | undefined
 
   const scrollGestureWindowMs = 250
   const scrollGestureThrottleMs = 64
@@ -682,17 +727,16 @@ export default function Page() {
 
   const hasScrollGesture = () => Date.now() - ui.scrollGesture < scrollGestureWindowMs
 
-  const [sessionSync] = createResource(
-    () => [sdk.directory, params.id] as const,
-    ([directory, id]) => {
-      if (!id) return
+  createEffect(() => {
+    const directory = sdk.directory
+    const id = params.id
+    if (!id) return
 
-      const cached = untrack(() => sync.data.message[id] !== undefined)
-      const prefetch = cached ? getSessionPrefetch(directory, id) : undefined
-      const force = !cached && (!prefetch || Date.now() - prefetch.at > SESSION_PREFETCH_TTL)
-      return sync.session.sync(id, force ? { force: true } : undefined)
-    },
-  )
+    const cached = untrack(() => sync.data.message[id] !== undefined)
+    const prefetch = cached ? getSessionPrefetch(directory, id) : undefined
+    const force = !cached && (!prefetch || Date.now() - prefetch.at > SESSION_PREFETCH_TTL)
+    void sync.session.sync(id, force ? { force: true } : undefined).catch(() => undefined)
+  })
 
   createEffect(
     on(
@@ -1364,29 +1408,7 @@ export default function Page() {
     [...root.querySelectorAll<HTMLElement>("[data-viewport-turn]")].find((el) => el.dataset.viewportTurn === turnID)
 
   const clearTimelineVisualSnapshot = () => {
-    if (timelineSnapshotTimer !== undefined) window.clearTimeout(timelineSnapshotTimer)
-    if (timelineSnapshotFrame !== undefined) cancelAnimationFrame(timelineSnapshotFrame)
-    timelineSnapshotTimer = undefined
-    timelineSnapshotFrame = undefined
-    timelineSnapshotKey = undefined
     timelineSnapshotHost?.replaceChildren()
-  }
-
-  const showTimelineVisualSnapshot = (input: { key: string; revision: string }) => {
-    if (!timelineSnapshotHost) return false
-    const snapshot = readSessionTimelineVisualSnapshot(input)
-    if (!snapshot) return false
-    timelineSnapshotHost.replaceChildren(snapshot.root)
-    timelineSnapshotKey = input.key
-    if (timelineSnapshotFrame !== undefined) cancelAnimationFrame(timelineSnapshotFrame)
-    timelineSnapshotFrame = requestAnimationFrame(() => {
-      timelineSnapshotFrame = undefined
-      snapshot.root.scrollTop = snapshot.scrollTop
-      snapshot.root.scrollLeft = snapshot.scrollLeft
-    })
-    if (timelineSnapshotTimer !== undefined) window.clearTimeout(timelineSnapshotTimer)
-    timelineSnapshotTimer = window.setTimeout(clearTimelineVisualSnapshot, 3_000)
-    return true
   }
 
   const captureTimelineVisualSnapshot = () => {
@@ -1403,21 +1425,9 @@ export default function Page() {
       turnIDs,
       root,
     })
-    if (timelineSnapshotHost?.childElementCount) return
-    showTimelineVisualSnapshot({ key: `${surface.key}/main`, revision })
   }
 
-  const captureTimelineHotState = () => {
-    const surface = activeMainTimelineSurface()
-    if (surface && timelineVirtualizer && scroller && matchesScrollerOwner(scroller, surface.sessionID)) {
-      rememberSessionVirtualCache({
-        key: `${surface.key}/main`,
-        sessionID: surface.sessionID,
-        turnIDs: surface.history.renderedUserMessages().map((message) => message.id),
-        revision: String(surface.contentRevision()),
-        cache: timelineVirtualizer.cache,
-      })
-    }
+  const captureTimelineSurfaceState = () => {
     captureTimelineVisualSnapshot()
   }
 
@@ -1622,17 +1632,10 @@ export default function Page() {
         ?.renderedUserMessages()
         .map((message) => message.id) ?? [],
     onPhase: (phase, detail) => {
-      setTimelinePreparing(phase === "requested" || phase === "preparing")
-      if (phase === "requested" || phase === "preparing") {
-        const surface = activeMainTimelineSurface()
-        if (surface) {
-          showTimelineVisualSnapshot({
-            key: `${surface.key}/main`,
-            revision: String(surface.contentRevision()),
-          })
-        }
-      }
       if (phase === "committed") {
+        requestAnimationFrame(clearTimelineVisualSnapshot)
+      }
+      if (phase === "cancelled") {
         requestAnimationFrame(clearTimelineVisualSnapshot)
       }
       document.documentElement.dataset.timelineSurfacePhase = phase
@@ -1668,7 +1671,7 @@ export default function Page() {
     const unregisterViewport = registerSessionViewport({
       key: surface.key,
       flush: () => viewportController?.flush(),
-      snapshot: captureTimelineHotState,
+      snapshot: captureTimelineSurfaceState,
     })
     const unregisterSurface = registerSessionViewSurface({
       key: surface.key,
@@ -1676,7 +1679,7 @@ export default function Page() {
       surface: "main",
       phase: "active",
       freeze: () => {
-        captureTimelineHotState()
+        captureTimelineSurfaceState()
         viewportController?.flush()
         viewportController?.cancelRestore()
         autoScroll.pause()
@@ -1686,7 +1689,7 @@ export default function Page() {
         viewportController?.notifyDataReady()
       },
       cool: () => {
-        captureTimelineHotState()
+        captureTimelineSurfaceState()
         viewportController?.deactivate()
       },
       estimateWeight: () => surface.history.renderedUserMessages().length,
@@ -1903,17 +1906,9 @@ export default function Page() {
   const waitForFileTabMode = async (mode: "edit" | "preview", attempts = 90) => {
     for (let index = 0; index < attempts; index += 1) {
       const state = readSessionAutomationState().fileTab
-      if (mode === "preview") {
-        if (activeCppToolbarButton("preview")?.getAttribute("data-variant") === "secondary") return state
-      }
-      if (mode === "edit") {
-        if (
-          activeCppToolbarButton("edit")?.getAttribute("data-variant") === "secondary" &&
-          state.loaded &&
-          state.editor.implementation !== "none"
-        ) {
-          return state
-        }
+      if (activeFileTabMode() === mode) {
+        if (mode === "preview") return state
+        if (state.loaded && state.editor.implementation !== "none") return state
       }
       await waitForAutomationFrames(1)
     }
@@ -1986,6 +1981,14 @@ export default function Page() {
   }
 
   const resolveUiToken = (input: UiDriverQueryInput) => {
+    if (input.token === "settings.toggle") {
+      const button = document.querySelector('[data-action="settings-toggle"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "settings.tab.editor") {
+      const button = document.querySelector('[data-action="settings-tab-editor"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
     if (input.token === "composer.main.input") {
       return inputRef
     }
@@ -2477,12 +2480,17 @@ export default function Page() {
     }
   }
 
+  const activeFileTabMode = () => {
+    const mode = activeFileTabPanel()?.dataset.editorMode
+    if (mode === "edit" || mode === "preview") return mode
+  }
+
   const activeCppToolbarButton = (kind: "edit" | "preview" | "save" | "run" | "reload") => {
     const panel = activeFileTabPanel()
     if (!(panel instanceof HTMLElement)) return
     const selectors = {
-      edit: '[data-automation-id="cpp-file-edit"]',
-      preview: '[data-automation-id="cpp-file-preview"]',
+      edit: '[data-automation-id="code-file-edit"]',
+      preview: '[data-automation-id="code-file-preview"]',
       save: '[data-automation-id="cpp-file-save"]',
       run: '[data-automation-id="cpp-file-run"]',
       reload: '[data-automation-id="cpp-file-reload"]',
@@ -3070,7 +3078,7 @@ export default function Page() {
       const selection = value?.selection
       const startLineNumber = typeof selection?.startLineNumber === "number" ? selection.startLineNumber : undefined
       const startColumn = typeof selection?.startColumn === "number" ? selection.startColumn : undefined
-      await openCodeEditorPath({
+      await openLfcodeEditorPath({
         path: targetPath,
         selection:
           startLineNumber && startColumn
@@ -3092,6 +3100,9 @@ export default function Page() {
       const value = input as { mode?: unknown } | undefined
       const mode = typeof value?.mode === "string" ? value.mode : ""
       if (mode !== "edit" && mode !== "preview") throw new Error("Missing file tab mode")
+      if (activeFileTabMode() === mode) {
+        return { mode, state: readSessionAutomationState() }
+      }
       const button = activeCppToolbarButton(mode)
       if (!button) throw new Error(`Active file tab ${mode} button is not available`)
       button.click()
@@ -3686,6 +3697,7 @@ export default function Page() {
         turnIDs={() => history.renderedUserMessages().map((message) => message.id)}
         contentRevision={() => String(contentRevision())}
         centered={centered()}
+        rightInset={desktopSummaryCardVisible()}
         setContentRef={bindTimelineContent}
         turnStart={history.turnStart()}
         historyMore={historyMoreForSurface()}
@@ -3697,6 +3709,7 @@ export default function Page() {
         sessionActors={(sync.data.actor ?? {})[props.sessionID] ?? []}
         onViewAgentChange={(agentID) => setSearchParams({ agentID: agentID === "main" ? undefined : agentID })}
         anchor={anchor}
+        domAnchor={(id) => `timeline-${checksum(props.sessionKey)}-${anchor(id)}`}
         fileReferences={fileReferences()}
         onOpenSideChat={() => void createSideChat({ text: "" })}
         onHtmlComponentEvent={handleHtmlComponentEvent}
@@ -3705,25 +3718,11 @@ export default function Page() {
   }
 
   const SessionTimelineViewport = () => (
-    <div
-      class="relative size-full min-h-0 overflow-hidden"
-      data-component="session-timeline-viewport"
-      classList={{ invisible: timelinePreparing() }}
-    >
-      <Show
-        when={
-          params.id && messagesReady()
-            ? { id: params.id, key: createSessionStorageKey(params.dir, params.id) }
-            : undefined
-        }
-        keyed
-      >
+    <div class="relative size-full min-h-0 overflow-hidden" data-component="session-timeline-viewport">
+      <Show when={params.id ? { id: params.id, key: createSessionStorageKey(params.dir, params.id) } : undefined} keyed>
         {(surface) => <MainTimelineSurface sessionID={surface.id} sessionKey={surface.key} />}
       </Show>
-      <div
-        ref={(el) => (timelineSnapshotHost = el)}
-        class="absolute inset-0 z-20 overflow-hidden pointer-events-none"
-      />
+      <div ref={(el) => (timelineSnapshotHost = el)} class="absolute inset-0 z-20 overflow-hidden pointer-events-none" />
     </div>
   )
 
@@ -3765,7 +3764,6 @@ export default function Page() {
 
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
-      {sessionSync() ?? ""}
       <SessionHeader />
       <div
         class="relative flex-1 min-h-0 flex"
@@ -3802,11 +3800,10 @@ export default function Page() {
         {/* Session panel */}
         <div
           ref={(el) => (sessionDropRoot = el)}
+          data-component="session-main-panel"
           data-session-dropzone={sessionKey()}
           classList={{
             "@container relative shrink-0 flex flex-col min-h-0 h-full bg-background-stronger flex-1 md:flex-none": true,
-            "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-              !size.active() && !ui.reviewSnap,
           }}
           style={{
             width: sessionPanelWidth(),
@@ -3848,25 +3845,27 @@ export default function Page() {
             </Switch>
           </div>
 
-          <SessionComposerRegion
-            state={composer}
-            ready={messagesReady()}
-            centered={centered()}
-            scope={mainComposerScope()}
-            dropRoot={() => sessionDropRoot}
-            inputRef={(el) => {
-              inputRef = el
-            }}
-            newSessionWorktree={newSessionWorktree()}
-            onNewSessionWorktreeReset={() => setStore("newSessionWorktree", "main")}
-            onSubmit={() => {
-              comments.clear()
-              resumeTimelineToBottom()
-            }}
-            onResponseSubmit={resumeTimelineToBottom}
-            followup={
-              params.id && !isChildSession()
-                ? {
+          <div class="shrink-0">
+            <SessionComposerRegion
+              state={composer}
+              ready={messagesReady()}
+              centered={centered()}
+              rightInset={desktopSummaryCardVisible()}
+              scope={mainComposerScope()}
+              dropRoot={() => sessionDropRoot}
+              inputRef={(el) => {
+                inputRef = el
+              }}
+              newSessionWorktree={newSessionWorktree()}
+              onNewSessionWorktreeReset={() => setStore("newSessionWorktree", "main")}
+              onSubmit={() => {
+                comments.clear()
+                resumeTimelineToBottom()
+              }}
+              onResponseSubmit={resumeTimelineToBottom}
+              followup={
+                params.id && !isChildSession()
+                  ? {
                     mode: followupMode,
                     items: followupDock(),
                     sending: sendingFollowup(),
@@ -3883,22 +3882,37 @@ export default function Page() {
                     onEdit: editFollowup,
                     onEditLoaded: clearFollowupEdit,
                   }
-                : undefined
-            }
-            revert={
-              rolled().length > 0
-                ? {
+                  : undefined
+              }
+              revert={
+                rolled().length > 0
+                  ? {
                     items: rolled(),
                     restoring: restoring(),
                     disabled: reverting(),
                     onRestore: restore,
                   }
-                : undefined
-            }
-            setPromptDockRef={(el) => {
-              promptDock = el
-            }}
-          />
+                  : undefined
+              }
+              setPromptDockRef={(el) => {
+                promptDock = el
+              }}
+            />
+          </div>
+          <Show when={desktopSummaryCardVisible()}>
+            <SessionJobsRail
+              sessionID={params.id!}
+              directory={sdk.directory}
+              changes={reviewCount}
+              sources={sources}
+              onOpenChanges={() => {
+                openReviewPanel()
+                layout.fileTree.setTab("changes")
+              }}
+              onOpenFiles={openFileTree}
+              onAttachSources={attachSources}
+            />
+          </Show>
 
           <Show when={desktopReviewOpen()}>
             <div onPointerDown={() => size.start()}>

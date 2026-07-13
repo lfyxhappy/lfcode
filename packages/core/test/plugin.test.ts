@@ -87,4 +87,43 @@ describe("PluginV2", () => {
       expect(values.get().values).toEqual([])
     }),
   )
+
+  it.effect("keeps registration state while a plugin is deactivated and reactivated", () =>
+    Effect.gen(function* () {
+      const values = state()
+      const layerScope = yield* Scope.fork(yield* Scope.Scope)
+      const plugin = Context.get(yield* Layer.buildWithScope(Layer.fresh(plugins), layerScope), PluginV2.Service)
+      const id = PluginV2.ID.make("lifecycle")
+
+      yield* plugin.register({
+        id,
+        identity: {
+          name: "Lifecycle fixture",
+          source: "official",
+          trust: "official",
+          capabilities: ["tool"],
+          order: 10,
+        },
+        effect: Effect.gen(function* () {
+          const transform = yield* values.transform()
+          yield* transform((editor) => editor.add("active"))
+        }),
+      })
+      expect((yield* plugin.inspect())[0]?.lifecycle).toBe("resolved")
+
+      yield* plugin.activate(id)
+      expect(values.get().values).toEqual(["active"])
+      expect((yield* plugin.inspect())[0]?.lifecycle).toBe("active")
+
+      yield* plugin.deactivate(id)
+      expect(values.get().values).toEqual([])
+      expect((yield* plugin.inspect())[0]?.lifecycle).toBe("disabled")
+
+      yield* plugin.activate(id)
+      expect(values.get().values).toEqual(["active"])
+
+      yield* plugin.remove(id)
+      expect(yield* plugin.inspect()).toEqual([])
+    }),
+  )
 })

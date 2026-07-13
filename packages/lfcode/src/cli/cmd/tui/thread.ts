@@ -15,7 +15,7 @@ import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { writeHeapSnapshot } from "v8"
 import { TuiConfig } from "./config/tui"
-import { LFCODE_PROCESS_ROLE, LFCODE_RUN_ID, ensureRunID, sanitizedProcessEnv } from "@/util/mimo-process"
+import { LFCODE_PROCESS_ROLE, LFCODE_RUN_ID, ensureRunID, sanitizedProcessEnv } from "@/util/process-metadata"
 
 declare global {
   const LFCODE_WORKER_PATH: string

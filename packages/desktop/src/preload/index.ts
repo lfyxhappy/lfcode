@@ -78,6 +78,7 @@ const api: ElectronAPI = {
 
   openDirectoryPicker: (opts) => ipcRenderer.invoke("open-directory-picker", opts),
   openFilePicker: (opts) => ipcRenderer.invoke("open-file-picker", opts),
+  openAttachmentPicker: (opts) => ipcRenderer.invoke("open-attachment-picker", opts),
   saveFilePicker: (opts) => ipcRenderer.invoke("save-file-picker", opts),
   openLink: (url) => ipcRenderer.send("open-link", url),
   openExternalLink: (url) => ipcRenderer.send("open-external-link", url),
@@ -103,6 +104,7 @@ const api: ElectronAPI = {
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readDroppedImage: (path) => ipcRenderer.invoke("read-dropped-image", path),
+  readEditorSnippets: (directory) => ipcRenderer.invoke("read-editor-snippets", directory),
   showNotification: (title, body) => ipcRenderer.send("show-notification", title, body),
   getWindowFocused: () => ipcRenderer.invoke("get-window-focused"),
   setWindowFocus: () => ipcRenderer.invoke("set-window-focus"),

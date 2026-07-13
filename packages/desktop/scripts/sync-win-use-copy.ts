@@ -90,8 +90,9 @@ if (process.platform !== "win32") process.exit(0)
 if (!existsSync(sourceDir)) throw new Error(`Packaged Windows app not found: ${sourceDir}`)
 
 await mkdir(targetDir, { recursive: true })
+// Only Lfcode configuration is supported in the use-copy. Clear the former
+// compatibility file rather than preserving it or copying it from a package.
 await rm(path.join(targetDir, "opencode.jsonc"), { force: true })
-
 for (const directory of replacedDirectories) {
   await clearDirectory(path.join(targetDir, directory))
 }

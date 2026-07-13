@@ -1,16 +1,17 @@
-import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js"
+import { For, Match, Show, Switch, batch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Tabs } from "@lfcode-ai/ui/tabs"
+import { Button } from "@lfcode-ai/ui/button"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Icon } from "@lfcode-ai/ui/icon"
+import { TextField } from "@lfcode-ai/ui/text-field"
 import { TooltipKeybind } from "@lfcode-ai/ui/tooltip"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
-import { Mark } from "@lfcode-ai/ui/logo"
+import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
 import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { SnapshotFileDiff, VcsFileDiff } from "@lfcode-ai/sdk/v2"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
-import { useDialog } from "@lfcode-ai/ui/context/dialog"
 
 import FileTree from "@/components/file-tree"
 import { SessionContextUsage } from "@/components/session-context-usage"
@@ -21,28 +22,36 @@ import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
-import { useSync } from "@/context/sync"
-import { showToast } from "@lfcode-ai/ui/toast"
+import { useTerminal } from "@/context/terminal"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
 import {
-  BROWSER_REQUEST_OPEN_EVENT,
   browserTab,
   browserTabID,
   createBrowserTabID,
   createOpenSessionFileTab,
   createSessionTabs,
+  DEFAULT_BROWSER_URL,
   formatBrowserTabLabel,
   getTabReorderIndex,
   isBrowserTab,
-  normalizeBrowserRequestURL,
+  isSideChatTab,
+  sideChatTabID,
   type Sizing,
 } from "@/pages/session/helpers"
 import { buildDetachedSidePanelRoute } from "@/pages/session/detached-side-panel"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { BrowserPanel } from "@/pages/session/browser-panel"
-import { makeEventListener } from "@solid-primitives/event-listener"
+import { BrowserKeepaliveSlot } from "@/pages/session/browser-keepalive-host"
+import { SideChatPanel } from "@/pages/session/side-chat-panel"
+
+type LauncherItem = {
+  id: "review" | "terminal" | "browser" | "files" | "side-chat"
+  label: string
+  icon: "brain" | "terminal" | "window-cursor" | "folder" | "prompt"
+  keybind: string
+  disabled: boolean
+}
 
 export function SessionSidePanel(props: {
   canReview: () => boolean
@@ -56,16 +65,21 @@ export function SessionSidePanel(props: {
   focusReviewDiff: (path: string) => void
   reviewSnap: boolean
   size: Sizing
+  onOpenSideChat: () => void
+  onCloseSideChat?: (sessionID: string) => void
+  onAddToChat?: (input: { text: string; messageID?: string; sessionID?: string }) => void
+  onAskSideChat?: (input: { text: string; messageID?: string; sessionID?: string }) => void
+  setActiveSideChatContentRef?: (el: HTMLDivElement | undefined) => void
+  setActiveSideChatInputRef?: (el: HTMLDivElement | undefined) => void
 }) {
   const layout = useLayout()
   const platform = usePlatform()
   const settings = useSettings()
-  const sync = useSync()
   const file = useFile()
+  const terminal = useTerminal()
   const language = useLanguage()
   const command = useCommand()
-  const dialog = useDialog()
-  const { sessionKey, tabs, view } = useSessionLayout()
+  const { params, sessionKey, tabs, view } = useSessionLayout()
 
   const isDesktop = createMemo(() => platform.platform === "desktop")
   const shown = createMemo(
@@ -78,7 +92,7 @@ export function SessionSidePanel(props: {
   const reviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const fileOpen = createMemo(() => isDesktop() && shown() && layout.fileTree.opened())
   const open = createMemo(() => reviewOpen() || fileOpen())
-  const reviewTab = createMemo(() => isDesktop())
+  const reviewTab = createMemo(() => isDesktop() && view().reviewEnabled())
   const panelWidth = createMemo(() => {
     if (!open()) return "0px"
     if (reviewOpen()) return `calc(100% - ${layout.session.width()}px)`
@@ -137,7 +151,18 @@ export function SessionSidePanel(props: {
     if (!view().reviewPanel.opened()) view().reviewPanel.open()
   }
 
-  const openTab = createOpenSessionFileTab({
+  let explicitReviewActivation = false
+  let explicitReviewActivationTimer: number | undefined
+  const markExplicitReviewActivation = () => {
+    explicitReviewActivation = true
+    if (explicitReviewActivationTimer !== undefined) window.clearTimeout(explicitReviewActivationTimer)
+    explicitReviewActivationTimer = window.setTimeout(() => {
+      explicitReviewActivation = false
+      explicitReviewActivationTimer = undefined
+    }, 750)
+  }
+
+  const openSessionTab = createOpenSessionFileTab({
     normalizeTab,
     openTab: tabs().open,
     pathFromTab: file.pathFromTab,
@@ -159,34 +184,138 @@ export function SessionSidePanel(props: {
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const browserTabs = createMemo(() => openedTabs().filter(isBrowserTab))
-
-  onMount(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ url?: string }>).detail
-      const next = normalizeBrowserRequestURL(detail?.url)
-      if (!next) {
-        showToast({
-          title: language.t("toast.browser.invalidUrl.title"),
-          description: language.t("toast.browser.invalidUrl.description"),
-          variant: "error",
-        })
-        return
-      }
-
-      const currentSession = sessionKey()
-      const id = createBrowserTabID()
-      const tab = browserTab(id)
-      tabs().open(tab)
-      tabs().setActive(tab)
-      view().reviewPanel.open()
-      layout.view(currentSession).browser.open(id, next)
-      event.preventDefault()
+  const sideChatTabs = createMemo(() => openedTabs().filter(isSideChatTab))
+  const sideChatTitle = (tabID: string) => {
+    const index = sideChatTabs().findIndex((tab) => sideChatTabID(tab) === tabID)
+    if (index === -1) return language.t("session.sideChat.title")
+    return language.t("session.sideChat.indexed", { index: index + 1 })
+  }
+  const openTab = (tab: string) => {
+    if (tab === "review" && !explicitReviewActivation && (isSideChatTab(activeTab()) || isBrowserTab(activeTab()))) {
+      return
     }
+    if (tab === "context" || isBrowserTab(tab) || isSideChatTab(tab)) {
+      openReviewPanel()
+      tabs().setActive(tab)
+      return
+    }
+    openSessionTab(tab)
+  }
 
-    makeEventListener(window, BROWSER_REQUEST_OPEN_EVENT, handler as EventListener)
+  const closeReviewTab = () => {
+    batch(() => {
+      view().setReviewEnabled(false)
+      tabs().close("review")
+    })
+  }
+
+  const openReviewTab = () => {
+    batch(() => {
+      view().setReviewEnabled(true)
+      openReviewPanel()
+      tabs().setActive("review")
+    })
+  }
+
+  const openContextTab = () => {
+    batch(() => {
+      openReviewPanel()
+      void tabs().open("context")
+      tabs().setActive("context")
+    })
+  }
+
+  const openBrowserTab = () => {
+    const id = createBrowserTabID()
+    batch(() => {
+      view().browser.open(id, DEFAULT_BROWSER_URL)
+      openReviewPanel()
+      tabs().setActive(browserTab(id))
+    })
+  }
+
+  const openTerminalTab = () => {
+    if (terminal.all().length > 0) terminal.new()
+    view().terminal.open()
+  }
+
+  const openSideChatLauncher = () => {
+    props.onOpenSideChat()
+  }
+
+  const launcherItems = createMemo<LauncherItem[]>(() => [
+    {
+      id: "review" as const,
+      label: "Review",
+      icon: "brain",
+      keybind: command.keybind("review.toggle"),
+      disabled: !props.canReview(),
+    },
+    {
+      id: "terminal" as const,
+      label: "Terminal",
+      icon: "terminal",
+      keybind: "",
+      disabled: false,
+    },
+    {
+      id: "browser" as const,
+      label: "Browser",
+      icon: "window-cursor",
+      keybind: command.keybind("browser.open"),
+      disabled: false,
+    },
+    {
+      id: "files" as const,
+      label: "Files",
+      icon: "folder",
+      keybind: command.keybind("file.open"),
+      disabled: false,
+    },
+    {
+      id: "side-chat" as const,
+      label: "Side chat",
+      icon: "prompt",
+      keybind: "Ctrl+Alt+S",
+      disabled: !params.id,
+    },
+  ])
+
+  const openLauncherItem = (id: LauncherItem["id"]) => {
+    if (id === "review") {
+      openReviewTab()
+      return
+    }
+    if (id === "terminal") {
+      openTerminalTab()
+      return
+    }
+    if (id === "browser") {
+      openBrowserTab()
+      return
+    }
+    if (id === "files") {
+      showAllFiles()
+      return
+    }
+    openSideChatLauncher()
+  }
+
+  onCleanup(() => {
+    if (explicitReviewActivationTimer !== undefined) window.clearTimeout(explicitReviewActivationTimer)
+    props.setActiveSideChatContentRef?.(undefined)
+  })
+
+  createEffect(() => {
+    if (isSideChatTab(activeTab())) return
+    props.setActiveSideChatContentRef?.(undefined)
   })
 
   const fileTreeTab = () => layout.fileTree.tab()
+  const [allFilesSearch, setAllFilesSearch] = createSignal("")
+  const [allFilesMatches, setAllFilesMatches] = createSignal<readonly string[] | undefined>()
+  const [allFilesSearchLoading, setAllFilesSearchLoading] = createSignal(false)
+  let allFilesSearchRequest = 0
 
   const setFileTreeTabValue = (value: string) => {
     if (value !== "changes" && value !== "all") return
@@ -194,14 +323,41 @@ export function SessionSidePanel(props: {
   }
 
   const showAllFiles = () => {
-    if (fileTreeTab() !== "changes") return
+    layout.fileTree.open()
     layout.fileTree.setTab("all")
   }
+
+  createEffect(() => {
+    const query = allFilesSearch().trim()
+    const requestID = ++allFilesSearchRequest
+    if (!query) {
+      setAllFilesMatches(undefined)
+      setAllFilesSearchLoading(false)
+      return
+    }
+    setAllFilesSearchLoading(true)
+    const timer = window.setTimeout(() => {
+      void file
+        .searchFilesAndDirectories(query)
+        .then((result) => {
+          if (requestID !== allFilesSearchRequest) return
+          setAllFilesMatches(result)
+          setAllFilesSearchLoading(false)
+        })
+        .catch(() => {
+          if (requestID !== allFilesSearchRequest) return
+          setAllFilesMatches([])
+          setAllFilesSearchLoading(false)
+        })
+    }, 160)
+    onCleanup(() => window.clearTimeout(timer))
+  })
 
   const [store, setStore] = createStore({
     activeDraggable: undefined as string | undefined,
     dockTargetActive: false,
     tabStripBounds: undefined as DOMRect | undefined,
+    tabStripWidth: 0,
     detachPreview: undefined as
       | {
           tab: string
@@ -213,6 +369,33 @@ export function SessionSidePanel(props: {
           offsetY: number
         }
       | undefined,
+  })
+  const visibleTabCount = createMemo(() => {
+    const reviewCount = reviewTab() && props.canReview() ? 1 : 0
+    const contextCount = contextOpen() ? 1 : 0
+    return reviewCount + contextCount + openedTabs().length
+  })
+  const tabStripMetrics = createMemo(() => {
+    const baseWidth = 176
+    const minWidth = 112
+    const reservedWidth = 68
+    const count = visibleTabCount()
+    const stripWidth = store.tabStripWidth
+    if (count <= 0 || stripWidth <= 0) {
+      return {
+        width: baseWidth,
+        minWidth,
+        scrollable: false,
+      }
+    }
+    const availableWidth = Math.max(stripWidth - reservedWidth, minWidth)
+    const fittedWidth = Math.floor(availableWidth / count)
+    const width = Math.min(baseWidth, Math.max(minWidth, fittedWidth))
+    return {
+      width,
+      minWidth,
+      scrollable: width === minWidth && count * minWidth > availableWidth,
+    }
   })
 
   const detachedForSession = createMemo(() => layout.detachedPanels.listFor(sessionKey)())
@@ -232,12 +415,16 @@ export function SessionSidePanel(props: {
       const current = id ? view().browser.get(id) : undefined
       return current ? formatBrowserTabLabel(current.title ?? current.url) : tab
     }
+    if (isSideChatTab(tab)) {
+      return sideChatTitle(sideChatTabID(tab) ?? "")
+    }
     const path = file.pathFromTab(tab)
     return path ? path.split(/[\\/]/).pop() ?? path : tab
   }
 
   const detachTab = async (tab: string) => {
     if (platform.platform !== "desktop" || !platform.createDetachedSidePanelWindow) return
+    if (isSideChatTab(tab)) return
     if (detachedForSession().some((item) => item.tab === tab)) return
     const kind = tabKind(tab)
     const detachedWindowID = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -331,16 +518,15 @@ export function SessionSidePanel(props: {
     <Show when={isDesktop()}>
       <aside
         id="review-panel"
+        data-component="session-side-panel"
         aria-label={language.t("session.panel.reviewAndFiles")}
         aria-hidden={!open()}
         inert={!open()}
         class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
         classList={{
           "pointer-events-none": !open(),
-          "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-            !props.size.active() && !props.reviewSnap,
         }}
-        style={{ width: panelWidth(), display: open() ? undefined : "none" }}
+        style={{ width: panelWidth() }}
       >
         <div class="size-full flex border-l border-border-weaker-base">
           <div
@@ -360,14 +546,26 @@ export function SessionSidePanel(props: {
               >
                 <DragDropSensors />
                 <ConstrainDragYAxis />
-                <Tabs value={activeTab()} onChange={openTab}>
+                <Tabs value={activeTab()} onChange={openTab} class="size-full flex min-h-0 flex-col">
                   <div class="sticky top-0 shrink-0 flex">
                     <Tabs.List
                       data-component="detached-dock-target"
+                      data-session-tab-strip="true"
+                      data-scrollable={tabStripMetrics().scrollable ? "true" : "false"}
                       data-active={store.dockTargetActive ? "true" : "false"}
+                      style={{
+                        "--session-side-tab-width": `${tabStripMetrics().width}px`,
+                        "--session-side-tab-min-width": `${tabStripMetrics().minWidth}px`,
+                      }}
                       ref={(el: HTMLDivElement) => {
                         const stop = createFileTabListSync({ el, contextOpen })
+                        const resizeObserver = new ResizeObserver(() => {
+                          setStore("tabStripWidth", el.clientWidth)
+                        })
+                        setStore("tabStripWidth", el.clientWidth)
+                        resizeObserver.observe(el)
                         onCleanup(stop)
+                        onCleanup(() => resizeObserver.disconnect())
                         createEffect(() => {
                           if (!platform.setDetachedDockTarget || !platform.clearDetachedDockTarget) return
                           const rect = el.getBoundingClientRect()
@@ -389,7 +587,30 @@ export function SessionSidePanel(props: {
                       classList={{ "ring-1 ring-border-info-base": store.dockTargetActive }}
                     >
                       <Show when={reviewTab() && props.canReview()}>
-                        <Tabs.Trigger value="review">
+                        <Tabs.Trigger
+                          value="review"
+                          class="[--tabs-trigger-width:112px] [--tabs-trigger-min-width:112px]"
+                          closeButton={
+                            <TooltipKeybind
+                              title={language.t("common.closeTab")}
+                              keybind={command.keybind("tab.close")}
+                              placement="bottom"
+                              gutter={10}
+                            >
+                              <IconButton
+                                icon="close-small"
+                                variant="ghost"
+                                class="h-5 w-5"
+                                onClick={closeReviewTab}
+                                aria-label={language.t("common.closeTab")}
+                              />
+                            </TooltipKeybind>
+                          }
+                          hideCloseButton
+                          onPointerDown={markExplicitReviewActivation}
+                          onKeyDown={markExplicitReviewActivation}
+                          onMiddleClick={closeReviewTab}
+                        >
                           <div class="flex items-center gap-1.5">
                             <div>{language.t("session.tab.review")}</div>
                             <Show when={props.hasReview()}>
@@ -437,83 +658,161 @@ export function SessionSidePanel(props: {
                                 setStore("detachPreview", value)
                               }}
                               onDetach={(next) => {
+                                if (isSideChatTab(next)) return
                                 void detachTab(next)
                               }}
                               onBrowserTabClose={(tabID) => {
                                 layout.view(sessionKey()).browser.close(tabID)
                                 tabs().close(browserTab(tabID))
                               }}
+                              onSideChatTabClose={(sessionID) => {
+                                props.onCloseSideChat?.(sessionID)
+                              }}
+                              getSideChatTitle={sideChatTitle}
                             />
                           )}
                         </For>
                       </SortableProvider>
                       <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
-                        <TooltipKeybind
-                          title={language.t("command.file.open")}
-                          keybind={command.keybind("file.open")}
-                          class="flex items-center"
-                        >
-                          <IconButton
+                        <DropdownMenu gutter={8} placement="bottom-start">
+                          <DropdownMenu.Trigger
+                            as={IconButton}
                             icon="plus-small"
                             variant="ghost"
                             iconSize="large"
-                            class="!rounded-md"
-                            onClick={() => {
-                              void import("@/components/dialog-select-file").then((x) => {
-                                dialog.show(() => <x.DialogSelectFile mode="files" onOpenFile={showAllFiles} />)
-                              })
-                            }}
-                            aria-label={language.t("command.file.open")}
+                            class="rounded-lg text-text-weak hover:bg-surface-hover"
+                            aria-label={language.t("common.moreOptions")}
                           />
-                        </TooltipKeybind>
+                          <DropdownMenu.Portal>
+                            <DropdownMenu.Content class="min-w-[248px] rounded-xl border border-border-weaker-base bg-background-panel p-1.5 shadow-2xl">
+                              <div class="flex flex-col gap-1">
+                                <For each={launcherItems()}>
+                                  {(item) => (
+                                    <DropdownMenu.Item
+                                      disabled={item.disabled}
+                                      onSelect={() => openLauncherItem(item.id)}
+                                      class="rounded-lg px-3 py-2 hover:bg-surface-hover"
+                                    >
+                                      <div class="flex min-w-0 items-center gap-3">
+                                        <div class="flex size-4 shrink-0 items-center justify-center text-text-muted">
+                                          <Icon name={item.icon as any} size="small" />
+                                        </div>
+                                        <div class="min-w-0 flex-1 text-13-medium text-text-primary">{item.label}</div>
+                                        <Show when={item.keybind}>
+                                          <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
+                                        </Show>
+                                      </div>
+                                    </DropdownMenu.Item>
+                                  )}
+                                </For>
+                                <DropdownMenu.Item onSelect={openContextTab} class="rounded-lg px-3 py-2 hover:bg-surface-hover">
+                                  <div class="flex min-w-0 items-center gap-3">
+                                    <div class="flex size-4 shrink-0 items-center justify-center text-text-muted">
+                                      <Icon name="settings-gear" size="small" />
+                                    </div>
+                                    <div class="min-w-0 flex-1 text-13-medium text-text-primary">{language.t("session.tab.context")}</div>
+                                  </div>
+                                </DropdownMenu.Item>
+                              </div>
+                            </DropdownMenu.Content>
+                          </DropdownMenu.Portal>
+                        </DropdownMenu>
                       </div>
                     </Tabs.List>
                   </div>
 
-                  <Show when={reviewTab() && props.canReview()}>
-                    <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
-                      <Show when={activeTab() === "review"}>{props.reviewPanel()}</Show>
-                    </Tabs.Content>
-                  </Show>
+                  <div class="relative flex-1 min-h-0 overflow-hidden">
+                    <Show when={reviewTab() && props.canReview() && activeTab() === "review"}>
+                      {props.reviewPanel()}
+                    </Show>
 
-                  <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">
                     <Show when={activeTab() === "empty"}>
-                      <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                        <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-6">
-                          <Mark class="w-14 opacity-10" />
-                          <div class="text-14-regular text-text-weak max-w-56">
-                            {language.t("session.files.selectToOpen")}
+                      <div class="h-full min-h-0 overflow-hidden bg-background-base">
+                        <div class="flex h-full items-center justify-center px-6 pb-24">
+                          <div class="mx-auto flex w-full max-w-[760px] flex-col gap-2.5">
+                            <For each={launcherItems()}>
+                              {(item) => (
+                                <Button
+                                  variant="ghost"
+                                  size="large"
+                                  disabled={item.disabled}
+                                  onClick={() => openLauncherItem(item.id)}
+                                  class="h-17 justify-start rounded-[18px] border border-white/4 bg-[#262525] px-5 text-left text-[#f2f2f2] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] hover:bg-[#2a2929]"
+                                >
+                                  <div class="flex min-w-0 w-full items-center gap-4">
+                                    <div class="flex size-6 shrink-0 items-center justify-center text-[#d0d0d0]">
+                                      <Icon name={item.icon as any} size="small" />
+                                    </div>
+                                    <div class="min-w-0 flex-1 text-[16px] font-medium tracking-[-0.01em]">{item.label}</div>
+                                    <Show when={item.keybind}>
+                                      <div class="shrink-0 rounded-full bg-[#3b3a3a] px-3 py-1 text-[12px] text-[#d2d2d2]">
+                                        {item.keybind}
+                                      </div>
+                                    </Show>
+                                  </div>
+                                </Button>
+                              )}
+                            </For>
                           </div>
                         </div>
                       </div>
                     </Show>
-                  </Tabs.Content>
 
-                  <Show when={contextOpen()}>
-                    <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
-                      <Show when={activeTab() === "context"}>
-                        <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                          <SessionContextTab />
+                    <Show when={contextOpen() && activeTab() === "context"}>
+                      <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                        <SessionContextTab />
+                      </div>
+                    </Show>
+
+                    <Show when={activeFileTab()} keyed>
+                      {(tab) => <FileTabContent tab={tab} />}
+                    </Show>
+
+                    <For each={browserTabs()}>
+                      {(tab) => (
+                        <div
+                          class="size-full min-h-0 overflow-hidden contain-strict"
+                          style={{ display: activeTab() === tab ? undefined : "none" }}
+                        >
+                          <BrowserKeepaliveSlot
+                            sessionKey={sessionKey()}
+                            tab={tab}
+                            visible={reviewOpen() && activeTab() === tab}
+                          />
                         </div>
-                      </Show>
-                    </Tabs.Content>
-                  </Show>
+                      )}
+                    </For>
 
-                  <Show when={activeFileTab()} keyed>
-                    {(tab) => <FileTabContent tab={tab} />}
-                  </Show>
-                  <For each={browserTabs()}>
-                    {(tab) => (
-                      <Tabs.Content
-                        value={tab}
-                        class="flex flex-col h-full overflow-hidden contain-strict"
-                        forceMount
-                        style={{ display: activeTab() === tab ? undefined : "none" }}
-                      >
-                        <BrowserPanel tab={tab} visible={reviewOpen() && activeTab() === tab} />
-                      </Tabs.Content>
-                    )}
-                  </For>
+                    <For each={sideChatTabs()}>
+                      {(tab) => {
+                        const id = createMemo(() => sideChatTabID(tab))
+                        return (
+                          <div
+                            class="absolute inset-0 min-h-0 overflow-hidden contain-strict"
+                            aria-hidden={activeTab() === tab ? undefined : "true"}
+                            inert={activeTab() !== tab}
+                            style={{
+                              visibility: activeTab() === tab ? "visible" : "hidden",
+                              "pointer-events": activeTab() === tab ? "auto" : "none",
+                            }}
+                          >
+                            <SideChatPanel
+                              sessionID={id() ?? ""}
+                              active={activeTab() === tab}
+                              setContentRef={(el) => {
+                                if (activeTab() !== tab) return
+                                props.setActiveSideChatContentRef?.(el)
+                              }}
+                              inputRef={(el) => {
+                                if (activeTab() !== tab) return
+                                props.setActiveSideChatInputRef?.(el)
+                              }}
+                            />
+                          </div>
+                        )
+                      }}
+                    </For>
+                  </div>
                 </Tabs>
                 <DragOverlay>
                   <Show when={store.detachPreview ? undefined : store.activeDraggable} keyed>
@@ -570,11 +869,10 @@ export function SessionSidePanel(props: {
               id="file-tree-panel"
               aria-hidden={!fileOpen()}
               inert={!fileOpen()}
+              data-component="session-file-tree"
               class="relative min-w-0 h-full shrink-0 overflow-hidden"
               classList={{
                 "pointer-events-none": !fileOpen(),
-                "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-                  !props.size.active(),
               }}
               style={{ width: treeWidth() }}
             >
@@ -629,13 +927,54 @@ export function SessionSidePanel(props: {
                     <Switch>
                       <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
                       <Match when={true}>
-                        <FileTree
-                          path=""
-                          class="pt-3"
-                          modified={diffFiles()}
-                          kinds={kinds()}
-                          onFileClick={(node) => openTab(file.tab(node.path))}
-                        />
+                        <div class="min-h-0">
+                          <div class="sticky top-0 z-10 bg-background-stronger py-3">
+                            <div class="flex h-9 items-center gap-2 rounded-lg bg-surface-base px-3">
+                              <Icon name="magnifying-glass" class="shrink-0 text-icon-weak-base" />
+                              <TextField
+                                variant="ghost"
+                                type="text"
+                                value={allFilesSearch()}
+                                onChange={setAllFilesSearch}
+                                placeholder={language.t("common.search.placeholder")}
+                                class="min-w-0 flex-1"
+                              />
+                              <Show when={allFilesSearch()}>
+                                <IconButton
+                                  icon="circle-x"
+                                  variant="ghost"
+                                  aria-label={language.t("common.clearSearch")}
+                                  onClick={() => setAllFilesSearch("")}
+                                />
+                              </Show>
+                            </div>
+                          </div>
+                          <Show
+                            when={!allFilesSearchLoading()}
+                            fallback={
+                              <div class="px-2 py-2 text-12-regular text-text-weak">
+                                {language.t("common.loading")}
+                                {language.t("common.loading.ellipsis")}
+                              </div>
+                            }
+                          >
+                            <Show
+                              when={!allFilesSearch().trim() || (allFilesMatches()?.length ?? 0) > 0}
+                              fallback={
+                                <div class="px-2 py-2 text-12-regular text-text-weak">{language.t("palette.empty")}</div>
+                              }
+                            >
+                              <FileTree
+                                path=""
+                                class="pb-3"
+                                allowed={allFilesSearch().trim() ? allFilesMatches() : undefined}
+                                modified={diffFiles()}
+                                kinds={kinds()}
+                                onFileClick={(node) => openTab(file.tab(node.path))}
+                              />
+                            </Show>
+                          </Show>
+                        </div>
                       </Match>
                     </Switch>
                   </Tabs.Content>

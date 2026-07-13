@@ -31,6 +31,10 @@ export function rememberSessionTimelineVisualSnapshot(input: {
   turnIDs: string[]
   root: HTMLDivElement
 }) {
+  if (input.turnIDs.length === 0 || !input.root.querySelector("[data-viewport-turn]")) {
+    dropSessionTimelineVisualSnapshot(input.key)
+    return
+  }
   dropSessionTimelineVisualSnapshot(input.key)
   const template = input.root.cloneNode(true) as HTMLDivElement
   template.removeAttribute("id")

@@ -8,6 +8,95 @@
 }
 
 @layer components {
+  [data-component="session-side-panel"] {
+    transition: width var(--motion-surface-ms) var(--motion-ease-out);
+  }
+
+  [data-component="session-main-panel"] {
+    transition: width var(--motion-surface-ms) var(--motion-ease-out);
+  }
+
+  [data-component="terminal-panel"] {
+    transition: height var(--motion-content-ms) var(--motion-ease-out);
+  }
+
+  [data-component="timeline-resume-control"] {
+    transition:
+      opacity var(--motion-micro-ms) var(--motion-ease-out),
+      transform var(--motion-micro-ms) var(--motion-ease-out);
+  }
+
+  [data-component="timeline-working-indicator"] {
+    transition:
+      width var(--motion-content-ms) var(--motion-ease-out),
+      margin-right var(--motion-content-ms) var(--motion-ease-out);
+  }
+
+  [data-component="timeline-working-spinner"] {
+    transition: opacity var(--motion-micro-ms) var(--motion-ease-out);
+  }
+
+  [data-component="workspace-chevron"],
+  [data-component="prompt-context-item"],
+  [data-component="prompt-context-remove"],
+  [data-component="prompt-attachment"],
+  [data-component="sidebar-session-item"],
+  [data-component="sidebar-project-item"],
+  [data-component="workspace-item"] {
+    transition:
+      opacity var(--motion-micro-ms) var(--motion-ease-out),
+      transform var(--motion-micro-ms) var(--motion-ease-out),
+      width var(--motion-micro-ms) var(--motion-ease-out),
+      background-color var(--motion-micro-ms) var(--motion-ease-out),
+      box-shadow var(--motion-micro-ms) var(--motion-ease-out),
+      color var(--motion-micro-ms) var(--motion-ease-out);
+  }
+
+  [data-component="prompt-attachment"] {
+    animation: prompt-attachment-enter var(--motion-content-ms) var(--motion-ease-out) both;
+  }
+
+  [data-component="prompt-attachment"][data-removing="true"],
+  [data-component="prompt-context-item"][data-removing="true"] {
+    opacity: 0;
+    transform: translate3d(0, -2px, 0) scale(0.98);
+    pointer-events: none;
+  }
+
+  [data-component="session-file-tree"] {
+    transition: width var(--motion-content-ms) var(--motion-ease-out);
+  }
+
+  [data-component="release-notes-progress"] {
+    transition: width var(--motion-micro-ms) var(--motion-ease-out);
+  }
+
+  @keyframes prompt-attachment-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 3px, 0) scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  :root[data-motion-mode="off"] [data-component="session-side-panel"],
+  :root[data-motion-reduced="true"] [data-component="session-side-panel"],
+  :root[data-motion-mode="off"] [data-component="session-main-panel"],
+  :root[data-motion-reduced="true"] [data-component="session-main-panel"],
+  :root[data-motion-mode="off"] [data-component="terminal-panel"],
+  :root[data-motion-reduced="true"] [data-component="terminal-panel"] {
+    transition-duration: 0ms;
+  }
+
+  :root[data-motion-mode="off"] [data-component="prompt-attachment"],
+  :root[data-motion-reduced="true"] [data-component="prompt-attachment"] {
+    animation-duration: 0ms;
+  }
+
   @keyframes session-progress-whip {
     0% {
       clip-path: inset(0 100% 0 0 round 999px);

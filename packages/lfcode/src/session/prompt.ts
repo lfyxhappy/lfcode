@@ -10,18 +10,17 @@ import * as Session from "./session"
 import { Agent } from "../agent/agent"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 import { Provider } from "../provider"
+import * as ProviderTransform from "../provider/transform"
 import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, type ModelMessage, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
-import { computeLastMessageInfo } from "./last-message-info"
-import { pressureLevel, isOverflow as overflowCheck } from "./overflow"
+import { pressureLevel, isOverflow as overflowCheck, shouldAutoCompact } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
 import { Bus } from "../bus"
-import { ProviderTransform } from "../provider"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
 import { TuiEvent } from "@/cli/cmd/tui/event"
@@ -31,6 +30,7 @@ import MAX_STEPS from "../session/prompt/max-steps.txt"
 import PROMPT_COMPOSE from "../session/prompt/compose.txt"
 import { composeSkillsBlock } from "@/skill/compose/extract"
 import { ToolRegistry } from "../tool"
+import { transformedToolSchema } from "../tool/registry"
 import { MCP } from "../mcp"
 import { LSP } from "../lsp"
 import { Flag } from "../flag/flag"
@@ -65,15 +65,35 @@ import { InstanceState } from "@/effect"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { Goal } from "./goal"
+import { isRealUserPart, stepSignature } from "./part-helpers"
 import { TaskGate, MAX_TASK_GATE_MAIN_REACT } from "@/task/gate"
 import { TaskGateState } from "@/task/gate-state"
 import { TaskRegistry } from "@/task/registry"
+import {
+  buildComposeGateReminder,
+  classifyComposeRoute,
+  collectComposeEvidence,
+  getLatestComposeUserMessage,
+  getMissingComposeStages,
+  shouldManageComposeRoute,
+} from "./compose-route"
+import { isComposeRuntimeToolAllowed, resolveComposeRuntimePolicy } from "./compose-runtime-policy"
+import { ComposeGateState } from "./compose-gate-state"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
 import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
-import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
+import {
+  AUTO_DISTILL_TITLE,
+  AUTO_DREAM_TITLE,
+  DISTILL_TASK,
+  DREAM_TASK,
+  claimAutomaticMaintenance,
+  maintenanceConfig,
+  parseDistillCandidates,
+} from "./auto-dream"
+import { Maintenance } from "@/maintenance"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -90,7 +110,13 @@ export function recallHintLines(toolCfg: ToolStyleConfig | undefined): string[] 
       ? "- actor status <actor_id>"
       : `- actor({ operation: "status", actor_id: "<id>" })`
   // memory has no shell form (no shell.parse) → always JSON.
-  return [`- memory({ operation: "search", query: "<keyword>" })`, taskHint, actorHint]
+  return [taskHint, actorHint, `- memory({ operation: "search", query: "<keyword>" })`]
+}
+
+function composeGateRecoveryLine(missing: string[], count: number) {
+  if (count <= 1) return "Take the shortest valid path: fill only the missing stage evidence, then continue."
+  if (missing.length === 1) return `You are re-entering on the same single gap. Resolve just this missing stage now: ${missing[0]}.`
+  return "The same stage gaps are still open. Do not restart the whole flow; resolve the listed missing stages directly."
 }
 
 /**
@@ -100,6 +126,7 @@ export function recallHintLines(toolCfg: ToolStyleConfig | undefined): string[] 
  * TODO: lift to lfcode.json config (e.g. session.maxGoalReact).
  */
 const MAX_GOAL_REACT = 12
+const MAX_COMPOSE_GATE_MAIN_REACT = 3
 
 /**
  * Number of consecutive finished assistant steps with an identical action
@@ -107,25 +134,6 @@ const MAX_GOAL_REACT = 12
  * signal the model is stuck repeating itself rather than making progress.
  */
 const REPEATED_STEP_THRESHOLD = 3
-
-/**
- * Deterministic JSON serialization with sorted object keys, so that two
- * semantically-identical tool inputs produce the same string regardless of the
- * order the model happened to emit the keys in. `JSON.stringify` preserves
- * insertion order, and models routinely re-emit the same arguments with keys in
- * a different order (e.g. {url,format} vs {format,url}) — without this the
- * signatures would differ and the repeated-step check would miss real loops.
- */
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null"
-  if (Array.isArray(value)) return "[" + value.map(stableStringify).join(",") + "]"
-  const keys = Object.keys(value as Record<string, unknown>).sort()
-  return (
-    "{" +
-    keys.map((k) => JSON.stringify(k) + ":" + stableStringify((value as Record<string, unknown>)[k])).join(",") +
-    "}"
-  )
-}
 
 /**
  * Stable signature for an assistant step's *action* — the tool calls it made
@@ -136,17 +144,6 @@ function stableStringify(value: unknown): string {
  * action we want to catch. Returns undefined when a step makes no tool calls
  * (e.g. a pure-text turn), since there is no repeated *action* to compare.
  */
-function stepSignature(parts: MessageV2.Part[]): string | undefined {
-  const segments: string[] = []
-  for (const part of parts) {
-    if (part.type === "tool") {
-      segments.push("tool:" + part.tool + ":" + stableStringify(part.state.input ?? {}))
-    }
-  }
-  if (segments.length === 0) return undefined
-  return segments.join("\n")
-}
-
 const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
 
 IMPORTANT:
@@ -163,6 +160,8 @@ const PREDICT_NUDGE = `Based on the conversation above, write the user's most li
 
 const OUTPUT_LENGTH_CONTINUATION_LIMIT = Flag.LFCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT
 const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.LFCODE_INVALID_OUTPUT_CONTINUATION_LIMIT
+const INTERRUPTED_OUTPUT_CONTINUATION_LIMIT = INVALID_OUTPUT_CONTINUATION_LIMIT
+const STEER_MARKER = "lfcode:followup-steer"
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
@@ -211,6 +210,7 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
     const goal = yield* Goal.Service
     const taskGateState = yield* TaskGateState.Service
+    const composeGateState = yield* ComposeGateState.Service
     const taskRegistry = yield* TaskRegistry.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
@@ -222,6 +222,7 @@ export const layer = Layer.effect(
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
+    const steerWakeups = new Set<SessionID>()
 
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
     // can call buildLLMRequestPrefix without forming a layer cycle
@@ -497,8 +498,8 @@ export const layer = Layer.effect(
 Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
 ## Plan File Info:
-${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.` : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`}
-You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
+${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using patch-first file tools such as apply_patch, replace_range, or symbol_edit.` : `No plan file exists yet. You should create your plan at ${plan} using apply_patch.`}
+You should build your plan incrementally using patch-first file tools on this file only. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
 
 ## Plan Workflow
 
@@ -573,6 +574,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       agent: Agent.Info
       model: Provider.Model
       session: Session.Info
+      composeRoute?: Session.Info["composeRoute"]
       tools?: Record<string, boolean>
       processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
       bypassAgentCheck: boolean
@@ -584,6 +586,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const tools: Record<string, AITool> = {}
       const run = yield* runner()
       const promptOps = yield* ops()
+      const composeRuntimePolicy =
+        (input.agentID ?? "main") === "main" && shouldManageComposeRoute(input.agent.name) && input.composeRoute
+          ? resolveComposeRuntimePolicy(input.composeRoute)
+          : undefined
 
       // Per-tool runtime whitelist: when the LLM call is being made on behalf
       // of a registered actor (subagent or peer), look up the actor row and,
@@ -649,8 +655,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
         agent: input.agent,
+        capabilities: input.model.capabilities,
       })) {
-        const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
+        if (composeRuntimePolicy && !isComposeRuntimeToolAllowed(composeRuntimePolicy, item.id)) continue
+        const schema = transformedToolSchema(input.model, item.parameters)
         tools[item.id] = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
@@ -762,8 +770,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 { args },
               )
               yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
+              const nextArgs =
+                key.startsWith("playwright_") && args && typeof args === "object" && !Array.isArray(args)
+                  ? { ...(args as Record<string, unknown>), _lfcodeSessionID: ctx.sessionID }
+                  : args
               const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.promise(() =>
-                execute(args, opts),
+                execute(nextArgs, opts),
               )
               log.debug("tool execute done (mcp)", {
                 tool: key,
@@ -815,7 +827,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const metadata = {
                 ...result.metadata,
                 truncated: truncated.truncated,
-                ...(truncated.truncated && { outputPath: truncated.outputPath }),
+                ...(truncated.truncated && { outputRef: truncated.outputRef }),
               }
 
               const output = {
@@ -1101,7 +1113,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         id: PartID.ascending(),
         messageID: msg.id,
         sessionID: input.sessionID,
-        tool: "bash",
+        tool: "shell",
         callID: ulid(),
         state: {
           status: "running",
@@ -1616,6 +1628,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       yield* sessions.updateMessage(info)
       for (const part of parts) yield* sessions.updatePart(part)
+      if (input.source !== "spawn" && input.source !== "hook" && parts.some(isRealUserPart)) {
+        yield* sessions.setLastUserActivity({ sessionID: input.sessionID, at: info.time.created })
+      }
 
       return { info, parts }
     }, Effect.scoped)
@@ -1627,6 +1642,40 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* Effect.sync(() => Session.clearOrphanAssistants({ sessionID, ...options }))
     })
 
+    const wakePendingSteer = Effect.fn("SessionPrompt.wakePendingSteer")(function* (
+      sessionID: SessionID,
+      agentID?: string,
+      task_id?: string,
+    ) {
+      if (steerWakeups.has(sessionID)) return
+      steerWakeups.add(sessionID)
+      yield* Effect.gen(function* () {
+        while (true) {
+          const pending = yield* state.hasPendingSteer(sessionID)
+          if (!pending) return
+          const busy = yield* state.assertNotBusy(sessionID).pipe(Effect.exit)
+          if (Exit.isSuccess(busy)) {
+            yield* loop({ sessionID, agentID: agentID ?? "main", task_id }).pipe(Effect.ignore)
+            return
+          }
+          yield* Effect.sleep("25 millis")
+        }
+      }).pipe(
+        Effect.catchAllCause((cause) =>
+          elog.error("pending steer wake failed", {
+            sessionID,
+            error: Cause.squash(cause),
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            steerWakeups.delete(sessionID)
+          }),
+        ),
+        Effect.forkIn(scope),
+      )
+    })
+
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
         const session = yield* sessions.get(input.sessionID)
@@ -1635,6 +1684,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* sweepOrphanAssistants(input.sessionID)
         }
         const message = yield* createUserMessage(input)
+        if (input.delivery === "steer") {
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: message.info.id,
+            sessionID: input.sessionID,
+            type: "text",
+            synthetic: true,
+            ignored: true,
+            text: STEER_MARKER,
+          })
+        }
         yield* sessions.touch(input.sessionID)
 
         const permissions: Permission.Ruleset = []
@@ -1647,6 +1707,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (input.noReply === true) return message
+        if (input.delivery === "steer") {
+          const busy = yield* state.assertNotBusy(input.sessionID).pipe(Effect.exit)
+          if (Exit.isFailure(busy)) {
+            yield* state.noteSteer(input.sessionID, message.info.id)
+            yield* wakePendingSteer(input.sessionID, input.agentID, input.task_id)
+            return message
+          }
+        }
         return yield* loop({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
       },
     )
@@ -1680,6 +1748,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let structured: unknown | undefined
         let step = 0
         const session = yield* sessions.get(sessionID)
+        let composeRoute = session.composeRoute
         let lastFinishedForPrune: MessageV2.Assistant | undefined
         let lastModelForPrune: Provider.Model | undefined
         let outputLengthContinuations = 0
@@ -1688,10 +1757,84 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // counter — do not add a second one. Local to runLoop so a fresh user
         // turn resets it (no cross-message pollution), same as outputLengthContinuations.
         let invalidContinuations = 0
+        // Missing-finish-step is a separate failure mode: the provider stream
+        // died before emitting a completion event. Keep its retry budget
+        // independent from invalid output so one class does not consume the other.
+        let interruptedContinuations = 0
         // structured-output 专用 retry：上限来自 lastUser.format.retryCount（默认 2），
         // 与 invalidContinuations（generic invalid）分离，互不污染。局部于 runLoop，
         // 新一轮用户 turn 自动归零。
         let structuredRetries = 0
+        const hasSteerMarker = (msg: MessageV2.WithParts) =>
+          msg.info.role === "user" &&
+          msg.parts.some((part) => part.type === "text" && part.synthetic && part.ignored && part.text === STEER_MARKER)
+
+        const steerTextParts = (msg: MessageV2.WithParts) =>
+          msg.parts.filter(
+            (part): part is MessageV2.TextPart =>
+              part.type === "text" &&
+              !part.synthetic &&
+              !part.ignored &&
+              part.text.trim().length > 0,
+          )
+
+        const mergeSteerFollowups = (
+          messages: MessageV2.WithParts[],
+          lastFinished: MessageV2.Assistant | undefined,
+          pendingSteerIDs?: MessageID[],
+        ) => {
+          if (!lastFinished) return
+          const pending =
+            pendingSteerIDs && pendingSteerIDs.length > 0
+              ? new Set<string>(pendingSteerIDs.map((id) => String(id)))
+              : undefined
+          const steer = messages.filter(
+            (msg) =>
+              msg.info.id > lastFinished.id &&
+              hasSteerMarker(msg) &&
+              steerTextParts(msg).length > 0 &&
+              (!pending || pending.has(String(msg.info.id))),
+          )
+          if (steer.length === 0) return
+          const target = steer.at(-1)
+          if (!target || target.info.role !== "user") return
+          const merged = steer
+            .flatMap((msg) => steerTextParts(msg).map((part) => part.text.trim()))
+            .filter(Boolean)
+          if (merged.length === 0) return
+          for (const msg of steer) {
+            for (const part of msg.parts) {
+              if (part.type !== "text" || part.synthetic || part.ignored) continue
+              part.ignored = true
+            }
+          }
+          target.parts.push({
+            id: PartID.ascending(),
+            messageID: target.info.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: [
+              "<system-reminder>",
+              "The user sent the following follow-up message(s) while you were working:",
+              ...merged,
+              "",
+              "Please address these follow-up message(s) and continue with your tasks.",
+              "</system-reminder>",
+            ].join("\n"),
+          })
+        }
+        const resetContinuationBudgets = (assistant: MessageV2.Assistant, parts: MessageV2.Part[]) => {
+          if (!hasUsableAssistantProgress(assistant, parts)) return
+          if (invalidContinuations === 0 && interruptedContinuations === 0) return
+          const previous = {
+            invalidContinuations,
+            interruptedContinuations,
+          }
+          invalidContinuations = 0
+          interruptedContinuations = 0
+          return previous
+        }
         const agentMetrics = { tokens_in: 0, tokens_out: 0, files_changed: 0 }
         const publishAgentRequest = (phase: string, taskType: string) =>
           bus
@@ -1767,6 +1910,63 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           return true
         })
 
+        const reenterWithReminder = Effect.fn("SessionPrompt.reenterWithReminder")(function* (input: {
+          lastUser: MessageV2.User
+          text: string
+        }) {
+          const reentry = yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user" as const,
+            sessionID,
+            agentID: input.lastUser.agentID,
+            agent: input.lastUser.agent,
+            model: input.lastUser.model,
+            tools: input.lastUser.tools,
+            format: input.lastUser.format,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: reentry.id,
+            sessionID,
+            type: "text",
+            synthetic: true,
+            text: input.text,
+          } satisfies MessageV2.TextPart)
+        })
+
+        const ensureComposeRoute = Effect.fn("SessionPrompt.ensureComposeRoute")(function* (msgs: MessageV2.WithParts[]) {
+          if ((agentID ?? "main") !== "main") return composeRoute
+          const composeUser = getLatestComposeUserMessage(msgs)
+          if (!composeUser) return composeRoute
+          if (composeRoute?.sourceMessageID === composeUser.info.id) return composeRoute
+          const next = classifyComposeRoute({ message: composeUser })
+          const persisted = {
+            ...next,
+            time: {
+              created:
+                composeRoute?.sourceMessageID === composeUser.info.id ? composeRoute.time.created : next.time.created,
+              updated: Date.now(),
+            },
+          }
+          yield* sessions.setComposeRoute({ sessionID, composeRoute: persisted })
+          composeRoute = persisted
+          yield* slog.info("compose_route_selected", {
+            sessionID,
+            sourceMessageID: persisted.sourceMessageID,
+            strategy: persisted.strategy,
+            difficulty: persisted.difficulty,
+            taskType: persisted.taskType,
+            executionShape: persisted.executionShape,
+            reason: persisted.reason,
+            requiresTaskBoard: persisted.requiresTaskBoard,
+            requiresPlan: persisted.requiresPlan,
+            requiresReview: persisted.requiresReview,
+            requiresVerify: persisted.requiresVerify,
+          })
+          return composeRoute
+        })
+
         // Task stop-condition gate (main agent only). Before honoring a stop,
         // list non-terminal tasks in the session: if any remain, inject a
         // nudge as a synthetic user turn and re-enter (return true) so the
@@ -1778,6 +1978,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // pending-task board pollutes any goal verdict.
         const taskGate = Effect.fn("SessionPrompt.taskGate")(function* (lastUser: MessageV2.User) {
           if ((agentID ?? "main") !== "main") return false
+          const route = shouldManageComposeRoute(lastUser.agent) ? composeRoute : undefined
+          if (!route?.requiresTaskBoard) {
+            yield* taskGateState.clear(sessionID)
+            return false
+          }
           // If the main agent has the `task` tool stripped (Permission.disabled),
           // a nudge to call `task done` is unsatisfiable and would re-loop to
           // cap. Skip the gate entirely. Mirrors the canWrite skip in
@@ -1794,6 +1999,56 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // its turn can drop `task` even when permission allows it; nudging
           // is then unsatisfiable. Same skip rationale, narrower window.
           if (lastUser.tools?.["task"] === false) return false
+
+          const allTasks = yield* taskRegistry.list({
+            session_id: sessionID,
+            include_terminal: true,
+          })
+          const blockedTasks = allTasks.filter((task) => task.status === "blocked")
+          const hasTaskBoard = allTasks.length > 0
+          if (!hasTaskBoard || blockedTasks.length > 0) {
+            const count = yield* taskGateState.get(sessionID)
+            if (count >= MAX_TASK_GATE_MAIN_REACT) {
+              yield* slog.warn("compose task board gate hit cap; allowing stop", {
+                sessionID,
+                hasTaskBoard,
+                blockedTasks: blockedTasks.map((task) => task.id),
+              })
+              yield* taskGateState.clear(sessionID)
+              return false
+            }
+            yield* taskGateState.bump(sessionID)
+            yield* slog.info("compose_task_gate_blocked", {
+              sessionID,
+              sourceMessageID: route.sourceMessageID,
+              strategy: route.strategy,
+              difficulty: route.difficulty,
+              taskType: route.taskType,
+              hasTaskBoard,
+              blockedTasks: blockedTasks.map((task) => task.id),
+              missingStages: getMissingComposeStages({
+                route,
+                evidence: collectComposeEvidence({ messages: [], route }),
+                hasTaskBoard,
+                hasBlockedTasks: blockedTasks.length > 0,
+              }),
+            })
+            yield* reenterWithReminder({
+              lastUser,
+              text: buildComposeGateReminder({
+                route,
+                missing: getMissingComposeStages({
+                  route,
+                  evidence: collectComposeEvidence({ messages: [], route }),
+                  hasTaskBoard,
+                  hasBlockedTasks: blockedTasks.length > 0,
+                }),
+                hasTaskBoard,
+                hasBlockedTasks: blockedTasks.length > 0,
+              }),
+            })
+            return true
+          }
 
           const count = yield* taskGateState.get(sessionID)
           // runLoop is annotated `R = never`; TaskGate.decide raises a
@@ -1817,25 +2072,135 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return false
           }
           yield* taskGateState.bump(sessionID)
-          const reentry = yield* sessions.updateMessage({
-            id: MessageID.ascending(),
-            role: "user" as const,
+          yield* slog.info("compose_task_gate_blocked", {
             sessionID,
-            agentID: lastUser.agentID,
-            agent: lastUser.agent,
-            model: lastUser.model,
-            tools: lastUser.tools,
-            format: lastUser.format,
-            time: { created: Date.now() },
+            sourceMessageID: route.sourceMessageID,
+            strategy: route.strategy,
+            difficulty: route.difficulty,
+            taskType: route.taskType,
+            incompleteTasks: decision.incompleteTasks,
           })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: reentry.id,
-            sessionID,
-            type: "text",
-            synthetic: true,
+          yield* reenterWithReminder({
+            lastUser,
             text: decision.reentryText,
-          } satisfies MessageV2.TextPart)
+          })
+          return true
+        })
+
+        const composeGate = Effect.fn("SessionPrompt.composeGate")(function* (lastUser: MessageV2.User) {
+          if ((agentID ?? "main") !== "main") return false
+          if (!shouldManageComposeRoute(lastUser.agent)) {
+            yield* composeGateState.clear(sessionID)
+            return false
+          }
+          if (!composeRoute) {
+            const count = yield* composeGateState.get(sessionID)
+            if (count >= MAX_COMPOSE_GATE_MAIN_REACT) {
+              yield* slog.warn("compose route gate hit cap without a route; allowing stop", { sessionID })
+              yield* composeGateState.clear(sessionID)
+              return false
+            }
+            yield* composeGateState.bump(sessionID)
+            yield* reenterWithReminder({
+              lastUser,
+              text: [
+                "<system-reminder>",
+                "This compose session reached a stop point without a runtime route decision.",
+                "Classify the task first, then continue through the matching compose strategy before you stop.",
+                "</system-reminder>",
+              ].join("\n"),
+            })
+            return true
+          }
+
+          const transcriptContext = yield* MessageV2.loadContinuationContextEffect(sessionID, {
+            contextFrom: session.contextFrom,
+            contextWatermark: session.contextWatermark,
+            agentID: agentID ?? "main",
+          })
+          const transcriptMsgs = transcriptContext.messages
+          yield* slog.info("compose_gate_context_source", {
+            sessionID,
+            agentID: agentID ?? "main",
+            source: transcriptContext.own.source,
+            boundaryType: transcriptContext.own.boundary?.kind,
+            boundaryValid: transcriptContext.own.boundary?.valid ?? false,
+            fallbackReason: transcriptContext.own.fallbackReason,
+            messageCount: transcriptMsgs.length,
+            inherited: !!session.contextFrom,
+            inheritedSource: transcriptContext.parent?.source,
+            inheritedBoundaryType: transcriptContext.parent?.boundary?.kind,
+            inheritedBoundaryValid: transcriptContext.parent?.boundary?.valid ?? false,
+            inheritedFallbackReason: transcriptContext.parent?.fallbackReason,
+          })
+          const allTasks = composeRoute.requiresTaskBoard
+            ? yield* taskRegistry.list({
+                session_id: sessionID,
+                include_terminal: true,
+              })
+            : []
+          const evidence = collectComposeEvidence({ messages: transcriptMsgs, route: composeRoute })
+          const missing = getMissingComposeStages({
+            route: composeRoute,
+            evidence,
+            hasTaskBoard: allTasks.length > 0,
+            hasOpenTasks: allTasks.some((task) => task.status === "open" || task.status === "in_progress"),
+            hasBlockedTasks: allTasks.some((task) => task.status === "blocked"),
+          })
+          if (missing.length === 0) {
+            yield* slog.info("compose_route_completed", {
+              sessionID,
+              sourceMessageID: composeRoute.sourceMessageID,
+              strategy: composeRoute.strategy,
+              difficulty: composeRoute.difficulty,
+              taskType: composeRoute.taskType,
+            })
+            yield* composeGateState.clear(sessionID)
+            return false
+          }
+
+          const gateState = yield* composeGateState.get(sessionID)
+          if (gateState.count >= MAX_COMPOSE_GATE_MAIN_REACT) {
+            yield* slog.warn("compose gate hit cap; failing stop", {
+              sessionID,
+              missing,
+              strategy: composeRoute.strategy,
+            })
+            yield* composeGateState.clear(sessionID)
+            const assistant = yield* lastAssistant(sessionID, agentID)
+            if (assistant.info.role === "assistant") {
+              yield* writeModelError({
+                assistant: assistant.info,
+                reason:
+                  "Compose route requirements are still incomplete after repeated re-entry: " + missing.join("; "),
+              })
+            }
+            return false
+          }
+
+          const nextCount = yield* composeGateState.bump(sessionID, missing)
+          yield* slog.info("compose_gate_blocked", {
+            sessionID,
+            sourceMessageID: composeRoute.sourceMessageID,
+            strategy: composeRoute.strategy,
+            difficulty: composeRoute.difficulty,
+            taskType: composeRoute.taskType,
+            missingStages: missing,
+            reentryCount: nextCount,
+          })
+          yield* reenterWithReminder({
+            lastUser,
+            text:
+              buildComposeGateReminder({
+                route: composeRoute,
+                missing,
+                hasTaskBoard: allTasks.length > 0,
+                hasOpenTasks: allTasks.some((task) => task.status === "open" || task.status === "in_progress"),
+                hasBlockedTasks: allTasks.some((task) => task.status === "blocked"),
+              }) +
+              "\n" +
+              ["<system-reminder>", composeGateRecoveryLine(missing, nextCount), "</system-reminder>"].join("\n"),
+          })
           return true
         })
 
@@ -1848,7 +2213,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // error so a flaky judge can never trap the user.
         const goalGate = Effect.fn("SessionPrompt.goalGate")(function* (lastUser: MessageV2.User) {
           if ((agentID ?? "main") !== "main") return false
-          const active = yield* goal.get(sessionID)
+          const active = yield* goal.getActive(sessionID)
           if (!active) return false
 
           const transcriptMsgs = yield* MessageV2.filterCompactedEffect(sessionID, {
@@ -1859,44 +2224,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // Anchor the verdict to the assistant turn the judge just evaluated, so
           // the TUI can render a per-turn marker the user can trace back to.
           const judgedMessageID = transcriptMsgs.findLast((m) => m.info.role === "assistant")?.info.id
-          const verdict = yield* goal
-            .evaluate({
-              condition: active.condition,
-              msgs: transcriptMsgs,
-              model: lastUser.model,
-            })
-            .pipe(
-              Effect.catch((err) =>
-                Effect.gen(function* () {
-                  yield* slog.warn("goal judge failed; allowing stop", { error: String(err) })
-                  return { ok: true, reason: "judge error", judgeFailed: true } as Goal.Verdict & {
-                    judgeFailed: true
-                  }
-                }),
-              ),
-            )
+          const completion = yield* goal.requestComplete({
+            sessionID,
+            msgs: transcriptMsgs,
+            model: lastUser.model,
+            messageID: judgedMessageID,
+          })
 
-          if (verdict.ok || verdict.impossible) {
+          if (completion.completed) {
             yield* slog.info("goal satisfied; allowing stop", {
               sessionID,
-              impossible: verdict.impossible === true,
+              impossible: completion.verdict?.impossible === true,
+              error: completion.verdict?.error === true,
             })
-            // Publish the final verdict (goal cleared) so the TUI can render the
-            // ✓/⊘ result line before the indicator disappears. goal.clear also
-            // publishes goal:undefined, but the TUI keeps lastVerdict sticky.
-            yield* bus.publish(Goal.Event.Updated, {
-              sessionID,
-              goal: undefined,
-              lastVerdict: {
-                ...verdict,
-                attempt: active.react,
-                messageID: judgedMessageID,
-                error: "judgeFailed" in verdict ? true : undefined,
-              },
-            })
-            yield* goal.clear(sessionID)
             return false
           }
+
+          const verdict = completion.verdict
+          if (!verdict) return false
 
           const count = yield* goal.bumpReact(sessionID)
           if (count > MAX_GOAL_REACT) {
@@ -1905,21 +2250,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               condition: active.condition,
               count,
             })
-            yield* bus.publish(Goal.Event.Updated, {
-              sessionID,
-              goal: undefined,
-              lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
-            })
             yield* goal.clear(sessionID)
             return false
           }
 
           yield* slog.info("goal not satisfied; re-entering", { sessionID, attempt: count })
-          yield* bus.publish(Goal.Event.Updated, {
-            sessionID,
-            goal: { condition: active.condition },
-            lastVerdict: { ...verdict, attempt: count, messageID: judgedMessageID },
-          })
           const reentry = yield* sessions.updateMessage({
             id: MessageID.ascending(),
             role: "user" as const,
@@ -1994,6 +2329,45 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               "Your previous response contained no usable answer (it had only reasoning, or was empty).",
               "Provide a final answer to the user now, or call a valid tool to make progress on the task.",
               "Do not respond with only reasoning/thinking.",
+              "</system-reminder>",
+            ].join("\n"),
+          } satisfies MessageV2.TextPart)
+          return true
+        })
+
+        const autoContinueInterruptedOutput = Effect.fn("SessionPrompt.autoContinueInterruptedOutput")(function* (input: {
+          lastUser: MessageV2.User
+          assistant: MessageV2.Assistant
+          parts: MessageV2.Part[]
+        }) {
+          if (!isInterruptedStreamAssistant(input.assistant, input.parts)) return false
+          if (interruptedContinuations >= INTERRUPTED_OUTPUT_CONTINUATION_LIMIT) return false
+
+          interruptedContinuations++
+          yield* slog.info("auto-continuing interrupted output", { attempt: interruptedContinuations })
+          const msg = yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user" as const,
+            sessionID: input.lastUser.sessionID,
+            agentID: input.lastUser.agentID,
+            agent: input.lastUser.agent,
+            model: input.lastUser.model,
+            tools: input.lastUser.tools,
+            format: input.lastUser.format,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            messageID: msg.id,
+            sessionID: msg.sessionID,
+            type: "text",
+            synthetic: true,
+            text: [
+              "<system-reminder>",
+              "Your previous step was interrupted before the model emitted a completion event.",
+              "Continue the same task from the interruption point.",
+              "Do not restart from scratch and do not repeat completed tool calls unless their prior result is missing or unusable.",
+              "First inspect any completed tool results already in the conversation, then continue.",
               "</system-reminder>",
             ].join("\n"),
           } satisfies MessageV2.TextPart)
@@ -2128,6 +2502,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          const pendingSteerIDs =
+            !agentID || agentID === "main"
+              ? yield* state.takePendingSteer(sessionID)
+              : []
+          yield* ensureComposeRoute(msgs)
 
           // Per-user-message active recall reminder. Once the session has
           // any memory artifacts (memory dir populated OR tasks recorded),
@@ -2141,8 +2520,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               .hasMemoryOrTasks(sessionID)
               .pipe(Effect.catch(() => Effect.succeed(false)))
             if (hasRecallTarget) {
-              const sessMemDir = path.join(Global.Path.data, "memory", "sessions", sessionID)
-              const hints = recallHintLines((yield* config.get()).tool)
+              const [taskHint, actorHint, memoryHint] = recallHintLines((yield* config.get()).tool)
               lastUserMsgForRecall.parts.push({
                 id: PartID.ascending(),
                 messageID: lastUserMsgForRecall.info.id,
@@ -2151,14 +2529,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 synthetic: true,
                 text: [
                   "<system-reminder>",
-                  `This session has memory at ${sessMemDir}/. Recall content`,
-                  "not in your context with:",
-                  hints[0],
-                  `- Read(file_path="${sessMemDir}/...")`,
-                  hints[1],
-                  hints[2],
+                  "This session may already have recorded state.",
+                  "Before asking the user to repeat prior context, check the existing session/task state with:",
+                  taskHint,
+                  actorHint,
+                  `${memoryHint} only if task/actor state still leaves a cross-turn gap.`,
                   "",
-                  "Don't ask the user about something memory may already record.",
+                  "Don't ask the user about something the session state may already record.",
                   "</system-reminder>",
                 ].join("\n"),
               })
@@ -2184,12 +2561,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
 
-          if (lastAssistant) {
+          if (lastAssistant && lastUser.id < lastAssistant.id) {
+            const lastAssistantParts = lastAssistantMsg?.parts ?? []
             const classification = classifyAssistantStep({
               phase: "existing-assistant",
               lastUser,
               assistant: lastAssistant,
-              parts: lastAssistantMsg?.parts ?? [],
+              parts: lastAssistantParts,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: lastAssistant })
@@ -2197,6 +2575,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               break
             }
             if (classification.type === "failed") {
+              if (
+                yield* autoContinueInterruptedOutput({
+                  lastUser,
+                  assistant: lastAssistant,
+                  parts: lastAssistantParts,
+                })
+              )
+                continue
               yield* writeModelError({ assistant: lastAssistant, reason: classification.reason })
               yield* slog.info("exiting loop", { classification: classification.type, reason: classification.reason })
               break
@@ -2211,6 +2597,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               yield* slog.warn("degraded final on abnormal finish", { finish: lastAssistant.finish })
             if (classification.type !== "continue") {
               if (yield* taskGate(lastUser)) continue
+              if (yield* composeGate(lastUser)) continue
               if (yield* goalGate(lastUser)) continue
               yield* slog.info("exiting loop", { classification: classification.type })
               break
@@ -2228,37 +2615,61 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           if (step === 1 && !session.parentID) {
             const cfg = yield* config.get()
-            const dreamTrigger = yield* shouldAutoDream(cfg).pipe(Effect.catch(() => Effect.succeed(false)))
-            const distillTrigger = yield* shouldAutoDistill(cfg).pipe(Effect.catch(() => Effect.succeed(false)))
+            const maintenance = maintenanceConfig(cfg)
+            const run = yield* claimAutomaticMaintenance({ cfg, projectID: session.projectID }).pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            )
             const mdl = { providerID: lastUser.model.providerID, modelID: lastUser.model.modelID }
-            // AppRuntime is imported dynamically (not at module top level) to keep
-            // the session layer out of the app-runtime module-init cycle
-            // (prompt → app-runtime → AppLayer → SessionPrompt). Only loaded when a
-            // trigger actually fires. Detached fire-and-forget on the full runtime.
-            if (dreamTrigger || distillTrigger) {
-              const { AppRuntime } = yield* Effect.promise(() => import("@/effect/app-runtime"))
-              if (dreamTrigger) {
-                AppRuntime.runPromise(
-                  Session.Service.use((svc) =>
-                    Effect.gen(function* () {
-                      const s = yield* svc.create({ title: AUTO_DREAM_TITLE })
-                      const sp = yield* Service
-                      yield* sp.prompt({ sessionID: s.id, agent: "dream", model: mdl, parts: [{ type: "text", text: DREAM_TASK }] })
-                    }),
-                  ),
-                ).catch((err) => log.error("auto-dream prompt failed", { error: String(err) }))
-              }
-              if (distillTrigger) {
-                AppRuntime.runPromise(
-                  Session.Service.use((svc) =>
-                    Effect.gen(function* () {
-                      const s = yield* svc.create({ title: AUTO_DISTILL_TITLE })
-                      const sp = yield* Service
-                      yield* sp.prompt({ sessionID: s.id, agent: "distill", model: mdl, parts: [{ type: "text", text: DISTILL_TASK }] })
-                    }),
-                  ),
-                ).catch((err) => log.error("auto-distill prompt failed", { error: String(err) }))
-              }
+            if (run) {
+              yield* Effect.gen(function* () {
+                if (run.jobKind !== "distill" && maintenance.dreamEnabled) {
+                  Maintenance.updateStage({ runID: run.id, stage: "dream", status: "running" })
+                  const dream = yield* sessions.create({ title: AUTO_DREAM_TITLE })
+                  yield* prompt({ sessionID: dream.id, agent: "dream", model: mdl, parts: [{ type: "text", text: DREAM_TASK }] })
+                  Maintenance.updateStage({ runID: run.id, stage: "dream", status: "completed" })
+                }
+
+                if (run.jobKind !== "dream" && maintenance.distillEnabled) {
+                  Maintenance.updateStage({ runID: run.id, stage: "distill", status: "running" })
+                  const distill = yield* sessions.create({ title: AUTO_DISTILL_TITLE })
+                  const result = yield* prompt({
+                    sessionID: distill.id,
+                    agent: "distill",
+                    model: mdl,
+                    parts: [{ type: "text", text: DISTILL_TASK }],
+                  })
+                  const candidates = parseDistillCandidates(
+                    result.parts
+                      .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+                      .map((part) => part.text)
+                      .join("\n"),
+                  ).map((candidate) => ({
+                    candidateKind: candidate.candidate_kind,
+                    targetKind: candidate.target_kind,
+                    targetPath: candidate.target_path,
+                    evidence: candidate.evidence,
+                    confidence: candidate.confidence,
+                    proposedSummary: candidate.proposed_summary,
+                    proposedPatchPreview: candidate.proposed_patch_preview,
+                  }))
+                  Maintenance.insertCandidates(run.id, candidates)
+                  Maintenance.updateStage({ runID: run.id, stage: "distill", status: "completed" })
+                }
+
+                Maintenance.complete({
+                  runID: run.id,
+                  status: "completed",
+                  summary: "Dream and Distill maintenance completed.",
+                })
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => {
+                    Maintenance.fail(run.id, Cause.squash(cause))
+                    log.error("memory maintenance failed", { runID: run.id, error: Cause.squash(cause) })
+                  }),
+                ),
+                Effect.forkIn(scope),
+              )
             }
           }
 
@@ -2366,8 +2777,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }
 
-          // Resolve the agent for this iteration once. Both the management
-          // hooks below (fireCheckpoints, overflow handler) and the existing
+          // Resolve the agent for this iteration once. Both the context-management
+          // hook below and the existing
           // agent-not-found check later in the iteration reuse this binding.
           // Bounded computation agents (native + hidden — currently title,
           // summary, checkpoint-writer) are exempt from context management;
@@ -2376,30 +2787,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const isBoundedComputation =
             agent?.native === true && agent?.hidden === true
 
-          // Fire background checkpoint writers for any newly-crossed thresholds
-          // based on the latest completed assistant message's tokens. Must run
-          // BEFORE the overflow/maxThreshold check below so maxCrossed flag is
-          // set in time to trigger rebuild on this same iteration.
-          if (!skipOverflowCheck && !isBoundedComputation && lastFinished && lastFinished.tokens) {
-            const fireOps = yield* ops()
-            yield* prune
-              .fireCheckpoints({
-                sessionID,
-                model,
-                tokens: lastFinished.tokens,
-                promptOps: fireOps,
-                agentID: lastUser.agentID,
-              })
-              .pipe(Effect.ignore)
-          }
+          const cfg = yield* config.get()
+          const overflowed =
+            !!lastFinished &&
+            overflowCheck({ cfg, tokens: lastFinished.tokens, model })
+          const shouldCompact =
+            !!lastFinished &&
+            lastFinished.summary !== true &&
+            (overflowed || shouldAutoCompact({ cfg, tokens: lastFinished.tokens, model }))
 
           if (
             !skipOverflowCheck &&
             !isBoundedComputation &&
-            lastFinished &&
-            lastFinished.summary !== true &&
-            (overflowCheck({ cfg: yield* config.get(), tokens: lastFinished.tokens, model }) ||
-              (yield* prune.maxThresholdCrossed(sessionID)))
+            shouldCompact
           ) {
             // Subagent overflow → per-actor compaction (lossy LLM summarization
             // scoped to the actor's (sessionID, agent_id) slice). Subagents
@@ -2426,48 +2826,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               continue
             }
 
-            // Main-agent overflow: insert a checkpoint boundary marker (never
-            // deletes DB messages) so the next iteration rebuilds from the
-            // freshest checkpoint. Fall back to compaction only when no boundary
-            // can be produced.
-            const hasCP = yield* checkpoint.hasCheckpoint(sessionID).pipe(Effect.catch(() => Effect.succeed(false)))
-            if (hasCP) {
-              // Wait for any running writer so the freshest checkpoint is available
-              yield* checkpoint.waitForWriter(sessionID).pipe(Effect.ignore)
-
-              const boundary = yield* checkpoint
-                .lastBoundary(sessionID)
-                .pipe(Effect.catch(() => Effect.succeed(undefined)))
-              const boundaryMsg = boundary ? msgs.find((m) => m.info.id === boundary) : undefined
-              const inserted = boundary
-                ? yield* checkpoint
-                    .insertRebuildBoundary({
-                      sessionID,
-                      boundary,
-                      lastMessageInfo: computeLastMessageInfo(msgs.map((m) => m.info)),
-                      agentID: lastUser.agentID,
-                      agent: lastUser.agent,
-                      model: { providerID: model.providerID, modelID: model.id },
-                      boundaryCreatedAt: boundaryMsg?.info.time.created,
-                    })
-                    .pipe(Effect.catch(() => Effect.succeed(false)))
-                : false
-
-              if (inserted) {
-                yield* prune.resetThresholds(sessionID)
-                skipOverflowCheck = true
-                continue
-              }
-            }
-
-            // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
-            // Better than mechanical trim: preserves semantic content via summary.
             yield* compaction
               .create({
                 sessionID,
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, modelID: model.id },
                 auto: true,
+                overflow: overflowed,
                 agentID: lastUser.agentID,
               })
               .pipe(Effect.ignore)
@@ -2510,40 +2875,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             assistantMessage: msg,
             sessionID,
             model,
+            submitAt: lastUser.time.created,
             agentMetrics,
+            manageSessionStatus: false,
           })
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-            const tools = yield* resolveTools({
-              agent,
-              session,
-              model,
-              tools: lastUser.tools,
-              processor: handle,
-              bypassAgentCheck,
-              messages: msgs,
-              agentID: lastUser.agentID,
-              task_id,
-            })
-
-            if (lastUser.format?.type === "json_schema") {
-              tools["StructuredOutput"] = createStructuredOutputTool({
-                schema: lastUser.format.schema,
-                onSuccess(output) {
-                  structured = output
-                },
-              })
-            }
-
             if (step === 1)
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
             if (step > 1 && lastFinished) {
+              mergeSteerFollowups(msgs, lastFinished, pendingSteerIDs)
               for (const m of msgs) {
                 if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
+                if (hasSteerMarker(m)) continue
                 for (const p of m.parts) {
                   if (p.type !== "text" || p.ignored || p.synthetic) continue
                   if (!p.text.trim()) continue
@@ -2562,6 +2910,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const format = lastUser.format ?? { type: "text" as const }
+            const loadActiveTools = resolveTools({
+              agent,
+              session,
+              model,
+              composeRoute: shouldManageComposeRoute(lastUser.agent) ? composeRoute : undefined,
+              tools: lastUser.tools,
+              processor: handle,
+              bypassAgentCheck,
+              messages: msgs,
+              agentID: lastUser.agentID,
+              task_id,
+            }).pipe(
+              Effect.tap((tools) =>
+                Effect.sync(() => {
+                  if (format.type !== "json_schema") return
+                  tools["StructuredOutput"] = createStructuredOutputTool({
+                    schema: format.schema,
+                    onSuccess(output) {
+                      structured = output
+                    },
+                  })
+                }),
+              ),
+            )
 
             // Determine if this iteration is for a fork agent (contextMode === "full").
             // Fork agents use the frozen ForkContext snapshot captured at spawn time
@@ -2585,6 +2957,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // If forkCtx is missing (race / cleanup bug / spawn skipped), fail the
             // actor so the next prune turn can spawn a fresh fork.
             if (isForkAgent) {
+              const tools = yield* loadActiveTools
               const forkCtxEffect = spawnRef.current?.getForkContext(lastUser.agentID!)
               const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
               if (!forkCtx) {
@@ -2614,6 +2987,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const result = yield* handle.process({
                 user: lastUser,
                 agent,
+                submitAt: lastUser.time.created,
                 // Fork inherits the parent agent's permission (captured at spawn into
                 // ForkContext). This drives llm.ts resolveTools/disabled() to the SAME
                 // visible tool set as the parent → prompt-cache parity on the inherited
@@ -2654,18 +3028,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return "break" as const
               }
 
+              const forkParts = MessageV2.parts(handle.message.id)
               const forkClassification = classifyAssistantStep({
                 phase: "after-process",
                 lastUser,
                 assistant: handle.message,
-                parts: MessageV2.parts(handle.message.id),
+                parts: forkParts,
                 processResult: result,
               })
               if (forkClassification.type === "filtered") {
                 yield* writeContentFilterError({ assistant: handle.message })
                 return "break" as const
               }
+              const forkBudgetReset = resetContinuationBudgets(handle.message, forkParts)
+              if (forkBudgetReset)
+                yield* slog.info("reset continuation budgets after usable progress", forkBudgetReset)
               if (forkClassification.type === "failed") {
+                if (
+                  yield* autoContinueInterruptedOutput({
+                    lastUser,
+                    assistant: handle.message,
+                    parts: forkParts,
+                  })
+                )
+                  return "continue" as const
                 yield* writeModelError({ assistant: handle.message, reason: forkClassification.reason })
                 return "break" as const
               }
@@ -2706,11 +3092,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "continue" as const
             }
 
-            const [skills, env, instructions] = yield* Effect.all([
-              sys.skills(agent),
-              Effect.sync(() => sys.environment(model)),
-              instruction.system().pipe(Effect.orDie),
-            ])
+            const loadSystemInputs = Effect.gen(function* () {
+              const loadSystemInputsAt = Date.now()
+              yield* slog.info("loadSystemInputs", {
+                status: "started",
+                sessionID,
+                step,
+                agent: agent.name,
+              })
+              const [skills, env, instructions] = yield* Effect.all([
+                sys.skills(agent),
+                Effect.sync(() => sys.environment(model)),
+                instruction.system().pipe(Effect.orDie),
+              ])
+              yield* slog.info("loadSystemInputs", {
+                status: "completed",
+                duration: Date.now() - loadSystemInputsAt,
+                sessionID,
+                step,
+                agent: agent.name,
+              })
+              return { skills, env, instructions }
+            })
+            const [tools, systemInputs] = yield* Effect.all([loadActiveTools, loadSystemInputs], {
+              concurrency: 2,
+            })
+            const { skills, env, instructions } = systemInputs
+            const composeSystem =
+              shouldManageComposeRoute(lastUser.agent) && composeRoute
+                ? resolveComposeRuntimePolicy(composeRoute).memoryPreface
+                : undefined
             // Surface which instruction files (CLAUDE.md, AGENTS.md, ...) were loaded.
             // Only for primary sessions (subagents would be noisy) and once per session.
             if (!session.parentID && !instructionsNotified.has(sessionID)) {
@@ -2725,6 +3136,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               ...env,
               ...(skills ? [skills] : []),
               ...instructions.content,
+              ...(composeSystem ? [composeSystem] : []),
               ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
             ]
             // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
@@ -2738,17 +3150,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // task creates, etc.) so each step doesn't replay from the bare
             // user prompt. The watermark is for fork capture only (frozen
             // snapshot of parent-view at spawn time).
-            const { system: prebuiltSystem, inheritedMessages: modelMsgs } =
-              yield* buildLLMRequestPrefix({
-                sessionID,
-                agent,
-                model,
-                msgs,
-                additions,
-              }).pipe(
-                Effect.provideService(LLM.Service, llm),
-                Effect.provideService(ToolRegistry.Service, registry),
-              )
+            const buildLLMRequestPrefixAt = Date.now()
+            yield* slog.info("buildLLMRequestPrefix", {
+              status: "started",
+              sessionID,
+              step,
+              agent: agent.name,
+            })
+            const { system: prebuiltSystem, inheritedMessages: modelMsgs } = yield* buildLLMRequestPrefix({
+              sessionID,
+              agent,
+              model,
+              msgs,
+              additions,
+            }).pipe(
+              Effect.provideService(LLM.Service, llm),
+              Effect.provideService(ToolRegistry.Service, registry),
+            )
+            yield* slog.info("buildLLMRequestPrefix", {
+              status: "completed",
+              duration: Date.now() - buildLLMRequestPrefixAt,
+              sessionID,
+              step,
+              agent: agent.name,
+            })
             const maxModeCfg = (yield* config.get()).experimental?.maxMode
             const useMaxMode =
               agent.name === MaxMode.MAX_MODE_AGENT && maxModeCfg !== undefined && format.type !== "json_schema"
@@ -2759,6 +3184,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
+              submitAt: lastUser.time.created,
               // system: additions is preserved for non-LLM consumers of StreamInput (e.g.,
               // MessageV2.User.system for logging/replay); llm.stream itself uses prebuiltSystem.
               system: additions,
@@ -2770,6 +3196,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               agentID: lastUser.agentID,
             }
 
+            const llmProcessAt = Date.now()
+            yield* slog.info("llmProcess", {
+              status: "started",
+              sessionID,
+              step,
+              agent: agent.name,
+              toolCount: Object.keys(tools).length,
+            })
             const result = useMaxMode
               ? yield* MaxMode.runMaxStep({
                   // runMaxStep reuses the identical per-step args as handle.process,
@@ -2782,6 +3216,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     status.set(sessionID, message ? { type: "busy", message } : { type: "busy" }),
                 })
               : yield* handle.process(processArgs)
+            yield* slog.info("llmProcess", {
+              status: "completed",
+              duration: Date.now() - llmProcessAt,
+              sessionID,
+              step,
+              agent: agent.name,
+              toolCount: Object.keys(tools).length,
+            })
 
             if (
               result === "continue" &&
@@ -2797,18 +3239,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
 
+            const parts = MessageV2.parts(handle.message.id)
             const classification = classifyAssistantStep({
               phase: "after-process",
               lastUser,
               assistant: handle.message,
-              parts: MessageV2.parts(handle.message.id),
+              parts,
               processResult: result,
             })
             if (classification.type === "filtered") {
               yield* writeContentFilterError({ assistant: handle.message })
               return "break" as const
             }
+            const budgetReset = resetContinuationBudgets(handle.message, parts)
+            if (budgetReset)
+              yield* slog.info("reset continuation budgets after usable progress", budgetReset)
             if (classification.type === "failed") {
+              if (
+                yield* autoContinueInterruptedOutput({
+                  lastUser,
+                  assistant: handle.message,
+                  parts,
+                })
+              )
+                return "continue" as const
               yield* writeModelError({ assistant: handle.message, reason: classification.reason })
               return "break" as const
             }
@@ -2851,41 +3305,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return "continue" as const
               }
 
-              // Main-agent provider-signalled overflow: insert a checkpoint
-              // boundary marker (never deletes). Prefer rebuild over compaction:
-              // if a writer is running or finished, wait (bounded) and rebuild
-              // from it. Fall back to compaction only when no boundary exists.
-              const writerRunning = yield* checkpoint.isWriterRunning(sessionID)
-                .pipe(Effect.catch(() => Effect.succeed(false)))
-              const hasCP = yield* checkpoint.hasCheckpoint(sessionID)
-                .pipe(Effect.catch(() => Effect.succeed(false)))
-
-              if (writerRunning || hasCP) {
-                yield* checkpoint.waitForWriter(sessionID).pipe(Effect.ignore)
-                const boundary2 = yield* checkpoint.lastBoundary(sessionID)
-                  .pipe(Effect.catch(() => Effect.succeed(undefined)))
-                const boundary2Msg = boundary2 ? msgs.find((m) => m.info.id === boundary2) : undefined
-                const inserted2 = boundary2
-                  ? yield* checkpoint
-                      .insertRebuildBoundary({
-                        sessionID,
-                        boundary: boundary2,
-                        lastMessageInfo: computeLastMessageInfo(msgs.map((m) => m.info)),
-                        agentID: lastUser.agentID,
-                        agent: lastUser.agent,
-                        model: { providerID: model.providerID, modelID: model.id },
-                        boundaryCreatedAt: boundary2Msg?.info.time.created,
-                      })
-                      .pipe(Effect.catch(() => Effect.succeed(false)))
-                  : false
-
-                if (inserted2) {
-                  yield* prune.resetThresholds(sessionID)
-                  return "continue" as const
-                }
-              }
-
-              // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
               yield* compaction
                 .create({
                   sessionID,
@@ -2900,7 +3319,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return "continue" as const
           }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
           if (outcome === "break") {
+            if ((!agentID || agentID === "main") && (yield* state.hasPendingSteer(sessionID))) continue
             if (yield* taskGate(lastUser)) continue
+            if (yield* composeGate(lastUser)) continue
             if (yield* goalGate(lastUser)) continue
             break
           }
@@ -2977,6 +3398,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             messageID: input.messageID,
             agent: agentName,
             parts: [{ type: "text", text: "Goal cleared.", synthetic: true }],
+            noReply: true,
+          })
+        }
+        if (condition === "pause") {
+          yield* goal.pause(input.sessionID)
+          return yield* prompt({
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+            agent: agentName,
+            parts: [{ type: "text", text: "Goal paused.", synthetic: true }],
+            noReply: true,
+          })
+        }
+        if (condition === "resume") {
+          yield* goal.resume(input.sessionID)
+          return yield* prompt({
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+            agent: agentName,
+            parts: [{ type: "text", text: "Goal resumed.", synthetic: true }],
+            noReply: true,
+          })
+        }
+        if (condition === "delete") {
+          yield* goal.delete(input.sessionID)
+          return yield* prompt({
+            sessionID: input.sessionID,
+            messageID: input.messageID,
+            agent: agentName,
+            parts: [{ type: "text", text: "Goal deleted.", synthetic: true }],
             noReply: true,
           })
         }
@@ -3164,6 +3615,7 @@ export const defaultLayer = Layer.suspend(() =>
         Inbox.defaultLayer,
         Goal.defaultLayer,
         TaskGateState.defaultLayer,
+        ComposeGateState.defaultLayer,
         TaskRegistry.defaultLayer,
       ),
     ),
@@ -3198,6 +3650,7 @@ export const PromptInput = z.object({
   format: MessageV2.Format.optional(),
   system: z.string().optional(),
   variant: z.string().optional(),
+  delivery: z.enum(["default", "steer"]).optional(),
   parts: z.array(
     z.discriminatedUnion("type", [
       MessageV2.TextPart.omit({
@@ -3322,6 +3775,26 @@ export function createStructuredOutputTool(input: {
     },
   })
 }
+
+function hasUsableAssistantProgress(assistant: MessageV2.Assistant, parts: MessageV2.Part[]) {
+  if (assistant.summary || assistant.structured !== undefined) return false
+  return parts.some((part) => {
+    if (part.type === "text" || part.type === "reasoning") return !!part.text.trim()
+    if (part.type !== "tool") return false
+    return part.state.status === "completed"
+  })
+}
+
+function isInterruptedStreamAssistant(assistant: MessageV2.Assistant, parts: MessageV2.Part[]) {
+  if (assistant.error?.name !== "ModelError" && assistant.error?.name !== "MessageAbortedError") return false
+  if (assistant.summary || assistant.structured !== undefined) return false
+  const stepFinish = [...parts]
+    .reverse()
+    .find((part): part is MessageV2.StepFinishPart => part.type === "step-finish")
+  if (stepFinish?.reason === "missing-finish-step") return true
+  return hasUsableAssistantProgress(assistant, parts)
+}
+
 const bashRegex = /!`([^`]+)`/g
 // Match [Image N] as single token, quoted strings, or non-space sequences
 const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi

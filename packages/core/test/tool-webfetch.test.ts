@@ -58,6 +58,13 @@ const call = (input: typeof WebFetchTool.Input.Type, id = "call-webfetch") => ({
 })
 
 describe("WebFetchTool helpers", () => {
+  test("classifies search-engine URLs and safe transport failures", () => {
+    expect(WebFetchTool.isSearchEngineUrl(new URL("https://www.bing.com/search?q=lfcode"))).toBe(true)
+    expect(WebFetchTool.isSearchEngineUrl(new URL("https://docs.lfcode.dev"))).toBe(false)
+    expect(WebFetchTool.classifyWebFetchFailure(new Error("webfetch:response_too_large"))).toBe("response_too_large")
+    expect(WebFetchTool.classifyWebFetchFailure(new Error("certificate verify failed"))).toBe("tls")
+  })
+
   test("defaults format and rejects invalid timeout controls", () => {
     const decode = Schema.decodeUnknownSync(WebFetchTool.Input)
     expect(decode({ url: "https://example.com" })).toEqual({ url: "https://example.com", format: "markdown" })
@@ -147,7 +154,7 @@ describe("WebFetchTool registration", () => {
 
       expect(yield* executeTool(registry, call({ url: "file:///etc/passwd", format: "text" }))).toEqual({
         type: "error",
-        value: "Unable to fetch file:///etc/passwd",
+        value: "URL 无效，且必须使用 http:// 或 https://。",
       })
       expect(assertions).toEqual([])
       expect(requests).toEqual([])
@@ -188,7 +195,7 @@ describe("WebFetchTool registration", () => {
         )
       expect(yield* executeTool(registry, call({ url: "https://1.1.1.1/declared", format: "text" }))).toEqual({
         type: "error",
-        value: "Unable to fetch https://1.1.1.1/declared",
+        value: "网页响应过大，已停止读取。请使用更具体的 URL 或其他工具。",
       })
 
       respond = () =>
@@ -197,7 +204,7 @@ describe("WebFetchTool registration", () => {
         )
       expect(yield* executeTool(registry, call({ url: "https://1.1.1.1/streamed", format: "text" }))).toEqual({
         type: "error",
-        value: "Unable to fetch https://1.1.1.1/streamed",
+        value: "网页响应过大，已停止读取。请使用更具体的 URL 或其他工具。",
       })
     }),
   )
@@ -209,13 +216,13 @@ describe("WebFetchTool registration", () => {
       respond = () => Effect.succeed(new Response("png", { headers: { "content-type": "image/png" } }))
       expect(yield* executeTool(registry, call({ url: "https://1.1.1.1/image", format: "html" }))).toEqual({
         type: "error",
-        value: "Unable to fetch https://1.1.1.1/image",
+        value: "该 URL 返回的不是可读取文本网页。请使用对应的文件或媒体工具。",
       })
 
       respond = () => Effect.succeed(new Response("pdf", { headers: { "content-type": "application/pdf" } }))
       expect(yield* executeTool(registry, call({ url: "https://1.1.1.1/file", format: "html" }))).toEqual({
         type: "error",
-        value: "Unable to fetch https://1.1.1.1/file",
+        value: "该 URL 返回的不是可读取文本网页。请使用对应的文件或媒体工具。",
       })
     }),
   )
@@ -253,7 +260,10 @@ describe("WebFetchTool registration", () => {
       ).pipe(Effect.forkChild)
       yield* TestClock.adjust(Duration.seconds(1))
 
-      expect(yield* Fiber.join(fiber)).toEqual({ type: "error", value: "Unable to fetch https://1.1.1.1/slow" })
+      expect(yield* Fiber.join(fiber)).toEqual({
+        type: "error",
+        value: "网页请求超时。可稍后重试、缩小目标页面，或改用浏览器会话。",
+      })
     }),
   )
 })

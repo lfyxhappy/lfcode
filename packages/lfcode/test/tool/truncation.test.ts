@@ -24,7 +24,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("truncated...")
-        if (result.truncated) expect(result.outputPath).toBeDefined()
+        if (result.truncated) expect(result.outputRef).toMatch(/^tool-output:tool_/)
       }),
     )
 
@@ -114,12 +114,13 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("The tool call succeeded but the output was truncated")
-        expect(result.content).toContain("Grep")
+        expect(result.content).toContain("tool_output")
         if (!result.truncated) throw new Error("expected truncated")
-        expect(result.outputPath).toBeDefined()
-        expect(result.outputPath).toContain("tool_")
+        expect(result.outputRef).toMatch(/^tool-output:tool_/)
 
-        const written = yield* Effect.promise(() => Filesystem.readText(result.outputPath!))
+        const filepath = Truncate.resolveOutputReference(result.outputRef)
+        expect(filepath).toBeDefined()
+        const written = yield* Effect.promise(() => Filesystem.readText(filepath!))
         expect(written).toBe(lines)
       }),
     )
@@ -132,8 +133,8 @@ describe("Truncate", () => {
         const result = yield* svc.output(lines, { maxLines: 10 }, agent as any)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("Grep")
-        expect(result.content).toContain("actor tool")
+        expect(result.content).toContain("tool_output")
+        expect(result.content).toContain("explore actor")
       }),
     )
 
@@ -145,8 +146,8 @@ describe("Truncate", () => {
         const result = yield* svc.output(lines, { maxLines: 10 }, agent as any)
 
         expect(result.truncated).toBe(true)
-        expect(result.content).toContain("Grep")
-        expect(result.content).not.toContain("actor tool")
+        expect(result.content).toContain("tool_output")
+        expect(result.content).not.toContain("explore actor")
       }),
     )
 
@@ -158,7 +159,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(false)
         if (result.truncated) throw new Error("expected not truncated")
-        expect("outputPath" in result).toBe(false)
+        expect("outputRef" in result).toBe(false)
       }),
     )
 

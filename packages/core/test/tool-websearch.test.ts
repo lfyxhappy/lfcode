@@ -23,8 +23,8 @@ describe("WebSearchTool provider selection", () => {
     expect(() => decode({ query: "x", numResults: WebSearchTool.MAX_NUM_RESULTS + 1 })).toThrow()
     expect(() => decode({ query: "x", contextMaxCharacters: WebSearchTool.MAX_CONTEXT_CHARACTERS + 1 })).toThrow()
   })
-  test("selects a stable provider per session", () => {
-    expect(WebSearchTool.selectProvider(sessionID)).toBe(WebSearchTool.selectProvider(sessionID))
+  test("defaults to Exa before considering Parallel", () => {
+    expect(WebSearchTool.selectProvider(sessionID)).toBe("exa")
   })
 
   test("supports an explicit operational override", () => {
@@ -34,11 +34,8 @@ describe("WebSearchTool provider selection", () => {
     expect(WebSearchTool.selectProvider(sessionID, { enableExa: false, enableParallel: false }, "exa")).toBe("exa")
   })
 
-  test("prefers Parallel when both explicit flags are enabled", () => {
-    expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: true })).toBe("parallel")
-  })
-
-  test("prefers Exa when only its explicit flag is enabled", () => {
+  test("keeps the legacy flags from changing the deterministic default order", () => {
+    expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: true })).toBe("exa")
     expect(WebSearchTool.selectProvider(sessionID, { enableExa: true, enableParallel: false })).toBe("exa")
   })
 })
@@ -221,7 +218,13 @@ describe("WebSearchTool registration", () => {
       expect(settled).toEqual({
         result: { type: "text", value: "parallel results" },
         output: {
-          structured: { provider: "parallel", text: "parallel results" },
+          structured: {
+            provider: "parallel",
+            text: "parallel results",
+            attemptedProviders: ["parallel"],
+            sources: [],
+            warnings: [],
+          },
           content: [{ type: "text", text: "parallel results" }],
         },
       })
@@ -248,7 +251,7 @@ describe("WebSearchTool registration", () => {
     }),
   )
 
-  it.effect("returns the legacy no-results fallback as concise model text", () =>
+  it.effect("reports an explicit provider empty response without retrying a different provider", () =>
     Effect.gen(function* () {
       requests.length = 0
       assertions.length = 0
@@ -262,7 +265,7 @@ describe("WebSearchTool registration", () => {
           ...toolIdentity,
           call: { type: "tool-call", id: "call-empty", name: "websearch", input: { query: "nothing" } },
         }),
-      ).toEqual({ type: "text", value: WebSearchTool.NO_RESULTS })
+      ).toEqual({ type: "error", value: "Unable to search the web for nothing (exa:empty_response)" })
     }),
   )
 
@@ -280,7 +283,7 @@ describe("WebSearchTool registration", () => {
           ...toolIdentity,
           call: { type: "tool-call", id: "call-large-response", name: "websearch", input: { query: "too much" } },
         }),
-      ).toEqual({ type: "error", value: "Unable to search the web for too much" })
+      ).toEqual({ type: "error", value: "Unable to search the web for too much (exa:transport)" })
     }),
   )
 })

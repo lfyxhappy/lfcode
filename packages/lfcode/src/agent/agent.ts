@@ -6,7 +6,7 @@ import { generateObject, streamObject, type ModelMessage } from "ai"
 import { Instance } from "../project/instance"
 import { Truncate } from "../tool"
 import { Auth } from "../auth"
-import { ProviderTransform } from "../provider"
+import * as ProviderTransform from "../provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
@@ -96,6 +96,7 @@ export const layer = Layer.effect(
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
           },
           question: "deny",
+          compose_enter: "deny",
           plan_enter: "deny",
           plan_exit: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
@@ -113,12 +114,13 @@ export const layer = Layer.effect(
           build: {
             name: "build",
             color: "#fb8147",
-            description: "Executes tools based on configured permissions.",
+            description: "Direct execution mode for routine and small-scope tasks.",
             options: {},
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
                 question: "allow",
+                compose_enter: "allow",
                 plan_enter: "allow",
               }),
               user,
@@ -141,6 +143,7 @@ export const layer = Layer.effect(
                     defaults,
                     Permission.fromConfig({
                       question: "allow",
+                      compose_enter: "allow",
                       plan_enter: "allow",
                     }),
                     user,
@@ -177,13 +180,14 @@ export const layer = Layer.effect(
           compose: {
             name: "compose",
             color: "#a7a3d8",
-            description: "Compose mode. Orchestrates workflows with built-in compose skills.",
+            description: "Large-project orchestration mode with built-in superpowers workflows for planning, delegation, review, and verification.",
             options: {},
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
                 question: "allow",
                 skill: "allow",
+                compose_enter: "allow",
               }),
               user,
             ),
@@ -212,10 +216,12 @@ export const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 "*": "deny",
-                grep: "allow",
-                glob: "allow",
+                search: "allow",
+                tree: "allow",
+                file_info: "allow",
+                archive_inspect: "allow",
                 list: "allow",
-                bash: "allow",
+                shell: "allow",
                 webfetch: "allow",
                 websearch: "allow",
                 codesearch: "allow",
@@ -227,7 +233,7 @@ export const layer = Layer.effect(
               }),
               user,
             ),
-            description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
+            description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by name or path (eg. "src/components/App.tsx"), search code for keywords (eg. "API endpoints"), inspect directory structure, or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
             options: {},
             mode: "subagent",
@@ -324,12 +330,12 @@ export const layer = Layer.effect(
               Permission.fromConfig({
                 "*": "deny",
                 read: "allow",
-                write: "allow",
-                edit: "allow",
-                glob: "allow",
-                grep: "allow",
+                file_info: "allow",
+                tree: "allow",
+                search: "allow",
+                archive_inspect: "allow",
                 memory: "allow",
-                bash: "allow",
+                shell: "allow",
                 external_directory: {
                   [path.join(Global.Path.data, "memory")]: "allow",
                   [path.join(Global.Path.data, "memory", "*")]: "allow",
@@ -337,7 +343,15 @@ export const layer = Layer.effect(
               }),
               user,
             ),
-            toolAllowlist: ["read", "write", "edit", "glob", "grep", "memory", "bash"],
+            toolAllowlist: [
+              "read",
+              "file_info",
+              "tree",
+              "search",
+              "archive_inspect",
+              "memory",
+              "shell",
+            ],
           },
           distill: {
             name: "distill",
@@ -351,12 +365,12 @@ export const layer = Layer.effect(
               Permission.fromConfig({
                 "*": "deny",
                 read: "allow",
-                write: "allow",
-                edit: "allow",
-                glob: "allow",
-                grep: "allow",
+                file_info: "allow",
+                tree: "allow",
+                search: "allow",
+                archive_inspect: "allow",
                 memory: "allow",
-                bash: "allow",
+                shell: "allow",
                 external_directory: {
                   [path.join(Global.Path.data, "memory")]: "allow",
                   [path.join(Global.Path.data, "memory", "*")]: "allow",
@@ -364,7 +378,15 @@ export const layer = Layer.effect(
               }),
               user,
             ),
-            toolAllowlist: ["read", "write", "edit", "glob", "grep", "memory", "bash"],
+            toolAllowlist: [
+              "read",
+              "file_info",
+              "tree",
+              "search",
+              "archive_inspect",
+              "memory",
+              "shell",
+            ],
           },
         }
 

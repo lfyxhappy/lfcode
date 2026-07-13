@@ -1,4 +1,17 @@
-import { type Component, type JSX, ErrorBoundary, For, Match, Show, Suspense, Switch, createEffect, createMemo, createSignal, lazy } from "solid-js"
+import {
+  type Component,
+  type JSX,
+  ErrorBoundary,
+  For,
+  Match,
+  Show,
+  Suspense,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  lazy,
+} from "solid-js"
 import { Dialog } from "@lfcode-ai/ui/dialog"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { Icon } from "@lfcode-ai/ui/icon"
@@ -6,21 +19,41 @@ import { Dynamic } from "solid-js/web"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { nextVisitedSettingsTabs, shouldMountSettingsPanel, type SettingsTab } from "./dialog-settings-logic"
+import { SettingsEditor } from "./settings-editor"
 import { SettingsGeneral } from "./settings-general"
 import { SettingsKeybinds } from "./settings-keybinds"
 
 const SettingsArchives = lazy(() => import("./settings-archives").then((mod) => ({ default: mod.SettingsArchives })))
+const SettingsAppControl = lazy(() =>
+  import("./settings-app-control").then((mod) => ({ default: mod.SettingsAppControl })),
+)
 const SettingsBrowser = lazy(() => import("./settings-browser").then((mod) => ({ default: mod.SettingsBrowser })))
-const SettingsProviders = lazy(() => import("./settings-providers").then((mod) => ({ default: mod.SettingsProviders })))
 const SettingsModels = lazy(() => import("./settings-models").then((mod) => ({ default: mod.SettingsModels })))
 const SettingsMcp = lazy(() => import("./settings-mcp").then((mod) => ({ default: mod.SettingsMcp })))
+const SettingsPlugins = lazy(() => import("./settings-plugins").then((mod) => ({ default: mod.SettingsPlugins })))
+const SettingsPersonalization = lazy(() =>
+  import("./settings-personalization").then((mod) => ({ default: mod.SettingsPersonalization })),
+)
+const SettingsMaintenance = lazy(() =>
+  import("./settings-maintenance").then((mod) => ({ default: mod.SettingsMaintenance })),
+)
+const SettingsRuntimes = lazy(() => import("./settings-runtimes").then((mod) => ({ default: mod.SettingsRuntimes })))
 const SettingsUsage = lazy(() => import("./settings-usage").then((mod) => ({ default: mod.SettingsUsage })))
 const SettingsSkills = lazy(() => import("./settings-skills").then((mod) => ({ default: mod.SettingsSkills })))
 
 type SettingsPanelRenderers = Partial<Record<SettingsTab, Component>>
 
-const serverTabs = ["archives", "providers", "models", "mcp", "skills", "usage"] as const satisfies SettingsTab[]
-const desktopTabs = ["general", "shortcuts", "browser"] as const satisfies SettingsTab[]
+const serverTabs = ["archives", "models", "mcp", "plugins", "skills", "usage"] as const satisfies SettingsTab[]
+const desktopTabs = [
+  "general",
+  "editor",
+  "personalization",
+  "maintenance",
+  "appControl",
+  "shortcuts",
+  "browser",
+  "runtimes",
+] as const satisfies SettingsTab[]
 
 function SettingsPanelSkeleton() {
   return (
@@ -63,18 +96,26 @@ function SettingsPanelBoundary(props: { children: JSX.Element }) {
   )
 }
 
-function renderLazyPanel(tab: Exclude<SettingsTab, "general" | "shortcuts">) {
+function renderLazyPanel(tab: Exclude<SettingsTab, "general" | "editor" | "shortcuts">) {
   switch (tab) {
+    case "personalization":
+      return SettingsPersonalization
+    case "maintenance":
+      return SettingsMaintenance
+    case "appControl":
+      return SettingsAppControl
     case "browser":
       return SettingsBrowser
+    case "runtimes":
+      return SettingsRuntimes
     case "archives":
       return SettingsArchives
-    case "providers":
-      return SettingsProviders
     case "models":
       return SettingsModels
     case "mcp":
       return SettingsMcp
+    case "plugins":
+      return SettingsPlugins
     case "skills":
       return SettingsSkills
     case "usage":
@@ -87,9 +128,12 @@ function SettingsPanel(props: {
   selected: () => SettingsTab
   visited: () => Set<SettingsTab>
   renderers?: SettingsPanelRenderers
+  directory?: string
 }) {
   const renderer = createMemo(() => props.renderers?.[props.tab])
-  const shouldMount = createMemo(() => shouldMountSettingsPanel({ tab: props.tab, selected: props.selected(), visited: props.visited() }))
+  const shouldMount = createMemo(() =>
+    shouldMountSettingsPanel({ tab: props.tab, selected: props.selected(), visited: props.visited() }),
+  )
   const eagerRenderer = createMemo(() => {
     const value = renderer()
     return value ? <Dynamic component={value} /> : undefined
@@ -97,7 +141,7 @@ function SettingsPanel(props: {
   const lazyRenderer = createMemo<Component | undefined>(() => {
     const value = renderer()
     if (value) return value
-    if (props.tab === "general" || props.tab === "shortcuts") return undefined
+    if (props.tab === "general" || props.tab === "editor" || props.tab === "shortcuts") return undefined
     return renderLazyPanel(props.tab)
   })
 
@@ -126,6 +170,11 @@ function SettingsPanel(props: {
                 {(value) => value()}
               </Show>
             </Match>
+            <Match when={props.tab === "editor"}>
+              <Show when={eagerRenderer()} fallback={<SettingsEditor directory={props.directory} />}>
+                {(value) => value()}
+              </Show>
+            </Match>
             <Match when={lazyRenderer()}>
               {(value) => (
                 <SettingsPanelBoundary>
@@ -143,24 +192,30 @@ function SettingsPanel(props: {
 export const SettingsView: Component<{
   defaultValue?: SettingsTab
   tabRenderers?: SettingsPanelRenderers
+  directory?: string
 }> = (props) => {
   const language = useLanguage()
   const platform = usePlatform()
   const initial = props.defaultValue ?? "general"
   const [selected, setSelected] = createSignal<SettingsTab>(initial)
-  const [visited, setVisited] = createSignal(new Set<SettingsTab>(["general", "shortcuts", initial]))
+  const [visited, setVisited] = createSignal(new Set<SettingsTab>(["general", "editor", "shortcuts", initial]))
   const version = createMemo(() => (platform.version ? `v${platform.version}` : undefined))
 
   const tabMeta = createMemo(
     () =>
       ({
         general: { icon: "sliders" as const, label: language.t("settings.tab.general") },
+        editor: { icon: "code-lines" as const, label: language.t("settings.tab.editor") },
+        personalization: { icon: "brain" as const, label: language.t("settings.tab.personalization") },
+        maintenance: { icon: "status" as const, label: language.t("settings.tab.maintenance") },
+        appControl: { icon: "settings-gear" as const, label: language.t("settings.tab.appControl") },
         shortcuts: { icon: "keyboard" as const, label: language.t("settings.tab.shortcuts") },
         browser: { icon: "window-cursor" as const, label: language.t("settings.browser.title") },
+        runtimes: { icon: "server" as const, label: language.t("settings.tab.runtimes") },
         archives: { icon: "archive" as const, label: language.t("settings.archives.title") },
-        providers: { icon: "providers" as const, label: language.t("settings.providers.title") },
         models: { icon: "models" as const, label: language.t("settings.models.title") },
         mcp: { icon: "server" as const, label: language.t("settings.mcp.title") },
+        plugins: { icon: "status" as const, label: language.t("settings.plugins.title") },
         skills: { icon: "folder-add-left" as const, label: language.t("settings.skills.title") },
         usage: { icon: "status" as const, label: language.t("settings.usage.title") },
       }) satisfies Record<SettingsTab, { icon: Parameters<typeof Icon>[0]["name"]; label: string }>,
@@ -176,6 +231,7 @@ export const SettingsView: Component<{
       variant="settings"
       value={selected()}
       onChange={(value) => setSelected(value as SettingsTab)}
+      contentTransition
       class="h-full w-full settings-dialog"
       data-component="settings-shell"
     >
@@ -188,7 +244,7 @@ export const SettingsView: Component<{
                 <div class="flex flex-col gap-1.5 w-full">
                   <For each={desktopTabs}>
                     {(tab) => (
-                      <Tabs.Trigger value={tab}>
+                      <Tabs.Trigger value={tab} data-action={`settings-tab-${tab}`}>
                         <Icon name={tabMeta()[tab].icon} />
                         {tabMeta()[tab].label}
                       </Tabs.Trigger>
@@ -202,7 +258,7 @@ export const SettingsView: Component<{
                 <div class="flex flex-col gap-1.5 w-full">
                   <For each={serverTabs}>
                     {(tab) => (
-                      <Tabs.Trigger value={tab}>
+                      <Tabs.Trigger value={tab} data-action={`settings-tab-${tab}`}>
                         <Icon name={tabMeta()[tab].icon} />
                         {tabMeta()[tab].label}
                       </Tabs.Trigger>
@@ -214,15 +270,30 @@ export const SettingsView: Component<{
           </div>
           <div class="flex flex-col gap-1 pl-1 py-1 text-12-medium text-text-weak">
             <span>{language.t("app.name.desktop")}</span>
-            <Show when={version()}>
-              {(value) => <span class="text-11-regular">{value()}</span>}
-            </Show>
+            <Show when={version()}>{(value) => <span class="text-11-regular">{value()}</span>}</Show>
           </div>
         </div>
       </Tabs.List>
-      <SettingsPanel tab="general" selected={selected} visited={visited} renderers={props.tabRenderers} />
+      <SettingsPanel
+        tab="general"
+        selected={selected}
+        visited={visited}
+        renderers={props.tabRenderers}
+        directory={props.directory}
+      />
+      <SettingsPanel
+        tab="editor"
+        selected={selected}
+        visited={visited}
+        renderers={props.tabRenderers}
+        directory={props.directory}
+      />
+      <SettingsPanel tab="personalization" selected={selected} visited={visited} renderers={props.tabRenderers} />
+      <SettingsPanel tab="maintenance" selected={selected} visited={visited} renderers={props.tabRenderers} />
+      <SettingsPanel tab="appControl" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <SettingsPanel tab="shortcuts" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <SettingsPanel tab="browser" selected={selected} visited={visited} renderers={props.tabRenderers} />
+      <SettingsPanel tab="runtimes" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <For each={serverTabs}>
         {(tab) => <SettingsPanel tab={tab} selected={selected} visited={visited} renderers={props.tabRenderers} />}
       </For>

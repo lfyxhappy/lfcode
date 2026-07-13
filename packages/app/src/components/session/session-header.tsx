@@ -18,6 +18,7 @@ import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { focusTerminalById } from "@/pages/session/helpers"
@@ -27,7 +28,8 @@ import { decode64 } from "@/utils/base64"
 import { formatServerError } from "@/utils/server-errors"
 import { Persist, persisted } from "@/utils/persist"
 import { StatusPopover } from "../status-popover"
-import { BROWSER_REQUEST_OPEN_EVENT, DEFAULT_BROWSER_URL } from "@/pages/session/helpers"
+import { MaintenanceStatusPill } from "./maintenance-status-pill"
+import { BROWSER_REQUEST_OPEN_EVENT, createBrowserRequestID, DEFAULT_BROWSER_URL } from "@/pages/session/helpers"
 import { LINUX_APPS, MAC_APPS, OPEN_APPS, type OpenApp, WINDOWS_APPS } from "./session-open-apps"
 type OS = "macos" | "windows" | "linux" | "unknown"
 
@@ -56,9 +58,10 @@ export function SessionHeader() {
   const platform = usePlatform()
   const language = useLanguage()
   const settings = useSettings()
+  const globalSDK = useGlobalSDK()
   const sync = useSync()
   const terminal = useTerminal()
-  const { params, view } = useSessionLayout()
+  const { params, view, sessionKey } = useSessionLayout()
   const [searchParams, setSearchParams] = useSearchParams<{ agentID?: string }>()
   const sessionActors = createMemo(() => (params.id ? sync.data.actor[params.id] ?? [] : []))
   const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent").toSorted((a, b) => a.time.created - b.time.created))
@@ -146,7 +149,13 @@ export function SessionHeader() {
   const openBrowser = () => {
     window.dispatchEvent(
       new CustomEvent(BROWSER_REQUEST_OPEN_EVENT, {
-        detail: { url: DEFAULT_BROWSER_URL },
+        detail: {
+          requestID: createBrowserRequestID(),
+          url: DEFAULT_BROWSER_URL,
+          sessionKey: sessionKey(),
+          sessionID: params.id,
+          reason: "human" as const,
+        },
         cancelable: true,
       }),
     )
@@ -211,6 +220,19 @@ export function SessionHeader() {
   const viewLabel = (agentID: string) => {
     if (agentID === "main") return "返回主对话"
     return subagents().find((actor) => actor.actorID === agentID)?.description ?? agentID
+  }
+
+  const destroySubagent = async (actorID: string) => {
+    if (!params.id) return
+    const actor = subagents().find((item) => item.actorID === actorID)
+    if (!actor) return
+    if (!window.confirm(`销毁子对话 "${actor.description}"？`)) return
+    try {
+      await globalSDK.client.session.deleteActor({ sessionID: params.id, actorID })
+      if (searchParams.agentID === actorID) setSearchParams({ agentID: undefined })
+    } catch (err) {
+      showRequestError(language, err)
+    }
   }
 
   const [centerMount, setCenterMount] = createSignal<HTMLElement | null>(null)
@@ -370,6 +392,7 @@ export function SessionHeader() {
                 </div>
               </Show>
               <div class="flex items-center gap-1">
+                <MaintenanceStatusPill sessionID={params.id} />
                 <Show when={params.id && sessionActors().length > 0}>
                   <DropdownMenu gutter={4} placement="bottom-end" open={viewMenu.open} onOpenChange={(open) => setViewMenu("open", open)}>
                     <DropdownMenu.Trigger
@@ -412,13 +435,26 @@ export function SessionHeader() {
                             )}
                           </For>
                         </DropdownMenu.RadioGroup>
+                        <DropdownMenu.Separator />
+                        <For each={subagents()}>
+                          {(actor) => (
+                            <DropdownMenu.Item
+                              onSelect={async () => {
+                                setViewMenu("open", false)
+                                await destroySubagent(actor.actorID)
+                              }}
+                            >
+                              <DropdownMenu.ItemLabel>销毁 {actor.description}</DropdownMenu.ItemLabel>
+                            </DropdownMenu.Item>
+                          )}
+                        </For>
                       </DropdownMenu.Content>
                     </DropdownMenu.Portal>
                   </DropdownMenu>
                 </Show>
                 <Show when={status()}>
                   <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
-                    <StatusPopover />
+              <StatusPopover directory={projectDirectory()} sessionID={params.id} />
                   </Tooltip>
                 </Show>
                 <Show when={term()}>
@@ -451,6 +487,27 @@ export function SessionHeader() {
                       <Icon size="small" name="window-cursor" />
                     </Button>
                   </Tooltip>
+                  <Show when={params.id}>
+                    <Tooltip placement="bottom" value={language.t("session.header.summary.toggle")}>
+                      <Button
+                        variant="ghost"
+                        class="titlebar-icon w-8 h-6 p-0 box-border"
+                        onClick={() => view().summaryCard.toggle()}
+                        aria-label={language.t("session.header.summary.toggle")}
+                        aria-expanded={view().summaryCard.opened()}
+                        aria-controls="session-jobs-rail"
+                      >
+                        <Icon
+                          size="small"
+                          name="sliders"
+                          classList={{
+                            "text-icon-strong": view().summaryCard.opened(),
+                            "text-icon-weak": !view().summaryCard.opened(),
+                          }}
+                        />
+                      </Button>
+                    </Tooltip>
+                  </Show>
                   <TooltipKeybind
                     title={language.t("command.review.toggle")}
                     keybind={command.keybind("review.toggle")}
@@ -458,7 +515,10 @@ export function SessionHeader() {
                     <Button
                       variant="ghost"
                       class="group/review-toggle titlebar-icon w-8 h-6 p-0 box-border"
-                      onClick={() => view().reviewPanel.toggle()}
+                      onClick={() => {
+                        if (!view().reviewPanel.opened()) view().setReviewEnabled(true)
+                        view().reviewPanel.toggle()
+                      }}
                       aria-label={language.t("command.review.toggle")}
                       aria-expanded={view().reviewPanel.opened()}
                       aria-controls="review-panel"

@@ -465,7 +465,12 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                   class="min-w-0 flex-1"
                 />
                 <Show when={query()}>
-                  <IconButton icon="circle-x" variant="ghost" onClick={() => setQuery("")} />
+                  <IconButton
+                    icon="circle-x"
+                    variant="ghost"
+                    aria-label={language.t("common.clearSearch")}
+                    onClick={() => setQuery("")}
+                  />
                 </Show>
               </div>
 
@@ -533,7 +538,12 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                 class="min-w-0 flex-1"
               />
               <Show when={manageQuery()}>
-                <IconButton icon="circle-x" variant="ghost" onClick={() => setManageQuery("")} />
+                <IconButton
+                  icon="circle-x"
+                  variant="ghost"
+                  aria-label={language.t("common.clearSearch")}
+                  onClick={() => setManageQuery("")}
+                />
               </Show>
             </div>
           </Show>

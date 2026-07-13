@@ -18,7 +18,6 @@ import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { Flag } from "@/flag/flag"
 import semver from "semver"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
-import { DialogMimoLogin } from "@tui/component/dialog-mimo-login"
 import { ErrorComponent } from "@tui/component/error-component"
 import { PluginRouteMissing } from "@tui/component/plugin-route-missing"
 import { ProjectProvider } from "@tui/context/project"
@@ -28,6 +27,7 @@ import { StartupLoading } from "@tui/component/startup-loading"
 import { SyncProvider, useSync } from "@tui/context/sync"
 import { LocalProvider, useLocal } from "@tui/context/local"
 import { DialogModel, useConnected } from "@tui/component/dialog-model"
+import { DialogProviderConnect } from "@tui/component/dialog-provider"
 import { DialogMcp } from "@tui/component/dialog-mcp"
 import { DialogStatus } from "@tui/component/dialog-status"
 import { DialogWorktree } from "@tui/component/dialog-worktree"
@@ -483,6 +483,17 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
     },
     {
+      title: "Connect provider",
+      value: "provider.connect",
+      category: "provider",
+      slash: {
+        name: "connect",
+      },
+      onSelect: () => {
+        dialog.replace(() => <DialogProviderConnect />)
+      },
+    },
+    {
       title: t("tui.command.model.cycle_recent.title"),
       value: "model.cycle_recent",
       keybind: "model_cycle_recent",
@@ -606,44 +617,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       onSelect: () => {
         local.agent.move(-1)
       },
-    },
-    {
-      title: t("tui.command.provider.login.title"),
-      value: "provider.login",
-      slash: {
-        name: "login",
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogMimoLogin />)
-      },
-      category: "provider",
-    },
-    {
-      title: t("tui.command.provider.connect.title"),
-      value: "provider.connect",
-      suggested: !connected(),
-      slash: {
-        name: "connect",
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogMimoLogin />)
-      },
-      category: "provider",
-    },
-    {
-      title: t("tui.command.provider.logout.title"),
-      value: "provider.logout",
-      slash: {
-        name: "logout",
-      },
-      onSelect: async () => {
-        await sdk.client.auth.remove({ providerID: "xiaomi" })
-        await sdk.client.instance.dispose()
-        await sync.bootstrap()
-        toast.show({ message: t("tui.command.logout.toast"), variant: "info" })
-        dialog.clear()
-      },
-      category: "provider",
     },
     ...(sync.data.console_state.switchableOrgCount > 1
       ? [
@@ -773,7 +746,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
         aliases: ["docs"],
       },
       onSelect: () => {
-        open("https://mimo.xiaomi.com/coder/docs").catch(() => {})
+        open("https://lfcode.ai/docs").catch(() => {})
         dialog.clear()
       },
       category: "system",

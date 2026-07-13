@@ -134,7 +134,7 @@
     &.clickable {
       cursor: pointer;
       text-decoration: underline;
-      transition: color 0.15s ease;
+      transition: color var(--motion-micro-ms) var(--motion-ease-out);
 
       &:hover {
         color: var(--text-base);
@@ -196,9 +196,9 @@
   border: 1px solid var(--border-weak-base, rgba(255, 255, 255, 0.08));
   background: color-mix(in srgb, var(--background-base) 92%, transparent);
   transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    color 0.15s ease;
+    border-color var(--motion-micro-ms) var(--motion-ease-out),
+    background-color var(--motion-micro-ms) var(--motion-ease-out),
+    color var(--motion-micro-ms) var(--motion-ease-out);
 
   [data-slot="basic-tool-tool-info-structured"] {
     flex: 1 1 auto;
@@ -232,8 +232,8 @@
     margin-left: auto;
     opacity: 0;
     transition:
-      opacity 0.15s ease,
-      color 0.15s ease;
+      opacity var(--motion-micro-ms) var(--motion-ease-out),
+      color var(--motion-micro-ms) var(--motion-ease-out);
   }
 
   [data-component="task-tool-title"] {

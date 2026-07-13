@@ -38,12 +38,13 @@ const HITS_SHAPE = {
   type: "object", required: ["hits"],
   properties: {
     hits: { type: "array", maxItems: 6, items: {
-      type: "object", required: ["url", "title", "fit"],
+      type: "object", required: ["url", "title", "fit", "sourceTier"],
       properties: {
         url: { type: "string" },
         title: { type: "string" },
         note: { type: "string" },
         fit: { enum: ["high", "medium", "low"] },
+        sourceTier: { enum: ["primary", "authoritative-secondary", "practitioner", "discovery-only"] },
       },
     }},
   },
@@ -51,7 +52,7 @@ const HITS_SHAPE = {
 const READ_SHAPE = {
   type: "object", required: ["facts", "tier"],
   properties: {
-    tier: { enum: ["primary", "secondary", "blog", "forum", "weak"] },
+    tier: { enum: ["primary", "authoritative-secondary", "practitioner", "discovery-only", "weak"] },
     published: { type: "string" },
     facts: { type: "array", maxItems: 5, items: {
       type: "object", required: ["statement", "excerpt", "weight"],
@@ -139,6 +140,7 @@ const taken = new Map()
 const repeats = []
 const overflow = []
 const FIT_RANK = { high: 0, medium: 1, low: 2 }
+const SOURCE_TIER_RANK = { primary: 0, "authoritative-secondary": 1, practitioner: 2, "discovery-only": 3 }
 let slotsLeft = SOURCE_BUDGET
 
 // ─── Agent prompts ───
@@ -148,18 +150,19 @@ const searchPrompt = (line) =>
   "Your line: **" + line.topic + "**" + (line.why ? " — " + line.why : "") + "\n" +
   "Suggested query: `" + line.query + "`\n\n" +
   "Run WebSearch (refine the query if you can do better) and hand back the 4-6 most useful results.\n" +
-  "Judge usefulness against the OVERALL question, not just your query. Drop content farms and SEO spam.\n" +
-  "Give each result a one-line note on why it matters.\n\nReturn structured output only."
+  "Judge usefulness against the OVERALL question, not just your query. Prefer primary sources: official documentation, original papers, standards, government/regulator sources, filings, original datasets, official repositories and release notes.\n" +
+  "Use authoritative-secondary only for established independent reporting or professional institutions; practitioner for maintained technical notes; discovery-only for forums, aggregators, SEO pages and unverifiable posts. Drop content farms and SEO spam.\n" +
+  "Give each result a one-line note on why it matters and label its source tier. Discovery-only pages may guide follow-up searches but cannot carry a high-confidence final claim alone.\n\nReturn structured output only."
 
 const readPrompt = (source, line) =>
   "Read one source and pull out checkable facts.\n\n" +
   "Overall question: \"" + TOPIC + "\"\n\n" +
   "**URL:** " + source.url + "\n**Title:** " + source.title + "\n**Surfaced by:** the \"" + line + "\" line\n\n" +
   "## Steps\n1. Fetch the page with WebFetch.\n" +
-  "2. Judge the source tier: primary (research / the institution itself), secondary (reporting), blog/opinion, forum, or weak/unreliable.\n" +
+  "2. Re-check the source tier: primary, authoritative-secondary, practitioner, discovery-only, or weak/unreliable. Its search-stage tier was " + (source.sourceTier || "unknown") + ".\n" +
   "3. Pull 2-5 FALSIFIABLE facts that bear on the question. Each fact must:\n" +
   "   - state something concrete and checkable (no vague hand-waving)\n" +
-  "   - quote the source verbatim as backing\n" +
+  "   - quote a short supporting excerpt and keep it tied to this exact URL\n" +
   "   - be tagged key / support / aside relative to the question\n" +
   "4. Record the publish date if you can find it.\n\n" +
   "If the page won't load, is paywalled, or is off-topic, return facts: [] with tier: \"weak\".\n\nReturn structured output only."
@@ -203,7 +206,9 @@ const perLine = await pipeline(
   }),
 
   found => {
-    const byFit = [...found.hits].sort((a, b) => FIT_RANK[a.fit] - FIT_RANK[b.fit])
+    const byFit = [...found.hits].sort((a, b) =>
+      (FIT_RANK[a.fit] - FIT_RANK[b.fit]) || ((SOURCE_TIER_RANK[a.sourceTier] ?? 3) - (SOURCE_TIER_RANK[b.sourceTier] ?? 3))
+    )
     const fresh = byFit.filter(h => {
       const key = canonURL(h.url)
       if (taken.has(key)) {
@@ -236,7 +241,7 @@ const perLine = await pipeline(
           if (!out) return null
           return {
             url: source.url, title: source.title, line: found.line,
-            tier: out.tier, published: out.published,
+            tier: out.tier, sourceTier: source.sourceTier, published: out.published,
             facts: out.facts.map(f => ({ ...f, sourceUrl: source.url, tier: out.tier })),
           }
         }).catch(e => {
@@ -251,7 +256,7 @@ const perLine = await pipeline(
 const sources = perLine.flat().filter(Boolean)
 const facts = sources.flatMap(s => s.facts)
 const WEIGHT_RANK = { key: 0, support: 1, aside: 2 }
-const TIER_RANK = { primary: 0, secondary: 1, blog: 2, forum: 3, weak: 4 }
+const TIER_RANK = { primary: 0, "authoritative-secondary": 1, practitioner: 2, "discovery-only": 3, weak: 4 }
 
 const topFacts = [...facts]
   .sort((a, b) => (WEIGHT_RANK[a.weight] - WEIGHT_RANK[b.weight]) || (TIER_RANK[a.tier] - TIER_RANK[b.tier]))
@@ -351,6 +356,7 @@ const report = await agent(
   "1. Merge facts that say the same thing and pool their sources.\n" +
   "2. Gather related facts into coherent findings, each one speaking to the question.\n" +
   "3. Rate each finding's certainty: high (several primary sources, jury unanimous), medium (secondary sources or a split jury), low (single source or blog-grade).\n" +
+  "   A high-confidence finding must cite one primary source or two independent authoritative-secondary sources. Discovery-only sources cannot by themselves support high confidence.\n" +
   "4. Open with a 3-5 sentence answer to the question.\n" +
   "5. Spell out the limits: what's shaky, which sources were thin, what may have gone stale.\n" +
   "6. End with 2-4 questions that surfaced but went unanswered.\n\nReturn structured output only.",

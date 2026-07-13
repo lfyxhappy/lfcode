@@ -125,7 +125,7 @@ export const layer = Layer.effect(
       }
       commands[Default.DREAM] = {
         name: Default.DREAM,
-        description: "manually consolidate project memory from memory files and raw trajectory",
+        description: "manually consolidate project memory through typed records and compatible projections",
         agent: "dream",
         source: "command",
         subtask: false,
@@ -136,16 +136,16 @@ export const layer = Layer.effect(
             "User focus or constraints:",
             "$ARGUMENTS",
             "",
-            "Use the memory files as the working index and the raw lfcode trajectory database as the source of truth.",
-            "Use bash for read-only SQLite and filesystem inspection. Do not modify the database.",
-            "Consolidate only durable, verified information into project memory.",
+            "Use raw lfcode trajectory as the source of truth. Memory Markdown is only a compatibility projection of typed records.",
+            "Use the terminal tool for read-only SQLite and filesystem inspection. On Windows, use pwsh syntax. Do not modify the database.",
+            "Do not edit memory files directly. Consolidate only durable, verified information with memory(operation=write_project_record), using a complete MEMORY or MEMORY-<topic> body.",
           ].join("\n")
         },
         hints: ["$ARGUMENTS"],
       }
       commands[Default.DISTILL] = {
         name: Default.DISTILL,
-        description: "find repeated workflows in recent work and package them into skills, subagents, or commands",
+        description: "find repeated workflows in recent work and add reviewable packaging candidates",
         agent: "distill",
         source: "command",
         subtask: false,
@@ -159,8 +159,8 @@ export const layer = Layer.effect(
             "Look back over recent work and identify repeated manual workflows worth packaging.",
             "Use the raw lfcode trajectory database as the source of truth and memory files to spot cross-session patterns.",
             "Inventory existing skills, agents, and commands first so you reuse or extend instead of duplicating.",
-            "Use bash for read-only SQLite and filesystem inspection. Do not modify the database.",
-            "Produce a compact shortlist, then create only the high-confidence missing assets.",
+            "Use the terminal tool for read-only SQLite and filesystem inspection. On Windows, use pwsh syntax. Do not modify the database.",
+            "Do not create, edit, or delete assets. Produce a compact, reviewable JSON candidate shortlist only.",
           ].join("\n")
         },
         hints: ["$ARGUMENTS"],

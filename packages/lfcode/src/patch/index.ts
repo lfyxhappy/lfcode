@@ -163,9 +163,10 @@ function parseAddFileContent(lines: string[], startIdx: number): { content: stri
   let i = startIdx
 
   while (i < lines.length && !lines[i].startsWith("***")) {
-    if (lines[i].startsWith("+")) {
-      content += lines[i].substring(1) + "\n"
+    if (!lines[i].startsWith("+")) {
+      throw new Error(`Invalid patch format: Add File content line ${i + 1} must start with '+'`)
     }
+    content += lines[i].substring(1) + "\n"
     i++
   }
 

@@ -85,6 +85,19 @@ describe("Patch namespace", () => {
 
       expect(() => Patch.parsePatch(invalidPatch)).toThrow("Invalid patch format")
     })
+
+    test("rejects malformed Add File lines instead of silently dropping them", () => {
+      const patchText = `*** Begin Patch
+*** Add File: hello.cpp
++#include <iostream>
+
+int main() {
+  return 0;
+}
+*** End Patch`
+
+      expect(() => Patch.parsePatch(patchText)).toThrow("Add File content line")
+    })
   })
 
   describe("maybeParseApplyPatch", () => {

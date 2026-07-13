@@ -31,3 +31,7 @@ It is important to remember:
 
 - You must include a header with your intended action (Add/Delete/Update)
 - You must prefix new lines with `+` even when creating a new file
+- Before updating a file, read the current file and use only exact text from that read as patch context.
+- If context verification fails, stop guessing. Read the target again, then use the exact current span with `replace_range`, `symbol_edit`, or a new patch.
+- The runtime records the failed target. A recovery read must be fresh; if the file changes after that read, read it again. Two context failures for one target in the same editing turn fuse the patch chain.
+- Never bypass a failed patch by using shell, Python, or another terminal command to write the same target file.

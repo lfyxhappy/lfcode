@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
-import { readFile } from "node:fs/promises"
-import { basename, extname, isAbsolute } from "node:path"
+import { readFile, readdir } from "node:fs/promises"
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path"
 import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type {
@@ -251,6 +251,19 @@ export function registerIpcHandlers(deps: Deps) {
   )
 
   ipcMain.handle(
+    "open-attachment-picker",
+    async (_event: IpcMainInvokeEvent, opts?: { multiple?: boolean; title?: string; defaultPath?: string }) => {
+      const result = await dialog.showOpenDialog({
+        properties: ["openFile", "openDirectory", ...(opts?.multiple ? ["multiSelections" as const] : [])],
+        title: opts?.title ?? "Attach files or folders",
+        defaultPath: opts?.defaultPath,
+      })
+      if (result.canceled) return null
+      return opts?.multiple ? result.filePaths : result.filePaths[0]
+    },
+  )
+
+  ipcMain.handle(
     "save-file-picker",
     async (_event: IpcMainInvokeEvent, opts?: { title?: string; defaultPath?: string }) => {
       const result = await dialog.showSaveDialog({
@@ -280,6 +293,10 @@ export function registerIpcHandlers(deps: Deps) {
       filename: basename(path),
       mime,
     }
+  })
+
+  ipcMain.handle("read-editor-snippets", async (_event: IpcMainInvokeEvent, directory: string) => {
+    return readEditorSnippetFiles(directory)
   })
 
   ipcMain.handle("read-clipboard-file-paths", () => {
@@ -369,7 +386,14 @@ export function registerIpcHandlers(deps: Deps) {
     const win = BrowserWindow.fromWebContents(event.sender)
     return win?.id ?? null
   })
-  ipcMain.handle("get-renderer-memory-info", (event: IpcMainInvokeEvent) => event.sender.getProcessMemoryInfo())
+  ipcMain.handle("get-renderer-memory-info", (event: IpcMainInvokeEvent) => {
+    const metric = app.getAppMetrics().find((item) => item.pid === event.sender.getOSProcessId())
+    return {
+      private: metric?.memory.privateBytes ?? 0,
+      shared: 0,
+      residentSet: metric?.memory.workingSetSize ?? 0,
+    }
+  })
 
   ipcMain.handle("get-window-focused", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -410,6 +434,30 @@ export function sendMenuCommand(win: BrowserWindow, id: string) {
 
 export function sendDeepLinks(win: BrowserWindow, urls: string[]) {
   win.webContents.send("deep-link", urls)
+}
+
+async function readEditorSnippetFiles(directory: string) {
+  const roots = [join(app.getPath("home"), ".lfcode", "snippets")]
+  if (isAbsolute(directory)) roots.push(join(directory, ".lfcode", "snippets"))
+  const files = await Promise.all(roots.map((root) => collectEditorSnippetFiles(root)))
+  return files.flat()
+}
+
+async function collectEditorSnippetFiles(root: string, depth = 0): Promise<{ path: string; content: string }[]> {
+  if (depth > 3) return []
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const target = resolve(root, entry.name)
+      if (relative(root, target).startsWith("..")) return []
+      if (entry.isDirectory()) return collectEditorSnippetFiles(target, depth + 1)
+      if (!entry.isFile() || !/\.(json|code-snippets)$/i.test(entry.name)) return []
+      const content = await readFile(target, "utf8").catch(() => undefined)
+      if (!content || Buffer.byteLength(content) > 512 * 1024) return []
+      return [{ path: target, content }]
+    }),
+  )
+  return nested.flat()
 }
 
 export function sendDetachedSidePanelEvent(win: BrowserWindow, event: DetachedSidePanelEvent) {

@@ -7,12 +7,6 @@ const px = (value: number | string | undefined, fallback: number) => {
   return `${fallback}px`
 }
 
-const ms = (value: number | string | undefined, fallback: number) => {
-  if (typeof value === "number") return `${value}ms`
-  if (typeof value === "string") return value
-  return `${fallback}ms`
-}
-
 const pct = (value: number | undefined, fallback: number) => {
   const v = value ?? fallback
   return `${v}%`
@@ -123,7 +117,7 @@ export function TextReveal(props: {
       class={props.class}
       aria-label={props.text ?? ""}
       style={{
-        "--text-reveal-duration": ms(props.duration, 450),
+        "--text-reveal-duration": typeof props.duration === "number" ? `${props.duration}ms` : (props.duration ?? "var(--motion-content-ms)"),
         "--text-reveal-edge": pct(props.edge, 17),
         "--text-reveal-travel": px(props.travel, 0),
         "--text-reveal-spring": props.spring ?? "cubic-bezier(0.34, 1.08, 0.64, 1)",

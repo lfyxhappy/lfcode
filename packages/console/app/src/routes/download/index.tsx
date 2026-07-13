@@ -118,34 +118,22 @@ export default function Download() {
             <div data-component="section-content">
               <button
                 data-component="cli-row"
-                onClick={handleCopyClick("curl -fsSL https://opencode.ai/install | bash")}
+                onClick={handleCopyClick("curl -fsSL https://lfcode.ai/install | bash")}
               >
                 <code>
-                  curl -fsSL https://<strong>opencode.ai/install</strong> | bash
+                  curl -fsSL https://<strong>lfcode.ai/install</strong> | bash
                 </code>
                 <CopyStatus />
               </button>
-              <button data-component="cli-row" onClick={handleCopyClick("npm i -g opencode-ai")}>
+              <button data-component="cli-row" onClick={handleCopyClick("npm i -g @lfcode-ai/cli")}>
                 <code>
-                  npm i -g <strong>opencode-ai</strong>
+                  npm i -g <strong>@lfcode-ai/cli</strong>
                 </code>
                 <CopyStatus />
               </button>
-              <button data-component="cli-row" onClick={handleCopyClick("bun add -g opencode-ai")}>
+              <button data-component="cli-row" onClick={handleCopyClick("bun add -g @lfcode-ai/cli")}>
                 <code>
-                  bun add -g <strong>opencode-ai</strong>
-                </code>
-                <CopyStatus />
-              </button>
-              <button data-component="cli-row" onClick={handleCopyClick("brew install anomalyco/tap/opencode")}>
-                <code>
-                  brew install <strong>anomalyco/tap/opencode</strong>
-                </code>
-                <CopyStatus />
-              </button>
-              <button data-component="cli-row" onClick={handleCopyClick("paru -S opencode")}>
-                <code>
-                  paru -S <strong>opencode</strong>
+                  bun add -g <strong>@lfcode-ai/cli</strong>
                 </code>
                 <CopyStatus />
               </button>
@@ -157,12 +145,6 @@ export default function Download() {
               <span>[2]</span> {i18n.t("download.section.desktop")}
             </div>
             <div data-component="section-content">
-              <button data-component="cli-row" onClick={handleCopyClick("brew install --cask opencode-desktop")}>
-                <code>
-                  brew install --cask <strong>opencode-desktop</strong>
-                </code>
-                <CopyStatus />
-              </button>
               <div data-component="download-row">
                 <div data-component="download-info">
                   <span data-slot="icon">

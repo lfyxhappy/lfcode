@@ -14,6 +14,20 @@ export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 export const DEFAULT_TIMEOUT_SECONDS = 30
 export const MAX_TIMEOUT_SECONDS = 120
 
+export type WebFetchFailureClass =
+  | "invalid_url"
+  | "search_engine_url"
+  | "browser_required"
+  | "tls"
+  | "timeout"
+  | "http_403"
+  | "http_429"
+  | "http_5xx"
+  | "http_error"
+  | "unsupported_content"
+  | "response_too_large"
+  | "transport"
+
 export const description = `Fetch content from an HTTP or HTTPS URL and return it as text, markdown, or HTML. Markdown is the default.
 
 Use a more targeted tool when one is available. This tool is read-only. Large text results may be replaced with a preview while the complete output is retained in managed storage.`
@@ -60,6 +74,61 @@ const headers = (format: Format, userAgent: string) => ({
 const browserUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
+const searchEngineHosts = new Set([
+  "google.com",
+  "www.google.com",
+  "bing.com",
+  "www.bing.com",
+  "baidu.com",
+  "www.baidu.com",
+  "duckduckgo.com",
+  "search.yahoo.com",
+  "yandex.com",
+  "www.yandex.com",
+])
+
+export function isSearchEngineUrl(value: URL) {
+  return searchEngineHosts.has(value.hostname.toLowerCase())
+}
+
+function extractHttpStatus(error: unknown) {
+  if (!error || typeof error !== "object") return
+  const reason = "reason" in error ? error.reason : error
+  if (!reason || typeof reason !== "object") return
+  if ("response" in reason && reason.response && typeof reason.response === "object" && "status" in reason.response) {
+    const status = reason.response.status
+    if (typeof status === "number") return status
+  }
+}
+
+export function classifyWebFetchFailure(error: unknown): WebFetchFailureClass {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  if (message.includes("webfetch:")) return message.split("webfetch:")[1]?.split(/[\s:]/)[0] as WebFetchFailureClass
+  if (message.includes("certificate") || message.includes("tls") || message.includes("ssl")) return "tls"
+  if (message.includes("timeout") || message.includes("timed out")) return "timeout"
+  if (isCloudflareChallenge(error)) return "browser_required"
+  const status = extractHttpStatus(error)
+  if (status === 403) return "http_403"
+  if (status === 429) return "http_429"
+  if (status !== undefined && status >= 500) return "http_5xx"
+  if (status !== undefined) return "http_error"
+  return "transport"
+}
+
+export function formatWebFetchFailure(failure: WebFetchFailureClass) {
+  if (failure === "search_engine_url") return "这是搜索结果页。请使用 websearch，而不是直接抓取搜索引擎页面。"
+  if (failure === "browser_required") return "该页面需要浏览器会话、JavaScript 或登录状态。请使用内置浏览器或浏览器自动化工具。"
+  if (failure === "tls") return "TLS 证书连接失败。请检查目标站点证书或使用浏览器会话；Lfcode 不会绕过 TLS 校验。"
+  if (failure === "timeout") return "网页请求超时。可稍后重试、缩小目标页面，或改用浏览器会话。"
+  if (failure === "http_403") return "目标站点拒绝访问（HTTP 403）。页面可能需要浏览器或登录状态。"
+  if (failure === "http_429") return "目标站点正在限流（HTTP 429）。请稍后重试。"
+  if (failure === "http_5xx") return "目标站点服务暂时不可用（HTTP 5xx）。请稍后重试。"
+  if (failure === "unsupported_content") return "该 URL 返回的不是可读取文本网页。请使用对应的文件或媒体工具。"
+  if (failure === "response_too_large") return "网页响应过大，已停止读取。请使用更具体的 URL 或其他工具。"
+  if (failure === "invalid_url") return "URL 无效，且必须使用 http:// 或 https://。"
+  return "网页请求失败，请检查网络、URL 或改用浏览器会话。"
+}
+
 const isCloudflareChallenge = (error: unknown) => {
   if (!error || typeof error !== "object" || !("reason" in error)) return false
   const reason = error.reason
@@ -89,15 +158,14 @@ const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
   Effect.gen(function* () {
     const contentLength = response.headers["content-length"]
     if (contentLength && Number.parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
-      return yield* Effect.fail(new Error(`Response too large (exceeds ${MAX_RESPONSE_BYTES} byte limit)`))
+      return yield* Effect.fail(new Error("webfetch:response_too_large"))
     }
     const chunks: Uint8Array[] = []
     let size = 0
     yield* Stream.runForEach(response.stream, (chunk) =>
       Effect.gen(function* () {
         size += chunk.byteLength
-        if (size > MAX_RESPONSE_BYTES)
-          return yield* Effect.fail(new Error(`Response too large (exceeds ${MAX_RESPONSE_BYTES} byte limit)`))
+        if (size > MAX_RESPONSE_BYTES) return yield* Effect.fail(new Error("webfetch:response_too_large"))
         chunks.push(chunk)
         return undefined
       }),
@@ -140,7 +208,12 @@ export const layer = Layer.effectDiscard(
           execute: (input, context) =>
             Effect.gen(function* () {
               yield* Effect.try({
-                try: () => assertHttpUrl(new URL(input.url)),
+                try: () => {
+                  const parsed = new URL(input.url)
+                  assertHttpUrl(parsed)
+                  if (isSearchEngineUrl(parsed)) throw new Error("webfetch:search_engine_url")
+                  return parsed
+                },
                 catch: (error) => error,
               })
 
@@ -161,14 +234,14 @@ export const layer = Layer.effectDiscard(
                 const contentType = response.headers["content-type"] || ""
                 const mime = mimeFrom(contentType)
                 if (isImageAttachment(mime))
-                  return yield* Effect.fail(new Error(`Unsupported fetched image content type: ${mime}`))
+                  return yield* Effect.fail(new Error("webfetch:unsupported_content"))
                 if (!isTextualMime(mime))
-                  return yield* Effect.fail(new Error(`Unsupported fetched file content type: ${mime}`))
+                  return yield* Effect.fail(new Error("webfetch:unsupported_content"))
                 return { body: yield* collectBody(response), contentType }
               }).pipe(
                 Effect.timeoutOrElse({
                   duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
-                  orElse: () => Effect.fail(new Error("Request timed out")),
+                  orElse: () => Effect.fail(new Error("webfetch:timeout")),
                 }),
               )
               const content = convert(new TextDecoder().decode(body), contentType, input.format)
@@ -178,7 +251,9 @@ export const layer = Layer.effectDiscard(
                 format: input.format,
                 output: content,
               }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to fetch ${input.url}` }))),
+            }).pipe(
+              Effect.mapError((error) => new ToolFailure({ message: formatWebFetchFailure(classifyWebFetchFailure(error)) })),
+            ),
         }),
       })
       .pipe(Effect.orDie)

@@ -16,10 +16,47 @@ import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
 import { Format } from "../format"
 import { Global } from "../global"
+import * as PatchRecovery from "./patch-recovery"
 
 const PatchParams = z.object({
   patchText: z.string().describe("The full patch text that describes all changes to be made"),
 })
+
+function describePatchVerificationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes("missing Begin/End markers")) {
+    return [
+      "apply_patch verification failed: Invalid patch format: missing Begin/End markers.",
+      "Submit pure patch text only, with no explanation outside the patch.",
+      "Required envelope:",
+      "*** Begin Patch",
+      "*** Update File: path/to/file",
+      "@@",
+      "-old line",
+      "+new line",
+      "*** End Patch",
+      'If you already know an exact span or symbol, prefer "replace_range" or "symbol_edit" instead of hand-writing a patch.',
+    ].join("\n")
+  }
+  if (message.includes("no hunks found")) {
+    return [
+      "apply_patch verification failed: no hunks found.",
+      'Include at least one "*** Add File", "*** Update File", or "*** Delete File" section inside the patch envelope.',
+    ].join("\n")
+  }
+  if (message.includes("Failed to find context")) {
+    return [
+      "apply_patch verification failed: the supplied context does not match the current file.",
+      message,
+      "Recovery protocol:",
+      "1. Read the target file again and copy the exact current lines before attempting another edit.",
+      "2. Do not retry with guessed headings, remembered text, or text that was only planned to be added.",
+      '3. Prefer "replace_range" for a verified exact span, or "symbol_edit" for a verified symbol.',
+      "4. Do not bypass this failed patch by writing the same target through shell, Python, or another terminal command.",
+    ].join("\n")
+  }
+  return `apply_patch verification failed: ${message}`
+}
 
 export const ApplyPatchTool = Tool.define(
   "apply_patch",
@@ -40,7 +77,7 @@ export const ApplyPatchTool = Tool.define(
         const parseResult = Patch.parsePatch(params.patchText)
         hunks = parseResult.hunks
       } catch (error) {
-        return yield* Effect.fail(new Error(`apply_patch verification failed: ${error}`))
+        return yield* Effect.fail(new Error(describePatchVerificationError(error)))
       }
 
       if (hunks.length === 0) {
@@ -48,7 +85,7 @@ export const ApplyPatchTool = Tool.define(
         if (normalized === "*** Begin Patch\n*** End Patch") {
           return yield* Effect.fail(new Error("patch rejected: empty patch"))
         }
-        return yield* Effect.fail(new Error("apply_patch verification failed: no hunks found"))
+        return yield* Effect.fail(new Error(describePatchVerificationError(new Error("no hunks found"))))
       }
 
       // Validate file paths and check permissions
@@ -106,6 +143,10 @@ export const ApplyPatchTool = Tool.define(
               )
             }
 
+            const currentBytes = yield* afs.readFile(filePath)
+            const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, currentBytes)
+            if (recoveryError) return yield* Effect.fail(new Error(`apply_patch recovery blocked: ${recoveryError}`))
+
             const oldContent = yield* afs.readFileString(filePath)
             let newContent = oldContent
 
@@ -114,7 +155,8 @@ export const ApplyPatchTool = Tool.define(
               const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
               newContent = fileUpdate.content
             } catch (error) {
-              return yield* Effect.fail(new Error(`apply_patch verification failed: ${error}`))
+              const recovery = PatchRecovery.markContextFailure(ctx.sessionID, ctx.messageID, filePath)
+              return yield* Effect.fail(new Error(`${describePatchVerificationError(error)}\n${recovery}`))
             }
 
             const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
@@ -145,6 +187,9 @@ export const ApplyPatchTool = Tool.define(
           }
 
           case "delete": {
+            const currentBytes = yield* afs.readFile(filePath)
+            const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, currentBytes)
+            if (recoveryError) return yield* Effect.fail(new Error(`apply_patch recovery blocked: ${recoveryError}`))
             const contentToDelete = yield* afs
               .readFileString(filePath)
               .pipe(
@@ -197,7 +242,9 @@ export const ApplyPatchTool = Tool.define(
       // memory writes — the askEditUnlessMemory deferral used by write.ts/edit.ts
       // is structurally already satisfied here. Left as a direct ctx.ask.
       if (permissionChanges.length > 0) {
-        const relativePaths = permissionChanges.map((c) => path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"))
+        const relativePaths = permissionChanges.map((c) =>
+          path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"),
+        )
         yield* ctx.ask({
           permission: "edit",
           patterns: relativePaths,
@@ -246,6 +293,8 @@ export const ApplyPatchTool = Tool.define(
             updates.push({ file: change.filePath, event: "unlink" })
             break
         }
+
+        PatchRecovery.clear(ctx.sessionID, ctx.messageID, change.filePath)
 
         if (edited) {
           yield* format.file(edited)
@@ -306,4 +355,3 @@ export const ApplyPatchTool = Tool.define(
     }
   }),
 )
-

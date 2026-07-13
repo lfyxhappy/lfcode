@@ -193,7 +193,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
       warnings.push({ type: "unsupported", feature: "stopSequences" })
     }
 
-    const openaiOptions = await parseProviderOptions({
+    const openaiOptions = await parseProviderOptions<OpenAIResponsesProviderOptions>({
       provider: "copilot",
       providerOptions,
       schema: openaiResponsesProviderOptionsSchema,
@@ -406,7 +406,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
       headers: combineHeaders(this.config.headers(), options.headers),
       body,
       failedResponseHandler: openaiFailedResponseHandler,
-      successfulResponseHandler: createJsonResponseHandler(
+      successfulResponseHandler: createZodJsonResponseHandler(
         z.object({
           id: z.string(),
           created_at: z.number(),
@@ -788,7 +788,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
         stream: true,
       },
       failedResponseHandler: openaiFailedResponseHandler,
-      successfulResponseHandler: createEventSourceResponseHandler(openaiResponsesChunkSchema),
+      successfulResponseHandler: createEventSourceResponseHandler<OpenAIResponsesChunk>(openaiResponsesChunkSchema),
       abortSignal: options.abortSignal,
       fetch: this.config.fetch,
     })
@@ -1568,6 +1568,12 @@ const openaiResponsesChunkSchema = z.union([
   errorChunkSchema,
   z.object({ type: z.string() }).loose(), // fallback for unknown chunks
 ])
+
+type OpenAIResponsesChunk = z.infer<typeof openaiResponsesChunkSchema>
+
+function createZodJsonResponseHandler<Schema extends z.core.$ZodType>(schema: Schema) {
+  return createJsonResponseHandler<z.output<Schema>>(schema)
+}
 
 type ExtractByType<T, K extends T extends { type: infer U } ? U : never> = T extends { type: K } ? T : never
 

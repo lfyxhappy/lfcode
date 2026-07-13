@@ -20,11 +20,11 @@
   }
 
   &[data-closed] {
-    animation: popover-close 0.15s ease-out;
+    animation: popover-close var(--motion-micro-ms) var(--motion-ease-in);
   }
 
   &[data-expanded] {
-    animation: popover-open 0.15s ease-out;
+    animation: popover-open var(--motion-content-ms) var(--motion-ease-out);
   }
 
   [data-slot="popover-header"] {

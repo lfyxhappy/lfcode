@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, UserMessage } from "@lfcode-ai/sdk/v2"
 import { createRoot, createSignal } from "solid-js"
-import { createSessionTimelineMessageSource } from "./session-timeline-history"
+import { createSessionTimelineMessageSource, retainTimelineMessages } from "./session-timeline-history"
 
 function user(sessionID: string, id: string): UserMessage {
   return {
@@ -35,5 +35,11 @@ describe("createSessionTimelineMessageSource", () => {
 
       dispose()
     })
+  })
+
+  test("keeps the last confirmed projection while a refresh has no message page", () => {
+    const previous = [user("session-a", "user-a")]
+    expect(retainTimelineMessages(undefined, previous)).toEqual(previous)
+    expect(retainTimelineMessages([], previous)).toEqual([])
   })
 })
