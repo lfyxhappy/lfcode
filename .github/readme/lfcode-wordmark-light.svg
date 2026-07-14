@@ -1,27 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 128" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 476.425 115" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
   <title id="title">LFCODE</title>
-  <desc id="desc">LFCODE pixel geometric wordmark for light backgrounds</desc>
-  <g fill="#101412">
-    <rect x="8" y="8" width="16" height="112"/>
-    <rect x="8" y="104" width="88" height="16"/>
-    <rect x="128" y="8" width="16" height="112"/>
-    <rect x="128" y="8" width="88" height="16"/>
-    <rect x="128" y="56" width="72" height="16"/>
-    <rect x="248" y="8" width="88" height="16"/>
-    <rect x="248" y="8" width="16" height="112"/>
-    <rect x="248" y="104" width="88" height="16"/>
-    <rect x="368" y="8" width="88" height="16"/>
-    <rect x="368" y="104" width="88" height="16"/>
-    <rect x="368" y="8" width="16" height="112"/>
-    <rect x="440" y="8" width="16" height="112"/>
-    <rect x="488" y="8" width="72" height="16"/>
-    <rect x="488" y="104" width="72" height="16"/>
-    <rect x="488" y="8" width="16" height="112"/>
-    <rect x="560" y="24" width="16" height="80"/>
-    <rect x="608" y="8" width="88" height="16"/>
-    <rect x="608" y="8" width="16" height="112"/>
-    <rect x="608" y="56" width="72" height="16"/>
-    <rect x="608" y="104" width="88" height="16"/>
-  </g>
-  <rect x="704" y="104" width="8" height="16" fill="#15a05c"/>
+  <desc id="desc">LFCODE block geometric wordmark for light backgrounds</desc>
+  <path d="M16.429 65.714H49.286V82.143H16.429V65.714Z" fill="#CFCECD"/>
+  <path d="M0 16.429H16.429V82.143H65.714V98.572H0V16.429Z" fill="#656363"/>
+  <path d="M98.569 49.286H131.426V65.714H98.569V49.286Z" fill="#CFCECD"/>
+  <path d="M82.141 16.429H147.855V32.857H98.569V49.286H131.426V65.714H98.569V98.572H82.141V16.429Z" fill="#656363"/>
+  <path d="M213.575 49.286H180.718V82.143H213.575V49.286Z" fill="#CFCECD"/>
+  <path d="M230.003 32.857H180.718V82.143H230.003V98.572H164.289V16.429H230.003V32.857Z" fill="#211E1E"/>
+  <path d="M295.717 49.286H262.859V82.143H295.717V49.286Z" fill="#CFCECD"/>
+  <path d="M295.715 32.857H262.858V82.143H295.715V32.857ZM312.144 98.572H246.43V16.429H312.144V98.572Z" fill="#211E1E"/>
+  <path d="M377.86 49.286H345.003V82.143H377.86V49.286Z" fill="#CFCECD"/>
+  <path d="M377.858 32.857H345.001V82.143H377.858V32.857ZM394.287 98.572H328.572V16.429H377.858V0H394.287V98.572Z" fill="#211E1E"/>
+  <path d="M476.425 65.714V82.143H427.14V65.714H476.425Z" fill="#CFCECD"/>
+  <path d="M427.139 32.857V49.286H459.996V32.857H427.139ZM476.424 65.714H427.139V82.143H476.424V98.572H410.71V16.429H476.424V65.714Z" fill="#211E1E"/>
 </svg>
