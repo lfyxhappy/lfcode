@@ -1,22 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logosu">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">opencode üzerinde geliştirilmiş açık kaynaklı bir yapay zeka kodlama ajanı.</p>
-<p align="center">Tarihsel uyumluluk noktalarını korurken oturum yönetimi, Skills yönetimi ve GitHub Action entegrasyonunu genişletir.</p>
+<p align="center"><strong>Yerel öncelikli, açık kaynaklı bir yapay zekâ kodlama çalışma alanı.</strong></p>
+<p align="center">Sohbeti, kod düzenlemeyi, terminali, tarayıcıyı, Skills'i ve otomasyonu tek bir masaüstü ortamında birleştirin.</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="En son sürüm" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Derleme durumu" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -39,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## Temel değerler
 
----
+LFCODE tüm geliştirme akışını tek bir yerde tutar:
 
-> Bu yerelleştirilmiş README, indirme bağlantılarının, sürüm dosyalarının ve uyumluluk notlarının doğru kalması için Lfcode deposunun güncel durumunu yansıtır.
+- **Oturumlar** — Uzun konuşmaları düzenleyin, çalışmaya devam edin ve her görevin geçmişini inceleyin.
+- **Düzenleyici ve terminal** — Çalışma alanından ayrılmadan değişiklikler, komutlar ve sonuçlar arasında geçiş yapın.
+- **Tarayıcı ve otomasyon** — Tarayıcı akışlarını ve tekrarlanabilir görevleri aynı bağlamda çalıştırın.
+- **Skills ve uzantılar** — Skills, MCP, eklentiler ve kendi araçlarınızla yetenekleri genişletin.
 
-### Genel Bakış
+## Özellik önizlemeleri
 
-Lfcode, opencode üzerine inşa edilmiş bir Bun workspace monorepo’sudur. Tarihsel uyumluluğu korur ve Lfcode markasını, masaüstü uygulamasını, web UI’ını, SDK’yı ve GitHub Action desteğini sunmaya devam eder.
+Bu önizlemeler dört ana alanı temsil eder ve ileride gerçek ekran görüntüleriyle değiştirilecektir.
 
-### Öne Çıkanlar
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Oturumlar</strong></td>
+    <td align="center"><strong>Düzenleyici ve terminal</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Tarayıcı ve otomasyon</strong></td>
+    <td align="center"><strong>Skills ve uzantılar</strong></td>
+  </tr>
+</table>
 
-- Daha kapsamlı oturum yönetimi: liste, durum, oluşturma, güncelleme, silme, fork, paylaşma, paylaşımı kaldırma, özetleme, sıkıştırma, diff, revert ve unrevert
-- Daha fazla etkileşim biçimi: mesaj gönderme, asenkron `prompt`, `shell`, komutlar ve sonraki prompt tahmini
-- Skills yönetimi: yerel Skills listesi, keşif, kurulum, içe aktarma, oluşturma, yenileme ve klasör inceleme
-- GitHub Action entegrasyonu: issue veya PR yorumlarından `/lfcode`, `/opencode` ya da `/oc` ile otomatik işi tetikleme
-- Tarihsel uyumluluk: `opencode` CLI komutu, `LFCODE_*` ortam değişkenleri ve `lfcode://` protokolü korunur
+<a id="quick-start"></a>
+## Hızlı başlangıç
 
-### Kurulum
+### Windows kurulumu
 
-Genel indirmeler [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) sayfasında yayımlanır.
+[Releases](https://github.com/lfyxhappy/lfcode/releases) sayfasını açın, en son sürümden `lfcode-win-x64.exe` dosyasını indirin ve yükleyiciyi çalıştırın.
 
-- Masaüstü: mevcut release hattı `lfcode-win-x64.exe` adlı bir Windows yükleyicisi yayımlar
-- Kaynak: yerel geliştirme için repo kökünden Bun kullanın
+### Ana komut
+
+`lfcode` resmi CLI komutudur:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### Kaynak koddan çalıştırma
+
+Yerel geliştirme için Bun gerekir. Terminalde çalıştırın:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### Uyumluluk
+## Mimari ve genişletilebilirlik
 
-Bazı runtime tanımlayıcıları uyumluluk için hâlâ tarihsel `opencode` adını kullanır.
+Depo bir Bun workspace monorepo'sudur. Çalışma zamanı `packages/lfcode`, web arayüzü `packages/app`, Electron sunucusu `packages/desktop`, ortak arayüz `packages/ui` ve JavaScript SDK `packages/sdk/js` içindedir. LFCODE; Skills, MCP araçları, eklentiler, komutlar ve otomasyonlarla genişletilebilir.
 
-- CLI komutu: `opencode`
-- Yapılandırma dizini: `~/.lfcode`
-- Ortam değişkenleri: `LFCODE_*`
-- Masaüstü protokol şeması: `lfcode://`
+## Uyumluluk
 
-### Depo Yapısı
+Eski iş akışlarını korumak için bazı tarihsel tanımlayıcılar ve `opencode` takma adı desteklenmeye devam eder. Yeni belgelerde ve günlük kullanımda LFCODE adını ve `lfcode` komutunu kullanın.
 
-- `packages/lfcode`: çekirdek runtime ve session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron masaüstü host’u
-- `packages/ui`: paylaşılan UI bileşenleri
-- `packages/sdk/js`: JavaScript SDK
+## Katkı ve destek
 
-### Dokümantasyon
+Katkılara açığız. Hata ve öneriler için [Issues](https://github.com/lfyxhappy/lfcode/issues), indirmeler ve değişiklikler için [Releases](https://github.com/lfyxhappy/lfcode/releases) sayfasını kullanın.
 
-Güncel doküman kaynağı [packages/web/src/content/docs](packages/web/src/content/docs) altında bulunur.
-
-### Doğrulama
-
-Workspace kökünden ana kontrolleri çalıştırın:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### Destek
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE [MIT Lisansı](LICENSE) ile yayımlanır.

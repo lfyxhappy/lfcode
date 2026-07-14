@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Browser Automation preview placeholder</title>
+  <desc id="desc">Abstract browser automation layout labeled Preview coming soon</desc>
+  <rect width="1200" height="675" fill="#10151a"/>
+  <rect x="1" y="1" width="1198" height="673" fill="none" stroke="#303943" stroke-width="2"/>
+  <rect x="84" y="72" width="1032" height="510" fill="#151b20" stroke="#303943" stroke-width="2"/>
+  <path d="M84 138H1116" stroke="#303943" stroke-width="2"/>
+  <circle cx="120" cy="105" r="7" fill="#52615a"/>
+  <circle cx="146" cy="105" r="7" fill="#52615a"/>
+  <circle cx="172" cy="105" r="7" fill="#62e69c"/>
+  <rect x="220" y="90" width="650" height="30" fill="#222a31"/>
+  <rect x="246" y="100" width="280" height="9" fill="#73847c"/>
+  <rect x="116" y="174" width="642" height="342" fill="#1c2329"/>
+  <rect x="790" y="174" width="294" height="342" fill="#151b20" stroke="#303943" stroke-width="2"/>
+  <g fill="#62736b">
+    <rect x="154" y="218" width="302" height="16"/>
+    <rect x="154" y="256" width="530" height="10" opacity=".55"/>
+    <rect x="154" y="282" width="456" height="10" opacity=".55"/>
+    <rect x="154" y="338" width="244" height="104" opacity=".45"/>
+    <rect x="422" y="338" width="244" height="104" opacity=".45"/>
+    <rect x="822" y="212" width="190" height="10"/>
+    <rect x="822" y="252" width="218" height="8" opacity=".55"/>
+    <rect x="822" y="278" width="172" height="8" opacity=".55"/>
+    <rect x="822" y="324" width="218" height="48" opacity=".45"/>
+    <rect x="822" y="396" width="218" height="48" opacity=".45"/>
+  </g>
+  <path d="M664 304l36 92 16-36 38-16z" fill="#62e69c" stroke="#10151a" stroke-width="8" stroke-linejoin="bevel"/>
+  <path d="M716 360l44 44" stroke="#62e69c" stroke-width="12"/>
+  <rect x="424" y="612" width="352" height="36" fill="#10151a"/>
+  <text x="600" y="638" fill="#9fb0a8" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="22" text-anchor="middle" letter-spacing="3">PREVIEW COMING SOON</text>
+</svg>

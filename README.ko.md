@@ -1,21 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">오픈 소스 AI 코딩 에이전트입니다.</p>
+<p align="center"><strong>로컬 우선 오픈 소스 AI 코딩 워크스페이스.</strong></p>
+<p align="center">대화, 코드 편집, 터미널, 브라우저, Skills, 자동화 워크플로를 하나의 데스크톱 환경에 모읍니다.</p>
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -38,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## 핵심 가치
 
----
+LFCODE는 전체 개발 흐름을 한곳에 유지합니다.
 
-> 이 README는 현재 Lfcode 저장소 상태를 반영하므로 다운로드 링크, 릴리스 산출물, 호환성 노트가 항상 정확하게 유지됩니다.
+- **세션** — 긴 대화를 정리하고 작업을 재개하며 각 작업의 기록을 확인합니다.
+- **코드 편집기와 터미널** — 워크스페이스를 벗어나지 않고 변경, 명령, 실행 결과를 오갑니다.
+- **브라우저와 자동화** — 같은 컨텍스트에서 브라우저 흐름과 반복 가능한 작업을 실행합니다.
+- **Skills와 확장** — Skills, MCP, 플러그인, 사용자 도구로 기능을 확장합니다.
 
-### 개요
+## 기능 미리보기
 
-Lfcode는 opencode에서 발전한 Bun workspace 기반 모노레포입니다. 기존 호환성을 유지하면서 Lfcode 브랜드, 데스크톱 앱, 웹 UI, SDK, GitHub Action 연동을 제공합니다.
+다음 이미지는 네 가지 핵심 영역을 나타내며 추후 실제 화면으로 교체됩니다.
 
-### 주요 기능
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>세션</strong></td>
+    <td align="center"><strong>코드 편집기와 터미널</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>브라우저와 자동화</strong></td>
+    <td align="center"><strong>Skills와 확장</strong></td>
+  </tr>
+</table>
 
-- 더 완전한 세션 관리: 목록, 상태, 생성, 업데이트, 삭제, 분기, 공유, 공유 해제, 요약, 압축, diff, revert, unrevert 지원.
-- 다양한 상호작용 방식: 메시지 전송, 비동기 `prompt`, `shell`, 명령, 다음 프롬프트 예측.
-- Skills 관리: 로컬 Skills 목록, 검색, 설치, 가져오기, 생성, 새로고침, 디렉터리 확인.
-- GitHub Action 연동: 이슈 또는 PR 댓글에서 `/lfcode`, `/opencode`, `/oc`으로 자동 작업 트리거.
-- 기존 호환성: `opencode` CLI 명령, `LFCODE_*` 환경 변수, `lfcode://` 프로토콜 유지.
+<a id="quick-start"></a>
+## 빠른 시작
 
-### 설치
+### Windows 설치
 
-공개 다운로드는 [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) 페이지에 게시됩니다.
+[Releases](https://github.com/lfyxhappy/lfcode/releases)에서 최신 버전의 `lfcode-win-x64.exe`를 내려받아 설치 프로그램을 실행합니다.
 
-- 데스크톱: 현재 릴리스 파이프라인은 `lfcode-win-x64.exe`라는 Windows 설치 파일을 배포합니다.
-- 소스: 로컬 개발은 저장소 루트에서 Bun을 사용하세요.
+### 기본 명령
+
+`lfcode`가 공식 CLI 명령입니다.
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### 소스에서 실행
+
+로컬 개발에는 Bun이 필요합니다. 터미널에서 실행하세요.
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### 호환성
+## 아키텍처와 확장성
 
-호환성을 위해 몇 가지 런타임 식별자는 여전히 역사적인 `opencode` 이름을 사용합니다.
+저장소는 Bun workspace monorepo입니다. 핵심 런타임은 `packages/lfcode`, 웹 UI는 `packages/app`, Electron 호스트는 `packages/desktop`, 공유 UI는 `packages/ui`, JavaScript SDK는 `packages/sdk/js`에 있습니다. Skills, MCP 도구, 플러그인, 명령, 자동화 워크플로로 LFCODE를 확장할 수 있습니다.
 
-- CLI 명령: `opencode`
-- 설정 디렉터리: `~/.lfcode`
-- 환경 변수: `LFCODE_*`
-- 데스크톱 프로토콜 스킴: `lfcode://`
+## 호환성
 
-### 저장소 구조
+기존 워크플로를 유지하기 위해 일부 역사적 식별자와 `opencode` 별칭은 계속 지원됩니다. 새 문서와 일상적인 사용에서는 LFCODE 이름과 `lfcode` 명령을 사용하세요.
 
-- `packages/lfcode`: 핵심 런타임과 세션 엔진
-- `packages/app`: 웹 UI
-- `packages/desktop`: Electron 데스크톱 호스트
-- `packages/ui`: 공용 UI 컴포넌트
-- `packages/sdk/js`: JavaScript SDK
+## 기여와 지원
 
-### 문서
+기여를 환영합니다. 버그와 제안은 [Issues](https://github.com/lfyxhappy/lfcode/issues), 다운로드와 변경 사항은 [Releases](https://github.com/lfyxhappy/lfcode/releases)를 확인하세요.
 
-현재 문서 소스는 [packages/web/src/content/docs](packages/web/src/content/docs)에 있습니다.
-
-### 검증
-
-워크스페이스 루트에서 주요 검사를 실행하세요:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### 지원
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE는 [MIT License](LICENSE)로 배포됩니다.

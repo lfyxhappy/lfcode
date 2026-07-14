@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 128" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">LFCODE</title>
+  <desc id="desc">LFCODE pixel geometric wordmark for dark backgrounds</desc>
+  <g fill="#f3f7f5">
+    <rect x="8" y="8" width="16" height="112"/>
+    <rect x="8" y="104" width="88" height="16"/>
+    <rect x="128" y="8" width="16" height="112"/>
+    <rect x="128" y="8" width="88" height="16"/>
+    <rect x="128" y="56" width="72" height="16"/>
+    <rect x="248" y="8" width="88" height="16"/>
+    <rect x="248" y="8" width="16" height="112"/>
+    <rect x="248" y="104" width="88" height="16"/>
+    <rect x="368" y="8" width="88" height="16"/>
+    <rect x="368" y="104" width="88" height="16"/>
+    <rect x="368" y="8" width="16" height="112"/>
+    <rect x="440" y="8" width="16" height="112"/>
+    <rect x="488" y="8" width="72" height="16"/>
+    <rect x="488" y="104" width="72" height="16"/>
+    <rect x="488" y="8" width="16" height="112"/>
+    <rect x="560" y="24" width="16" height="80"/>
+    <rect x="608" y="8" width="88" height="16"/>
+    <rect x="608" y="8" width="16" height="112"/>
+    <rect x="608" y="56" width="72" height="16"/>
+    <rect x="608" y="104" width="88" height="16"/>
+  </g>
+  <rect x="704" y="104" width="8" height="16" fill="#62e69c"/>
+</svg>

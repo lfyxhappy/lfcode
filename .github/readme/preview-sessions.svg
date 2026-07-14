@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Sessions preview placeholder</title>
+  <desc id="desc">Abstract sessions layout labeled Preview coming soon</desc>
+  <rect width="1200" height="675" fill="#10151a"/>
+  <rect x="1" y="1" width="1198" height="673" fill="none" stroke="#303943" stroke-width="2"/>
+  <path d="M0 88H1200M330 88V675" stroke="#303943" stroke-width="2"/>
+  <circle cx="48" cy="44" r="8" fill="#62e69c"/>
+  <rect x="72" y="34" width="168" height="20" fill="#d7e0dc"/>
+  <g fill="#222a31">
+    <rect x="28" y="124" width="274" height="72"/>
+    <rect x="28" y="212" width="274" height="72"/>
+    <rect x="28" y="300" width="274" height="72"/>
+  </g>
+  <g fill="#8ca097">
+    <rect x="52" y="145" width="150" height="10"/>
+    <rect x="52" y="165" width="96" height="8" opacity=".6"/>
+    <rect x="52" y="233" width="174" height="10"/>
+    <rect x="52" y="253" width="120" height="8" opacity=".6"/>
+    <rect x="52" y="321" width="132" height="10"/>
+    <rect x="52" y="341" width="186" height="8" opacity=".6"/>
+  </g>
+  <g fill="none" stroke="#405047" stroke-width="2">
+    <rect x="380" y="126" width="720" height="126"/>
+    <rect x="470" y="286" width="630" height="126"/>
+    <rect x="380" y="446" width="720" height="126"/>
+  </g>
+  <g fill="#62736b">
+    <rect x="412" y="160" width="286" height="10"/>
+    <rect x="412" y="184" width="542" height="8" opacity=".55"/>
+    <rect x="412" y="204" width="416" height="8" opacity=".55"/>
+    <rect x="502" y="320" width="244" height="10"/>
+    <rect x="502" y="344" width="468" height="8" opacity=".55"/>
+    <rect x="412" y="480" width="320" height="10"/>
+    <rect x="412" y="504" width="512" height="8" opacity=".55"/>
+    <rect x="412" y="524" width="382" height="8" opacity=".55"/>
+  </g>
+  <rect x="424" y="612" width="352" height="36" fill="#10151a"/>
+  <text x="600" y="638" fill="#9fb0a8" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="22" text-anchor="middle" letter-spacing="3">PREVIEW COMING SOON</text>
+</svg>

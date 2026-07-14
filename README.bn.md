@@ -1,21 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">ওপেন সোর্স এআই কোডিং এজেন্ট।</p>
+<p align="center"><strong>লোকাল-ফার্স্ট, ওপেন-সোর্স AI কোডিং ওয়ার্কস্পেস।</strong></p>
+<p align="center">চ্যাট, কোড এডিটিং, টার্মিনাল, ব্রাউজার, Skills এবং অটোমেশনকে একই ডেস্কটপ পরিবেশে আনুন।</p>
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -38,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## মূল সুবিধা
 
----
+LFCODE পুরো ডেভেলপমেন্ট প্রবাহকে এক জায়গায় রাখে:
 
-> এই README Lfcode রিপোজিটরির বর্তমান অবস্থা প্রতিফলিত করে, যাতে ডাউনলোড লিংক, রিলিজ অ্যাসেট এবং সামঞ্জস্য নোট সঠিক থাকে।
+- **সেশন** — দীর্ঘ কথোপকথন সাজান, কাজ আবার শুরু করুন এবং প্রতিটি কাজের ইতিহাস দেখুন।
+- **কোড এডিটিং ও টার্মিনাল** — ওয়ার্কস্পেস না ছেড়েই পরিবর্তন, কমান্ড ও রান ফলাফলের মধ্যে চলুন।
+- **ব্রাউজার ও অটোমেশন** — একই প্রসঙ্গ থেকে ব্রাউজার ও পুনরাবৃত্ত কাজের ওয়ার্কফ্লো চালান।
+- **Skills ও এক্সটেনশন** — Skills, MCP, প্লাগইন ও নিজস্ব টুল দিয়ে আচরণ বাড়ান।
 
-### পরিচিতি
+## ফিচার প্রিভিউ
 
-Lfcode হলো একটি Bun workspace monorepo, যা opencode থেকে বিকশিত হয়েছে। এটি ঐতিহাসিক compatibility surface বজায় রেখে Lfcode ব্র্যান্ড, ডেস্কটপ অ্যাপ, ওয়েব UI, SDK, এবং GitHub Action সমর্থন দেয়।
+এই প্রিভিউগুলো চারটি প্রধান ক্ষেত্র দেখায়; পরে প্রকৃত স্ক্রিনশট যোগ হবে।
 
-### বৈশিষ্ট্য
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>সেশন</strong></td>
+    <td align="center"><strong>কোড এডিটিং ও টার্মিনাল</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>ব্রাউজার ও অটোমেশন</strong></td>
+    <td align="center"><strong>Skills ও এক্সটেনশন</strong></td>
+  </tr>
+</table>
 
-- আরও পূর্ণাঙ্গ session management: তালিকা, status, create, update, delete, fork, share, unshare, summarize, compact, diff, revert, এবং unrevert সমর্থন।
-- একাধিক interaction mode: message পাঠানো, asynchronous `prompt`, `shell`, commands, এবং next-prompt prediction।
-- Skills management: local Skills তালিকা, discover, install, import, create, refresh, এবং directory inspection।
-- GitHub Action integration: issue বা PR comment থেকে `/lfcode`, `/opencode`, বা `/oc` ব্যবহার করে automated কাজ শুরু।
-- ঐতিহাসিক compatibility: `opencode` CLI command, `LFCODE_*` environment variables, এবং `lfcode://` protocol বজায় রাখা।
+<a id="quick-start"></a>
+## দ্রুত শুরু
 
-### ইনস্টলেশন
+### Windows-এ ইনস্টল
 
-Public download গুলো [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) পেজে প্রকাশিত হয়।
+[Releases](https://github.com/lfyxhappy/lfcode/releases) খুলুন, সর্বশেষ রিলিজ থেকে `lfcode-win-x64.exe` ডাউনলোড করে ইনস্টলার চালান।
 
-- Desktop: বর্তমান release pipeline `lfcode-win-x64.exe` নামের Windows installer প্রকাশ করে।
-- Source: local development-এর জন্য repository root থেকে Bun ব্যবহার করুন।
+### প্রধান কমান্ড
+
+`lfcode` হলো আনুষ্ঠানিক CLI কমান্ড:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### সোর্স থেকে চালানো
+
+লোকাল ডেভেলপমেন্টে Bun প্রয়োজন। টার্মিনালে চালান:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### সামঞ্জস্য
+## আর্কিটেকচার ও এক্সটেনশন
 
-কিছু runtime identifier compatibility-এর জন্য এখনো ঐতিহাসিক `opencode` নাম ব্যবহার করে।
+এটি একটি Bun workspace monorepo। মূল runtime `packages/lfcode`, web UI `packages/app`, Electron host `packages/desktop`, shared UI `packages/ui`, এবং JavaScript SDK `packages/sdk/js`-এ আছে। Skills, MCP tools, plugins, commands ও automation workflow দিয়ে LFCODE বাড়ানো যায়।
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
+## সামঞ্জস্য
 
-### Repository structure
+পুরোনো workflow সচল রাখতে কিছু ঐতিহাসিক identifier এবং `opencode` alias এখনও সমর্থিত। নতুন নথি ও দৈনন্দিন ব্যবহারে LFCODE নাম এবং `lfcode` কমান্ড ব্যবহার করুন।
 
-- `packages/lfcode`: core runtime এবং session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: shared UI components
-- `packages/sdk/js`: JavaScript SDK
+## অবদান ও সহায়তা
 
-### Documentation
+অবদান স্বাগত। বাগ বা প্রস্তাবের জন্য [Issues](https://github.com/lfyxhappy/lfcode/issues), আর ডাউনলোড ও পরিবর্তনের জন্য [Releases](https://github.com/lfyxhappy/lfcode/releases) দেখুন।
 
-বর্তমান documentation source আছে [packages/web/src/content/docs](packages/web/src/content/docs)-এ।
-
-### Validation
-
-Workspace root থেকে মূল checks চালান:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### Support
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE [MIT License](LICENSE)-এর অধীনে প্রকাশিত।

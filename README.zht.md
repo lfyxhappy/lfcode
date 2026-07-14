@@ -1,21 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">開源 AI 編碼代理。</p>
+<p align="center"><strong>本機優先的開源 AI 程式設計工作台。</strong></p>
+<p align="center">把對話、程式碼編輯、終端機、瀏覽器、Skills 與自動化工作流程帶進同一個桌面環境。</p>
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -38,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## 核心價值
 
----
+LFCODE 把完整的開發流程集中在一個工作台中：
 
-> 這份在地化 README 已依照目前的 Lfcode 倉庫狀態同步，確保下載連結、發佈資產與相容性說明保持準確。
+- **工作階段** — 整理長對話、繼續未完成的工作，並清楚檢視每項任務的歷史。
+- **程式碼編輯與終端機** — 不必離開工作台，即可在修改、命令與執行結果之間切換。
+- **瀏覽器與自動化** — 在同一個上下文中執行瀏覽器流程與可重複的自動化任務。
+- **Skills 與擴充** — 透過 Skills、MCP、外掛與自訂工具擴充工作方式。
 
-### 總覽
+## 功能展示
 
-Lfcode 是一個從 opencode 發展而來的 Bun workspace monorepo。它保留歷史相容入口，同時持續提供 Lfcode 品牌、桌面應用、Web UI、SDK 與 GitHub Action 支援。
+以下預覽圖對應四項核心能力，後續將替換為實際產品畫面。
 
-### 特色功能
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>工作階段</strong></td>
+    <td align="center"><strong>程式碼編輯與終端機</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>瀏覽器與自動化</strong></td>
+    <td align="center"><strong>Skills 與擴充</strong></td>
+  </tr>
+</table>
 
-- 更完整的 session 管理：列表、狀態、建立、更新、刪除、fork、分享、取消分享、摘要、壓縮、diff、revert 與 unrevert。
-- 更多互動方式：傳送訊息、非同步 `prompt`、`shell`、命令與下一個 prompt 預測。
-- Skills 管理：本機 Skills 列表、探索、安裝、匯入、建立、重新整理與目錄檢視。
-- GitHub Action 整合：可在 issue 或 PR 留言中使用 `/lfcode`、`/opencode` 或 `/oc` 觸發自動處理。
-- 歷史相容性：保留 `opencode` CLI 指令、`LFCODE_*` 環境變數與 `lfcode://` 協定。
+<a id="quick-start"></a>
+## 快速開始
 
-### 安裝
+### Windows 安裝
 
-公開下載會發佈在 [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) 頁面。
+開啟 [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases)，下載最新版本中的 `lfcode-win-x64.exe`，然後執行安裝程式。
 
-- 桌面版：目前的發佈流程會產生名為 `lfcode-win-x64.exe` 的 Windows 安裝程式。
-- 原始碼：在倉庫根目錄使用 Bun 進行本機開發。
+### 主要命令
+
+`lfcode` 是正式的命令列入口：
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### 從原始碼啟動
+
+本機開發需要 Bun。請在終端機執行：
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### 相容性
+## 架構與擴充能力
 
-部分執行期識別仍保留歷史 `opencode` 命名，以便相容舊工作流程。
+儲存庫採用 Bun workspace monorepo：核心執行階段位於 `packages/lfcode`，Web UI 位於 `packages/app`，Electron 桌面宿主位於 `packages/desktop`，共用 UI 位於 `packages/ui`，JavaScript SDK 位於 `packages/sdk/js`。LFCODE 可透過 Skills、MCP 工具、外掛、命令與自動化工作流程繼續擴充。
 
-- CLI 指令：`opencode`
-- 設定目錄：`~/.lfcode`
-- 環境變數：`LFCODE_*`
-- 桌面協定：`lfcode://`
+## 相容性說明
 
-### 倉庫結構
+為了讓舊工作流程繼續運作，部分歷史識別碼與 `opencode` 相容別名仍予以保留。新文件與日常使用應優先採用 LFCODE 品牌及 `lfcode` 主要命令。
 
-- `packages/lfcode`：核心執行階段與 session 引擎
-- `packages/app`：Web UI
-- `packages/desktop`：Electron 桌面主程式
-- `packages/ui`：共用 UI 元件
-- `packages/sdk/js`：JavaScript SDK
+## 貢獻與支援
 
-### 文件
+歡迎參與貢獻。請透過 [Issues](https://github.com/lfyxhappy/lfcode/issues) 回報問題或提出建議，並從 [Releases](https://github.com/lfyxhappy/lfcode/releases) 取得下載與版本變更。
 
-目前文件來源位於 [packages/web/src/content/docs](packages/web/src/content/docs)。
-
-### 驗證
-
-在 workspace 根目錄執行主要檢查：
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### 支援
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE 依 [MIT License](LICENSE) 開源。

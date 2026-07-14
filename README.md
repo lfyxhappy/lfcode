@@ -1,22 +1,32 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode 标志">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE" width="620">
     </picture>
   </a>
 </p>
-<p align="center">基于 opencode 开发的开源 AI 编码代理。</p>
-<p align="center">保留历史兼容入口，同时补齐会话管理、Skills 管理和 GitHub Action 集成。</p>
+
+<h3 align="center">本地优先的开源 AI 编程工作台</h3>
+<p align="center">把对话、代码编辑、终端、浏览器、Skills 与自动化工作流带进同一个桌面环境。</p>
+
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="构建状态" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square"></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?branch=dev&style=flat-square&label=build"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases/latest">下载</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -39,69 +49,100 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode 终端界面](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
-
 ---
 
-> 本 README 按当前 Lfcode 仓库状态编写，下载链接、发布产物和兼容性说明均以仓库代码为准。
+## 一个工作台，贯穿完整开发流程
 
-### 项目简介
+- **会话**：组织持续的 AI 协作，查看状态、Diff 和历史，并在不同任务之间保持上下文清晰。
+- **代码编辑与终端**：在同一工作区阅读和修改代码、运行命令，让讨论直接落到可验证的结果。
+- **浏览器与自动化**：把页面操作、调试和验证接入代理工作流，覆盖从实现到真实界面检查的闭环。
+- **Skills 与扩展**：通过本地 Skills、MCP、插件和 SDK 组合适合项目的工具链与自动化能力。
 
-Lfcode 是一个基于 Bun workspace 的 monorepo，从 opencode 发展而来。项目在保留 `opencode` 相关兼容入口的同时，继续以 Lfcode 品牌提供桌面端、Web UI、SDK 和 GitHub Action 能力。
+## 功能展示
 
-### 特色功能
+以下为统一视觉占位，真实产品预览将随后补充。
 
-- 会话管理更完整：支持列表、状态、创建、更新、删除、分叉、分享、取消分享、总结、压缩、Diff、回滚和恢复。
-- 交互方式更多样：支持发送消息、异步 `prompt`、`shell` 执行、命令执行和下一条提示预测。
-- Skills 管理：支持本地 Skills 列表、发现、安装、导入、创建、刷新和目录查看。
-- GitHub Action 集成：可在 issue 或 PR 评论中使用 `/lfcode`、`/opencode`、`/oc` 触发自动处理。
-- 历史兼容：保留 `opencode` CLI 命令、`LFCODE_*` 环境变量、`lfcode://` 协议等旧入口。
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-sessions.svg" alt="Sessions — Preview coming soon" width="100%"><br>
+      <strong>会话</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-editor-terminal.svg" alt="Editor & Terminal — Preview coming soon" width="100%"><br>
+      <strong>编辑器与终端</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-browser-automation.svg" alt="Browser Automation — Preview coming soon" width="100%"><br>
+      <strong>浏览器自动化</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-skills-extensions.svg" alt="Skills & Extensions — Preview coming soon" width="100%"><br>
+      <strong>Skills 与扩展</strong>
+    </td>
+  </tr>
+</table>
 
-### 安装
+## 快速开始
 
-当前公开下载发布在 [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) 页面。
+### Windows 桌面端
 
-- 桌面端：当前发布流程会生成 Windows 安装包 `lfcode-win-x64.exe`。
-- 源码开发：在仓库根目录使用 Bun。
+前往 [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases/latest)，下载 `lfcode-win-x64.exe` 并按安装向导完成安装。
+
+### 命令行
+
+Lfcode 的正式主命令是：
 
 ```bash
+lfcode
+```
+
+### 从源码运行
+
+需要 [Bun](https://bun.sh/) 1.3.11。克隆仓库后在根目录运行：
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
+```
+
+按需要也可以单独启动 Web UI 或桌面开发环境：
+
+```bash
 bun run dev:web
 bun run dev:desktop
 ```
 
-### 兼容性
+## 架构与扩展
 
-部分运行时标识仍保留历史 `opencode` 命名，以兼容旧工作流。
+Lfcode 是一个 Bun workspace monorepo：
 
-- CLI 命令：`opencode`
-- 配置目录：`~/.lfcode`
-- 环境变量：`LFCODE_*`
-- 桌面协议：`lfcode://`
-
-### 仓库结构
-
-- `packages/lfcode`：核心运行时和会话引擎
-- `packages/app`：Web UI
+- `packages/lfcode`：核心运行时、CLI 与会话引擎
+- `packages/app`：Web 应用界面
 - `packages/desktop`：Electron 桌面宿主
 - `packages/ui`：共享 UI 组件
+- `packages/plugin`：插件接口
 - `packages/sdk/js`：JavaScript SDK
 
-### 文档
-
-当前文档源位于 [packages/web/src/content/docs](packages/web/src/content/docs)。
-
-### 验证
-
-在仓库根目录运行：
+项目配置、Skills、命令、主题、插件和工具可以放在 `.lfcode/` 中，以便按工作区组合和复用。开发提交前可从仓库根目录运行：
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### 支持
+## 兼容说明
 
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+Lfcode 从 opencode 项目演进而来。为照顾已有配置和自动化，部分历史入口仍作为兼容别名保留；新文档、脚本和日常使用应优先采用 `lfcode` 命令与 `LFCODE_*` 环境变量。
+
+## 参与项目
+
+- 在 [Issues](https://github.com/lfyxhappy/lfcode/issues) 报告问题或提出功能建议。
+- 在 [Releases](https://github.com/lfyxhappy/lfcode/releases) 获取已发布版本与变更记录。
+- 欢迎提交 Pull Request；开始前建议先查看现有 issue，避免重复工作。
+
+Lfcode 使用 [MIT License](LICENSE) 发布。

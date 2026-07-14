@@ -1,21 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">AI agent za kodiranje otvorenog koda.</p>
+<p align="center"><strong>Lokalno orijentisan AI radni prostor otvorenog koda za programiranje.</strong></p>
+<p align="center">Objedinite razgovore, uređivanje koda, terminal, preglednik, Skills i automatizaciju u jednom desktop okruženju.</p>
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -38,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## Glavne vrijednosti
 
----
+LFCODE drži cijeli razvojni tok na jednom mjestu:
 
-> Ovaj README odražava trenutno stanje Lfcode repozitorija kako bi linkovi za preuzimanje, release asseti i napomene o kompatibilnosti ostali tačni.
+- **Sesije** — Organizujte duge razgovore, nastavite rad i pregledajte historiju svakog zadatka.
+- **Uređivač i terminal** — Prelazite između izmjena, naredbi i rezultata bez napuštanja radnog prostora.
+- **Preglednik i automatizacija** — Pokrećite tokove preglednika i ponovljive zadatke iz istog konteksta.
+- **Skills i proširenja** — Proširite mogućnosti kroz Skills, MCP, dodatke i vlastite alate.
 
-### Pregled
+## Pregled mogućnosti
 
-Lfcode je Bun workspace monorepo koji je nastao iz opencode-a. Zadržava istorijsku kompatibilnost i isporučuje Lfcode brend, desktop aplikaciju, web UI, SDK i GitHub Action podršku.
+Ovi prikazi predstavljaju četiri glavna područja i kasnije će biti zamijenjeni stvarnim snimcima.
 
-### Istaknuto
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Sesije</strong></td>
+    <td align="center"><strong>Uređivač i terminal</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Preglednik i automatizacija</strong></td>
+    <td align="center"><strong>Skills i proširenja</strong></td>
+  </tr>
+</table>
 
-- Potpunije upravljanje sesijama: lista, status, kreiranje, ažuriranje, brisanje, fork, dijeljenje, ukidanje dijeljenja, sažetak, kompakcija, diff, revert i unrevert.
-- Više načina interakcije: slanje poruka, asinhroni `prompt`, `shell`, komande i predviđanje sljedećeg prompta.
-- Upravljanje Skillsima: lokalna lista Skillsa, otkrivanje, instalacija, import, kreiranje, osvježavanje i provjera direktorija.
-- GitHub Action integracija: pokrenite automatizirani rad iz issue ili PR komentara pomoću `/lfcode`, `/opencode` ili `/oc`.
-- Istorijska kompatibilnost: zadržani su `opencode` CLI naredba, `LFCODE_*` environment varijable i `lfcode://` protokol.
+<a id="quick-start"></a>
+## Brzi početak
 
-### Instalacija
+### Instalacija na Windows
 
-Javni downloadi se objavljuju na stranici [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+Otvorite [Releases](https://github.com/lfyxhappy/lfcode/releases), preuzmite `lfcode-win-x64.exe` iz najnovijeg izdanja i pokrenite instalaciju.
 
-- Desktop: trenutni release pipeline objavljuje Windows installer pod imenom `lfcode-win-x64.exe`.
-- Source: za lokalni razvoj koristite Bun iz korijena repozitorija.
+### Glavna naredba
+
+`lfcode` je službena CLI naredba:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### Pokretanje iz izvornog koda
+
+Za lokalni razvoj potreban je Bun. U terminalu pokrenite:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### Kompatibilnost
+## Arhitektura i proširenja
 
-Neki runtime identifikatori i dalje koriste historijsko ime `opencode` zbog kompatibilnosti.
+Repozitorij je Bun workspace monorepo. Jezgra je u `packages/lfcode`, web UI u `packages/app`, Electron host u `packages/desktop`, zajednički UI u `packages/ui`, a JavaScript SDK u `packages/sdk/js`. LFCODE se proširuje kroz Skills, MCP alate, dodatke, naredbe i automatizovane tokove.
 
-- CLI naredba: `opencode`
-- Konfiguracioni direktorij: `~/.lfcode`
-- Environment varijable: `LFCODE_*`
-- Desktop protokol: `lfcode://`
+## Kompatibilnost
 
-### Struktura repozitorija
+Radi starih tokova rada, neki historijski identifikatori i alias `opencode` ostaju podržani. Za novu dokumentaciju i svakodnevni rad koristite naziv LFCODE i naredbu `lfcode`.
 
-- `packages/lfcode`: core runtime i session engine
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: zajedničke UI komponente
-- `packages/sdk/js`: JavaScript SDK
+## Doprinos i podrška
 
-### Dokumentacija
+Doprinosi su dobrodošli. Koristite [Issues](https://github.com/lfyxhappy/lfcode/issues) za greške i prijedloge, a [Releases](https://github.com/lfyxhappy/lfcode/releases) za preuzimanja i promjene.
 
-Trenutni izvor dokumentacije je u [packages/web/src/content/docs](packages/web/src/content/docs).
-
-### Provjera
-
-Pokrenite glavne provjere iz korijena workspace-a:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### Podrška
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE je objavljen pod [MIT licencom](LICENSE).

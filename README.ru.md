@@ -1,22 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Логотип Lfcode">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">Open-source AI-агент для кодирования, построенный на opencode.</p>
-<p align="center">Сохраняет историческую совместимость и расширяет управление сессиями, Skills и интеграцию с GitHub Action.</p>
+<p align="center"><strong>Локальная рабочая среда с ИИ для программирования с открытым исходным кодом.</strong></p>
+<p align="center">Объедините диалоги, редактирование кода, терминал, браузер, Skills и автоматизацию в одном настольном приложении.</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Последний релиз" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Статус сборки" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -39,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## Основные преимущества
 
----
+LFCODE сохраняет весь процесс разработки в одном месте:
 
-> Этот локализованный README отражает текущее состояние репозитория Lfcode, чтобы ссылки на загрузку, релизные файлы и заметки о совместимости оставались точными.
+- **Сессии** — Организуйте длинные диалоги, продолжайте работу и просматривайте историю каждой задачи.
+- **Редактор и терминал** — Переходите между изменениями, командами и результатами, не покидая рабочую среду.
+- **Браузер и автоматизация** — Запускайте браузерные сценарии и повторяемые задачи в едином контексте.
+- **Skills и расширения** — Расширяйте возможности с помощью Skills, MCP, плагинов и собственных инструментов.
 
-### Обзор
+## Предварительный просмотр
 
-Lfcode — это Bun workspace monorepo, построенный на основе opencode. Он сохраняет историческую совместимость и продолжает поставлять бренд Lfcode, десктопное приложение, веб-интерфейс, SDK и поддержку GitHub Action.
+Эти изображения представляют четыре ключевых направления и позднее будут заменены реальными снимками экрана.
 
-### Основные возможности
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Сессии</strong></td>
+    <td align="center"><strong>Редактор и терминал</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Браузер и автоматизация</strong></td>
+    <td align="center"><strong>Skills и расширения</strong></td>
+  </tr>
+</table>
 
-- Более полное управление сессиями: список, статус, создание, обновление, удаление, fork, sharing, unshare, summarize, compact, diff, revert и unrevert.
-- Несколько способов взаимодействия: отправка сообщений, асинхронный `prompt`, `shell`, команды и прогноз следующего prompt.
-- Управление Skills: локальный список Skills, обнаружение, установка, импорт, создание, обновление и просмотр каталогов.
-- Интеграция GitHub Action: запуск автоматической работы из комментариев issue или PR через `/lfcode`, `/opencode` или `/oc`.
-- Историческая совместимость: сохранены команда CLI `opencode`, переменные окружения `LFCODE_*` и протокол `lfcode://`.
+<a id="quick-start"></a>
+## Быстрый старт
 
-### Установка
+### Установка в Windows
 
-Публичные загрузки публикуются на странице [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+Откройте [Releases](https://github.com/lfyxhappy/lfcode/releases), скачайте `lfcode-win-x64.exe` из последнего выпуска и запустите установщик.
 
-- Desktop: текущий release pipeline публикует Windows installer с именем `lfcode-win-x64.exe`.
-- Source: используйте Bun из корня репозитория для локальной разработки.
+### Основная команда
+
+`lfcode` — официальная команда CLI:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### Запуск из исходного кода
+
+Для локальной разработки нужен Bun. Выполните в терминале:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### Совместимость
+## Архитектура и расширение
 
-Некоторые идентификаторы runtime по-прежнему используют историческое имя `opencode` ради совместимости.
+Репозиторий представляет собой Bun workspace monorepo. Ядро находится в `packages/lfcode`, веб-интерфейс — в `packages/app`, хост Electron — в `packages/desktop`, общие компоненты UI — в `packages/ui`, а JavaScript SDK — в `packages/sdk/js`. LFCODE расширяется через Skills, инструменты MCP, плагины, команды и автоматизацию.
 
-- Команда CLI: `opencode`
-- Каталог конфигурации: `~/.lfcode`
-- Переменные окружения: `LFCODE_*`
-- Схема desktop-протокола: `lfcode://`
+## Совместимость
 
-### Структура репозитория
+Для работы старых сценариев некоторые исторические идентификаторы и псевдоним `opencode` всё ещё поддерживаются. В новой документации и повседневной работе используйте название LFCODE и команду `lfcode`.
 
-- `packages/lfcode`: основной runtime и движок сессий
-- `packages/app`: web UI
-- `packages/desktop`: Electron desktop host
-- `packages/ui`: общие UI-компоненты
-- `packages/sdk/js`: JavaScript SDK
+## Участие и поддержка
 
-### Документация
+Мы приветствуем вклад в проект. Используйте [Issues](https://github.com/lfyxhappy/lfcode/issues) для ошибок и предложений, а [Releases](https://github.com/lfyxhappy/lfcode/releases) — для загрузок и списка изменений.
 
-Текущий источник документации находится в [packages/web/src/content/docs](packages/web/src/content/docs).
-
-### Проверка
-
-Запускайте основные проверки из корня workspace:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### Поддержка
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE распространяется по [лицензии MIT](LICENSE).

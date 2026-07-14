@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Editor and Terminal preview placeholder</title>
+  <desc id="desc">Abstract editor and terminal layout labeled Preview coming soon</desc>
+  <rect width="1200" height="675" fill="#10151a"/>
+  <rect x="1" y="1" width="1198" height="673" fill="none" stroke="#303943" stroke-width="2"/>
+  <path d="M0 88H1200M0 448H1200M248 88V448" stroke="#303943" stroke-width="2"/>
+  <circle cx="48" cy="44" r="8" fill="#62e69c"/>
+  <rect x="72" y="34" width="250" height="20" fill="#d7e0dc"/>
+  <g fill="#222a31">
+    <rect x="24" y="120" width="200" height="38"/>
+    <rect x="24" y="170" width="200" height="38"/>
+    <rect x="24" y="220" width="200" height="38"/>
+    <rect x="24" y="270" width="200" height="38"/>
+  </g>
+  <g fill="#62736b">
+    <rect x="284" y="126" width="88" height="10"/>
+    <rect x="396" y="126" width="282" height="10" opacity=".55"/>
+    <rect x="316" y="158" width="182" height="10"/>
+    <rect x="522" y="158" width="354" height="10" opacity=".55"/>
+    <rect x="316" y="190" width="470" height="10" opacity=".55"/>
+    <rect x="348" y="222" width="232" height="10"/>
+    <rect x="604" y="222" width="400" height="10" opacity=".55"/>
+    <rect x="348" y="254" width="316" height="10" opacity=".55"/>
+    <rect x="316" y="286" width="510" height="10" opacity=".55"/>
+    <rect x="284" y="318" width="392" height="10"/>
+    <rect x="284" y="350" width="610" height="10" opacity=".55"/>
+  </g>
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="20">
+    <text x="36" y="492" fill="#62e69c">$</text>
+    <text x="68" y="492" fill="#9fb0a8">lfcode</text>
+    <text x="36" y="532" fill="#62e69c">›</text>
+    <rect x="68" y="516" width="504" height="10" fill="#62736b"/>
+    <rect x="68" y="548" width="386" height="10" fill="#62736b" opacity=".55"/>
+  </g>
+  <rect x="424" y="612" width="352" height="36" fill="#10151a"/>
+  <text x="600" y="638" fill="#9fb0a8" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="22" text-anchor="middle" letter-spacing="3">PREVIEW COMING SOON</text>
+</svg>

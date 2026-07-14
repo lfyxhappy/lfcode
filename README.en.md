@@ -1,24 +1,32 @@
-# Lfcode
-
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE" width="620">
     </picture>
   </a>
 </p>
-<p align="center">An open-source AI coding agent built on top of opencode.</p>
-<p align="center">It keeps the historical compatibility surface while adding richer session management, Skills management, and GitHub Action integration.</p>
+
+<h3 align="center">A local-first, open-source AI coding workspace.</h3>
+<p align="center">Bring chat, code editing, terminal, browser, skills, and automation into one desktop environment.</p>
+
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square"></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?branch=dev&style=flat-square&label=build"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases/latest">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">中文</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -41,69 +49,100 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
-
 ---
 
-> This README reflects the current Lfcode repository state so download links, release assets, and compatibility notes stay accurate.
+## One workspace for the whole development loop
 
-### Overview
+- **Sessions** organize ongoing AI collaboration, surface status, diffs, and history, and keep context clear across tasks.
+- **Editor & terminal** bring code reading, editing, and command execution together so conversations lead to verifiable results.
+- **Browser & automation** connect page interaction, debugging, and validation to agent workflows, from implementation through real UI checks.
+- **Skills & extensions** combine local skills, MCP, plugins, and the SDK into a toolchain tailored to each project.
 
-Lfcode is a Bun workspace monorepo that evolved from opencode. It keeps the historical compatibility surface while continuing to ship Lfcode branding, a desktop app, a web UI, an SDK, and GitHub Action support.
+## Product previews
 
-### Highlights
+These are intentionally labeled visual placeholders. Real product previews are coming soon.
 
-- Rich session management: list, status, create, update, delete, fork, share, unshare, summarize, compact, diff, revert, and unrevert.
-- Multiple interaction modes: message sending, async `prompt`, `shell`, commands, and next-prompt prediction.
-- Skills management: local Skills listing, discovery, installation, import, creation, refresh, and directory inspection.
-- GitHub Action integration: trigger automated work from issue or PR comments with `/lfcode`, `/opencode`, or `/oc`.
-- Historical compatibility: keep the `opencode` CLI command, `LFCODE_*` environment variables, and the `lfcode://` protocol.
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-sessions.svg" alt="Sessions — Preview coming soon" width="100%"><br>
+      <strong>Sessions</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-editor-terminal.svg" alt="Editor & Terminal — Preview coming soon" width="100%"><br>
+      <strong>Editor & Terminal</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-browser-automation.svg" alt="Browser Automation — Preview coming soon" width="100%"><br>
+      <strong>Browser Automation</strong>
+    </td>
+    <td width="50%" align="center">
+      <img src=".github/readme/preview-skills-extensions.svg" alt="Skills & Extensions — Preview coming soon" width="100%"><br>
+      <strong>Skills & Extensions</strong>
+    </td>
+  </tr>
+</table>
 
-### Installation
+## Quick start
 
-Public downloads are published on the [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases) page.
+### Windows desktop
 
-- Desktop: the current release pipeline publishes a Windows installer named `lfcode-win-x64.exe`.
-- Source: use Bun from the repo root for local development.
+Open [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases/latest), download `lfcode-win-x64.exe`, and follow the installer.
+
+### Command line
+
+The primary Lfcode command is:
 
 ```bash
+lfcode
+```
+
+### Run from source
+
+[Bun](https://bun.sh/) 1.3.11 is required. Clone the repository and run these commands from its root:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
+```
+
+Start the web UI or desktop development environment separately when needed:
+
+```bash
 bun run dev:web
 bun run dev:desktop
 ```
 
-### Compatibility
+## Architecture and extensibility
 
-Several runtime identifiers still use the historical `opencode` name for compatibility.
+Lfcode is a Bun workspace monorepo:
 
-- CLI command: `opencode`
-- Config directory: `~/.lfcode`
-- Environment variables: `LFCODE_*`
-- Desktop protocol scheme: `lfcode://`
-
-### Repository Layout
-
-- `packages/lfcode`: core runtime and session engine
-- `packages/app`: web UI
+- `packages/lfcode`: core runtime, CLI, and session engine
+- `packages/app`: web application UI
 - `packages/desktop`: Electron desktop host
 - `packages/ui`: shared UI components
+- `packages/plugin`: plugin interfaces
 - `packages/sdk/js`: JavaScript SDK
 
-### Documentation
-
-The current docs source lives in [packages/web/src/content/docs](packages/web/src/content/docs).
-
-### Validation
-
-Run the main repository checks from the workspace root:
+Project-scoped config, skills, commands, themes, plugins, and tools can live under `.lfcode/` for composable, reusable workflows. Before contributing, run the main checks from the repository root:
 
 ```bash
 bun run lint
 bun run typecheck
 ```
 
-### Support
+## Compatibility
 
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+Lfcode evolved from the opencode project. Some historical entry points remain available as compatibility aliases for existing configurations and automation; new documentation, scripts, and everyday usage should prefer the `lfcode` command and `LFCODE_*` environment variables.
+
+## Contributing
+
+- Report bugs and request features in [Issues](https://github.com/lfyxhappy/lfcode/issues).
+- Find published builds and release notes in [Releases](https://github.com/lfyxhappy/lfcode/releases).
+- Pull requests are welcome; checking existing issues first helps avoid duplicate work.
+
+Lfcode is released under the [MIT License](LICENSE).

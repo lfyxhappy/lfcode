@@ -1,21 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Lfcode logo">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">وكيل البرمجة بالذكاء الاصطناعي مفتوح المصدر.</p>
+<p align="center"><strong>مساحة عمل مفتوحة المصدر للبرمجة بالذكاء الاصطناعي، تعمل محليًا أولًا.</strong></p>
+<p align="center">اجمع المحادثات وتحرير الشيفرة والطرفية والمتصفح والمهارات وسير العمل الآلي في بيئة سطح مكتب واحدة.</p>
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
   <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -38,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## القيمة الأساسية
 
----
+صُمم LFCODE ليُبقي دورة التطوير كاملة في مكان واحد:
 
-> يعكس هذا README الحالة الحالية لمستودع Lfcode حتى تبقى روابط التنزيل وملفات الإصدارات وملاحظات التوافق دقيقة.
+- **الجلسات** — نظّم المحادثات الطويلة، واستأنف العمل، وراجع تاريخ كل مهمة.
+- **تحرير الشيفرة والطرفية** — انتقل بين التعديلات والأوامر ونتائج التنفيذ دون مغادرة مساحة العمل.
+- **المتصفح والأتمتة** — نفّذ سير عمل المتصفح والمهام القابلة للتكرار من السياق نفسه.
+- **المهارات والإضافات** — وسّع السلوك عبر Skills وMCP والإضافات والأدوات المخصصة.
 
-### نظرة عامة
+## معاينة الوظائف
 
-Lfcode هو monorepo مبني على Bun workspace وتطوّر من opencode. يحافظ على سطح التوافق التاريخي ويقدّم علامة Lfcode التجارية، وتطبيق سطح مكتب، وواجهة ويب، وSDK، ودعم GitHub Action.
+توضح هذه المعاينات المجالات الأربعة الأساسية؛ ستستبدل بلقطات حقيقية لاحقًا.
 
-### أبرز المزايا
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>الجلسات</strong></td>
+    <td align="center"><strong>تحرير الشيفرة والطرفية</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>المتصفح والأتمتة</strong></td>
+    <td align="center"><strong>المهارات والإضافات</strong></td>
+  </tr>
+</table>
 
-- إدارة جلسات أوسع: عرض القائمة، الحالة، الإنشاء، التحديث، الحذف، التفريع، المشاركة، إلغاء المشاركة، التلخيص، الضغط، diff، revert، وunrevert.
-- أوضاع تفاعل متعددة: إرسال الرسائل، `prompt` غير المتزامن، `shell`، الأوامر، وتوقع prompt التالي.
-- إدارة Skills: عرض Skills المحلية، اكتشافها، تثبيتها، استيرادها، إنشاؤها، تحديثها، وفحص المجلدات.
-- تكامل GitHub Action: تشغيل العمل الآلي من تعليقات issues أو PR باستخدام `/lfcode` أو `/opencode` أو `/oc`.
-- توافق تاريخي: الإبقاء على أمر CLI `opencode` ومتغيرات البيئة `LFCODE_*` والبروتوكول `lfcode://`.
+<a id="quick-start"></a>
+## البدء السريع
 
-### التثبيت
+### التثبيت على Windows
 
-تُنشر التنزيلات العامة على صفحة [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+افتح صفحة [Releases](https://github.com/lfyxhappy/lfcode/releases)، ونزّل `lfcode-win-x64.exe` من أحدث إصدار، ثم شغّل المثبّت.
 
-- سطح المكتب: تنشر قناة الإصدارات الحالية ملف تثبيت Windows باسم `lfcode-win-x64.exe`.
-- المصدر: استخدم Bun من جذر المستودع للتطوير المحلي.
+### الأمر الرئيسي
+
+`lfcode` هو أمر سطر الأوامر الرسمي:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### التشغيل من المصدر
+
+يتطلب التطوير المحلي Bun. نفّذ الأوامر التالية من الطرفية:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### التوافق
+## البنية وقابلية التوسعة
 
-تستخدم عدة معرفات تشغيلية الاسم التاريخي `opencode` من أجل التوافق.
+المستودع مساحة عمل Bun متعددة الحزم. توجد النواة في `packages/lfcode`، وواجهة الويب في `packages/app`، وتطبيق Electron في `packages/desktop`، والمكونات المشتركة في `packages/ui`، وSDK JavaScript في `packages/sdk/js`. يمكن توسيع LFCODE عبر Skills وأدوات MCP والإضافات والأوامر وسير العمل الآلي.
 
-- أمر CLI: `opencode`
-- دليل الإعدادات: `~/.lfcode`
-- متغيرات البيئة: `LFCODE_*`
-- مخطط بروتوكول سطح المكتب: `lfcode://`
+## التوافق
 
-### بنية المستودع
+للحفاظ على سير العمل القديم، ما زالت بعض المعرّفات والاسم المستعار `opencode` مدعومة. في الوثائق الجديدة والاستخدام اليومي، استخدم اسم LFCODE والأمر `lfcode`.
 
-- `packages/lfcode`: النواة ومحرك الجلسات
-- `packages/app`: واجهة الويب
-- `packages/desktop`: مضيف سطح المكتب Electron
-- `packages/ui`: مكونات UI مشتركة
-- `packages/sdk/js`: SDK الخاص بـ JavaScript
+## المساهمة والدعم
 
-### الوثائق
+نرحب بالمساهمات. استخدم [Issues](https://github.com/lfyxhappy/lfcode/issues) للإبلاغ عن الأخطاء أو اقتراح التحسينات، وراجع [Releases](https://github.com/lfyxhappy/lfcode/releases) للتنزيلات وسجل التغييرات.
 
-مصدر الوثائق الحالي موجود في [packages/web/src/content/docs](packages/web/src/content/docs).
-
-### التحقق
-
-شغّل الفحوصات الرئيسية من جذر مساحة العمل:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### الدعم
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+يُنشر LFCODE بموجب [رخصة MIT](LICENSE).

@@ -1,22 +1,29 @@
 <p align="center">
   <a href="https://github.com/lfyxhappy/lfcode">
     <picture>
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/brand/lfcode-wordmark-light.svg" alt="Logo Lfcode">
+      <source srcset=".github/readme/lfcode-wordmark-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset=".github/readme/lfcode-wordmark-light.svg" media="(prefers-color-scheme: light)">
+      <img src=".github/readme/lfcode-wordmark-light.svg" alt="LFCODE">
     </picture>
   </a>
 </p>
-<p align="center">Tác nhân lập trình AI mã nguồn mở được phát triển trên opencode.</p>
-<p align="center">Giữ nguyên các điểm tương thích lịch sử, đồng thời mở rộng quản lý phiên, Skills và tích hợp GitHub Action.</p>
+<p align="center"><strong>Không gian lập trình AI mã nguồn mở, ưu tiên chạy cục bộ.</strong></p>
+<p align="center">Đưa trò chuyện, chỉnh sửa mã, terminal, trình duyệt, Skills và tự động hóa vào cùng một môi trường desktop.</p>
 <p align="center">
-  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Bản phát hành mới nhất" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
-  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Trạng thái build" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/lfyxhappy/lfcode?display_name=tag&style=flat-square" /></a>
+  <a href="https://github.com/lfyxhappy/lfcode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/lfyxhappy/lfcode/publish.yml?style=flat-square&branch=dev" /></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/lfyxhappy/lfcode/releases">Download</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/lfyxhappy/lfcode/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="README.en.md">English</a> |
   <a href="README.md">简体中文</a> |
+  <a href="README.zh.md">简体中文（备用）</a> |
   <a href="README.zht.md">繁體中文</a> |
   <a href="README.ko.md">한국어</a> |
   <a href="README.de.md">Deutsch</a> |
@@ -39,69 +46,75 @@
   <a href="README.vi.md">Tiếng Việt</a>
 </p>
 
-[![Lfcode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://github.com/lfyxhappy/lfcode)
+## Giá trị cốt lõi
 
----
+LFCODE giữ toàn bộ quy trình phát triển tại một nơi:
 
-> README bản địa hóa này phản ánh trạng thái hiện tại của kho Lfcode để các liên kết tải xuống, file phát hành và ghi chú tương thích luôn chính xác.
+- **Phiên làm việc** — Sắp xếp hội thoại dài, tiếp tục công việc và xem lại lịch sử của từng tác vụ.
+- **Trình sửa mã và terminal** — Chuyển giữa thay đổi, lệnh và kết quả mà không rời không gian làm việc.
+- **Trình duyệt và tự động hóa** — Chạy quy trình trình duyệt và các tác vụ lặp lại trong cùng ngữ cảnh.
+- **Skills và phần mở rộng** — Mở rộng khả năng bằng Skills, MCP, plugin và công cụ riêng.
 
-### Tổng quan
+## Xem trước tính năng
 
-Lfcode là một Bun workspace monorepo được xây dựng dựa trên opencode. Dự án vẫn giữ các điểm tương thích lịch sử, đồng thời tiếp tục cung cấp thương hiệu Lfcode, ứng dụng desktop, web UI, SDK và hỗ trợ GitHub Action.
+Các hình này đại diện cho bốn khu vực chính và sẽ được thay bằng ảnh chụp thật sau này.
 
-### Tính năng nổi bật
+<table>
+  <tr>
+    <td><img src=".github/readme/preview-sessions.svg" alt="Sessions preview"></td>
+    <td><img src=".github/readme/preview-editor-terminal.svg" alt="Editor and terminal preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Phiên làm việc</strong></td>
+    <td align="center"><strong>Trình sửa mã và terminal</strong></td>
+  </tr>
+  <tr>
+    <td><img src=".github/readme/preview-browser-automation.svg" alt="Browser automation preview"></td>
+    <td><img src=".github/readme/preview-skills-extensions.svg" alt="Skills and extensions preview"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Trình duyệt và tự động hóa</strong></td>
+    <td align="center"><strong>Skills và phần mở rộng</strong></td>
+  </tr>
+</table>
 
-- Quản lý session đầy đủ hơn: danh sách, trạng thái, tạo, cập nhật, xóa, fork, chia sẻ, bỏ chia sẻ, tóm tắt, nén, diff, revert và unrevert
-- Nhiều cách tương tác hơn: gửi tin nhắn, `prompt` bất đồng bộ, `shell`, lệnh và dự đoán prompt tiếp theo
-- Quản lý Skills: danh sách Skills cục bộ, khám phá, cài đặt, nhập, tạo, làm mới và xem thư mục
-- Tích hợp GitHub Action: kích hoạt tự động từ bình luận issue hoặc PR bằng `/lfcode`, `/opencode` hoặc `/oc`
-- Tương thích lịch sử: vẫn giữ lệnh CLI `opencode`, biến môi trường `LFCODE_*` và giao thức `lfcode://`
+<a id="quick-start"></a>
+## Bắt đầu nhanh
 
-### Cài đặt
+### Cài đặt trên Windows
 
-Các bản tải xuống công khai được đăng tại trang [GitHub Releases](https://github.com/lfyxhappy/lfcode/releases).
+Mở [Releases](https://github.com/lfyxhappy/lfcode/releases), tải `lfcode-win-x64.exe` từ bản phát hành mới nhất rồi chạy trình cài đặt.
 
-- Desktop: quy trình phát hành hiện tại xuất bản bộ cài Windows tên `lfcode-win-x64.exe`
-- Source: dùng Bun từ thư mục gốc của repo để phát triển cục bộ
+### Lệnh chính
+
+`lfcode` là lệnh CLI chính thức:
 
 ```bash
+lfcode
+lfcode --help
+```
+
+### Chạy từ mã nguồn
+
+Phát triển cục bộ cần Bun. Chạy trong terminal:
+
+```bash
+git clone https://github.com/lfyxhappy/lfcode.git
+cd lfcode
 bun install
 bun run dev
-bun run dev:web
-bun run dev:desktop
 ```
 
-### Tương thích
+## Kiến trúc và khả năng mở rộng
 
-Một số định danh runtime vẫn dùng tên lịch sử `opencode` để tương thích.
+Kho mã là một Bun workspace monorepo. Runtime nằm ở `packages/lfcode`, giao diện web ở `packages/app`, Electron host ở `packages/desktop`, UI dùng chung ở `packages/ui`, và JavaScript SDK ở `packages/sdk/js`. Có thể mở rộng LFCODE bằng Skills, công cụ MCP, plugin, lệnh và quy trình tự động.
 
-- Lệnh CLI: `opencode`
-- Thư mục cấu hình: `~/.lfcode`
-- Biến môi trường: `LFCODE_*`
-- Giao thức desktop: `lfcode://`
+## Tương thích
 
-### Cấu trúc kho
+Để duy trì quy trình cũ, một số định danh lịch sử và bí danh `opencode` vẫn được hỗ trợ. Với tài liệu mới và sử dụng hằng ngày, hãy dùng tên LFCODE và lệnh `lfcode`.
 
-- `packages/lfcode`: runtime cốt lõi và session engine
-- `packages/app`: web UI
-- `packages/desktop`: host desktop Electron
-- `packages/ui`: các thành phần UI dùng chung
-- `packages/sdk/js`: JavaScript SDK
+## Đóng góp và hỗ trợ
 
-### Tài liệu
+Mọi đóng góp đều được hoan nghênh. Dùng [Issues](https://github.com/lfyxhappy/lfcode/issues) cho lỗi và đề xuất, và xem [Releases](https://github.com/lfyxhappy/lfcode/releases) để tải xuống và đọc thay đổi.
 
-Nguồn tài liệu hiện tại nằm ở [packages/web/src/content/docs](packages/web/src/content/docs).
-
-### Xác minh
-
-Chạy các kiểm tra chính từ thư mục gốc của workspace:
-
-```bash
-bun run lint
-bun run typecheck
-```
-
-### Hỗ trợ
-
-- Issues: [github.com/lfyxhappy/lfcode/issues](https://github.com/lfyxhappy/lfcode/issues)
-- Releases: [github.com/lfyxhappy/lfcode/releases](https://github.com/lfyxhappy/lfcode/releases)
+LFCODE được phát hành theo [giấy phép MIT](LICENSE).

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">Skills and Extensions preview placeholder</title>
+  <desc id="desc">Abstract skills and extensions layout labeled Preview coming soon</desc>
+  <rect width="1200" height="675" fill="#10151a"/>
+  <rect x="1" y="1" width="1198" height="673" fill="none" stroke="#303943" stroke-width="2"/>
+  <circle cx="48" cy="44" r="8" fill="#62e69c"/>
+  <rect x="72" y="34" width="280" height="20" fill="#d7e0dc"/>
+  <path d="M0 88H1200" stroke="#303943" stroke-width="2"/>
+  <g fill="#1b2228" stroke="#39453f" stroke-width="2">
+    <rect x="92" y="140" width="304" height="170"/>
+    <rect x="448" y="140" width="304" height="170"/>
+    <rect x="804" y="140" width="304" height="170"/>
+    <rect x="92" y="350" width="304" height="170"/>
+    <rect x="448" y="350" width="304" height="170"/>
+    <rect x="804" y="350" width="304" height="170"/>
+  </g>
+  <g fill="none" stroke="#62e69c" stroke-width="8">
+    <path d="M220 188h48v48h48v32h-48v48h-48v-48h-48v-32h48z"/>
+    <path d="M560 194h80l40 40-40 40h-80l-40-40z"/>
+    <circle cx="956" cy="234" r="48"/>
+    <path d="M208 398l72 72M280 398l-72 72"/>
+    <path d="M552 398h96v72h-96zM576 374v24M624 374v24"/>
+    <path d="M908 398h96v72h-96zM932 422h48M956 398v72"/>
+  </g>
+  <g fill="#62736b">
+    <rect x="124" y="282" width="132" height="8"/>
+    <rect x="480" y="282" width="132" height="8"/>
+    <rect x="836" y="282" width="132" height="8"/>
+    <rect x="124" y="492" width="132" height="8"/>
+    <rect x="480" y="492" width="132" height="8"/>
+    <rect x="836" y="492" width="132" height="8"/>
+  </g>
+  <rect x="424" y="612" width="352" height="36" fill="#10151a"/>
+  <text x="600" y="638" fill="#9fb0a8" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="22" text-anchor="middle" letter-spacing="3">PREVIEW COMING SOON</text>
+</svg>
