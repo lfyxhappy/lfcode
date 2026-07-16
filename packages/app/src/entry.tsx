@@ -5,7 +5,7 @@ import { AppBaseProviders, AppInterface } from "@/app"
 import { type Platform, PlatformProvider } from "@/context/platform"
 import { dict as en } from "@/i18n/en"
 import { dict as zh } from "@/i18n/zh"
-import { BROWSER_REQUEST_OPEN_EVENT } from "@/pages/session/helpers"
+import { BROWSER_REQUEST_OPEN_EVENT, type BrowserOpenRequestDetail } from "@/pages/session/helpers"
 import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
@@ -77,9 +77,9 @@ const notify: Platform["notify"] = async (title, description, href) => {
   }
 }
 
-const openLink: Platform["openLink"] = (url) => {
-  const event = new CustomEvent<{ url: string }>(BROWSER_REQUEST_OPEN_EVENT, {
-    detail: { url },
+const openLink: Platform["openLink"] = (url, detail) => {
+  const event = new CustomEvent<BrowserOpenRequestDetail>(BROWSER_REQUEST_OPEN_EVENT, {
+    detail: { url, ...detail },
     cancelable: true,
   })
   const handled = window.dispatchEvent(event)

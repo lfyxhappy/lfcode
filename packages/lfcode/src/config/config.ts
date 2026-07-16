@@ -41,6 +41,7 @@ import { ConfigProvider } from "./provider"
 import { ConfigServer } from "./server"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@/npm"
+import { listManagedPluginSpecs, registryFile } from "@/plugin/library"
 
 const log = Log.create({ service: "config" })
 
@@ -1190,6 +1191,12 @@ export const layer = Layer.effect(
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
         }
 
+        yield* mergePluginOrigins(
+          registryFile(),
+          yield* Effect.promise(() => listManagedPluginSpecs()),
+          "global",
+        )
+
         if (process.env.LFCODE_CONFIG_CONTENT) {
           const source = "LFCODE_CONFIG_CONTENT"
           const next = yield* loadConfig(process.env.LFCODE_CONFIG_CONTENT, {
@@ -1554,7 +1561,7 @@ export const layer = Layer.effect(
         enabled: current.enabled,
         permission: current.permission,
         target: "app" as const,
-        availableTargets: ["app"] as const,
+        availableTargets: ["app" as const],
         service,
         config,
       }
@@ -1676,7 +1683,7 @@ export const layer = Layer.effect(
         enabled: current.enabled,
         permission: current.permission,
         target: "app" as const,
-        availableTargets: ["app"] as const,
+        availableTargets: ["app" as const],
         service,
         config: next,
       }
@@ -1727,7 +1734,7 @@ export const layer = Layer.effect(
       providerID: string,
       provider: ConfigProvider.Info,
       key?: string,
-    ): Effect.Effect<Info, never> {
+    ) {
       const target = yield* Effect.fn(function* () {
         for (const file of globalConfigFiles()) {
           const before = yield* readConfigFile(file)

@@ -9,4 +9,12 @@ describe("workflow catalog description", () => {
     expect(text).toContain("multi-source")
     expect(text).toContain('name: "deep-research"')
   })
+
+  test("lists compose-orchestrator with its workflow phases", () => {
+    const text = renderWorkflowCatalog()
+    expect(text).toContain("compose-orchestrator")
+    expect(text).toContain("Compose orchestration")
+    expect(text).toContain("Inspect")
+    expect(text).toContain("Verify")
+  })
 })

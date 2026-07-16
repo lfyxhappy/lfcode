@@ -21,7 +21,7 @@ import {
   VOLCENGINE_CODING_PLAN_PROVIDER_ID,
 } from "@lfcode-ai/shared/volcengine-coding-plan"
 
-export function DialogConnectProvider(props: { provider: string; returnTo?: "models" }) {
+export function DialogConnectProvider(props: { provider: string; returnTo?: "models" | "settings-models" }) {
   const dialog = useDialog()
   const globalSync = useGlobalSync()
   const globalSDK = useGlobalSDK()
@@ -37,6 +37,12 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
   const showModels = () => {
     void import("./dialog-manage-models").then((x) => {
       dialog.show(() => <x.DialogManageModels />)
+    })
+  }
+
+  const showSettingsModels = () => {
+    void import("./dialog-settings").then((x) => {
+      dialog.show(() => <x.DialogSettings defaultValue="models" />)
     })
   }
 
@@ -367,6 +373,8 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
     }
     if (props.returnTo === "models") {
       showModels()
+    } else if (props.returnTo === "settings-models") {
+      showSettingsModels()
     } else {
       dialog.close()
     }

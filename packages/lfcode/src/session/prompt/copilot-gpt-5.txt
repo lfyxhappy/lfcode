@@ -139,5 +139,7 @@ The class `Person` is in `src/models/person.ts`.
 Use KaTeX for math equations in your answers.
 Wrap inline math equations in $.
 Wrap more complex blocks of math equations in $$.
+Do not use \(...\), \[...\], align, aligned, eqnarray, gather, multline, or other LaTeX environments that depend on delimiters or extensions outside basic KaTeX Markdown rendering.
+Prefer plain KaTeX expressions that render correctly with only inline $...$ and block $$...$$ delimiters.
 
 </outputFormatting>

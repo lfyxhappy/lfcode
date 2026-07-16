@@ -39,6 +39,7 @@ import { Team } from "../../src/team"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { SessionCompaction } from "../../src/session/compaction"
 import { Goal } from "../../src/session/goal"
+import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { TaskRegistry } from "../../src/task/registry"
 import { Auth } from "../../src/auth"
@@ -89,11 +90,23 @@ const lsp = Layer.succeed(
     status: () => Effect.succeed([]),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
+    syncFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
     hover: () => Effect.succeed(undefined),
+    completion: () => Effect.succeed(undefined),
+    signatureHelp: () => Effect.succeed(undefined),
+    prepareRename: () => Effect.succeed(undefined),
+    rename: () => Effect.succeed(undefined),
+    formatting: () => Effect.succeed([]),
+    rangeFormatting: () => Effect.succeed([]),
+    codeAction: () => Effect.succeed([]),
+    executeCommand: () => Effect.succeed(undefined),
+    declaration: () => Effect.succeed([]),
     definition: () => Effect.succeed([]),
+    typeDefinition: () => Effect.succeed([]),
     references: () => Effect.succeed([]),
     implementation: () => Effect.succeed([]),
+    documentHighlights: () => Effect.succeed([]),
     documentSymbol: () => Effect.succeed([]),
     workspaceSymbol: () => Effect.succeed([]),
     prepareCallHierarchy: () => Effect.succeed([]),
@@ -131,6 +144,7 @@ export function makeLayer() {
   const team = Team.defaultLayer
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
+    Layer.provide(Goal.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
@@ -143,15 +157,27 @@ export function makeLayer() {
     Layer.provide(History.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(Auth.defaultLayer),
+    Layer.provide(Layer.mergeAll(Instruction.defaultLayer, Bus.layer)),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
+    Layer.provide(
+      Layer.mergeAll(
+        Goal.defaultLayer,
+        ProviderSvc.defaultLayer,
+        Session.defaultLayer,
+        Truncate.defaultLayer,
+        AgentSvc.defaultLayer,
+      ),
+    ),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
+    Layer.provide(ComposeGateState.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
     Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
@@ -189,7 +215,12 @@ export function makeLayer() {
       // worktree before the tmpdir fixture finalizer runs.
       Layer.provideMerge(Worktree.defaultLayer),
     ),
-  ).pipe(Layer.provide(summary))
+  ).pipe(
+    Layer.provide(summary),
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(ProviderSvc.defaultLayer),
+    Layer.provide(Session.defaultLayer),
+  )
 }
 
 export const ref = {

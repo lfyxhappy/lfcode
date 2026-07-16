@@ -15,6 +15,9 @@ import {
   normalizeBrowserRequestURL,
   normalizeBrowserURL,
   sanitizeBrowserURL,
+  isSideChatTab,
+  sideChatTab,
+  sideChatTabID,
   shouldFocusTerminalOnKeyDown,
 } from "./helpers"
 
@@ -187,6 +190,28 @@ describe("createSessionTabs", () => {
     })
   })
 
+  test("falls back to empty when review tab is not explicitly enabled", () => {
+    createRoot((dispose) => {
+      const [state] = createStore({
+        active: undefined as string | undefined,
+        all: [],
+      })
+      const tabs = createMemo(() => ({ active: () => state.active, all: () => state.all }))
+      const result = createSessionTabs({
+        tabs,
+        pathFromTab: () => undefined,
+        normalizeTab: (tab) => tab,
+        review: () => false,
+        hasReview: () => true,
+      })
+
+      expect(result.activeTab()).toBe("empty")
+      expect(result.activeFileTab()).toBeUndefined()
+      expect(result.closableTab()).toBeUndefined()
+      dispose()
+    })
+  })
+
   test("keeps browser tabs active and closable", () => {
     createRoot((dispose) => {
       const [state] = createStore({
@@ -203,6 +228,27 @@ describe("createSessionTabs", () => {
       expect(result.activeTab()).toBe(browserTab("tab-1"))
       expect(result.activeFileTab()).toBeUndefined()
       expect(result.closableTab()).toBe(browserTab("tab-1"))
+      dispose()
+    })
+  })
+
+  test("keeps side chat tabs active and closable without treating them as file tabs", () => {
+    createRoot((dispose) => {
+      const tab = sideChatTab("session-1")
+      const [state] = createStore({
+        active: tab,
+        all: [tab, "context"],
+      })
+      const tabs = createMemo(() => ({ active: () => state.active, all: () => state.all }))
+      const result = createSessionTabs({
+        tabs,
+        pathFromTab: () => undefined,
+        normalizeTab: (tab) => tab,
+      })
+
+      expect(result.activeTab()).toBe(tab)
+      expect(result.activeFileTab()).toBeUndefined()
+      expect(result.closableTab()).toBe(tab)
       dispose()
     })
   })
@@ -248,5 +294,14 @@ describe("browser tab helpers", () => {
     expect(normalizeBrowserRequestURL()).toBe(BROWSER_HOME_URL)
     expect(normalizeBrowserRequestURL("")).toBe(BROWSER_HOME_URL)
     expect(normalizeBrowserRequestURL("https://example.com")).toBe("https://example.com")
+  })
+})
+
+describe("side chat tab helpers", () => {
+  test("identifies side chat tabs and extracts ids", () => {
+    expect(isSideChatTab(sideChatTab("abc"))).toBe(true)
+    expect(isSideChatTab("file://src/a.ts")).toBe(false)
+    expect(sideChatTabID(sideChatTab("abc"))).toBe("abc")
+    expect(sideChatTabID("context")).toBeUndefined()
   })
 })

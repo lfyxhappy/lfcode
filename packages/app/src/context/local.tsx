@@ -6,6 +6,7 @@ import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { Persist, persisted } from "@/utils/persist"
+import { normalizePromptFeatures, type PromptFeature } from "@/utils/prompt-features"
 import { DEFAULT_QUESTION_GUIDANCE, normalizeQuestionGuidance, type QuestionGuidance } from "@/utils/question-guidance"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
@@ -18,6 +19,7 @@ type State = {
   model?: ModelKey
   variant?: string | null
   questionGuidance?: QuestionGuidance
+  promptFeatures?: PromptFeature[]
 }
 
 type Saved = {
@@ -51,6 +53,7 @@ const clone = (value: State | undefined) => {
     ...value,
     model: value.model ? { ...value.model } : undefined,
     questionGuidance: normalizeQuestionGuidance(value.questionGuidance),
+    promptFeatures: normalizePromptFeatures(value.promptFeatures),
   } satisfies State
 }
 
@@ -81,11 +84,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       current?: string
       draft?: State
       last?: {
-        type: "agent" | "model" | "variant" | "questionGuidance"
+        type: "agent" | "model" | "variant" | "questionGuidance" | "promptFeatures"
         agent?: string
         model?: ModelKey | null
         variant?: string | null
         questionGuidance?: QuestionGuidance
+        promptFeatures?: PromptFeature[]
       }
     }>({
       current: list()[0]?.name,
@@ -255,6 +259,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
         variant: selected(),
         questionGuidance: normalizeQuestionGuidance(scope()?.questionGuidance),
+        promptFeatures: normalizePromptFeatures(scope()?.promptFeatures),
       } satisfies State
     }
 
@@ -372,11 +377,28 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const promptFeatures = {
+      current() {
+        return normalizePromptFeatures(scope()?.promptFeatures)
+      },
+      set(value: PromptFeature[]) {
+        const next = normalizePromptFeatures(value)
+        batch(() => {
+          setStore("last", {
+            type: "promptFeatures",
+            promptFeatures: next,
+          })
+          write({ promptFeatures: next.length > 0 ? next : undefined })
+        })
+      },
+    }
+
     const result = {
       slug: createMemo(() => base64Encode(sdk.directory)),
       model,
       agent,
       questionGuidance,
+      promptFeatures,
       session: {
         reset() {
           setStore("draft", undefined)

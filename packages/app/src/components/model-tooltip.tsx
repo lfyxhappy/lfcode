@@ -3,7 +3,7 @@ import { useLanguage } from "@/context/language"
 
 type InputKey = "text" | "image" | "audio" | "video" | "pdf"
 type InputMap = Record<InputKey, boolean>
-type CapabilityKey = InputKey | "tool_call" | "reasoning" | "native_web" | "temperature"
+type CapabilityKey = InputKey | "attachment" | "tool_call" | "reasoning" | "patch_editing" | "native_web" | "temperature"
 type CapabilityMap = Record<CapabilityKey, boolean>
 
 type ModelInfo = {
@@ -14,8 +14,11 @@ type ModelInfo = {
   }
   capabilities?: {
     reasoning: boolean
+    attachment?: boolean
+    patch_editing?: boolean
     input: InputMap
     tools?: boolean
+    tool_call?: boolean
     toolcall?: boolean
     temperature?: boolean
     native_web?: boolean
@@ -23,7 +26,12 @@ type ModelInfo = {
   modalities?: {
     input: Array<string>
   }
+  attachment?: boolean
+  tool_call?: boolean
   reasoning?: boolean
+  patch_editing?: boolean
+  native_web?: boolean
+  temperature?: boolean
   limit: {
     context: number
   }
@@ -53,6 +61,8 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
   const capabilityLabel = (value: CapabilityKey) => {
     if (value === "tool_call") return language.t("model.capability.tool_call")
     if (value === "reasoning") return language.t("model.capability.reasoning")
+    if (value === "attachment") return language.t("model.capability.attachment")
+    if (value === "patch_editing") return language.t("model.capability.patch_editing")
     if (value === "native_web") return language.t("model.capability.native_web")
     if (value === "temperature") return language.t("model.capability.temperature")
     return inputLabel(value)
@@ -93,10 +103,16 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       audio: !!props.model.capabilities?.input.audio,
       video: !!props.model.capabilities?.input.video,
       pdf: !!props.model.capabilities?.input.pdf,
-      tool_call: !!props.model.capabilities?.tools || !!props.model.capabilities?.toolcall,
-      reasoning: !!props.model.capabilities?.reasoning,
-      native_web: !!props.model.capabilities?.native_web,
-      temperature: !!props.model.capabilities?.temperature,
+      attachment: !!props.model.capabilities?.attachment || !!props.model.attachment,
+      tool_call:
+        !!props.model.capabilities?.tools ||
+        !!props.model.capabilities?.toolcall ||
+        !!props.model.capabilities?.tool_call ||
+        !!props.model.tool_call,
+      reasoning: !!props.model.capabilities?.reasoning || !!props.model.reasoning,
+      patch_editing: !!props.model.capabilities?.patch_editing || !!props.model.patch_editing,
+      native_web: !!props.model.capabilities?.native_web || !!props.model.native_web,
+      temperature: props.model.capabilities?.temperature ?? props.model.temperature ?? false,
     }
     return (Object.keys(next) as CapabilityKey[]).filter((key) => next[key])
   }

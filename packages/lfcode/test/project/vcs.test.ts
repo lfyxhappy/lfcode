@@ -51,7 +51,6 @@ function withVcsOnly(directory: string, body: () => Promise<void>) {
 }
 
 type BranchEvent = { directory?: string; payload: { type: string; properties: { branch?: string } } }
-const weird = process.platform === "win32" ? "space file.txt" : "tab\tfile.txt"
 
 /** Wait for a Vcs.Event.BranchUpdated event on GlobalBus, with retry polling as fallback */
 function nextBranchUpdate(directory: string, timeout = 10_000) {
@@ -156,7 +155,7 @@ describeVcs("Vcs", () => {
   })
 })
 
-describe("Vcs diff", () => {
+describe("Vcs defaults", () => {
   afterEach(async () => {
     await Instance.disposeAll()
   })
@@ -208,79 +207,6 @@ describe("Vcs diff", () => {
       )
       expect(branch).toBe("feature/test")
       expect(base).toBe("main")
-    })
-  })
-
-  test("diff('git') returns uncommitted changes", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await fs.writeFile(path.join(tmp.path, "file.txt"), "original\n", "utf-8")
-    await $`git add .`.cwd(tmp.path).quiet()
-    await $`git commit --no-gpg-sign -m "add file"`.cwd(tmp.path).quiet()
-    await fs.writeFile(path.join(tmp.path, "file.txt"), "changed\n", "utf-8")
-
-    await withVcsOnly(tmp.path, async () => {
-      const diff = await AppRuntime.runPromise(
-        Effect.gen(function* () {
-          const vcs = yield* Vcs.Service
-          return yield* vcs.diff("git")
-        }),
-      )
-      expect(diff).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            file: "file.txt",
-            status: "modified",
-          }),
-        ]),
-      )
-    })
-  })
-
-  test("diff('git') handles special filenames", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await fs.writeFile(path.join(tmp.path, weird), "hello\n", "utf-8")
-
-    await withVcsOnly(tmp.path, async () => {
-      const diff = await AppRuntime.runPromise(
-        Effect.gen(function* () {
-          const vcs = yield* Vcs.Service
-          return yield* vcs.diff("git")
-        }),
-      )
-      expect(diff).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            file: weird,
-            status: "added",
-          }),
-        ]),
-      )
-    })
-  })
-
-  test("diff('branch') returns changes against default branch", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await $`git branch -M main`.cwd(tmp.path).quiet()
-    await $`git checkout -b feature/test`.cwd(tmp.path).quiet()
-    await fs.writeFile(path.join(tmp.path, "branch.txt"), "hello\n", "utf-8")
-    await $`git add .`.cwd(tmp.path).quiet()
-    await $`git commit --no-gpg-sign -m "branch file"`.cwd(tmp.path).quiet()
-
-    await withVcsOnly(tmp.path, async () => {
-      const diff = await AppRuntime.runPromise(
-        Effect.gen(function* () {
-          const vcs = yield* Vcs.Service
-          return yield* vcs.diff("branch")
-        }),
-      )
-      expect(diff).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            file: "branch.txt",
-            status: "added",
-          }),
-        ]),
-      )
     })
   })
 })

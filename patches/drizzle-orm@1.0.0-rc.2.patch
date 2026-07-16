@@ -1,0 +1,31 @@
+diff --git a/effect-core/query-effect.js b/effect-core/query-effect.js
+index dffdc6fbb726714fcf002e5c23172fc7ebf736ab..b3841f4ca124344c6c164cfb41a8e52431de9c3f 100644
+--- a/effect-core/query-effect.js
++++ b/effect-core/query-effect.js
+@@ -1,13 +1,19 @@
+-import * as Effectable from "effect/Effectable";
++import * as Effect from "effect/Effect";
+ 
+ //#region src/effect-core/query-effect.ts
+ function applyEffectWrapper(baseClass) {
+-	Object.assign(baseClass.prototype, Effectable.Prototype({
+-		label: "DrizzleQuery",
+-		evaluate() {
+-			return this.execute();
+-		}
+-	}));
++	const effectPrototype = Object.getPrototypeOf(Effect.suspend(() => Effect.void));
++	for (const key of Reflect.ownKeys(effectPrototype)) {
++		if (key === "~effect/Effect/evaluate" || key === "~effect/Effect/identifier") continue;
++		const descriptor = Object.getOwnPropertyDescriptor(effectPrototype, key);
++		if (descriptor) Object.defineProperty(baseClass.prototype, key, descriptor);
++	}
++	Object.defineProperty(baseClass.prototype, "~effect/Effect/identifier", { value: "DrizzleQuery" });
++	Object.defineProperty(baseClass.prototype, "~effect/Effect/evaluate", {
++		value() {
++			return this.execute();
++		}
++	});
+ }
+ 
+ //#endregion

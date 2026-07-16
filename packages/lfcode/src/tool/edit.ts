@@ -15,10 +15,11 @@ import { FileWatcher } from "../file/watcher"
 import { Bus } from "../bus"
 import { Format } from "../format"
 import { Instance } from "../project/instance"
+import { Vcs } from "../project"
 import { SessionCwd } from "./session-cwd"
-import { Snapshot } from "@/snapshot"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import { AppFileSystem } from "@/filesystem"
+import * as PatchRecovery from "./patch-recovery"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -46,7 +47,7 @@ function lock(filePath: string) {
 }
 
 const Parameters = z.object({
-  filePath: z.string().describe("The absolute path to the file to modify"),
+  filePath: z.string().describe("The absolute or relative path to the file to modify. On Windows, prefer forward slashes like C:/repo/file.ts."),
   oldString: z.string().describe("The text to replace"),
   newString: z.string().describe("The text to replace it with (must be different from oldString)"),
   replaceAll: z.boolean().optional().describe("Replace all occurrences of oldString (default false)"),
@@ -77,6 +78,11 @@ export const EditTool = Tool.define(
             ? params.filePath
             : path.join(SessionCwd.get(ctx.sessionID), params.filePath)
           yield* assertWriteAllowed(ctx, filePath)
+          const recoveryContent = yield* afs.readFile(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          if (recoveryContent) {
+            const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, recoveryContent)
+            if (recoveryError) throw new Error(`edit recovery blocked: ${recoveryError}`)
+          }
 
           let diff = ""
           let contentOld = ""
@@ -144,7 +150,7 @@ export const EditTool = Tool.define(
             }).pipe(Effect.orDie),
           )
 
-          const filediff: Snapshot.FileDiff = {
+          const filediff: Vcs.FileDiff = {
             file: filePath,
             patch: diff,
             additions: 0,
@@ -165,6 +171,7 @@ export const EditTool = Tool.define(
 
           let output = "Edit applied successfully."
           yield* lsp.touchFile(filePath, true)
+          PatchRecovery.clear(ctx.sessionID, ctx.messageID, filePath)
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilePath = AppFileSystem.normalizePath(filePath)
           const block = LSP.Diagnostic.report(filePath, diagnostics[normalizedFilePath] ?? [])

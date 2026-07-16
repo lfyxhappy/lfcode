@@ -34,7 +34,7 @@ import { Icon } from "@lfcode-ai/ui/icon"
 
 type Props = {
   back?: "providers" | "close"
-  returnTo?: "models"
+  returnTo?: "models" | "settings-models"
   preset?: CustomProviderPresetID
 }
 
@@ -86,6 +86,12 @@ export function DialogCustomProvider(props: Props) {
   const showModels = () => {
     void import("./dialog-manage-models").then((x) => {
       dialog.show(() => <x.DialogManageModels />)
+    })
+  }
+
+  const showSettingsModels = () => {
+    void import("./dialog-settings").then((x) => {
+      dialog.show(() => <x.DialogSettings defaultValue="models" />)
     })
   }
 
@@ -242,28 +248,19 @@ export function DialogCustomProvider(props: Props) {
 
   const saveMutation = useMutation(() => ({
     mutationFn: async (result: NonNullable<ReturnType<typeof validate>>) => {
-      const disabledProviders = globalSync.data.config.disabled_providers ?? []
-      const nextDisabled = disabledProviders.filter((id) => id !== result.providerID)
-
-      if (result.key) {
-        await globalSDK.client.auth.set({
-          providerID: result.providerID,
-          auth: {
-            type: "api",
-            key: result.key,
-          },
-        })
-      }
-
-      await globalSync.updateConfig({
-        provider: { [result.providerID]: result.config },
-        disabled_providers: nextDisabled,
+      await globalSDK.client.global.config.upsertCustomProvider({
+        providerID: result.providerID,
+        provider: result.config,
+        key: result.key,
       })
+      await globalSync.reloadProviders()
       return result
     },
     onSuccess: (result) => {
       if (props.returnTo === "models") {
         showModels()
+      } else if (props.returnTo === "settings-models") {
+        showSettingsModels()
       } else {
         dialog.close()
       }

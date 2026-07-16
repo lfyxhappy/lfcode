@@ -39,7 +39,7 @@ describe("InstructionContext", () => {
             await fs.writeFile(packageFile, "package")
           })
 
-          const load = SystemContextRegistry.Service.pipe(
+          const load = SystemContextRegistry.Service.asEffect().pipe(
             Effect.flatMap((service) => service.load()),
             Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
             Effect.provide(FSUtil.defaultLayer),
@@ -105,7 +105,7 @@ describe("InstructionContext", () => {
         Effect.gen(function* () {
           const file = path.join(tmp.path, "AGENTS.md")
           yield* Effect.promise(() => fs.writeFile(file, ""))
-          const context = yield* SystemContextRegistry.Service.pipe(
+          const context = yield* SystemContextRegistry.Service.asEffect().pipe(
             Effect.flatMap((service) => service.load()),
             Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
             Effect.provide(FSUtil.defaultLayer),
@@ -128,13 +128,13 @@ describe("InstructionContext", () => {
     Effect.gen(function* () {
       const failingFS = Layer.effect(
         FSUtil.Service,
-        FSUtil.Service.pipe(
+        FSUtil.Service.asEffect().pipe(
           Effect.map((fs) =>
             FSUtil.Service.of({ ...fs, up: () => Effect.fail(new FSUtil.FileSystemError({ method: "up" })) }),
           ),
         ),
       ).pipe(Layer.provide(FSUtil.defaultLayer))
-      const context = yield* SystemContextRegistry.Service.pipe(
+      const context = yield* SystemContextRegistry.Service.asEffect().pipe(
         Effect.flatMap((service) => service.load()),
         Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
         Effect.provide(failingFS),
@@ -160,7 +160,7 @@ describe("InstructionContext", () => {
       const file = AbsolutePath.make("/repo/AGENTS.md")
       const racingFS = Layer.effect(
         FSUtil.Service,
-        FSUtil.Service.pipe(
+        FSUtil.Service.asEffect().pipe(
           Effect.map((fs) =>
             FSUtil.Service.of({
               ...fs,
@@ -170,7 +170,7 @@ describe("InstructionContext", () => {
           ),
         ),
       ).pipe(Layer.provide(FSUtil.defaultLayer))
-      const context = yield* SystemContextRegistry.Service.pipe(
+      const context = yield* SystemContextRegistry.Service.asEffect().pipe(
         Effect.flatMap((service) => service.load()),
         Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
         Effect.provide(racingFS),
@@ -196,7 +196,7 @@ describe("InstructionContext", () => {
       let observed: { targets: string[]; start: string; stop?: string } | undefined
       const observingFS = Layer.effect(
         FSUtil.Service,
-        FSUtil.Service.pipe(
+        FSUtil.Service.asEffect().pipe(
           Effect.map((fs) =>
             FSUtil.Service.of({
               ...fs,
@@ -210,7 +210,7 @@ describe("InstructionContext", () => {
         ),
       ).pipe(Layer.provide(FSUtil.defaultLayer))
 
-      yield* SystemContextRegistry.Service.pipe(
+      yield* SystemContextRegistry.Service.asEffect().pipe(
         Effect.flatMap((service) => service.load()),
         Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
         Effect.provide(observingFS),
@@ -239,13 +239,13 @@ describe("InstructionContext", () => {
       let scanned = false
       process.env.LFCODE_DISABLE_PROJECT_CONFIG = "1"
 
-      yield* SystemContextRegistry.Service.pipe(
+      yield* SystemContextRegistry.Service.asEffect().pipe(
         Effect.flatMap((service) => service.load()),
         Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
         Effect.provide(
           Layer.effect(
             FSUtil.Service,
-            FSUtil.Service.pipe(
+            FSUtil.Service.asEffect().pipe(
               Effect.map((fs) => FSUtil.Service.of({ ...fs, up: () => Effect.sync(() => ((scanned = true), [])) })),
             ),
           ).pipe(Layer.provide(FSUtil.defaultLayer)),
@@ -269,13 +269,13 @@ describe("InstructionContext", () => {
   it.effect("does not discover project instructions outside the canonical project root", () =>
     Effect.gen(function* () {
       let scanned = false
-      yield* SystemContextRegistry.Service.pipe(
+      yield* SystemContextRegistry.Service.asEffect().pipe(
         Effect.flatMap((service) => service.load()),
         Effect.provide(InstructionContext.layer.pipe(Layer.provideMerge(SystemContextRegistry.layer))),
         Effect.provide(
           Layer.effect(
             FSUtil.Service,
-            FSUtil.Service.pipe(
+            FSUtil.Service.asEffect().pipe(
               Effect.map((fs) => FSUtil.Service.of({ ...fs, up: () => Effect.sync(() => ((scanned = true), [])) })),
             ),
           ).pipe(Layer.provide(FSUtil.defaultLayer)),

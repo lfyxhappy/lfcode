@@ -11,6 +11,7 @@ const prefixes = {
   part: "prt",
   pty: "pty",
   tool: "tool",
+  job: "job",
   workspace: "wrk",
   entry: "ent",
   workflow: "wf",

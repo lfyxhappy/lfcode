@@ -1,6 +1,6 @@
 export * as NodeSqliteClient from "./index"
 
-import { DatabaseSync, type SQLInputValue } from "node:sqlite"
+import { DatabaseSync } from "node:sqlite"
 import { identity } from "effect/Function"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -16,6 +16,7 @@ import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import * as Statement from "effect/unstable/sql/Statement"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
+type SqliteValue = null | number | bigint | string | Uint8Array
 
 export const TypeId: TypeId = "~@lfcode-ai/effect-sqlite-node/NodeSqliteClient"
 export type TypeId = "~@lfcode-ai/effect-sqlite-node/NodeSqliteClient"
@@ -58,12 +59,16 @@ export const make = (
     const makeConnection = Effect.gen(function* () {
       const db = new DatabaseSync(options.filename, {
         readOnly: options.readonly,
-        timeout: options.timeout,
         allowExtension: options.allowExtension,
         enableForeignKeyConstraints: true,
         open: true,
       })
       yield* Effect.addFinalizer(() => Effect.sync(() => db.close()))
+
+      if (options.timeout !== undefined) {
+        if (!Number.isInteger(options.timeout)) throw new TypeError("SQLite timeout must be an integer")
+        db.exec(`PRAGMA busy_timeout = ${Math.max(0, options.timeout)};`)
+      }
 
       if (options.disableWAL !== true && options.readonly !== true) {
         db.exec("PRAGMA journal_mode = WAL;")
@@ -74,7 +79,9 @@ export const make = (
           const statement = db.prepare(sql)
           statement.setReadBigInts(Context.get(fiber.context, Client.SafeIntegers))
           try {
-            return Effect.succeed(statement.all(...(params as SQLInputValue[])) as Array<Record<string, unknown>>)
+            const rows = statement.all(...requireSqliteValues(params))
+            if (!rows.every(isRecordRow)) throw new TypeError("SQLite returned an invalid object row")
+            return Effect.succeed(rows)
           } catch (cause) {
             return Effect.fail(
               new SqlError({
@@ -88,11 +95,16 @@ export const make = (
         Effect.withFiber<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>((fiber) => {
           const statement = db.prepare(sql)
           statement.setReadBigInts(Context.get(fiber.context, Client.SafeIntegers))
-          statement.setReturnArrays(true)
           try {
-            return Effect.succeed(
-              statement.all(...(params as SQLInputValue[])) as unknown as ReadonlyArray<ReadonlyArray<unknown>>,
-            )
+            if ("setReturnArrays" in statement && typeof statement.setReturnArrays === "function") {
+              statement.setReturnArrays(true)
+              const rows = statement.all(...requireSqliteValues(params))
+              if (!rows.every(isArrayRow)) throw new TypeError("SQLite returned an invalid array row")
+              return Effect.succeed(rows)
+            }
+            const rows = statement.all(...requireSqliteValues(params))
+            if (!rows.every(isRecordRow)) throw new TypeError("SQLite returned an invalid object row")
+            return Effect.succeed(rows.map(Object.values))
           } catch (cause) {
             return Effect.fail(
               new SqlError({
@@ -166,3 +178,25 @@ export const layer = (config: SqliteClientConfig): Layer.Layer<SqliteClient | Cl
       Context.make(SqliteClient, client).pipe(Context.add(Client.SqlClient, client)),
     ),
   ).pipe(Layer.provide(Reactivity.layer))
+
+function requireSqliteValues(params: ReadonlyArray<unknown>): Array<SqliteValue> {
+  return params.map((param) => {
+    if (
+      param === null ||
+      typeof param === "number" ||
+      typeof param === "bigint" ||
+      typeof param === "string" ||
+      param instanceof Uint8Array
+    )
+      return param
+    throw new TypeError(`Unsupported SQLite parameter type: ${typeof param}`)
+  })
+}
+
+function isRecordRow(row: unknown): row is Record<string, unknown> {
+  return typeof row === "object" && row !== null && !Array.isArray(row)
+}
+
+function isArrayRow(row: unknown): row is Array<unknown> {
+  return Array.isArray(row)
+}

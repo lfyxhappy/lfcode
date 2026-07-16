@@ -144,9 +144,9 @@ export async function create(input: { serverID: string; server: LSPServer.Handle
       return connection
     },
     notify: {
-      async open(request: { path: string }) {
+      async open(request: { path: string; text?: string }) {
         request.path = path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path)
-        const text = await Filesystem.readText(request.path)
+        const text = request.text ?? (await Filesystem.readText(request.path))
         const extension = path.extname(request.path)
         const languageId = LANGUAGE_EXTENSIONS[extension] ?? "plaintext"
 

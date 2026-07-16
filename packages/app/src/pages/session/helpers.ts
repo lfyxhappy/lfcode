@@ -5,6 +5,7 @@ import { same } from "@/utils/same"
 
 const emptyTabs: string[] = []
 const BROWSER_TAB_PREFIX = "browser://"
+const SIDE_CHAT_TAB_PREFIX = "side-chat://"
 const EMPTY_BROWSER_URL = "https://"
 export const BROWSER_HOME_URL = "https://www.bing.com"
 export const DEFAULT_BROWSER_URL = BROWSER_HOME_URL
@@ -12,6 +13,14 @@ const ALLOWED_BROWSER_PROTOCOLS = new Set(["http:", "https:", "file:"])
 
 export const BROWSER_REQUEST_OPEN_EVENT = "lfcode:browser-request-open"
 export const BROWSER_COMMAND_EVENT = "lfcode:browser-command"
+
+export type BrowserOpenRequestDetail = {
+  url?: string
+  sessionKey?: string
+  sessionID?: string
+  reason?: "human" | "tool"
+  requestID?: string
+}
 
 export const isBrowserTab = (tab: string) => tab.startsWith(BROWSER_TAB_PREFIX)
 
@@ -22,8 +31,23 @@ export const browserTabID = (tab: string) => {
   return tab.slice(BROWSER_TAB_PREFIX.length)
 }
 
+export const isSideChatTab = (tab: string) => tab.startsWith(SIDE_CHAT_TAB_PREFIX)
+
+export const sideChatTab = (id: string) => `${SIDE_CHAT_TAB_PREFIX}${id}`
+
+export const sideChatTabID = (tab: string) => {
+  if (!isSideChatTab(tab)) return undefined
+  return tab.slice(SIDE_CHAT_TAB_PREFIX.length)
+}
+
 export const createBrowserTabID = () =>
   `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+
+export const createSideChatTabID = () =>
+  `sc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+
+export const createBrowserRequestID = () =>
+  `browser-open-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 export const sanitizeBrowserURL = (value: string) => {
   const next = value.trim()
@@ -96,7 +120,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .flatMap((tab) => {
           if (detachedTabs().includes(tab)) return []
           if (tab === "context" || tab === "review") return []
-          if (isBrowserTab(tab)) return seen.has(tab) ? [] : (seen.add(tab), [tab])
+          if (isBrowserTab(tab) || isSideChatTab(tab)) return seen.has(tab) ? [] : (seen.add(tab), [tab])
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
           seen.add(value)
@@ -119,7 +143,7 @@ export const createSessionTabs = (input: TabsInput) => {
     }
     if (active === "context") return active
     if (active === "review" && review()) return active
-    if (active && isBrowserTab(active)) return active
+    if (active && (isBrowserTab(active) || isSideChatTab(active))) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
     const first = openedTabs()[0]
@@ -130,14 +154,14 @@ export const createSessionTabs = (input: TabsInput) => {
   })
   const activeFileTab = createMemo(() => {
     const active = activeTab()
-    if (isBrowserTab(active)) return
+    if (isBrowserTab(active) || isSideChatTab(active)) return
     if (!openedTabs().includes(active)) return
     return active
   })
   const closableTab = createMemo(() => {
     const active = activeTab()
     if (active === "context") return active
-    if (isBrowserTab(active)) return active
+    if (isBrowserTab(active) || isSideChatTab(active)) return active
     if (!openedTabs().includes(active)) return
     return active
   })
@@ -213,7 +237,11 @@ export const createOpenSessionFileTab = (input: {
     input.openTab(next)
 
     const path = input.pathFromTab(next)
-    if (!path) return
+    if (!path) {
+      input.openReviewPanel()
+      input.setActive(next)
+      return
+    }
 
     input.loadFile(path)
     input.openReviewPanel()

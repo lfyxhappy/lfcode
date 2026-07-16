@@ -1,14 +1,13 @@
 import {
-  Component,
   createEffect,
   createMemo,
   createSignal,
   For,
   Match,
+  lazy,
   onMount,
   Show,
   Switch,
-  onCleanup,
   Index,
   type JSX,
 } from "solid-js"
@@ -42,8 +41,9 @@ import { Icon } from "./icon"
 import { ToolErrorCard } from "./tool-error-card"
 import { Checkbox } from "./checkbox"
 import { DiffChanges } from "./diff-changes"
-import { Markdown } from "./markdown"
+import { Markdown, type HtmlComponentEventDetail } from "./markdown"
 import { ImagePreview } from "./image-preview"
+import { ThumbnailImage } from "./image-thumbnail"
 import { getDirectory as _getDirectory, getFilename } from "@lfcode-ai/shared/util/path"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { Tooltip } from "./tooltip"
@@ -55,6 +55,37 @@ import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
 import { animate } from "motion"
 import { attached, inline, kind } from "./message-file"
+import { resolveInlineImageUrl } from "./inline-image-cache"
+import { PART_MAPPING, ToolRegistry, type MessagePartProps, type ToolProps } from "./message-part-registry"
+import { registerMessagePartRenderers } from "./message-part-renderers"
+import { createPacedTextValue } from "./message-part-paced"
+import type { RenderCodeBlockInput } from "./message-code-blocks"
+import { buildHighlightSegments } from "./message-part-highlight"
+import {
+  groupAnchorMessageIDs,
+  groupParts,
+  index,
+  isContextGroupTool,
+  list,
+  partDefaultOpen,
+  renderable,
+  same,
+  sameGroups,
+  type PartGroup,
+} from "./message-part-grouping"
+import {
+  readDiagnosticsByFile,
+  readDiffChanges,
+  readFileDiff,
+  readString,
+  readStringField,
+  type ToolDiagnostic,
+} from "./message-part-tool-data"
+import { canUseCodeDiffView } from "./code-diff-shared"
+export { PART_MAPPING } from "./message-part-registry"
+export type { MessagePartProps, ToolProps } from "./message-part-registry"
+
+const CodeDiffView = lazy(() => import("./code-diff-view").then((mod) => ({ default: mod.CodeDiffView })))
 
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
@@ -89,25 +120,16 @@ function ShellSubmessage(props: { text: string; animate?: boolean }) {
   )
 }
 
-interface Diagnostic {
-  range: {
-    start: { line: number; character: number }
-    end: { line: number; character: number }
-  }
-  message: string
-  severity?: number
-}
-
 function getDiagnostics(
-  diagnosticsByFile: Record<string, Diagnostic[]> | undefined,
+  diagnosticsByFile: Record<string, ToolDiagnostic[]> | undefined,
   filePath: string | undefined,
-): Diagnostic[] {
+): ToolDiagnostic[] {
   if (!diagnosticsByFile || !filePath) return []
   const diagnostics = diagnosticsByFile[filePath] ?? []
   return diagnostics.filter((d) => d.severity === 1).slice(0, 3)
 }
 
-function DiagnosticsDisplay(props: { diagnostics: Diagnostic[] }): JSX.Element {
+function DiagnosticsDisplay(props: { diagnostics: ToolDiagnostic[] }): JSX.Element {
   const i18n = useI18n()
   return (
     <Show when={props.diagnostics.length > 0}>
@@ -134,6 +156,8 @@ export interface MessageProps {
   actions?: UserActions
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
+  onHtmlComponentEvent?: (detail: HtmlComponentEventDetail) => void
+  renderCodeBlock?: (input: RenderCodeBlockInput) => JSX.Element | undefined
 }
 
 export type SessionAction = (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -143,103 +167,29 @@ export type UserActions = {
   revert?: SessionAction
 }
 
-export interface MessagePartProps {
-  part: PartType
-  message: MessageType
-  hideDetails?: boolean
-  defaultOpen?: boolean
-  showAssistantCopyPartID?: string | null
-  turnDurationMs?: number
-  responseMetricsLine?: string
-}
-
-export type PartComponent = Component<MessagePartProps>
-
-export const PART_MAPPING: Record<string, PartComponent | undefined> = {}
-
-const TEXT_RENDER_PACE_MS = 24
-const TEXT_RENDER_SNAP = /[\s.,!?;:)\]]/
-
-function step(size: number) {
-  if (size <= 12) return 2
-  if (size <= 48) return 4
-  if (size <= 96) return 8
-  return Math.min(24, Math.ceil(size / 8))
-}
-
-function next(text: string, start: number) {
-  const end = Math.min(text.length, start + step(text.length - start))
-  const max = Math.min(text.length, end + 8)
-  for (let i = end; i < max; i++) {
-    if (TEXT_RENDER_SNAP.test(text[i] ?? "")) return i + 1
-  }
-  return end
-}
-
-function createPacedValue(getValue: () => string, live?: () => boolean) {
-  const [value, setValue] = createSignal(getValue())
-  let shown = getValue()
-  let timeout: ReturnType<typeof setTimeout> | undefined
-
-  const clear = () => {
-    if (!timeout) return
-    clearTimeout(timeout)
-    timeout = undefined
-  }
-
-  const sync = (text: string) => {
-    shown = text
-    setValue(text)
-  }
-
-  const run = () => {
-    timeout = undefined
-    const text = getValue()
-    if (!live?.()) {
-      sync(text)
-      return
-    }
-    if (!text.startsWith(shown) || text.length <= shown.length) {
-      sync(text)
-      return
-    }
-    const end = next(text, shown.length)
-    sync(text.slice(0, end))
-    if (end < text.length) timeout = setTimeout(run, TEXT_RENDER_PACE_MS)
-  }
-
-  createEffect(() => {
-    const text = getValue()
-    if (!live?.()) {
-      clear()
-      sync(text)
-      return
-    }
-    if (!text.startsWith(shown) || text.length < shown.length) {
-      clear()
-      sync(text)
-      return
-    }
-    if (text.length === shown.length || timeout) return
-    timeout = setTimeout(run, TEXT_RENDER_PACE_MS)
-  })
-
-  onCleanup(() => {
-    clear()
-  })
-
-  return value
-}
-
-function PacedMarkdown(props: { text: string; cacheKey: string; streaming: boolean }) {
-  const value = createPacedValue(
+export function PacedMarkdown(props: {
+  text: string
+  cacheKey: string
+  streaming: boolean
+  context: { sessionID?: string; messageID?: string; partID?: string; role?: string }
+  onHtmlComponentEvent?: (detail: HtmlComponentEventDetail) => void
+}) {
+  const value = createPacedTextValue(
     () => props.text,
     () => props.streaming,
   )
 
   return (
     <Show when={value()}>
-      <Markdown text={value()} cacheKey={props.cacheKey} streaming={props.streaming} />
+      <Markdown
+        text={value()}
+        cacheKey={props.cacheKey}
+        streaming={props.streaming}
+        htmlComponents={{
+          context: props.context,
+          onEvent: props.onHtmlComponentEvent,
+        }}
+      />
     </Show>
   )
 }
@@ -414,133 +364,9 @@ function urls(text: string | undefined) {
     })
 }
 
-const CONTEXT_GROUP_TOOLS = new Set(["read", "glob", "grep", "list"])
-const HIDDEN_TOOLS = new Set(["todowrite"])
-
-function list<T>(value: T[] | undefined | null, fallback: T[]) {
-  if (Array.isArray(value)) return value
-  return fallback
-}
-
-function same<T>(a: readonly T[] | undefined, b: readonly T[] | undefined) {
-  if (a === b) return true
-  if (!a || !b) return false
-  if (a.length !== b.length) return false
-  return a.every((x, i) => x === b[i])
-}
-
-type PartRef = {
-  messageID: string
-  partID: string
-}
-
-type PartGroup =
-  | {
-      key: string
-      type: "part"
-      ref: PartRef
-    }
-  | {
-      key: string
-      type: "context"
-      refs: PartRef[]
-    }
-
-function sameRef(a: PartRef, b: PartRef) {
-  return a.messageID === b.messageID && a.partID === b.partID
-}
-
-function sameGroup(a: PartGroup, b: PartGroup) {
-  if (a === b) return true
-  if (a.key !== b.key) return false
-  if (a.type !== b.type) return false
-  if (a.type === "part") {
-    if (b.type !== "part") return false
-    return sameRef(a.ref, b.ref)
-  }
-  if (b.type !== "context") return false
-  if (a.refs.length !== b.refs.length) return false
-  return a.refs.every((ref, i) => sameRef(ref, b.refs[i]!))
-}
-
-function sameGroups(a: readonly PartGroup[] | undefined, b: readonly PartGroup[] | undefined) {
-  if (a === b) return true
-  if (!a || !b) return false
-  if (a.length !== b.length) return false
-  return a.every((item, i) => sameGroup(item, b[i]!))
-}
-
-function groupParts(parts: { messageID: string; part: PartType }[]) {
-  const result: PartGroup[] = []
-  let start = -1
-
-  const flush = (end: number) => {
-    if (start < 0) return
-    const first = parts[start]
-    const last = parts[end]
-    if (!first || !last) {
-      start = -1
-      return
-    }
-    result.push({
-      key: `context:${first.part.id}`,
-      type: "context",
-      refs: parts.slice(start, end + 1).map((item) => ({
-        messageID: item.messageID,
-        partID: item.part.id,
-      })),
-    })
-    start = -1
-  }
-
-  parts.forEach((item, index) => {
-    if (isContextGroupTool(item.part)) {
-      if (start < 0) start = index
-      return
-    }
-
-    flush(index - 1)
-    result.push({
-      key: `part:${item.messageID}:${item.part.id}`,
-      type: "part",
-      ref: {
-        messageID: item.messageID,
-        partID: item.part.id,
-      },
-    })
-  })
-
-  flush(parts.length - 1)
-  return result
-}
-
-function index<T extends { id: string }>(items: readonly T[]) {
-  return new Map(items.map((item) => [item.id, item] as const))
-}
-
-function renderable(part: PartType, showReasoningSummaries = true) {
-  if (part.type === "tool") {
-    if (HIDDEN_TOOLS.has(part.tool)) return false
-    if (part.tool === "question") return part.state.status !== "pending" && part.state.status !== "running"
-    return true
-  }
-  if (part.type === "text") return !!part.text?.trim()
-  if (part.type === "reasoning") return showReasoningSummaries && !!part.text?.trim()
-  return !!PART_MAPPING[part.type]
-}
-
-function toolDefaultOpen(tool: string, shell = false, edit = false) {
-  if (tool === "bash") return shell
-  if (tool === "edit" || tool === "write" || tool === "apply_patch") return edit
-}
-
-function partDefaultOpen(part: PartType, shell = false, edit = false) {
-  if (part.type !== "tool") return
-  return toolDefaultOpen(part.tool, shell, edit)
-}
-
 export function AssistantParts(props: {
-  messages: AssistantMessage[]
+  messages: AssistantMessage[] | (() => AssistantMessage[])
+  anchor?: (messageID: string) => string
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
   responseMetricsLine?: string
@@ -548,22 +374,25 @@ export function AssistantParts(props: {
   showReasoningSummaries?: boolean
   shellToolDefaultOpen?: boolean
   editToolDefaultOpen?: boolean
+  onHtmlComponentEvent?: (detail: HtmlComponentEventDetail) => void
+  renderCodeBlock?: (input: RenderCodeBlockInput) => JSX.Element | undefined
 }) {
   const data = useData()
   const emptyParts: PartType[] = []
   const emptyTools: ToolPart[] = []
-  const msgs = createMemo(() => index(props.messages))
+  const messages = createMemo(() => (typeof props.messages === "function" ? props.messages() : props.messages))
+  const msgs = createMemo(() => index(messages()))
   const part = createMemo(
     () =>
       new Map(
-        props.messages.map((message) => [message.id, index(list(data.store.part?.[message.id], emptyParts))] as const),
+        messages().map((message) => [message.id, index(list(data.store.part?.[message.id], emptyParts))] as const),
       ),
   )
 
   const grouped = createMemo(
     () =>
       groupParts(
-        props.messages.flatMap((message) =>
+        messages().flatMap((message) =>
           list(data.store.part?.[message.id], emptyParts)
             .filter((part) => renderable(part, props.showReasoningSummaries ?? true))
             .map((part) => ({
@@ -577,74 +406,94 @@ export function AssistantParts(props: {
   )
 
   const last = createMemo(() => grouped().at(-1)?.key)
+  const groupAnchors = createMemo(() => (props.anchor ? groupAnchorMessageIDs(grouped()) : []))
 
   return (
     <Index each={grouped()}>
-      {(entryAccessor) => {
+      {(entryAccessor, index) => {
         const entryType = createMemo(() => entryAccessor().type)
+        const anchors = createMemo(() => groupAnchors()[index] ?? [])
 
         return (
-          <Switch>
-            <Match when={entryType() === "context"}>
-              {(() => {
-                const parts = createMemo(
-                  () => {
-                    const entry = entryAccessor()
-                    if (entry.type !== "context") return emptyTools
-                    return entry.refs
-                      .map((ref) => part().get(ref.messageID)?.get(ref.partID))
-                      .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
-                  },
-                  emptyTools,
-                  { equals: same },
-                )
-                const busy = createMemo(() => props.working && last() === entryAccessor().key)
+          <>
+            <For each={anchors()}>
+              {(messageID) => (
+                <div
+                  id={props.anchor?.(messageID)}
+                  data-message-id={messageID}
+                  data-message-role="assistant"
+                  aria-hidden="true"
+                  class="h-0 overflow-hidden pointer-events-none"
+                />
+              )}
+            </For>
+            <Switch>
+              <Match when={entryType() === "context"}>
+                {(() => {
+                  const parts = createMemo(
+                    () => {
+                      const entry = entryAccessor()
+                      if (entry.type !== "context") return emptyTools
+                      return entry.refs
+                        .map((ref) => part().get(ref.messageID)?.get(ref.partID))
+                        .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
+                    },
+                    emptyTools,
+                    { equals: same },
+                  )
+                  const busy = createMemo(() => props.working && last() === entryAccessor().key)
 
-                return (
-                  <Show when={parts().length > 0}>
-                    <ContextToolGroup parts={parts()} busy={busy()} />
-                  </Show>
-                )
-              })()}
-            </Match>
-            <Match when={entryType() === "part"}>
-              {(() => {
-                const message = createMemo(() => {
-                  const entry = entryAccessor()
-                  if (entry.type !== "part") return
-                  return msgs().get(entry.ref.messageID)
-                })
-                const item = createMemo(() => {
-                  const entry = entryAccessor()
-                  if (entry.type !== "part") return
-                  return part().get(entry.ref.messageID)?.get(entry.ref.partID)
-                })
-
-                return (
-                  <Show when={message()}>
-                    <Show when={item()}>
-                      <Part
-                        part={item()!}
-                        message={message()!}
-                        showAssistantCopyPartID={props.showAssistantCopyPartID}
-                        turnDurationMs={props.turnDurationMs}
-                        responseMetricsLine={props.responseMetricsLine}
-                        defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
-                      />
+                  return (
+                    <Show when={parts().length > 0}>
+                      <ContextToolGroup parts={parts()} busy={busy()} />
                     </Show>
-                  </Show>
-                )
-              })()}
-            </Match>
-          </Switch>
+                  )
+                })()}
+              </Match>
+              <Match when={entryType() === "part"}>
+                {(() => {
+                  const viewportAnchor = createMemo(() => {
+                    const entry = entryAccessor()
+                    if (entry.type !== "part") return
+                    return `${entry.ref.messageID}:${entry.ref.partID}`
+                  })
+                  const message = createMemo(() => {
+                    const entry = entryAccessor()
+                    if (entry.type !== "part") return
+                    return msgs().get(entry.ref.messageID)
+                  })
+                  const item = createMemo(() => {
+                    const entry = entryAccessor()
+                    if (entry.type !== "part") return
+                    return part().get(entry.ref.messageID)?.get(entry.ref.partID)
+                  })
+
+                  return (
+                    <Show when={message()}>
+                      <Show when={item()}>
+                        <div data-viewport-anchor={viewportAnchor()}>
+                          <Part
+                            part={item()!}
+                            message={message()!}
+                            showAssistantCopyPartID={props.showAssistantCopyPartID}
+                            turnDurationMs={props.turnDurationMs}
+                            responseMetricsLine={props.responseMetricsLine}
+                            defaultOpen={partDefaultOpen(item()!, props.shellToolDefaultOpen, props.editToolDefaultOpen)}
+                            onHtmlComponentEvent={props.onHtmlComponentEvent}
+                            renderCodeBlock={props.renderCodeBlock}
+                          />
+                        </div>
+                      </Show>
+                    </Show>
+                  )
+                })()}
+              </Match>
+            </Switch>
+          </>
         )
       }}
     </Index>
   )
-}
-
-function isContextGroupTool(part: PartType): part is ToolPart {
-  return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
 }
 
 function contextToolDetail(part: ToolPart): string | undefined {
@@ -743,10 +592,6 @@ function ExaOutput(props: { output?: string }) {
   )
 }
 
-export function registerPartComponent(type: string, component: PartComponent) {
-  PART_MAPPING[type] = component
-}
-
 export function Message(props: MessageProps) {
   return (
     <Switch>
@@ -762,6 +607,8 @@ export function Message(props: MessageProps) {
             parts={props.parts}
             showAssistantCopyPartID={props.showAssistantCopyPartID}
             showReasoningSummaries={props.showReasoningSummaries}
+            onHtmlComponentEvent={props.onHtmlComponentEvent}
+            renderCodeBlock={props.renderCodeBlock}
           />
         )}
       </Match>
@@ -774,6 +621,8 @@ export function AssistantMessageDisplay(props: {
   parts: PartType[]
   showAssistantCopyPartID?: string | null
   showReasoningSummaries?: boolean
+  onHtmlComponentEvent?: (detail: HtmlComponentEventDetail) => void
+  renderCodeBlock?: (input: RenderCodeBlockInput) => JSX.Element | undefined
 }) {
   const emptyTools: ToolPart[] = []
   const part = createMemo(() => index(props.parts))
@@ -833,6 +682,8 @@ export function AssistantMessageDisplay(props: {
                       part={item()!}
                       message={props.message}
                       showAssistantCopyPartID={props.showAssistantCopyPartID}
+                      onHtmlComponentEvent={props.onHtmlComponentEvent}
+                      renderCodeBlock={props.renderCodeBlock}
                     />
                   </Show>
                 )
@@ -991,8 +842,9 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
 
   const metaTail = stamp
 
-  const openImagePreview = (url: string, alt?: string) => {
-    dialog.show(() => <ImagePreview src={url} alt={alt} />)
+  const openImagePreview = (file: FilePart, alt?: string) => {
+    const src = resolveInlineImageUrl(file) ?? file.url
+    dialog.show(() => <ImagePreview src={src} alt={alt} />)
   }
 
   const handleCopy = async () => {
@@ -1033,7 +885,7 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
                   data-clickable={type === "image" ? "true" : undefined}
                   title={type === "file" ? name : undefined}
                   onClick={() => {
-                    if (type === "image") openImagePreview(file.url, name)
+                    if (type === "image") openImagePreview(file, name)
                   }}
                 >
                   <Show
@@ -1045,7 +897,14 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
                       </div>
                     }
                   >
-                    <img data-slot="user-message-attachment-image" src={file.url} alt={name} />
+                    <ThumbnailImage
+                      src={file.url}
+                      resolveSrc={() => resolveInlineImageUrl(file)}
+                      alt={name}
+                      cacheKey={file.id}
+                      slot="user-message-attachment-image"
+                      placeholderClass="user-message-attachment-image-placeholder"
+                    />
                   </Show>
                 </div>
               )
@@ -1120,43 +979,56 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
   )
 }
 
-type HighlightSegment = { text: string; type?: "file" | "agent" }
-
 function HighlightedText(props: { text: string; references: FilePart[]; agents: AgentPart[] }) {
-  const segments = createMemo(() => {
-    const text = props.text
-
-    const allRefs: { start: number; end: number; type: "file" | "agent" }[] = [
-      ...props.references
-        .filter((r) => r.source?.text?.start !== undefined && r.source?.text?.end !== undefined)
-        .map((r) => ({ start: r.source!.text!.start, end: r.source!.text!.end, type: "file" as const })),
-      ...props.agents
-        .filter((a) => a.source?.start !== undefined && a.source?.end !== undefined)
-        .map((a) => ({ start: a.source!.start, end: a.source!.end, type: "agent" as const })),
-    ].sort((a, b) => a.start - b.start)
-
-    const result: HighlightSegment[] = []
-    let lastIndex = 0
-
-    for (const ref of allRefs) {
-      if (ref.start < lastIndex) continue
-
-      if (ref.start > lastIndex) {
-        result.push({ text: text.slice(lastIndex, ref.start) })
-      }
-
-      result.push({ text: text.slice(ref.start, ref.end), type: ref.type })
-      lastIndex = ref.end
-    }
-
-    if (lastIndex < text.length) {
-      result.push({ text: text.slice(lastIndex) })
-    }
-
-    return result
-  })
+  const segments = createMemo(() => buildHighlightSegments(props.text, props.references, props.agents))
 
   return <For each={segments()}>{(segment) => <span data-highlight={segment.type}>{segment.text}</span>}</For>
+}
+
+function WebSearchProvenance(props: { metadata: Record<string, unknown> }) {
+  const i18n = useI18n()
+  const provider = createMemo(() => readStringField(props.metadata, "provider"))
+  const warnings = createMemo(() => {
+    const value = props.metadata.warnings
+    if (!Array.isArray(value)) return [] as string[]
+    return value.filter((item): item is string => typeof item === "string")
+  })
+  const sources = createMemo(() => {
+    const value = props.metadata.sources
+    if (!Array.isArray(value)) return [] as { url: string; sourceTier: string; title?: string }[]
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object") return []
+      const record = item as Record<string, unknown>
+      if (typeof record.url !== "string" || typeof record.sourceTier !== "string") return []
+      return [{
+        url: record.url,
+        sourceTier: record.sourceTier,
+        ...(typeof record.title === "string" ? { title: record.title } : {}),
+      }]
+    })
+  })
+  const tierLabel = (tier: string) => {
+    if (tier === "primary") return i18n.t("ui.webSearch.primary")
+    if (tier === "authoritative-secondary") return i18n.t("ui.webSearch.authoritativeSecondary")
+    if (tier === "practitioner") return i18n.t("ui.webSearch.practitioner")
+    return i18n.t("ui.webSearch.discoveryOnly")
+  }
+
+  return (
+    <Show when={provider() || warnings().length > 0 || sources().length > 0}>
+      <div class="mt-2 flex flex-col gap-1.5 text-12-regular text-text-weak" data-component="web-search-provenance">
+        <Show when={provider()}>{(value) => <span>{`${i18n.t("ui.webSearch.provider")}: ${value()}`}</span>}</Show>
+        <For each={sources().slice(0, 8)}>
+          {(source) => (
+            <a class="clickable subagent-link truncate" href={source.url} target="_blank" rel="noopener noreferrer">
+              {`[${tierLabel(source.sourceTier)}] ${source.title ?? source.url}`}
+            </a>
+          )}
+        </For>
+        <For each={warnings()}>{(warning) => <span class="text-status-warning">{`${i18n.t("ui.webSearch.fallbackWarning")}: ${warning}`}</span>}</For>
+      </div>
+    </Show>
+  )
 }
 
 export function Part(props: MessagePartProps) {
@@ -1172,45 +1044,10 @@ export function Part(props: MessagePartProps) {
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
         responseMetricsLine={props.responseMetricsLine}
+        renderCodeBlock={props.renderCodeBlock}
       />
     </Show>
   )
-}
-
-export interface ToolProps {
-  input: Record<string, any>
-  metadata: Record<string, any>
-  tool: string
-  output?: string
-  status?: string
-  hideDetails?: boolean
-  defaultOpen?: boolean
-  forceOpen?: boolean
-  locked?: boolean
-}
-
-export type ToolComponent = Component<ToolProps>
-
-const state: Record<
-  string,
-  {
-    name: string
-    render?: ToolComponent
-  }
-> = {}
-
-export function registerTool(input: { name: string; render?: ToolComponent }) {
-  state[input.name] = input
-  return input
-}
-
-export function getTool(name: string) {
-  return state[name]?.render
-}
-
-export const ToolRegistry = {
-  register: registerTool,
-  render: getTool,
 }
 
 function ToolFileAccordion(props: { path: string; actions?: JSX.Element; children: JSX.Element }) {
@@ -1249,69 +1086,6 @@ function ToolFileAccordion(props: { path: string; actions?: JSX.Element; childre
   )
 }
 
-PART_MAPPING["tool"] = function ToolPartDisplay(props) {
-  const data = useData()
-  const i18n = useI18n()
-  const part = () => props.part as ToolPart
-  if (part().tool === "todowrite") return null
-
-  const hideQuestion = createMemo(
-    () => part().tool === "question" && (part().state.status === "pending" || part().state.status === "running"),
-  )
-
-  const emptyInput: Record<string, any> = {}
-  const emptyMetadata: Record<string, any> = {}
-
-  const input = () => part().state?.input ?? emptyInput
-  // @ts-expect-error
-  const partMetadata = () => part().state?.metadata ?? emptyMetadata
-
-  const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
-
-  return (
-    <Show when={!hideQuestion()}>
-      <div data-component="tool-part-wrapper">
-        <Switch>
-          <Match when={part().state.status === "error" && (part().state as any).error}>
-            {(error) => {
-              const cleaned = error().replace("Error: ", "")
-              if (part().tool === "question" && cleaned.includes("dismissed this question")) {
-                return (
-                  <div style="width: 100%; display: flex; justify-content: flex-end;">
-                    <span class="text-13-regular text-text-weak cursor-default">
-                      {i18n.t("ui.messagePart.questions.dismissed")}
-                    </span>
-                  </div>
-                )
-              }
-              return (
-                <ToolErrorCard
-                  tool={part().tool}
-                  error={error()}
-                  defaultOpen={props.defaultOpen}
-                />
-              )
-            }}
-          </Match>
-          <Match when={true}>
-            <Dynamic
-              component={render()}
-              input={input()}
-              tool={part().tool}
-              metadata={partMetadata()}
-              // @ts-expect-error
-              output={part().state.output}
-              status={part().state.status}
-              hideDetails={props.hideDetails}
-              defaultOpen={props.defaultOpen}
-            />
-          </Match>
-        </Switch>
-      </div>
-    </Show>
-  )
-}
-
 export function MessageDivider(props: { label: string }) {
   return (
     <div data-component="compaction-part">
@@ -1326,151 +1100,7 @@ export function MessageDivider(props: { label: string }) {
   )
 }
 
-PART_MAPPING["compaction"] = function CompactionPartDisplay() {
-  const i18n = useI18n()
-  return <MessageDivider label={i18n.t("ui.messagePart.compaction")} />
-}
-
-PART_MAPPING["text"] = function TextPartDisplay(props) {
-  const data = useData()
-  const i18n = useI18n()
-  const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
-  const part = () => props.part as TextPart
-  const interrupted = createMemo(
-    () =>
-      props.message.role === "assistant" && (props.message as AssistantMessage).error?.name === "MessageAbortedError",
-  )
-
-  const model = createMemo(() => {
-    if (props.message.role !== "assistant") return ""
-    const message = props.message as AssistantMessage
-    const match = data.store.provider?.all?.find((p) => p.id === message.providerID)
-    return match?.models?.[message.modelID]?.name ?? message.modelID
-  })
-
-  const duration = createMemo(() => {
-    if (props.message.role !== "assistant") return ""
-    const message = props.message as AssistantMessage
-    const completed = message.time.completed
-    const ms =
-      typeof props.turnDurationMs === "number"
-        ? props.turnDurationMs
-        : typeof completed === "number"
-          ? completed - message.time.created
-          : -1
-    if (!(ms >= 0)) return ""
-    const total = Math.round(ms / 1000)
-    if (total < 60) return i18n.t("ui.message.duration.seconds", { count: numfmt().format(total) })
-    const minutes = Math.floor(total / 60)
-    const seconds = total % 60
-    return i18n.t("ui.message.duration.minutesSeconds", {
-      minutes: numfmt().format(minutes),
-      seconds: numfmt().format(seconds),
-    })
-  })
-
-  const meta = createMemo(() => {
-    if (props.message.role !== "assistant") return ""
-    const agent = (props.message as AssistantMessage).agent
-    const items = [
-      agent ? agent[0]?.toUpperCase() + agent.slice(1) : "",
-      model(),
-      duration(),
-      interrupted() ? i18n.t("ui.message.interrupted") : "",
-    ]
-    return items.filter((x) => !!x).join(" \u00B7 ")
-  })
-
-  const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
-  )
-  const text = () => (part().text ?? "").trim()
-  const isLastTextPart = createMemo(() => {
-    const last = (data.store.part?.[props.message.id] ?? [])
-      .filter((item): item is TextPart => item?.type === "text" && !!item.text?.trim())
-      .at(-1)
-    return last?.id === part().id
-  })
-  const showCopy = createMemo(() => {
-    if (props.message.role !== "assistant") return isLastTextPart()
-    if (props.showAssistantCopyPartID === null) return false
-    if (typeof props.showAssistantCopyPartID === "string") return props.showAssistantCopyPartID === part().id
-    return isLastTextPart()
-  })
-  const [copied, setCopied] = createSignal(false)
-  const responseMetrics = createMemo(() => {
-    if (props.message.role !== "assistant") return ""
-    if (streaming()) return ""
-    if (interrupted()) return ""
-    return isLastTextPart() ? props.responseMetricsLine ?? "" : ""
-  })
-
-  const handleCopy = async () => {
-    const content = text()
-    if (!content) return
-    await navigator.clipboard.writeText(content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  return (
-    <Show when={text()}>
-      <div data-component="text-part">
-        <div data-slot="text-part-body">
-          <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-            <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-          </Show>
-        </div>
-        <Show when={showCopy()}>
-          <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>
-            <Tooltip
-              value={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
-              placement="top"
-              gutter={4}
-            >
-              <IconButton
-                icon={copied() ? "check" : "copy"}
-                size="normal"
-                variant="ghost"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleCopy}
-                aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
-              />
-            </Tooltip>
-            <Show when={meta()}>
-              <span data-slot="text-part-meta" class="text-12-regular text-text-weak cursor-default">
-                {meta()}
-              </span>
-            </Show>
-          </div>
-          <Show when={responseMetrics()}>
-            <div data-slot="text-part-response-metrics" class="text-12-regular text-text-weak cursor-default">
-              {responseMetrics()}
-            </div>
-          </Show>
-        </Show>
-      </div>
-    </Show>
-  )
-}
-
-PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
-  const part = () => props.part as ReasoningPart
-  const streaming = createMemo(
-    () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
-  )
-  const text = () => part().text.trim()
-
-  return (
-    <Show when={text()}>
-      <div data-component="reasoning-part">
-        <Show when={streaming()} fallback={<Markdown text={text()} cacheKey={part().id} streaming={false} />}>
-          <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-        </Show>
-      </div>
-    </Show>
-  )
-}
+registerMessagePartRenderers()
 
 ToolRegistry.register({
   name: "read",
@@ -1493,7 +1123,10 @@ ToolRegistry.register({
           icon="glasses"
           trigger={{
             title: i18n.t("ui.tool.read"),
-            subtitle: props.input.filePath ? getFilename(props.input.filePath) : "",
+            subtitle: (() => {
+              const filePath = readStringField(props.input, "filePath")
+              return filePath ? getFilename(filePath) : ""
+            })(),
             args,
           }}
         />
@@ -1516,11 +1149,12 @@ ToolRegistry.register({
   name: "list",
   render(props) {
     const i18n = useI18n()
+    const path = createMemo(() => readStringField(props.input, "path") ?? "/")
     return (
       <BasicTool
         {...props}
         icon="bullet-list"
-        trigger={{ title: i18n.t("ui.tool.list"), subtitle: getDirectory(props.input.path || "/") }}
+        trigger={{ title: i18n.t("ui.tool.list"), subtitle: getDirectory(path()) }}
       >
         <Show when={props.output}>
           <div data-component="tool-output" data-scrollable>
@@ -1536,14 +1170,16 @@ ToolRegistry.register({
   name: "glob",
   render(props) {
     const i18n = useI18n()
+    const path = createMemo(() => readStringField(props.input, "path") ?? "/")
+    const pattern = createMemo(() => readStringField(props.input, "pattern"))
     return (
       <BasicTool
         {...props}
         icon="magnifying-glass-menu"
         trigger={{
           title: i18n.t("ui.tool.glob"),
-          subtitle: getDirectory(props.input.path || "/"),
-          args: props.input.pattern ? ["pattern=" + props.input.pattern] : [],
+          subtitle: getDirectory(path()),
+          args: pattern() ? ["pattern=" + pattern()] : [],
         }}
       >
         <Show when={props.output}>
@@ -1561,15 +1197,18 @@ ToolRegistry.register({
   render(props) {
     const i18n = useI18n()
     const args: string[] = []
-    if (props.input.pattern) args.push("pattern=" + props.input.pattern)
-    if (props.input.include) args.push("include=" + props.input.include)
+    const path = createMemo(() => readStringField(props.input, "path") ?? "/")
+    const pattern = createMemo(() => readStringField(props.input, "pattern"))
+    const include = createMemo(() => readStringField(props.input, "include"))
+    if (pattern()) args.push("pattern=" + pattern())
+    if (include()) args.push("include=" + include())
     return (
       <BasicTool
         {...props}
         icon="magnifying-glass-menu"
         trigger={{
           title: i18n.t("ui.tool.grep"),
-          subtitle: getDirectory(props.input.path || "/"),
+          subtitle: getDirectory(path()),
           args,
         }}
       >
@@ -1650,6 +1289,7 @@ ToolRegistry.register({
         }}
       >
         <ExaOutput output={props.output} />
+        <WebSearchProvenance metadata={props.metadata} />
       </BasicTool>
     )
   },
@@ -1730,9 +1370,11 @@ ToolRegistry.register({
     const i18n = useI18n()
     const pending = () => props.status === "pending" || props.status === "running"
     const sawPending = pending()
+    const description = createMemo(() => readStringField(props.input, "description"))
+    const outputRef = createMemo(() => readStringField(props.metadata, "outputRef"))
     const text = createMemo(() => {
-      const cmd = props.input.command ?? props.metadata.command ?? ""
-      const out = stripAnsi(props.output || props.metadata.output || "")
+      const cmd = readStringField(props.input, "command") ?? readStringField(props.metadata, "command") ?? ""
+      const out = stripAnsi(props.output ?? readStringField(props.metadata, "output") ?? "")
       return `$ ${cmd}${out ? "\n\n" + out : ""}`
     })
     const [copied, setCopied] = createSignal(false)
@@ -1755,15 +1397,23 @@ ToolRegistry.register({
               <span data-slot="basic-tool-tool-title">
                 <TextShimmer text={i18n.t("ui.tool.shell")} active={pending()} />
               </span>
-              <Show when={!pending() && props.input.description}>
-                <ShellSubmessage text={props.input.description} animate={sawPending} />
+              <Show when={!pending() && description()}>
+                <ShellSubmessage text={description()!} animate={sawPending} />
               </Show>
             </div>
           </div>
         }
-      >
-        <div data-component="bash-output">
-          <div data-slot="bash-copy">
+        >
+          <div data-component="bash-output">
+            <Show when={outputRef()}>
+              {(reference) => (
+                <div class="px-3 pt-2 text-11-regular text-text-weak">
+                  Full output captured as <code class="font-mono text-text-base">{reference()}</code>. Ask the assistant to
+                  inspect it with a bounded read or search.
+                </div>
+              )}
+            </Show>
+            <div data-slot="bash-copy">
             <Tooltip
               value={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copy")}
               placement="top"
@@ -1795,9 +1445,22 @@ ToolRegistry.register({
   render(props) {
     const i18n = useI18n()
     const fileComponent = useFileComponent()
-    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
-    const path = createMemo(() => props.metadata?.filediff?.file || props.input.filePath || "")
-    const filename = () => getFilename(props.input.filePath ?? "")
+    const filePath = createMemo(() => readStringField(props.input, "filePath") ?? "")
+    const fileDiff = createMemo(() => readFileDiff(props.metadata.filediff))
+    const diagnostics = createMemo(() => getDiagnostics(readDiagnosticsByFile(props.metadata.diagnostics), filePath()))
+    const path = createMemo(() => fileDiff()?.file ?? filePath())
+    const filename = () => getFilename(filePath())
+    const oldString = createMemo(() => readStringField(props.input, "oldString") ?? "")
+    const newString = createMemo(() => readStringField(props.input, "newString") ?? "")
+    const [codeDiffUnavailable, setCodeDiffUnavailable] = createSignal(false)
+    const useCodeDiff = createMemo(() =>
+      !codeDiffUnavailable() &&
+      canUseCodeDiffView({
+        path: path(),
+        before: fileDiff()?.before ?? oldString(),
+        after: fileDiff()?.after ?? newString(),
+      }),
+    )
     const pending = () => props.status === "pending" || props.status === "running"
     return (
       <div data-component="edit-tool">
@@ -1816,15 +1479,15 @@ ToolRegistry.register({
                     <span data-slot="message-part-title-filename">{filename()}</span>
                   </Show>
                 </div>
-                <Show when={!pending() && props.input.filePath?.includes("/")}>
+                <Show when={!pending() && filePath().includes("/")}>
                   <div data-slot="message-part-path">
-                    <span data-slot="message-part-directory">{getDirectory(props.input.filePath!)}</span>
+                    <span data-slot="message-part-directory">{getDirectory(filePath())}</span>
                   </div>
                 </Show>
               </div>
               <div data-slot="message-part-actions">
-                <Show when={!pending() && props.metadata.filediff}>
-                  <DiffChanges changes={props.metadata.filediff} />
+                <Show when={!pending() && fileDiff()}>
+                  <DiffChanges changes={fileDiff()!} />
                 </Show>
               </div>
             </div>
@@ -1834,24 +1497,37 @@ ToolRegistry.register({
             <ToolFileAccordion
               path={path()}
               actions={
-                <Show when={!pending() && props.metadata.filediff}>
-                  <DiffChanges changes={props.metadata.filediff!} />
+                <Show when={!pending() && fileDiff()}>
+                  <DiffChanges changes={fileDiff()!} />
                 </Show>
               }
             >
               <div data-component="edit-content">
-                <Dynamic
-                  component={fileComponent}
-                  mode="diff"
-                  before={{
-                    name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.before || props.input.oldString,
-                  }}
-                  after={{
-                    name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.after || props.input.newString,
-                  }}
-                />
+                <Show
+                  when={useCodeDiff()}
+                  fallback={
+                    <Dynamic
+                      component={fileComponent}
+                      mode="diff"
+                      before={{
+                        name: fileDiff()?.file ?? filePath(),
+                        contents: fileDiff()?.before ?? oldString(),
+                      }}
+                      after={{
+                        name: fileDiff()?.file ?? filePath(),
+                        contents: fileDiff()?.after ?? newString(),
+                      }}
+                    />
+                  }
+                >
+                  <CodeDiffView
+                    path={path()}
+                    before={fileDiff()?.before ?? oldString()}
+                    after={fileDiff()?.after ?? newString()}
+                    diffStyle="split"
+                    onUnavailable={() => setCodeDiffUnavailable(true)}
+                  />
+                </Show>
               </div>
             </ToolFileAccordion>
           </Show>
@@ -1867,9 +1543,11 @@ ToolRegistry.register({
   render(props) {
     const i18n = useI18n()
     const fileComponent = useFileComponent()
-    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
-    const path = createMemo(() => props.input.filePath || "")
-    const filename = () => getFilename(props.input.filePath ?? "")
+    const filePath = createMemo(() => readStringField(props.input, "filePath") ?? "")
+    const content = createMemo(() => readStringField(props.input, "content") ?? "")
+    const diagnostics = createMemo(() => getDiagnostics(readDiagnosticsByFile(props.metadata.diagnostics), filePath()))
+    const path = createMemo(() => filePath())
+    const filename = () => getFilename(filePath())
     const pending = () => props.status === "pending" || props.status === "running"
     return (
       <div data-component="write-tool">
@@ -1888,9 +1566,9 @@ ToolRegistry.register({
                     <span data-slot="message-part-title-filename">{filename()}</span>
                   </Show>
                 </div>
-                <Show when={!pending() && props.input.filePath?.includes("/")}>
+                <Show when={!pending() && filePath().includes("/")}>
                   <div data-slot="message-part-path">
-                    <span data-slot="message-part-directory">{getDirectory(props.input.filePath!)}</span>
+                    <span data-slot="message-part-directory">{getDirectory(filePath())}</span>
                   </div>
                 </Show>
               </div>
@@ -1898,16 +1576,16 @@ ToolRegistry.register({
             </div>
           }
         >
-          <Show when={props.input.content && path()}>
+          <Show when={content() && path()}>
             <ToolFileAccordion path={path()}>
               <div data-component="write-content">
                 <Dynamic
                   component={fileComponent}
                   mode="text"
                   file={{
-                    name: props.input.filePath,
-                    contents: props.input.content,
-                    cacheKey: checksum(props.input.content),
+                    name: filePath(),
+                    contents: content(),
+                    cacheKey: checksum(content()),
                   }}
                   overflow="scroll"
                 />
@@ -1928,6 +1606,7 @@ ToolRegistry.register({
     const fileComponent = useFileComponent()
     const files = createMemo(() => patchFiles(props.metadata.files))
     const pending = createMemo(() => props.status === "pending" || props.status === "running")
+    const [codeDiffUnavailable, setCodeDiffUnavailable] = createSignal(false)
     const single = createMemo(() => {
       const list = files()
       if (list.length !== 1) return
@@ -1976,6 +1655,7 @@ ToolRegistry.register({
                     {(file) => {
                       const active = createMemo(() => expanded().includes(file.filePath))
                       const [visible, setVisible] = createSignal(false)
+                      const [codeDiffUnavailable, setCodeDiffUnavailable] = createSignal(false)
 
                       createEffect(() => {
                         if (!active()) {
@@ -1989,8 +1669,8 @@ ToolRegistry.register({
                         })
                       })
 
-                      return (
-                        <Accordion.Item value={file.filePath} data-type={file.type}>
+                    return (
+                      <Accordion.Item value={file.filePath} data-type={file.type}>
                           <StickyAccordionHeader>
                             <Accordion.Trigger>
                               <div data-slot="apply-patch-trigger-content">
@@ -2032,7 +1712,22 @@ ToolRegistry.register({
                           <Accordion.Content>
                             <Show when={visible()}>
                               <div data-component="apply-patch-file-diff">
-                                <Dynamic component={fileComponent} mode="diff" fileDiff={file.view.fileDiff} />
+                                <Show
+                                  when={!codeDiffUnavailable() && canUseCodeDiffView({
+                                    path: file.relativePath,
+                                    before: file.view.fileDiff.deletionLines.join(""),
+                                    after: file.view.fileDiff.additionLines.join(""),
+                                  })}
+                                  fallback={<Dynamic component={fileComponent} mode="diff" fileDiff={file.view.fileDiff} />}
+                                >
+                                  <CodeDiffView
+                                    path={file.relativePath}
+                                    before={file.view.fileDiff.deletionLines.join("")}
+                                    after={file.view.fileDiff.additionLines.join("")}
+                                    diffStyle="split"
+                                    onUnavailable={() => setCodeDiffUnavailable(true)}
+                                  />
+                                </Show>
                               </div>
                             </Show>
                           </Accordion.Content>
@@ -2102,7 +1797,22 @@ ToolRegistry.register({
               }
             >
               <div data-component="apply-patch-file-diff">
-                <Dynamic component={fileComponent} mode="diff" fileDiff={single()!.view.fileDiff} />
+                <Show
+                  when={!codeDiffUnavailable() && canUseCodeDiffView({
+                    path: single()!.relativePath,
+                    before: single()!.view.fileDiff.deletionLines.join(""),
+                    after: single()!.view.fileDiff.additionLines.join(""),
+                  })}
+                  fallback={<Dynamic component={fileComponent} mode="diff" fileDiff={single()!.view.fileDiff} />}
+                >
+                  <CodeDiffView
+                    path={single()!.relativePath}
+                    before={single()!.view.fileDiff.deletionLines.join("")}
+                    after={single()!.view.fileDiff.additionLines.join("")}
+                    diffStyle="split"
+                    onUnavailable={() => setCodeDiffUnavailable(true)}
+                  />
+                </Show>
               </div>
             </ToolFileAccordion>
           </BasicTool>
@@ -2212,7 +1922,7 @@ ToolRegistry.register({
   name: "skill",
   render(props) {
     const i18n = useI18n()
-    const title = createMemo(() => props.input.name || i18n.t("ui.tool.skill"))
+    const title = createMemo(() => readStringField(props.input, "name") ?? i18n.t("ui.tool.skill"))
     const running = createMemo(() => props.status === "pending" || props.status === "running")
 
     const titleContent = () => <TextShimmer text={title()} active={running()} />

@@ -39,7 +39,7 @@ export async function spawnLocalServer(hostname: string, port: number, password:
     hostname,
     username: "lfcode",
     password,
-    cors: ["lfcode://renderer"],
+    cors: ["oc://renderer"],
   })
 
   const wait = (async () => {

@@ -1,0 +1,141 @@
+- generic [active] [ref=f2e1]:
+  - link "跳到正文" [ref=f2e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f2e3]:
+    - navigation "主导航" [ref=f2e4]:
+      - link "LFCODE" [ref=f2e5] [cursor=pointer]:
+        - /url: "#top"
+  - main [ref=f2e12]:
+    - generic [ref=f2e13]:
+      - generic [ref=f2e14]:
+        - text: L
+        - heading [level=1] [ref=f2e16]
+      - text: 01 // WORKBENCH
+    - generic [ref=f2e20]:
+      - generic [ref=f2e21]: ◆ CONTEXT
+      - generic [ref=f2e22]: ◆ CODE
+      - generic [ref=f2e23]: ◆ TERMINAL
+      - generic [ref=f2e24]: ◆ BROWSER
+      - generic [ref=f2e25]: ◆ SKILLS
+      - generic [ref=f2e26]: ◆ LOCAL-FIRST
+      - generic [ref=f2e27]: ◆ CONTEXT
+      - generic [ref=f2e28]: ◆ CODE
+      - generic [ref=f2e29]: ◆ TERMINAL
+      - generic [ref=f2e30]: ◆ BROWSER
+      - generic [ref=f2e31]: ◆ SKILLS
+      - generic [ref=f2e32]: ◆ LOCAL-FIRST
+    - generic [ref=f2e33]:
+      - generic [ref=f2e34]:
+        - generic [ref=f2e35]:
+          - paragraph [ref=f2e36]: ONE CONTEXT, FULL LOOP
+          - generic [ref=f2e37]:
+            - heading "从想法到浏览器， 不必离开现场。" [level=2] [ref=f2e38]: 从想法到浏览器，不必离开现场。
+            - paragraph [ref=f2e39]: 信息不在聊天、IDE、终端和浏览器之间反复搬运。Lfcode 让每一步都带着当前项目、文件和验证证据继续往下走。
+        - generic [ref=f2e40]:
+          - article [ref=f2e41]:
+            - text: 01 / CONTEXT
+            - heading "把任务讲清楚" [level=3] [ref=f2e42]
+            - paragraph [ref=f2e43]: 长会话保留问题、决策与当前文件上下文，让下一步不从零理解。
+          - article [ref=f2e44]:
+            - text: 02 / CHANGE
+            - heading "让代码落地" [level=3] [ref=f2e45]
+            - paragraph [ref=f2e46]: 在编辑器和差异视图里审阅真实改动，不把修改藏在一段对话里。
+          - article [ref=f2e47]:
+            - text: 03 / RUN
+            - heading "在终端里验证" [level=3] [ref=f2e48]
+            - paragraph [ref=f2e49]: 运行命令、观察输出、追踪长期任务，在同一任务链中继续处理异常。
+          - article [ref=f2e50]:
+            - text: 04 / BROWSER
+            - heading "看见真正结果" [level=3] [ref=f2e51]
+            - paragraph [ref=f2e52]: 打开页面、复现交互、检查 console 与网络，让“改好了”有证据。
+      - text: 02 // FLOW
+    - generic [ref=f2e55]:
+      - generic [ref=f2e56]:
+        - paragraph [ref=f2e57]: SCROLL TO MOVE THE WORK
+        - generic [ref=f2e58]:
+          - heading "滚动不是翻页， 而是把工作继续向前推。" [level=2] [ref=f2e59]: 滚动不是翻页，而是把工作继续向前推。
+          - paragraph [ref=f2e60]: 在桌面端，这一段会固定在视口中：滚轮驱动真实工作流从左到右穿过，而不是用轮播替代过程。移动端则回退为可读的纵向步骤。
+      - generic [ref=f2e62]:
+        - article [ref=f2e63]:
+          - text: 01 / BRIEF
+          - generic [ref=f2e64]:
+            - text: session / product-page→ collect context→ identify constraints
+            - generic [ref=f2e65]: 需求不是一段孤立提示词。它带着项目、文件与当前决策一起进入工作台。
+          - generic [ref=f2e66]:
+            - heading "把问题放进正确的上下文。" [level=3] [ref=f2e67]
+            - paragraph [ref=f2e68]: 会话从目标开始，也保留它为什么要这样做。
+        - article [ref=f2e69]:
+          - text: 02 / CHANGE
+          - generic [ref=f2e70]: diff / product-page.html+ brand stage+ scroll sequence
+          - generic [ref=f2e77]:
+            - heading "代码改动，有来处也有去处。" [level=3] [ref=f2e78]
+            - paragraph [ref=f2e79]: 在真实差异里审阅，不把实现藏在一段回答里。
+        - article [ref=f2e80]:
+          - text: 03 / RUN
+          - generic [ref=f2e81]:
+            - text: terminal / validationPS bun run typecheck✓ no new errors✓ build ready
+            - generic [ref=f2e82]: 长任务、日志和终态都留在同一条工作链里。
+          - generic [ref=f2e83]:
+            - heading "运行结果，不用复制回聊天框。" [level=3] [ref=f2e84]
+            - paragraph [ref=f2e85]: 命令和输出与它们解决的问题保持相邻。
+        - article [ref=f2e86]:
+          - text: 04 / BROWSER
+          - generic [ref=f2e87]:
+            - text: browser / localhost✓ page visible✓ keyboard path✓ console clean
+            - generic [ref=f2e88]: 真正的产品结果，必须在真正的页面里确认。
+          - generic [ref=f2e89]:
+            - heading "最后，让浏览器替你验收。" [level=3] [ref=f2e90]
+            - paragraph [ref=f2e91]: 从视觉、交互到网络错误，给“完成”一条证据链。
+    - generic [ref=f2e92]:
+      - generic [ref=f2e93]:
+        - generic [ref=f2e94]:
+          - paragraph [ref=f2e95]: EXTEND WHAT WORKS
+          - heading "不只会写代码， 还能复用你的做事方法。" [level=3] [ref=f2e96]: 不只会写代码，还能复用你的做事方法。
+          - paragraph [ref=f2e97]: 把项目规则、产品流程和验证方式沉淀为 Skills；用 MCP、插件和自定义工具连接已有环境。能力随项目生长，而不是随对话结束。
+          - list [ref=f2e98]:
+            - listitem [ref=f2e99]: →项目级 Skills 与全局 Skills
+            - listitem [ref=f2e100]: →MCP 工具与插件扩展
+            - listitem [ref=f2e101]: →可重复的自动化工作流
+        - generic [ref=f2e102]: skills / product-release→ read project context→ inspect changes→ run browser validation→ prepare release notesstatus ready for review
+      - text: 04 // EXTEND
+    - generic [ref=f2e104]:
+      - generic [ref=f2e105]:
+        - generic [ref=f2e106]:
+          - paragraph [ref=f2e107]: CONTROL STAYS CLOSE
+          - generic [ref=f2e108]:
+            - heading "本地优先， 所以你始终知道发生了什么。" [level=2] [ref=f2e109]: 本地优先，所以你始终知道发生了什么。
+            - paragraph [ref=f2e110]: 工作目录、终端、浏览器与工具调用都在你能看见、能控制的桌面环境里协作。连接模型提供商是你的选择，不是工作流的前提。
+        - generic [ref=f2e111]:
+          - article [ref=f2e112]:
+            - generic [ref=f2e113]: 01 / OPEN
+            - heading "开源可审阅" [level=3] [ref=f2e114]
+            - paragraph [ref=f2e115]: 源代码公开，使用 MIT 许可；团队可以按自己的标准检查、修改和扩展。
+          - article [ref=f2e116]:
+            - generic [ref=f2e117]: 02 / LOCAL
+            - heading "项目就在眼前" [level=3] [ref=f2e118]
+            - paragraph [ref=f2e119]: 围绕本地工作目录执行：文件、命令、浏览器结果和会话上下文互相可见。
+          - article [ref=f2e120]:
+            - generic [ref=f2e121]: 03 / CHOICE
+            - heading "模型由你决定" [level=3] [ref=f2e122]
+            - paragraph [ref=f2e123]: 使用内置能力，或连接你已经拥有的模型与提供商，按项目风险做选择。
+      - text: 04 // CONTROL
+    - generic [ref=f2e124]:
+      - text: LFCODE
+      - generic [ref=f2e125]:
+        - paragraph [ref=f2e126]: START WITH YOUR REAL PROJECT
+        - heading "少切一次工具， 多完成一件事情。" [level=2] [ref=f2e127]: 少切一次工具，多完成一件事情。
+        - paragraph [ref=f2e128]: 把下一次开发任务交给一个能对话、改代码、跑终端、开浏览器并记住项目规则的本地工作台。
+        - generic [ref=f2e129]:
+          - link "下载 Windows 版 ↗" [ref=f2e130] [cursor=pointer]:
+            - /url: https://github.com/lfyxhappy/lfcode/releases
+          - link "查看 Issues ↗" [ref=f2e131] [cursor=pointer]:
+            - /url: https://github.com/lfyxhappy/lfcode/issues
+  - contentinfo [ref=f2e132]:
+    - generic [ref=f2e133]:
+      - generic [ref=f2e134]: © 2026 LFCODE · MIT LICENSE
+      - generic [ref=f2e135]: LOCAL-FIRST AI WORKBENCH
+  - region "LFCODE 品牌舞台" [ref=f2e136]:
+    - generic [ref=f2e137]:
+      - generic [ref=f2e138]: LOCAL-FIRST / 2026
+      - generic [ref=f2e139]: MOVE ACROSS THE LOGO
+    - img "LFCODE" [ref=f2e140]

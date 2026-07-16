@@ -19,12 +19,15 @@ import { Snapshot } from "@/snapshot"
 import { Command } from "@/command"
 import { Log } from "@/util"
 import { ActorRegistry } from "@/actor/registry"
+import { Actor } from "@/actor/spawn"
+import { ActorWaiter } from "@/actor/waiter"
 import { TaskRegistry } from "@/task/registry"
 import { Task } from "@/task/schema"
 import { Permission } from "@/permission"
 import { PermissionID } from "@/permission/schema"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Provider } from "@/provider"
+import { NotFoundError } from "@/storage"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Bus } from "@/bus"
@@ -973,7 +976,7 @@ export const SessionRoutes = lazy(() =>
         c.header("Content-Type", "application/json")
         return stream(c, async (stream) => {
           const body = c.req.valid("json")
-          // If the HTTP client gives up (TUI exits, driver kills its `mimo run`
+          // If the HTTP client gives up (TUI exits, driver kills its `lfcode run`
           // client on its own per-turn timeout, network drop), we have to drive
           // the server-side runner to Idle ourselves. Otherwise the prompt
           // fiber keeps running with no consumer, and any next POST attaches
@@ -1032,17 +1035,23 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        await runRequest(
-          "SessionRoutes.prompt_async.assertNotBusy",
-          c,
-          SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
-        )
+        if (body.delivery !== "steer") {
+          await runRequest(
+            "SessionRoutes.prompt_async.assertNotBusy",
+            c,
+            SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+          )
+        }
         void runRequest(
           "SessionRoutes.prompt_async",
           c,
           SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
         ).catch((err) => {
-          log.error("prompt_async failed", { sessionID, error: err })
+          log.error("prompt_async failed", {
+            sessionID,
+            error: err,
+            stack: err instanceof Error ? err.stack : undefined,
+          })
           void Bus.publish(Session.Event.Error, {
             sessionID,
             error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
@@ -1299,5 +1308,75 @@ export const SessionRoutes = lazy(() =>
         )
         return c.json(actors)
       },
-    ),
+    )
+    .delete(
+      "/:sessionID/actors/:actorID",
+      describeRoute({
+        summary: "Delete session actor",
+        description: "Delete a visible subagent or peer actor and permanently remove its message slice.",
+        operationId: "session.deleteActor",
+        responses: {
+          200: {
+            description: "Successfully deleted actor",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+          actorID: z.string(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.deleteActor", c, function* () {
+          const params = c.req.valid("param")
+          const session = yield* Session.Service
+          const reg = yield* ActorRegistry.Service
+          const agents = yield* Agent.Service
+          const waiter = yield* ActorWaiter.Service
+          const actor = yield* reg.get(params.sessionID, params.actorID)
+          if (!actor) throw new NotFoundError({ message: `Actor not found: ${params.actorID}` })
+          if (actor.actorID === "main") throw new Error("Main actor is not deletable")
+          if (actor.mode !== "subagent" && actor.mode !== "peer") {
+            throw new Error(`Actor ${params.actorID} is not deletable`)
+          }
+          if ((yield* agents.get(actor.agent))?.hidden === true) {
+            throw new Error(`Actor ${params.actorID} is hidden and cannot be deleted`)
+          }
+          if (yield* reg.isSystemSpawned(params.sessionID, params.actorID)) {
+            throw new Error(`Actor ${params.actorID} is system-spawned and cannot be deleted`)
+          }
+          if (actor.status === "pending" || actor.status === "running") {
+            const actorSvc = yield* Actor.Service
+            yield* actorSvc.cancel(params.sessionID, params.actorID, "graceful")
+            const settled = yield* waiter.wait({
+              sessionID: params.sessionID,
+              actor_id: params.actorID,
+              timeout_ms: 10_000,
+            })
+            if (settled.status === "timeout") {
+              throw new Error(`Timed out waiting for actor ${params.actorID} to stop before deletion`)
+            }
+            if (settled.status === "pending" || settled.status === "running" || settled.status === "unknown") {
+              throw new Error(`Actor ${params.actorID} did not stop before deletion`)
+            }
+          }
+          const messages = yield* session.messages({ sessionID: params.sessionID, agentID: params.actorID })
+          for (const message of messages) {
+            yield* session.removeMessage({
+              sessionID: params.sessionID,
+              messageID: message.info.id,
+            })
+          }
+          yield* reg.remove(params.sessionID, params.actorID)
+          return true
+        }),
+    )
 )

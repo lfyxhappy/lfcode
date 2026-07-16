@@ -11,6 +11,7 @@ import { AppRuntime } from "../../src/effect/app-runtime"
 import { Effect, Layer } from "effect"
 import { CurrentWorkingDirectory } from "@/cli/cmd/tui/config/cwd"
 import { ConfigPlugin } from "@/config/plugin"
+import { registryFile } from "@/plugin/library"
 
 const wintest = process.platform === "win32" ? test : test.skip
 const clear = (wait = false) => AppRuntime.runPromise(Config.Service.use((svc) => svc.invalidate(wait)))
@@ -30,6 +31,7 @@ const getTuiConfig = async (directory: string) =>
 afterEach(async () => {
   delete process.env.LFCODE_CONFIG
   delete process.env.LFCODE_TUI_CONFIG
+  delete process.env.LFCODE_PLUGIN_LIBRARY_DIR
   await fs.rm(path.join(Global.Path.config, "lfcode.json"), { force: true }).catch(() => {})
   await fs.rm(path.join(Global.Path.config, "lfcode.jsonc"), { force: true }).catch(() => {})
   await fs.rm(path.join(Global.Path.config, "tui.json"), { force: true }).catch(() => {})
@@ -104,6 +106,61 @@ test("keeps server and tui plugin merge semantics aligned", async () => {
       expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
       expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
       expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+    },
+  })
+})
+
+test("keeps enabled managed plugins aligned between server and tui config", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => ({ library: path.join(dir, "plugin-library") }),
+  })
+  process.env.LFCODE_PLUGIN_LIBRARY_DIR = tmp.extra.library
+  await fs.mkdir(tmp.extra.library, { recursive: true })
+  await Bun.write(
+    registryFile(),
+    JSON.stringify({
+      version: 1,
+      plugins: {
+        "enabled.managed": {
+          enabled: true,
+          current: "1.0.0-test",
+          digest: "enabled-digest",
+          version: "1.0.0",
+          source: { type: "directory", label: "enabled", digest: "enabled-digest" },
+          installedAt: 0,
+        },
+        "disabled.managed": {
+          enabled: false,
+          current: "1.0.0-test",
+          digest: "disabled-digest",
+          version: "1.0.0",
+          source: { type: "directory", label: "disabled", digest: "disabled-digest" },
+          installedAt: 0,
+        },
+      },
+    }),
+  )
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const server = await load()
+      const tui = await getTuiConfig(tmp.path)
+
+      for (const config of [server, tui]) {
+        const plugins = (config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+        expect(plugins).toContain("lfplugin:enabled.managed")
+        expect(plugins).not.toContain("lfplugin:disabled.managed")
+        expect(
+          config.plugin_origins?.find(
+            (item) => ConfigPlugin.pluginSpecifier(item.spec) === "lfplugin:enabled.managed",
+          ),
+        ).toEqual({
+          spec: "lfplugin:enabled.managed",
+          source: registryFile(),
+          scope: "global",
+        })
+      }
     },
   })
 })
@@ -516,6 +573,29 @@ test("supports tuple plugin specs with options in tui.json", async () => {
       spec: ["acme-plugin@1.2.3", { enabled: true, label: "demo" }],
       scope: "local",
       source: path.join(tmp.path, "tui.json"),
+    },
+  ])
+})
+
+test("supports plugins alias in tui.json", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "tui.json"),
+        JSON.stringify({
+          plugins: ["demo-plugin@1.0.0"],
+        }),
+      )
+    },
+  })
+
+  const config = await getTuiConfig(tmp.path)
+  expect(config.plugin).toEqual(["demo-plugin@1.0.0"])
+  expect(config.plugin_origins).toEqual([
+    {
+      spec: "demo-plugin@1.0.0",
+      source: path.join(tmp.path, "tui.json"),
+      scope: "local",
     },
   ])
 })

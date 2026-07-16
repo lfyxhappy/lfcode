@@ -5,6 +5,7 @@ import { Switch } from "@lfcode-ai/ui/switch"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { showToast } from "@lfcode-ai/ui/toast"
 import type {
+  BrowserCacheOverview,
   BrowserCookieRecord,
   BrowserPasswordStorageState,
   SavedBrowserLoginRecord,
@@ -33,6 +34,13 @@ function sortLogins(logins: SavedBrowserLoginRecord[]) {
 function formatDate(value: number | null, language: ReturnType<typeof useLanguage>) {
   if (!value) return language.t("settings.browser.cookies.session")
   return new Date(value * 1000).toLocaleString()
+}
+
+function formatCacheBytes(value: number) {
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
 export const SettingsBrowser: Component = () => {
@@ -65,6 +73,15 @@ export const SettingsBrowser: Component = () => {
     error: "",
     items: [] as SavedBrowserLoginRecord[],
   })
+  const [cacheState, setCacheState] = createStore({
+    loading: false,
+    error: "",
+    value: {
+      cacheSizeBytes: 0,
+      indexedEntryCount: 0,
+      lastSeenAt: null,
+    } as BrowserCacheOverview,
+  })
   const [passwordState, setPasswordState] = createSignal<BrowserPasswordStorageState>({ available: false })
   const [passwordStateReady, setPasswordStateReady] = createSignal(false)
 
@@ -87,6 +104,19 @@ export const SettingsBrowser: Component = () => {
       setCookieState("error", error instanceof Error ? error.message : String(error))
     } finally {
       setCookieState("loading", false)
+    }
+  }
+
+  const loadCacheOverview = async () => {
+    if (!desktop() || !platform.getBrowserCacheOverview) return
+    setCacheState("loading", true)
+    setCacheState("error", "")
+    try {
+      setCacheState("value", await platform.getBrowserCacheOverview())
+    } catch (error) {
+      setCacheState("error", error instanceof Error ? error.message : String(error))
+    } finally {
+      setCacheState("loading", false)
     }
   }
 
@@ -115,6 +145,7 @@ export const SettingsBrowser: Component = () => {
   }
 
   onMount(() => {
+    void loadCacheOverview()
     void loadPasswordState()
     void loadCookies()
     void loadLogins()
@@ -309,6 +340,19 @@ export const SettingsBrowser: Component = () => {
     setCookieState("items", [])
   }
 
+  const clearCache = async () => {
+    if (!platform.clearBrowserCache) return
+    setCacheState("loading", true)
+    setCacheState("error", "")
+    try {
+      setCacheState("value", await platform.clearBrowserCache())
+    } catch (error) {
+      setCacheState("error", error instanceof Error ? error.message : String(error))
+    } finally {
+      setCacheState("loading", false)
+    }
+  }
+
   return (
     <div class="h-full w-full px-5 pb-10 pt-5 sm:px-8">
       <div class="mx-auto flex max-w-[1080px] flex-col gap-6">
@@ -366,6 +410,49 @@ export const SettingsBrowser: Component = () => {
               </For>
             </Show>
           </SettingsList>
+        </SettingsSection>
+
+        <SettingsSection title={language.t("settings.browser.section.cache.title")} description={language.t("settings.browser.section.cache.description")}>
+          <Show when={desktop() && platform.getBrowserCacheOverview && platform.clearBrowserCache} fallback={<UnavailableCard>{language.t("settings.browser.unavailable.cache.web")}</UnavailableCard>}>
+            <SettingsList>
+              <SettingsRow
+                title={language.t("settings.browser.cache.summary.title")}
+                description={language.t("settings.browser.cache.summary.description")}
+              >
+                <div class="flex w-full gap-2 sm:w-auto">
+                  <Button size="small" variant="secondary" onClick={() => void loadCacheOverview()} disabled={cacheState.loading}>
+                    {language.t("settings.browser.action.refresh")}
+                  </Button>
+                  <Button size="small" variant="secondary" onClick={() => void clearCache()} disabled={cacheState.loading}>
+                    {language.t("settings.browser.action.clearAll")}
+                  </Button>
+                </div>
+              </SettingsRow>
+              <Show when={cacheState.error}>
+                {(value) => <EmptyState>{value()}</EmptyState>}
+              </Show>
+              <Show when={!cacheState.error}>
+                <div class="rounded-[20px] border border-border-weak-base bg-surface-base px-4 py-3">
+                  <div class="grid gap-2 text-12-regular text-text-weak sm:grid-cols-3">
+                    <div>
+                      <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">{language.t("settings.browser.cache.field.size")}</div>
+                      <div class="mt-1 text-14-medium text-text-strong">{formatCacheBytes(cacheState.value.cacheSizeBytes)}</div>
+                    </div>
+                    <div>
+                      <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">{language.t("settings.browser.cache.field.indexed")}</div>
+                      <div class="mt-1 text-14-medium text-text-strong">{cacheState.value.indexedEntryCount}</div>
+                    </div>
+                    <div>
+                      <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">{language.t("settings.browser.cache.field.lastSeen")}</div>
+                      <div class="mt-1 text-14-medium text-text-strong">
+                        {cacheState.value.lastSeenAt ? new Date(cacheState.value.lastSeenAt).toLocaleString() : language.t("settings.browser.cache.lastSeen.empty")}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Show>
+            </SettingsList>
+          </Show>
         </SettingsSection>
 
         <SettingsSection title={language.t("settings.browser.section.cookies.title")} description={language.t("settings.browser.section.cookies.description")}>

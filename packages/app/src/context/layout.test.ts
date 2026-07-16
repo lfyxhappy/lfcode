@@ -4,6 +4,7 @@ import {
   createSessionKeyReader,
   ensureSessionKey,
   normalizeBrowserViewState,
+  normalizeStoredSessionView,
   pruneSessionKeys,
   syncBrowserViewState,
 } from "./layout"
@@ -26,7 +27,10 @@ describe("layout session-key helpers", () => {
 
     createRoot((dispose) => {
       const [key, setKey] = createSignal("dir/one")
-      const read = createSessionKeyReader(key, (value) => seen.push(value))
+      const read = createSessionKeyReader(key, (value) => {
+        seen.push(value)
+        return value
+      })
 
       expect(read()).toBe("dir/one")
       setKey("dir/two")
@@ -85,7 +89,7 @@ describe("browser view state helpers", () => {
 
     expect(result).toEqual({
       url: "https://two.example.com",
-      input: "example.com",
+      input: "https://example.com",
       title: undefined,
       history: ["https://example.com", "https://two.example.com"],
       index: 1,
@@ -146,5 +150,146 @@ describe("browser view state helpers", () => {
     expect(result.index).toBe(0)
     expect(result.canGoBack).toBe(false)
     expect(result.canGoForward).toBe(true)
+  })
+})
+
+describe("session view migration", () => {
+  test("drops legacy viewport and pixel scroll state", () => {
+    const result = normalizeStoredSessionView({
+      scroll: {
+        session: { x: 3, y: 240 },
+      },
+      viewportSnapshot: {
+        mode: "anchor",
+        anchorMessageId: "msg_anchor",
+        anchorOffsetPx: 9,
+        updatedAt: 99,
+      },
+      timelineMessageID: "msg_1",
+      pendingMessage: "msg_stale",
+      pendingMessageAt: 123,
+      sideChat: { opened: true },
+      reviewOpen: ["a", "a", 1],
+    })
+
+    expect(result).toEqual({
+      changed: true,
+      view: {
+        scroll: {},
+        viewportSnapshot: undefined,
+        turnStart: undefined,
+        reviewEnabled: undefined,
+        summaryCard: undefined,
+        reviewOpen: ["a"],
+        browser: undefined,
+      },
+    })
+  })
+
+  test("drops invalid viewport snapshot payloads", () => {
+    const result = normalizeStoredSessionView({
+      scroll: {
+        session: { x: 1, y: 2 },
+      },
+      viewportSnapshot: {
+        mode: "anchor",
+        anchorMessageId: "",
+        anchorOffsetPx: "bad",
+      },
+    })
+
+    expect(result).toEqual({
+      changed: true,
+      view: {
+        scroll: {},
+        viewportSnapshot: undefined,
+        turnStart: undefined,
+        reviewEnabled: undefined,
+        summaryCard: undefined,
+        reviewOpen: undefined,
+        browser: undefined,
+      },
+    })
+  })
+
+  test("keeps explicit review enabled state", () => {
+    const result = normalizeStoredSessionView({
+      scroll: {
+        session: { x: 1, y: 2 },
+      },
+      reviewEnabled: true,
+    })
+
+    expect(result).toEqual({
+      changed: true,
+      view: {
+        scroll: {},
+        viewportSnapshot: undefined,
+        turnStart: undefined,
+        reviewEnabled: true,
+        summaryCard: undefined,
+        reviewOpen: undefined,
+        browser: undefined,
+      },
+    })
+  })
+
+  test("keeps a complete V3 anchor snapshot", () => {
+    const result = normalizeStoredSessionView({
+      scroll: { review: { x: 1, y: 2 } },
+      viewportSnapshot: {
+        version: 3,
+        mode: "anchor",
+        assistantRevision: "msg-2\nidle",
+        historyTurnStart: 3,
+        anchorBlockId: "msg-1:part-1",
+        anchorTurnId: "msg-1",
+        anchorOffsetPx: 24,
+        updatedAt: 44,
+      },
+    })
+
+    expect(result).toEqual({
+      changed: false,
+      view: {
+        scroll: { review: { x: 1, y: 2 } },
+        viewportSnapshot: {
+          version: 3,
+          mode: "anchor",
+          assistantRevision: "msg-2\nidle",
+          historyTurnStart: 3,
+          anchorBlockId: "msg-1:part-1",
+          anchorTurnId: "msg-1",
+          anchorOffsetPx: 24,
+          updatedAt: 44,
+        },
+        turnStart: undefined,
+        reviewEnabled: undefined,
+        summaryCard: undefined,
+        reviewOpen: undefined,
+        browser: undefined,
+      },
+    })
+  })
+
+  test("keeps explicit summary card state", () => {
+    const result = normalizeStoredSessionView({
+      scroll: {},
+      summaryCard: false,
+    })
+
+    expect(result).toEqual({
+      changed: false,
+      view: {
+        scroll: {},
+        viewportSnapshot: undefined,
+        sessionState: undefined,
+        turnStart: undefined,
+        reviewEnabled: undefined,
+        summaryCard: false,
+        reviewOpen: undefined,
+        browser: undefined,
+      },
+    })
   })
 })

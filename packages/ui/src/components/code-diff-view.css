@@ -1,0 +1,45 @@
+.monaco-editor .lfcode-code-diff-line-highlight {
+  background: transparent;
+}
+
+[data-slot="code-diff-inline-comment"] {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 18px 10px 56px;
+  box-sizing: border-box;
+}
+
+[data-slot="code-diff-inline-comment"] [data-component="line-comment"][data-inline] {
+  width: min(100%, 720px);
+  margin-left: auto;
+}
+
+[data-slot="code-diff-inline-comment"] [data-component="line-comment"][data-inline] [data-slot="line-comment-popover"] {
+  box-shadow: var(--shadow-xs-border);
+}
+
+.monaco-editor .lfcode-code-diff-hover-utility {
+  transform: translate(-36px, 1px);
+  z-index: 3;
+}
+
+.monaco-editor .lfcode-code-diff-line-commented {
+  background: color-mix(in srgb, var(--icon-diff-modified-base) 14%, transparent);
+}
+
+.monaco-editor .lfcode-code-diff-line-selected {
+  background: color-mix(in srgb, var(--surface-base-active) 78%, transparent);
+  box-shadow: inset 2px 0 0 var(--border-strong-base);
+}
+
+.monaco-editor .lfcode-code-diff-line-commented.lfcode-code-diff-line-selected {
+  background: color-mix(in srgb, var(--surface-base-active) 64%, var(--icon-diff-modified-base) 36%);
+}
+
+.monaco-editor .margin .lfcode-code-diff-gutter-commented {
+  border-left: 2px solid var(--icon-diff-modified-base);
+}
+
+.monaco-editor .margin .lfcode-code-diff-gutter-selected {
+  border-left: 2px solid var(--text-strong);
+}

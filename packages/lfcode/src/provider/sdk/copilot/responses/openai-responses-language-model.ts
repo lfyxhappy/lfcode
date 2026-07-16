@@ -1571,8 +1571,8 @@ const openaiResponsesChunkSchema = z.union([
 
 type OpenAIResponsesChunk = z.infer<typeof openaiResponsesChunkSchema>
 
-function createZodJsonResponseHandler<Schema extends z.core.$ZodType>(schema: Schema) {
-  return createJsonResponseHandler<z.output<Schema>>(schema)
+function createZodJsonResponseHandler<Output>(schema: z.core.$ZodType<Output, unknown>) {
+  return createJsonResponseHandler<Output>(schema)
 }
 
 type ExtractByType<T, K extends T extends { type: infer U } ? U : never> = T extends { type: K } ? T : never

@@ -57,7 +57,7 @@ function supportsAvx2() {
   if (platform === "windows") {
     const command =
       '(Add-Type -MemberDefinition "[DllImport(""kernel32.dll"")] public static extern bool IsProcessorFeaturePresent(int ProcessorFeature);" -Name Kernel32 -Namespace Win32 -PassThru)::IsProcessorFeaturePresent(40)'
-    for (const executable of ["powershell.exe", "pwsh.exe", "pwsh", "powershell"]) {
+    for (const executable of ["pwsh.exe", "pwsh"]) {
       try {
         const result = childProcess.spawnSync(executable, ["-NoProfile", "-NonInteractive", "-Command", command], {
           encoding: "utf8",

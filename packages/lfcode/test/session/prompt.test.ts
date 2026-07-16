@@ -2,7 +2,7 @@ import path from "path"
 import { describe, expect, test } from "bun:test"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { fileURLToPath } from "url"
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
@@ -315,6 +315,223 @@ describe("session.prompt regression", () => {
             }),
           ),
       })
+    } finally {
+      void server.stop(true)
+    }
+  })
+
+  test("new user turn is not short-circuited by the previous completed assistant", async () => {
+    let calls = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url)
+        if (!url.pathname.endsWith("/chat/completions")) {
+          return new Response("not found", { status: 404 })
+        }
+        calls++
+        return new Response(chat(calls === 1 ? "first-reply" : "second-reply"), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        init: async (dir) => {
+          await Bun.write(
+            path.join(dir, "lfcode.json"),
+            JSON.stringify({
+              $schema: "https://lfcode.ai/config.json",
+              enabled_providers: ["alibaba"],
+              provider: {
+                alibaba: {
+                  options: {
+                    apiKey: "test-key",
+                    baseURL: `${server.url.origin}/v1`,
+                  },
+                },
+              },
+              agent: {
+                build: {
+                  model: "alibaba/qwen-plus",
+                },
+              },
+            }),
+          )
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const prompt = yield* SessionPrompt.Service
+              const sessions = yield* Session.Service
+              const session = yield* sessions.create({ title: "Second turn regression" })
+
+              const first = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "first question" }],
+              })
+              expect(first.info.role).toBe("assistant")
+
+              const second = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "second question" }],
+              })
+              expect(second.info.role).toBe("assistant")
+              expect(second.parts.some((part) => part.type === "text" && part.text.includes("second-reply"))).toBe(
+                true,
+              )
+
+              const msgs = yield* sessions.messages({ sessionID: session.id })
+              expect(msgs.filter((msg) => msg.info.role === "assistant")).toHaveLength(2)
+              expect(calls).toBe(2)
+            }),
+          ),
+      })
+    } finally {
+      void server.stop(true)
+    }
+  })
+
+  test("delivery=steer while busy is merged into the next LLM input without starting a concurrent run", async () => {
+    const ready = defer<void>()
+    const release = defer<void>()
+    const requests: any[] = []
+    let calls = 0
+    const held = () => {
+      const encoder = new TextEncoder()
+      const first = `data: ${JSON.stringify({
+        id: "chatcmpl-1",
+        object: "chat.completion.chunk",
+        choices: [{ delta: { role: "assistant" } }],
+      })}\n\n`
+      const rest =
+        [
+          `data: ${JSON.stringify({
+            id: "chatcmpl-1",
+            object: "chat.completion.chunk",
+            choices: [{ delta: { content: "late" } }],
+          })}`,
+          `data: ${JSON.stringify({
+            id: "chatcmpl-1",
+            object: "chat.completion.chunk",
+            choices: [{ delta: {}, finish_reason: "stop" }],
+          })}`,
+          "data: [DONE]",
+        ].join("\n\n") + "\n\n"
+
+      return new ReadableStream<Uint8Array>({
+        start(ctrl) {
+          ctrl.enqueue(encoder.encode(first))
+          ready.resolve()
+          void release.promise.then(() => {
+            ctrl.enqueue(encoder.encode(rest))
+            ctrl.close()
+          })
+        },
+      })
+    }
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url)
+        if (!url.pathname.endsWith("/chat/completions")) {
+          return new Response("not found", { status: 404 })
+        }
+        requests.push(await req.json())
+        calls++
+        if (calls === 1) {
+          return new Response(held(), {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          })
+        }
+        return new Response(chat("second-reply"), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        init: async (dir) => {
+          await Bun.write(
+            path.join(dir, "lfcode.json"),
+            JSON.stringify({
+              $schema: "https://lfcode.ai/config.json",
+              enabled_providers: ["alibaba"],
+              provider: {
+                alibaba: {
+                  options: {
+                    apiKey: "test-key",
+                    baseURL: `${server.url.origin}/v1`,
+                  },
+                },
+              },
+              agent: {
+                build: {
+                  model: "alibaba/qwen-plus",
+                },
+              },
+            }),
+          )
+        },
+      })
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const prompt = yield* SessionPrompt.Service
+              const sessions = yield* Session.Service
+              const session = yield* sessions.create({ title: "Steer regression" })
+
+              const running = yield* prompt
+                .prompt({
+                  sessionID: session.id,
+                  agent: "build",
+                  parts: [{ type: "text", text: "first question" }],
+                })
+                .pipe(Effect.forkChild)
+
+              yield* Effect.promise(() => ready.promise)
+
+              const steer = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                delivery: "steer",
+                parts: [{ type: "text", text: "second steer" }],
+              })
+
+              expect(steer.info.role).toBe("user")
+              release.resolve()
+
+              const result = yield* Fiber.join(running)
+              expect(result.info.role).toBe("assistant")
+              expect(result.parts.some((part) => part.type === "text" && part.text.includes("second-reply"))).toBe(true)
+
+              const msgs = yield* sessions.messages({ sessionID: session.id })
+              expect(msgs.filter((msg) => msg.info.role === "user")).toHaveLength(2)
+              expect(calls).toBe(2)
+            }),
+          ),
+      })
+
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain(
+        "The user sent the following follow-up message(s) while you were working:",
+      )
+      expect(JSON.stringify(requests.at(-1)?.messages)).toContain("second steer")
     } finally {
       void server.stop(true)
     }

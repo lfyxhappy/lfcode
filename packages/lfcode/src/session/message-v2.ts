@@ -4,19 +4,21 @@ import z from "zod"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, RetryError, type ModelMessage, type UIMessage } from "ai"
 import { LSP } from "../lsp"
-import { Snapshot } from "@/snapshot"
 import { SyncEvent } from "../sync"
-import { Database, NotFoundError, and, desc, eq, inArray, lt, or } from "@/storage"
+import { Database, NotFoundError, and, asc, desc, eq, gt, gte, inArray, lt, lte, or, sql } from "@/storage"
+import { Vcs } from "../project"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import { ProviderError } from "@/provider"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
+import { Log } from "@/util"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect } from "effect"
 import { EffectLogger } from "@/effect"
+import { hydrateStoredPart } from "./part-blob"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -27,6 +29,7 @@ interface FetchDecompressionError extends Error {
 
 export const SYNTHETIC_ATTACHMENT_PROMPT = "Attached image(s) from tool result:"
 export { isMedia }
+const log = Log.create({ service: "session.message-v2" })
 
 export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
 export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
@@ -186,6 +189,15 @@ export const FilePart = PartBase.extend({
   mime: z.string(),
   filename: z.string().optional(),
   url: z.string(),
+  blob: z
+    .object({
+      mode: z.literal("blob"),
+      sha256: z.string(),
+      bytes: z.number().int().nonnegative(),
+      path: z.string(),
+      mime: z.string(),
+    })
+    .optional(),
   source: FilePartSource.optional(),
 }).meta({
   ref: "FilePart",
@@ -288,6 +300,8 @@ export const StepFinishPart = PartBase.extend({
       start: z.number(),
       end: z.number(),
       ttft: z.number().nullable(),
+      submit_to_first_delta: z.number().nullable().optional(),
+      pre_stream: z.number().nullable().optional(),
     })
     .optional(),
   cost: z.number(),
@@ -408,7 +422,7 @@ export const User = Base.extend({
     .object({
       title: z.string().optional(),
       body: z.string().optional(),
-      diffs: Snapshot.FileDiff.array(),
+      diffs: Vcs.FileDiff.array(),
     })
     .optional(),
   agent: z.string(),
@@ -581,15 +595,28 @@ const info = (row: typeof MessageTable.$inferSelect) =>
   }) as Info
 
 const part = (row: typeof PartTable.$inferSelect) =>
-  ({
+  hydrateStoredPart({
     ...row.data,
     id: row.id,
     sessionID: row.session_id,
     messageID: row.message_id,
-  }) as Part
+  } as Part)
 
 const older = (row: Cursor) =>
   or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
+
+const olderOrEqual = (row: Cursor) =>
+  or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lte(MessageTable.id, row.id)))
+
+const newer = (row: Cursor) =>
+  or(gt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), gt(MessageTable.id, row.id)))
+
+const atOrAfter = (row: Cursor) =>
+  or(gt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), gte(MessageTable.id, row.id)))
+
+const userRole = () => sql`json_extract(${MessageTable.data}, '$.role') = 'user'`
+
+const agentClause = (agentID?: string) => (agentID === "*" ? undefined : eq(MessageTable.agent_id, agentID ?? "main"))
 
 function hydrate(rows: (typeof MessageTable.$inferSelect)[]) {
   const ids = rows.map((row) => row.id)
@@ -623,10 +650,55 @@ function providerMeta(metadata: Record<string, any> | undefined) {
   return Object.keys(rest).length > 0 ? rest : undefined
 }
 
+function selectedTextMetadata(metadata: Record<string, any> | undefined) {
+  if (!metadata || !("lfcodeSelectedText" in metadata)) return []
+  const raw = metadata.lfcodeSelectedText
+  const values = Array.isArray(raw) ? raw : [raw]
+  return values.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const text = "text" in item && typeof item.text === "string" ? item.text.trim() : ""
+    if (!text) return []
+    const messageID = "messageID" in item && typeof item.messageID === "string" ? item.messageID : undefined
+    const selection =
+      "selection" in item && item.selection && typeof item.selection === "object"
+        ? {
+            startLine:
+              "startLine" in item.selection && typeof item.selection.startLine === "number"
+                ? item.selection.startLine
+                : undefined,
+            endLine:
+              "endLine" in item.selection && typeof item.selection.endLine === "number"
+                ? item.selection.endLine
+                : undefined,
+          }
+        : undefined
+    return [{ text, messageID, selection }]
+  })
+}
+
+function formatSelectedTextPrompt(
+  item: ReturnType<typeof selectedTextMetadata>[number],
+  index: number,
+  total: number,
+) {
+  const lines = [
+    total > 1 ? `[User selected text ${index + 1}]` : "[User selected text]",
+    item.messageID ? `Source message: ${item.messageID}` : undefined,
+    item.selection?.startLine && item.selection?.endLine
+      ? item.selection.startLine === item.selection.endLine
+        ? `Lines: ${item.selection.startLine}`
+        : `Lines: ${item.selection.startLine}-${item.selection.endLine}`
+      : undefined,
+    "Excerpt:",
+    item.text,
+  ]
+  return lines.filter((line) => line && line.trim().length > 0).join("\n")
+}
+
 export const toModelMessagesEffect = Effect.fnUntraced(function* (
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  options?: { stripMedia?: boolean; compactToolResults?: boolean },
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
@@ -698,6 +770,15 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             type: "text",
             text: part.text,
           })
+        if (part.type === "text" && !part.ignored) {
+          const selectedTexts = selectedTextMetadata(part.metadata)
+          selectedTexts.forEach((item, index) => {
+            userMessage.parts.push({
+              type: "text",
+              text: formatSelectedTextPrompt(item, index, selectedTexts.length),
+            })
+          })
+        }
         // text/plain and directory files are converted into text parts, ignore them
         if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
           if (options?.stripMedia && isMedia(part.mime)) {
@@ -768,8 +849,15 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
-            const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
-            const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+            const outputText = part.state.time.compacted
+              ? "[Old tool result content cleared]"
+              : options?.compactToolResults
+                ? "[Tool result omitted during compaction]"
+                : part.state.output
+            const attachments =
+              part.state.time.compacted || options?.stripMedia || options?.compactToolResults
+                ? []
+                : (part.state.attachments ?? [])
 
             // For providers that don't support media in tool results, extract media files
             // (images, PDFs) to be sent as a separate user message
@@ -885,7 +973,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 export function toModelMessages(
   input: WithParts[],
   model: Provider.Model,
-  options?: { stripMedia?: boolean },
+  options?: { stripMedia?: boolean; compactToolResults?: boolean },
 ): Promise<ModelMessage[]> {
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
@@ -895,14 +983,11 @@ export function page(input: { sessionID: SessionID; limit: number; before?: stri
   // Slice contract: agentID `undefined` (default) ⇒ main slice only;
   // `"*"` ⇒ every slice (full-stream opt-out for export/stats/share/etc.);
   // any other string ⇒ that subagent's actorID slice.
-  const agentClause =
-    input.agentID === "*"
-      ? undefined
-      : eq(MessageTable.agent_id, input.agentID ?? "main")
+  const agent = agentClause(input.agentID)
   const where = and(
     eq(MessageTable.session_id, input.sessionID),
     ...(before ? [older(before)] : []),
-    ...(agentClause ? [agentClause] : []),
+    ...(agent ? [agent] : []),
   )
   const rows = Database.use((db) =>
     db
@@ -936,6 +1021,58 @@ export function page(input: { sessionID: SessionID; limit: number; before?: stri
   }
 }
 
+export function turnWindow(input: { sessionID: SessionID; messageID?: MessageID; turns?: number; agentID?: string }) {
+  const agent = agentClause(input.agentID)
+  const base = [eq(MessageTable.session_id, input.sessionID), ...(agent ? [agent] : [])]
+  const target = Database.use((db) =>
+    db
+      .select({ id: MessageTable.id, time: MessageTable.time_created })
+      .from(MessageTable)
+      .where(
+        and(
+          ...base,
+          userRole(),
+          ...(input.messageID ? [eq(MessageTable.id, input.messageID)] : []),
+        ),
+      )
+      .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+      .limit(1)
+      .get(),
+  )
+  if (!target) return [] as WithParts[]
+
+  const starts = Database.use((db) =>
+    db
+      .select({ id: MessageTable.id, time: MessageTable.time_created })
+      .from(MessageTable)
+      .where(and(...base, userRole(), olderOrEqual(target)))
+      .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+      .limit(Math.max(1, Math.floor(input.turns ?? 1)))
+      .all(),
+  )
+  const start = starts.at(-1) ?? target
+  const next = Database.use((db) =>
+    db
+      .select({ id: MessageTable.id, time: MessageTable.time_created })
+      .from(MessageTable)
+      .where(and(...base, userRole(), newer(target)))
+      .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+      .limit(1)
+      .get(),
+  )
+
+  return hydrate(
+    Database.use((db) =>
+      db
+        .select()
+        .from(MessageTable)
+        .where(and(...base, atOrAfter(start), ...(next ? [older(next)] : [])))
+        .orderBy(asc(MessageTable.time_created), asc(MessageTable.id))
+        .all(),
+    ),
+  )
+}
+
 /**
  * Iterate session messages oldest-last (caller usually reverses).
  *
@@ -962,14 +1099,13 @@ export function parts(message_id: MessageID) {
   const rows = Database.use((db) =>
     db.select().from(PartTable).where(eq(PartTable.message_id, message_id)).orderBy(PartTable.id).all(),
   )
-  return rows.map(
-    (row) =>
-      ({
-        ...row.data,
-        id: row.id,
-        sessionID: row.session_id,
-        messageID: row.message_id,
-      }) as Part,
+  return rows.map((row) =>
+    hydrateStoredPart({
+      ...row.data,
+      id: row.id,
+      sessionID: row.session_id,
+      messageID: row.message_id,
+    } as Part),
   )
 }
 
@@ -992,36 +1128,204 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   const result = [] as WithParts[]
   for (const msg of msgs) {
     result.push(msg)
-    if (msg.info.role === "user" && msg.parts.some((p) => p.type === "checkpoint" || p.type === "compaction")) break
+    if (msg.info.role === "user" && msg.parts.some((part) => part.type === "checkpoint" || part.type === "compaction")) break
   }
   result.reverse()
   return result
 }
 
-export const filterCompactedEffect = Effect.fnUntraced(function* (
+export type ContinuationBoundaryKind = "checkpoint" | "compaction"
+
+export type ContinuationContext = {
+  messages: WithParts[]
+  source: "raw" | ContinuationBoundaryKind
+  fallbackReason?: string
+  boundary?: {
+    messageID: MessageID
+    kind: ContinuationBoundaryKind
+    valid: boolean
+    reason?: string
+  }
+}
+
+function isLaterMessage(a: WithParts, b: WithParts) {
+  if (a.info.time.created !== b.info.time.created) return a.info.time.created > b.info.time.created
+  return a.info.id > b.info.id
+}
+
+function chronologicalMessages(messages: WithParts[]) {
+  if (messages.length < 2) return [...messages]
+  return isLaterMessage(messages[0], messages.at(-1)!) ? [...messages].reverse() : [...messages]
+}
+
+function hasVisibleText(parts: Part[]) {
+  return parts.some((part) => part.type === "text" && !!part.text.trim())
+}
+
+function hasCheckpointBody(msg: WithParts) {
+  const checkpointIndex = msg.parts.findIndex((part) => part.type === "checkpoint")
+  if (checkpointIndex < 0) return false
+  return msg.parts.slice(checkpointIndex + 1).some((part) => part.type === "text" && !!part.text.trim())
+}
+
+function hasCompactionSummary(messages: WithParts[], boundaryIndex: number) {
+  return messages.slice(boundaryIndex + 1).some((msg) => msg.info.role === "assistant" && hasVisibleText(msg.parts))
+}
+
+function describeBoundaryFallback(boundary: NonNullable<ContinuationContext["boundary"]>) {
+  return `${boundary.kind}: ${boundary.reason ?? "invalid continuation boundary"}`
+}
+
+export function selectContinuationMessages(messages: WithParts[]): ContinuationContext {
+  const ordered = chronologicalMessages(messages)
+  let latestInvalidBoundary: ContinuationContext["boundary"] | undefined
+
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const msg = ordered[i]
+    if (msg.info.role !== "user") continue
+
+    if (msg.parts.some((part) => part.type === "checkpoint")) {
+      if (!hasCheckpointBody(msg)) {
+        log.info("continuation_boundary_invalid", {
+          sessionID: msg.info.sessionID,
+          messageID: msg.info.id,
+          kind: "checkpoint",
+          reason: "missing checkpoint rebuild body",
+        })
+        latestInvalidBoundary ??= {
+          messageID: msg.info.id,
+          kind: "checkpoint",
+          valid: false,
+          reason: "missing checkpoint rebuild body",
+        }
+        continue
+      }
+      return {
+        messages: ordered.slice(i),
+        source: "checkpoint",
+        fallbackReason: latestInvalidBoundary ? describeBoundaryFallback(latestInvalidBoundary) : undefined,
+        boundary: {
+          messageID: msg.info.id,
+          kind: "checkpoint",
+          valid: true,
+        },
+      }
+    }
+
+    if (msg.parts.some((part) => part.type === "compaction")) {
+      const hasSummary = hasCompactionSummary(ordered, i)
+      if (!hasSummary) {
+        log.info("continuation_boundary_invalid", {
+          sessionID: msg.info.sessionID,
+          messageID: msg.info.id,
+          kind: "compaction",
+          reason: "missing summary assistant after compaction boundary",
+        })
+        latestInvalidBoundary ??= {
+          messageID: msg.info.id,
+          kind: "compaction",
+          valid: false,
+          reason: "missing summary assistant after compaction boundary",
+        }
+        continue
+      }
+      return {
+        messages: ordered.slice(i),
+        source: "compaction",
+        fallbackReason: latestInvalidBoundary ? describeBoundaryFallback(latestInvalidBoundary) : undefined,
+        boundary: {
+          messageID: msg.info.id,
+          kind: "compaction",
+          valid: true,
+        },
+      }
+    }
+  }
+
+  if (latestInvalidBoundary) {
+    return {
+      messages: ordered,
+      source: "raw",
+      fallbackReason: describeBoundaryFallback(latestInvalidBoundary),
+      boundary: latestInvalidBoundary,
+    }
+  }
+
+  return { messages: ordered, source: "raw", fallbackReason: "no continuation boundary" }
+}
+
+export const loadContinuationContextEffect = Effect.fnUntraced(function* (
   sessionID: SessionID,
   options?: { contextFrom?: SessionID; contextWatermark?: MessageID; agentID?: string },
 ) {
-  const ownMessages = filterCompacted(stream(sessionID, { agentID: options?.agentID }))
-
-  if (!options?.contextFrom) return ownMessages
+  const ownContext = selectContinuationMessages(Array.from(stream(sessionID, { agentID: options?.agentID })))
+  const ownMessages = ownContext.messages
+  if (!options?.contextFrom) {
+    return {
+      messages: ownMessages,
+      own: ownContext,
+    }
+  }
 
   // Load parent messages up to the watermark. Inherited parent context is
   // always scoped to the parent's main thread (agent_id = 'main') — subagent
   // siblings on the parent must not leak into a child session/subagent.
   const parentStream = stream(options.contextFrom, { agentID: "main" })
-  const parentFiltered = filterCompacted(parentStream)
+  const parentContext = selectContinuationMessages(Array.from(parentStream))
+  const parentFiltered = parentContext.messages
 
   // If watermark is set, truncate parent messages at the watermark point
   if (options.contextWatermark) {
     const watermarkIdx = parentFiltered.findIndex((msg) => msg.info.id === options.contextWatermark)
     if (watermarkIdx >= 0) {
-      return [...parentFiltered.slice(0, watermarkIdx + 1), ...ownMessages]
+      return {
+        messages: [...parentFiltered.slice(0, watermarkIdx + 1), ...ownMessages],
+        own: ownContext,
+        parent: parentContext,
+      }
     }
   }
 
   // Fallback: use all parent messages
-  return [...parentFiltered, ...ownMessages]
+  return {
+    messages: [...parentFiltered, ...ownMessages],
+    own: ownContext,
+    parent: parentContext,
+  }
+})
+
+export const filterCompactedEffect = Effect.fnUntraced(function* (
+  sessionID: SessionID,
+  options?: { contextFrom?: SessionID; contextWatermark?: MessageID; agentID?: string },
+) {
+  const loaded = yield* loadContinuationContextEffect(sessionID, options)
+
+  log.info("continuation_context_loaded", {
+    sessionID,
+    agentID: options?.agentID ?? "main",
+    source: loaded.own.source,
+    boundaryType: loaded.own.boundary?.kind,
+    boundaryValid: loaded.own.boundary?.valid ?? false,
+    fallbackReason: loaded.own.fallbackReason,
+    messageCount: loaded.own.messages.length,
+    inherited: !!options?.contextFrom,
+  })
+
+  if (loaded.parent) {
+    log.info("continuation_context_loaded", {
+      sessionID,
+      agentID: "main",
+      source: loaded.parent.source,
+      boundaryType: loaded.parent.boundary?.kind,
+      boundaryValid: loaded.parent.boundary?.valid ?? false,
+      fallbackReason: loaded.parent.fallbackReason,
+      messageCount: loaded.parent.messages.length,
+      inheritedFrom: options?.contextFrom,
+      contextWatermark: options?.contextWatermark,
+    })
+  }
+
+  return loaded.messages
 })
 
 export function fromError(

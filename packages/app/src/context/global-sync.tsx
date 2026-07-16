@@ -5,6 +5,7 @@ import type {
   Project,
   ProviderAuthResponse,
   ProviderListResponse,
+  SessionStatus,
   Todo,
 } from "@lfcode-ai/sdk/v2/client"
 import { showToast } from "@lfcode-ai/ui/toast"
@@ -20,7 +21,9 @@ import { bootstrapDirectory, bootstrapGlobal, clearProviderRev } from "./global-
 import { createChildStoreManager } from "./global-sync/child-store"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./global-sync/event-reducer"
 import { createRefreshQueue } from "./global-sync/queue"
+import { mergeSessionGoal } from "./global-sync/session-goal"
 import { clearSessionPrefetchDirectory } from "./global-sync/session-prefetch"
+import { createSessionStatusReconciler } from "./global-sync/session-status-reconciler"
 import { estimateRootSessionTotal, loadRootSessionsWithFallback } from "./global-sync/session-load"
 import { trimSessions } from "./global-sync/session-trim"
 import type { ProjectMeta } from "./global-sync/types"
@@ -29,6 +32,7 @@ import { normalizeProviderList, sanitizeProject } from "./global-sync/utils"
 import { formatServerError } from "@/utils/server-errors"
 import { queryOptions, skipToken, useQueryClient } from "@tanstack/solid-query"
 import { normalizeWorkspacePath } from "@/utils/persist"
+import { isSessionStreaming } from "@/utils/session-status"
 
 type GlobalStore = {
   ready: boolean
@@ -179,6 +183,11 @@ function createGlobalSync() {
     return sdk
   }
 
+  const sessionStatus = createSessionStatusReconciler({
+    getClient: sdkFor,
+    getStore: (directory) => children.peek(directory, { bootstrap: false }),
+  })
+
   async function loadSessions(directory: string) {
     directory = normalizeWorkspacePath(directory)
     const pending = sessionLoads.get(directory)
@@ -231,6 +240,9 @@ function createGlobalSync() {
                   }),
                 )
                 setStore("session", reconcile(sessions, { key: "id" }))
+                for (const session of sessions) {
+                  setStore("session_goal", session.id, (prev) => mergeSessionGoal(prev, { goal: (session as any).goal }))
+                }
                 cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo)
               })
               sessionMeta.set(directory, { limit })
@@ -279,6 +291,7 @@ function createGlobalSync() {
         sdk,
         store: child[0],
         setStore: child[1],
+        onSessionStatusSnapshot: sessionStatus.refresh,
         vcsCache: cache,
         loadSessions,
         translate: language.t,
@@ -300,6 +313,11 @@ function createGlobalSync() {
     const recent = bootingRoot || Date.now() - bootedAt < 1500
 
     if (directory === "global") {
+      if (event.type === "server.connected") {
+        for (const childDirectory of Object.keys(children.children)) {
+          sessionStatus.refresh(childDirectory)
+        }
+      }
       applyGlobalEvent({
         event,
         project: globalStore.project,
@@ -333,11 +351,23 @@ function createGlobalSync() {
           })
       },
     })
+    if (event.type === "session.status") {
+      const props = event.properties as { sessionID: string; status: SessionStatus }
+      if (isSessionStreaming(props.status)) sessionStatus.markBusy(directory, props.sessionID)
+      if (!isSessionStreaming(props.status)) sessionStatus.stop(directory, props.sessionID)
+    }
+    if (event.type === "message.part.updated" || event.type === "message.part.delta") {
+      const props = event.properties as { sessionID: string }
+      sessionStatus.refresh(directory, props.sessionID)
+    }
   })
 
   onCleanup(unsub)
   onCleanup(() => {
     queue.dispose()
+  })
+  onCleanup(() => {
+    sessionStatus.dispose()
   })
   onCleanup(() => {
     for (const directory of Object.keys(children.children)) {
@@ -387,7 +417,6 @@ function createGlobalSync() {
   }
 
   async function reloadProviders() {
-    await globalSDK.client.global.dispose()
     await bootstrap()
     await refreshActiveProviders()
   }
@@ -446,11 +475,13 @@ function createGlobalSync() {
       return globalStore.error
     },
     child: children.child,
+    existing: children.existing,
     peek: children.peek,
     bootstrap,
     reloadProviders,
     updateConfig,
     project: projectApi,
+    sessionStatus,
     todo: {
       set: setSessionTodo,
     },

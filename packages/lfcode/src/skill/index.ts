@@ -24,6 +24,7 @@ export const Info = z.object({
   description: z.string(),
   location: z.string(),
   content: z.string(),
+  triggers: z.array(z.string()).optional(),
   hidden: z.boolean().optional(),
 })
 export type Info = z.infer<typeof Info>
@@ -89,7 +90,16 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
 
   if (!md) return
 
-  const parsed = Info.pick({ name: true, description: true, hidden: true }).safeParse(md.data)
+  const parsed = Info.pick({
+    name: true,
+    description: true,
+    triggers: true,
+    hidden: true,
+  })
+    .extend({
+      triggers: z.array(z.string()).or(z.string().transform((value) => [value])).optional(),
+    })
+    .safeParse(md.data)
   if (!parsed.success) return
 
   if (state.skills[parsed.data.name]) {
@@ -106,6 +116,11 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
     description: parsed.data.description,
     location: match,
     content: md.content,
+    triggers: normalizeTriggers(
+      parsed.data.triggers?.length
+        ? parsed.data.triggers
+        : inferTriggersFromDescription(parsed.data.description),
+    ),
     hidden: parsed.data.hidden,
   }
 })
@@ -239,6 +254,55 @@ export const defaultLayer = layer.pipe(
   Layer.provide(Bus.layer),
   Layer.provide(AppFileSystem.defaultLayer),
 )
+
+function normalizeTriggers(input: string[]) {
+  return input
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index)
+}
+
+function inferTriggersFromDescription(description: string) {
+  return Array.from(description.matchAll(/当用户(?:提到|要求|说|输入)?(.+?)时使用/gi))
+    .flatMap((match) => match[1]?.split(/[、，,；;]+/g) ?? [])
+    .map((item) =>
+      item
+        .replace(/^[:：\s]+/, "")
+        .replace(/[。！!？?]+$/g, "")
+        .trim(),
+    )
+    .filter((item) => item.length >= 2)
+}
+
+function normalizeTriggerText(input: string) {
+  return input
+    .toLowerCase()
+    .replace(/[`"'“”‘’]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function isWordLikeTrigger(input: string) {
+  return /^[a-z0-9][a-z0-9 _-]*$/i.test(input)
+}
+
+export function triggerTerms(skill: Pick<Info, "name" | "description" | "triggers">) {
+  const triggers = skill.triggers?.length ? skill.triggers : inferTriggersFromDescription(skill.description)
+  return normalizeTriggers(triggers)
+}
+
+export function matchesTriggerText(skill: Pick<Info, "name" | "description" | "triggers">, text: string) {
+  const normalizedText = normalizeTriggerText(text)
+  if (!normalizedText) return false
+
+  return triggerTerms(skill).some((trigger) => {
+    const normalizedTrigger = normalizeTriggerText(trigger)
+    if (!normalizedTrigger) return false
+    if (!isWordLikeTrigger(normalizedTrigger)) return normalizedText.includes(normalizedTrigger)
+    const escaped = normalizedTrigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, "i").test(normalizedText)
+  })
+}
 
 export function fmt(list: Info[], opts: { verbose: boolean }) {
   if (list.length === 0) return "No skills are currently available."

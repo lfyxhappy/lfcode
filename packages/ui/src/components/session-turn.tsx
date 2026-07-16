@@ -3,15 +3,19 @@ import {
   type SnapshotFileDiff,
   Message as MessageType,
   Part as PartType,
+  type UserMessage,
 } from "@lfcode-ai/sdk/v2/client"
 import type { SessionStatus } from "@lfcode-ai/sdk/v2"
 import { useData } from "../context"
 
 import { Binary } from "@lfcode-ai/shared/util/binary"
 import { getDirectory, getFilename } from "@lfcode-ai/shared/util/path"
-import { createMemo, For, ParentProps, Show } from "solid-js"
+import { createMemo, For, ParentProps, Show, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
+import type { RenderCodeBlockInput } from "./message-code-blocks"
+import type { HtmlComponentEventDetail } from "./markdown"
+import { isSessionTurnWorking } from "./session-turn-working"
 import { Card } from "./card"
 import { DiffChanges } from "./diff-changes"
 import { TextShimmer } from "./text-shimmer"
@@ -23,6 +27,8 @@ import { FileReference } from "./file-reference"
 import { FileReferenceProvider, type FileReferenceApp, type FileReferenceContextValue } from "../context/file-reference"
 import { inferFileReferenceKind } from "./file-reference-path"
 import { getTurnResponseMetricsLine } from "./session-turn-response-metrics"
+import { isComposeGateReminderMessage } from "./session-turn-error"
+import { getSessionTurnCompactionState } from "./session-turn-compaction"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -145,7 +151,18 @@ export function SessionTurn(
   props: ParentProps<{
     sessionID: string
     messageID: string
-    messages?: MessageType[]
+    turn?:
+      | {
+          message: UserMessage
+          assistantMessages: AssistantMessage[]
+        }
+      | (() =>
+          | {
+              message: UserMessage
+              assistantMessages: AssistantMessage[]
+            }
+          | undefined)
+    messages?: MessageType[] | (() => MessageType[])
     actions?: UserActions
     showReasoningSummaries?: boolean
     shellToolDefaultOpen?: boolean
@@ -153,6 +170,7 @@ export function SessionTurn(
     active?: boolean
     status?: SessionStatus
     onUserInteracted?: () => void
+    anchor?: (messageID: string) => string
     classes?: {
       root?: string
       content?: string
@@ -161,6 +179,8 @@ export function SessionTurn(
     fileReferences?: FileReferenceContextValue & {
       openWithApps?: FileReferenceApp[]
     }
+    onHtmlComponentEvent?: (detail: HtmlComponentEventDetail) => void
+    renderCodeBlock?: (input: RenderCodeBlockInput) => JSX.Element | undefined
   }>,
 ) {
   const data = useData()
@@ -172,7 +192,11 @@ export function SessionTurn(
   const emptyDiffs: SnapshotFileDiff[] = []
   const idle = { type: "idle" as const }
 
-  const allMessages = createMemo(() => props.messages ?? list(data.store.message?.[props.sessionID], emptyMessages))
+  const turn = createMemo(() => (typeof props.turn === "function" ? props.turn() : props.turn))
+  const allMessages = createMemo(() => {
+    const messages = typeof props.messages === "function" ? props.messages() : props.messages
+    return messages ?? list(data.store.message?.[props.sessionID], emptyMessages)
+  })
 
   const messageIndex = createMemo(() => {
     const messages = allMessages() ?? emptyMessages
@@ -188,6 +212,7 @@ export function SessionTurn(
   })
 
   const message = createMemo(() => {
+    if (turn()) return turn()!.message
     const index = messageIndex()
     if (index < 0) return undefined
 
@@ -198,7 +223,14 @@ export function SessionTurn(
     return msg
   })
 
+  const session = createMemo(() => {
+    const result = Binary.search(data.store.session, props.sessionID, (item) => item.id)
+    if (!result.found) return undefined
+    return data.store.session[result.index]
+  })
+
   const pending = createMemo(() => {
+    if (turn()) return
     if (typeof props.active === "boolean") return
     const messages = allMessages() ?? emptyMessages
     return messages.findLast(
@@ -230,7 +262,18 @@ export function SessionTurn(
     return list(data.store.part?.[msg.id], emptyParts)
   })
 
-  const compaction = createMemo(() => parts().find((part) => part.type === "checkpoint"))
+  const boundary = createMemo(() => parts().find((part) => part.type === "compaction" || part.type === "checkpoint"))
+
+  const latestCompactionBoundaryMessageID = createMemo(() => {
+    const messages = allMessages() ?? emptyMessages
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const candidate = messages[i]
+      if (!candidate || candidate.role !== "user") continue
+      const candidateParts = list(data.store.part?.[candidate.id], emptyParts)
+      if (candidateParts.some((part) => part.type === "compaction")) return candidate.id
+    }
+    return undefined
+  })
 
   const diffs = createMemo(() => {
     const files = message()?.summary?.diffs
@@ -261,6 +304,7 @@ export function SessionTurn(
 
   const assistantMessages = createMemo(
     () => {
+      if (turn()) return turn()!.assistantMessages
       const msg = message()
       if (!msg) return emptyAssistant
 
@@ -279,9 +323,30 @@ export function SessionTurn(
     { equals: same },
   )
 
+  const assistantParts = createMemo(() =>
+    assistantMessages().flatMap((item) => list(data.store.part?.[item.id], emptyParts)),
+  )
+
   const interrupted = createMemo(() => assistantMessages().some((m) => m.error?.name === "MessageAbortedError"))
+  const compactionState = createMemo(() =>
+    getSessionTurnCompactionState({
+      session: session(),
+      message: message(),
+      latestBoundaryMessageID: latestCompactionBoundaryMessageID(),
+      parts: parts(),
+      assistantMessageCount: assistantMessages().length,
+      assistantParts: assistantParts(),
+    }),
+  )
   const divider = createMemo(() => {
-    if (compaction()) return i18n.t("ui.messagePart.compaction")
+    const state = compactionState()
+    const boundaryPart = boundary()
+    if (state === "compacting") return i18n.t("ui.sessionTurn.compaction.compacting")
+    if (state === "compacted") {
+      if (boundaryPart?.type === "compaction" && boundaryPart.auto) return i18n.t("ui.sessionTurn.compaction.completed")
+      return i18n.t("ui.messagePart.compaction")
+    }
+    if (state === "failed") return i18n.t("ui.sessionTurn.compaction.failed")
     if (interrupted()) return i18n.t("ui.message.interrupted")
     return ""
   })
@@ -312,13 +377,20 @@ export function SessionTurn(
     // oxlint-disable-next-line no-base-to-string -- msg is unknown from error data, coercion is intentional
     return unwrap(String(msg))
   })
+  const errorVariant = createMemo(() => (isComposeGateReminderMessage(errorText()) ? "warning" : "error"))
 
   const status = createMemo(() => {
     if (props.status !== undefined) return props.status
     if (typeof props.active === "boolean" && !props.active) return idle
     return data.store.session_status[props.sessionID] ?? idle
   })
-  const working = createMemo(() => status().type !== "idle" && active())
+  const working = createMemo(() =>
+    isSessionTurnWorking({
+      status: status(),
+      active: typeof props.active === "boolean" ? props.active : undefined,
+      hasPendingAssistant: active(),
+    }),
+  )
   const showReasoningSummaries = createMemo(() => props.showReasoningSummaries ?? true)
   const fileReferenceContext = createMemo<FileReferenceContextValue | undefined>(() => {
     if (!props.fileReferences) return
@@ -393,6 +465,12 @@ export function SessionTurn(
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
   })
+  const showDiffSummary = createMemo(() => {
+    if (edited() <= 0) return false
+    if (working()) return false
+    if (status().type === "busy" || status().type === "retry") return false
+    return true
+  })
 
   const autoScroll = createAutoScroll({
     working,
@@ -417,7 +495,13 @@ export function SessionTurn(
               class={props.classes?.container}
             >
               <div data-slot="session-turn-message-content" aria-live="off">
-                <Message message={message()!} parts={parts()} actions={props.actions} />
+                <Message
+                  message={message()!}
+                  parts={parts()}
+                  actions={props.actions}
+                  onHtmlComponentEvent={props.onHtmlComponentEvent}
+                  renderCodeBlock={props.renderCodeBlock}
+                />
               </div>
               <Show when={divider()}>
                 <div data-slot="session-turn-compaction">
@@ -427,7 +511,8 @@ export function SessionTurn(
               <Show when={assistantMessages().length > 0}>
                 <div data-slot="session-turn-assistant-content" aria-hidden={working()}>
                   <AssistantParts
-                    messages={assistantMessages()}
+                    messages={assistantMessages}
+                    anchor={props.anchor}
                     showAssistantCopyPartID={assistantCopyPartID()}
                     turnDurationMs={turnDurationMs()}
                     responseMetricsLine={responseMetricsLine()}
@@ -435,6 +520,8 @@ export function SessionTurn(
                     showReasoningSummaries={showReasoningSummaries()}
                     shellToolDefaultOpen={props.shellToolDefaultOpen}
                     editToolDefaultOpen={props.editToolDefaultOpen}
+                    onHtmlComponentEvent={props.onHtmlComponentEvent}
+                    renderCodeBlock={props.renderCodeBlock}
                   />
                 </div>
               </Show>
@@ -452,7 +539,7 @@ export function SessionTurn(
                 </div>
               </Show>
               <SessionRetry status={status()} show={active()} />
-              <Show when={edited() > 0 && !working()}>
+              <Show when={showDiffSummary()}>
                 <div
                   data-slot="session-turn-diffs"
                   data-component="session-turn-diffs-group"
@@ -513,7 +600,7 @@ export function SessionTurn(
                 </div>
               </Show>
               <Show when={error()}>
-                <Card variant="error" class="error-card">
+                <Card variant={errorVariant()} class="error-card">
                   {errorText()}
                 </Card>
               </Show>

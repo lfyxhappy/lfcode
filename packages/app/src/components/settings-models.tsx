@@ -1,5 +1,6 @@
 import { useFilteredList } from "@lfcode-ai/ui/hooks"
 import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
+import { Button } from "@lfcode-ai/ui/button"
 import { Select } from "@lfcode-ai/ui/select"
 import { Switch } from "@lfcode-ai/ui/switch"
 import { Icon } from "@lfcode-ai/ui/icon"
@@ -10,13 +11,24 @@ import { showToast } from "@lfcode-ai/ui/toast"
 import { type Component, createMemo, createSignal, For, type JSX, Show } from "solid-js"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useGlobalSync } from "@/context/global-sync"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
 import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { formatServerError } from "@/utils/server-errors"
 import { DialogRemoveProvider } from "./dialog-delete-custom-provider"
+import { DialogModelDetectResult } from "./dialog-model-detect-result"
+import { DialogModelLimitEditor } from "./dialog-model-limit-editor"
+import { DialogSelectProvider } from "./dialog-select-provider"
 import { SettingsList } from "./settings-list"
-import { SUBAGENT_FIELDS, subagentModelPatch, subagentModelValue, type SubagentField } from "./settings-models-helpers"
+import {
+  SUBAGENT_FIELDS,
+  subagentModelPatch,
+  subagentModelValue,
+  type ModelDetectResult,
+  type ModelDetectState,
+  type SubagentField,
+} from "./settings-models-helpers"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
 type ConfigModelField = "model" | "small_model"
@@ -64,13 +76,20 @@ export const SettingsModels: Component = () => {
   const dialog = useDialog()
   const models = useModels()
   const globalSync = useGlobalSync()
+  const globalSDK = useGlobalSDK()
   const [saving, setSaving] = createSignal<ConfigModelField | SubagentField>()
+  const [detecting, setDetecting] = createSignal<Record<string, ModelDetectState>>({})
+  const [detectResults, setDetectResults] = createSignal<Record<string, ModelDetectResult>>({})
 
   const modelValue = (item: ModelItem) => `${item.provider.id}/${item.id}`
   const reopenSettingsModels = () => {
     void import("./dialog-settings").then((x) => {
       dialog.show(() => <x.DialogSettings defaultValue="models" />)
     })
+  }
+
+  const openDetectResult = (item: ModelItem, result: ModelDetectResult) => {
+    dialog.show(() => <DialogModelDetectResult modelName={item.name} result={result} />)
   }
 
   const baseOptions = createMemo<ModelOption[]>(() =>
@@ -208,6 +227,40 @@ export const SettingsModels: Component = () => {
       .finally(() => setSaving(undefined))
   }
 
+  const detectModel = async (item: ModelItem) => {
+    const key = `${item.provider.id}:${item.id}`
+    if (detecting()[key] === "running") return
+    setDetecting((prev) => ({ ...prev, [key]: "running" }))
+
+    try {
+      const result = await globalSDK.client.provider.model.detect({
+        providerID: item.provider.id,
+        modelID: item.id,
+      })
+      if (result.data) {
+        setDetectResults((prev) => ({ ...prev, [key]: result.data }))
+      }
+      setDetecting((prev) => ({ ...prev, [key]: result.data?.saved ? "success" : "error" }))
+      await globalSync.reloadProviders()
+      showToast({
+        variant: "success",
+        icon: "circle-check",
+        title: item.name,
+        description: result.data?.warnings?.length
+          ? result.data.warnings.join(" ")
+          : language.t("settings.models.toast.capabilities.description", { model: item.name }),
+      })
+      if (result.data) openDetectResult(item, result.data)
+      return
+    } catch (err) {
+      setDetecting((prev) => ({ ...prev, [key]: "error" }))
+      showToast({
+        title: language.t("common.requestFailed"),
+        description: formatServerError(err, language.t, language.t("common.requestFailed")),
+      })
+    }
+  }
+
   const list = useFilteredList<ModelItem>({
     items: (_filter) => models.list(),
     key: (x) => `${x.provider.id}:${x.id}`,
@@ -238,6 +291,18 @@ export const SettingsModels: Component = () => {
             <h2 class="text-16-medium text-text-strong">{language.t("settings.models.title")}</h2>
             <p class="pt-1 text-14-regular text-text-weak">{language.t("settings.models.description")}</p>
           </div>
+          <div class="flex justify-start">
+            <Button
+              size="large"
+              variant="secondary"
+              icon="plus-small"
+              onClick={() => {
+                dialog.show(() => <DialogSelectProvider returnTo="settings-models" />)
+              }}
+            >
+              {language.t("settings.models.action.addProvider")}
+            </Button>
+          </div>
           <div class="flex items-center gap-2 px-3 h-9 rounded-lg bg-surface-base">
             <Icon name="magnifying-glass" class="text-icon-weak-base flex-shrink-0" />
             <TextField
@@ -253,7 +318,7 @@ export const SettingsModels: Component = () => {
               class="flex-1"
             />
             <Show when={list.filter()}>
-              <IconButton icon="circle-x" variant="ghost" onClick={list.clear} />
+              <IconButton icon="circle-x" variant="ghost" aria-label={language.t("common.clearSearch")} onClick={list.clear} />
             </Show>
           </div>
         </div>
@@ -407,12 +472,54 @@ export const SettingsModels: Component = () => {
                     <For each={group.items}>
                       {(item) => {
                         const key = { providerID: item.provider.id, modelID: item.id }
+                        const detectKey = `${item.provider.id}:${item.id}`
                         return (
                           <div class="flex flex-wrap items-center justify-between gap-4 py-3 border-b border-border-weak-base last:border-none">
-                            <div class="min-w-0">
+                            <div class="min-w-0 flex-1">
                               <span class="text-14-regular text-text-strong truncate block">{item.name}</span>
                             </div>
-                            <div class="flex-shrink-0">
+                            <div class="flex flex-shrink-0 items-center gap-2">
+                              <Button
+                                size="small"
+                                variant="secondary"
+                                onClick={() =>
+                                  dialog.show(() => (
+                                    <DialogModelLimitEditor
+                                      providerID={item.provider.id}
+                                      providerName={item.provider.name}
+                                      modelID={item.id}
+                                      modelName={item.name}
+                                      current={{
+                                        context: item.limit?.context,
+                                        output: item.limit?.output,
+                                      }}
+                                    />
+                                  ))
+                                }
+                              >
+                                {language.t("settings.models.limitEditor.action")}
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="secondary"
+                                disabled={detecting()[detectKey] === "running"}
+                                onClick={() => {
+                                  const result = detectResults()[detectKey]
+                                  if (detecting()[detectKey] === "success" && result) {
+                                    openDetectResult(item, result)
+                                    return
+                                  }
+                                  void detectModel(item)
+                                }}
+                              >
+                                {detecting()[detectKey] === "running"
+                                  ? language.t("settings.models.detect.running")
+                                  : detecting()[detectKey] === "success"
+                                    ? language.t("settings.models.detect.success")
+                                    : detecting()[detectKey] === "error"
+                                      ? language.t("settings.models.detect.retry")
+                                      : language.t("settings.models.detect.action")}
+                              </Button>
                               <Switch
                                 checked={models.visible(key)}
                                 onChange={(checked) => {

@@ -67,6 +67,7 @@ export interface Interface {
   ) => Effect.Effect<void>
   readonly updateTurn: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   readonly get: (sessionID: SessionID, actorID: string) => Effect.Effect<Actor | undefined>
+  readonly remove: (sessionID: SessionID, actorID: string) => Effect.Effect<void>
   readonly listBySession: (sessionID: SessionID) => Effect.Effect<Actor[]>
   readonly listActive: () => Effect.Effect<Actor[]>
   readonly listByParent: (sessionID: SessionID, parentActorID: string) => Effect.Effect<Actor[]>
@@ -221,6 +222,18 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         ),
       )
       return row ? fromRow(row) : undefined
+    })
+
+    const remove = Effect.fn("ActorRegistry.remove")(function* (sessionID: SessionID, actorID: string) {
+      yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .delete(ActorRegistryTable)
+            .where(and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)))
+            .run(),
+        ),
+      )
+      yield* bus.publish(Events.ActorRemoved, { sessionID, actorID })
     })
 
     const listBySession = Effect.fn("ActorRegistry.listBySession")(function* (sessionID: SessionID) {
@@ -396,6 +409,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       updateStatus,
       updateTurn,
       get,
+      remove,
       listBySession,
       listActive,
       listByParent,

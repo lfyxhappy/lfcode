@@ -1,0 +1,18 @@
+Manage Lfcode's built-in local runtimes and dependency environment.
+
+Use this when the task is about installing, repairing, checking, or reviewing logs for managed runtimes such as:
+- Python managed environment
+- pip / Python tool prerequisites
+- C++ compiler toolchain
+- Java runtime or Java SDK
+- voice recorder / FFmpeg
+- OfficeCLI document runtime
+
+Rules:
+- Prefer this tool over ad-hoc shell downloads or manual environment surgery.
+- Start with `list` when you need to see what is missing or managed already.
+- Use `install` only for items that are missing or should move to the managed runtime.
+- Use `repair` for managed items that look broken or need to be refreshed.
+- Use `update` only for a runtime that exposes a verified release update channel.
+- Use `logs` when you need the recent install/repair/update history.
+- If an item is not supported by the managed runtime registry, say that clearly instead of guessing shell commands.

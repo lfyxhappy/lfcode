@@ -10,6 +10,134 @@ export interface Metadata {
   [key: string]: any
 }
 
+export type Kind =
+  | "file"
+  | "search"
+  | "execution"
+  | "automation"
+  | "task"
+  | "memory"
+  | "workflow"
+  | "agent"
+  | "system"
+  | "custom"
+
+export type Recovery = "none" | "retry" | "reread" | "alternative" | "user"
+export type LatencyClass = "instant" | "fast" | "io" | "network" | "long"
+
+export type DefinitionMetadata = {
+  kind: Kind
+  namespace: string
+  readOnly: boolean
+  recovery: Recovery
+  latencyClass: LatencyClass
+}
+
+export type ValidationErrorCategory = "schema" | "format" | "context" | "permission" | "runtime"
+
+export type ValidationError = {
+  type: "tool_error"
+  tool: string
+  category: ValidationErrorCategory
+  field?: string
+  expected?: string
+  retryable: boolean
+  recovery: string
+  message: string
+}
+
+export function defaultMetadata(id: string): DefinitionMetadata {
+  if (["read", "file_info", "tree", "archive_inspect", "edit_history"].includes(id)) {
+    return {
+      kind: id === "tree" || id === "file_info" ? "search" : "file",
+      namespace: "file",
+      readOnly: true,
+      recovery: "reread",
+      latencyClass: "io",
+    }
+  }
+  if (["search", "websearch", "codesearch", "grep", "glob"].includes(id)) {
+    return {
+      kind: "search",
+      namespace: id === "websearch" ? "web" : "file",
+      readOnly: true,
+      recovery: "retry",
+      latencyClass: id === "websearch" ? "network" : "io",
+    }
+  }
+  if (["apply_patch", "replace_range", "symbol_edit", "write", "edit"].includes(id)) {
+    return { kind: "file", namespace: "file", readOnly: false, recovery: "reread", latencyClass: "io" }
+  }
+  if (["shell", "bash", "python", "pip", "cpp", "runtime_manage", "background_job"].includes(id)) {
+    return {
+      kind: "execution",
+      namespace: "runtime",
+      readOnly: false,
+      recovery: "retry",
+      latencyClass: id === "background_job" ? "long" : "io",
+    }
+  }
+  if (["task", "goal", "create_goal", "get_goal", "update_goal", "workflow"].includes(id)) {
+    return {
+      kind: id === "workflow" ? "workflow" : "task",
+      namespace: "planning",
+      readOnly: id === "get_goal",
+      recovery: "retry",
+      latencyClass: "fast",
+    }
+  }
+  if (["actor", "app-control"].includes(id) || id.startsWith("app_")) {
+    return {
+      kind: "automation",
+      namespace: id.startsWith("app_") ? "app" : "agent",
+      readOnly: false,
+      recovery: "user",
+      latencyClass: "io",
+    }
+  }
+  if (["memory", "history", "skill"].includes(id)) {
+    return {
+      kind: id === "memory" ? "memory" : "system",
+      namespace: "context",
+      readOnly: id !== "skill",
+      recovery: "retry",
+      latencyClass: "io",
+    }
+  }
+  return { kind: "custom", namespace: "custom", readOnly: false, recovery: "user", latencyClass: "io" }
+}
+
+export function definitionMetadata(def: Pick<Def, "id" | "metadata">): DefinitionMetadata {
+  return def.metadata ?? defaultMetadata(def.id)
+}
+
+export function classifyValidationError(error: unknown): ValidationErrorCategory {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/permission|not permitted|denied|access/i.test(message)) return "permission"
+  if (/context|fresh read|stale|does not match|not found/i.test(message)) return "context"
+  if (/format|patch|parse|syntax/i.test(message)) return "format"
+  if (/invalid argument|schema|expected|required|unrecognized/i.test(message)) return "schema"
+  return "runtime"
+}
+
+export function formatValidationError(input: { tool: string; error: z.ZodError; recovery?: string }): string {
+  const issue = input.error.issues[0]
+  const field = issue?.path.length ? issue.path.join(".") : undefined
+  const detail = input.error.issues
+    .map((item) => `${item.path.length ? item.path.join(".") : "arguments"}: ${item.message}`)
+    .join("; ")
+  const value: ValidationError = {
+    type: "tool_error",
+    tool: input.tool,
+    category: "schema",
+    ...(field ? { field } : {}),
+    retryable: true,
+    recovery: input.recovery ?? "Correct only the reported field and do not repeat the same arguments unchanged.",
+    message: detail,
+  }
+  return [`[tool_error] ${JSON.stringify(value)}`, detail, `Recovery: ${value.recovery}`].join("\n")
+}
+
 // TODO: remove this hack
 export type DynamicDescription = (agent: Agent.Info) => Effect.Effect<string>
 
@@ -38,6 +166,7 @@ export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadat
   id: string
   description: string
   parameters: Parameters
+  metadata?: DefinitionMetadata
   execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: z.ZodError): string
   shell?: {
@@ -94,11 +223,14 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
           ...(ctx.callID ? { "tool.call_id": ctx.callID } : {}),
         }
         return Effect.gen(function* () {
-          yield* Effect.try({
+          const parsedArgs = yield* Effect.try({
             try: () => toolInfo.parameters.parse(args),
             catch: (error) => {
               if (error instanceof z.ZodError && toolInfo.formatValidationError) {
                 return new Error(toolInfo.formatValidationError(error), { cause: error })
+              }
+              if (error instanceof z.ZodError) {
+                return new Error(formatValidationError({ tool: id, error }), { cause: error })
               }
               return new Error(
                 `The ${id} tool was called with invalid arguments: ${error}.\nPlease rewrite the input so it satisfies the expected schema.`,
@@ -106,7 +238,7 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
               )
             },
           })
-          const result = yield* execute(args, ctx)
+          const result = yield* execute(parsedArgs, ctx)
           if (result.metadata.truncated !== undefined) {
             return result
           }
@@ -118,7 +250,7 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
             metadata: {
               ...result.metadata,
               truncated: truncated.truncated,
-              ...(truncated.truncated && { outputPath: truncated.outputPath }),
+              ...(truncated.truncated && { outputRef: truncated.outputRef }),
             },
           }
         }).pipe(Effect.orDie, Effect.withSpan("Tool.execute", { attributes: attrs }))
@@ -140,6 +272,14 @@ export function define<Parameters extends z.ZodType, Result extends Metadata, R,
     }),
     { id },
   )
+}
+
+export function defineStatic<Parameters extends z.ZodType, Result extends Metadata, ID extends string = string>(
+  id: ID,
+  parameters: Parameters,
+  init: Omit<DefWithoutID<Parameters, Result>, "parameters">,
+) {
+  return define(id, Effect.succeed({ ...init, parameters }))
 }
 
 export function init<P extends z.ZodType, M extends Metadata>(info: Info<P, M>): Effect.Effect<Def<P, M>> {

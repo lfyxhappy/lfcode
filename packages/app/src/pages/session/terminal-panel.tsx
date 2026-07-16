@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, on, onCleanup, onMount } from "solid-js"
+import { For, Show, createEffect, createMemo, on, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { Tabs } from "@lfcode-ai/ui/tabs"
@@ -16,12 +16,11 @@ import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useTerminal } from "@/context/terminal"
 import { terminalTabLabel } from "@/pages/session/terminal-label"
-import { createSizing, focusTerminalById } from "@/pages/session/helpers"
+import { createSizing } from "@/pages/session/helpers"
 import { getTerminalHandoff, setTerminalHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
 
 export function TerminalPanel() {
-  const delays = [120, 240]
   const layout = useLayout()
   const terminal = useTerminal()
   const language = useLanguage()
@@ -72,40 +71,6 @@ export function TerminalPanel() {
         if (prevCount === undefined || prevCount <= 0 || count !== 0) return
         if (!opened()) return
         close()
-      },
-    ),
-  )
-
-  const focus = (id: string) => {
-    focusTerminalById(id)
-
-    const frame = requestAnimationFrame(() => {
-      if (!opened()) return
-      if (terminal.active() !== id) return
-      focusTerminalById(id)
-    })
-
-    const timers = delays.map((ms) =>
-      window.setTimeout(() => {
-        if (!opened()) return
-        if (terminal.active() !== id) return
-        focusTerminalById(id)
-      }, ms),
-    )
-
-    return () => {
-      cancelAnimationFrame(frame)
-      for (const timer of timers) clearTimeout(timer)
-    }
-  }
-
-  createEffect(
-    on(
-      () => [opened(), terminal.active()] as const,
-      ([next, id]) => {
-        if (!next || !id) return
-        const stop = focus(id)
-        onCleanup(stop)
       },
     ),
   )
@@ -165,13 +130,6 @@ export function TerminalPanel() {
 
   const handleTerminalDragEnd = () => {
     setStore("activeDraggable", undefined)
-
-    const activeId = terminal.active()
-    if (!activeId) return
-    requestAnimationFrame(() => {
-      if (terminal.active() !== activeId) return
-      focusTerminalById(activeId)
-    })
   }
 
   return (
@@ -278,7 +236,7 @@ export function TerminalPanel() {
                           <div id={`terminal-wrapper-${id}`} class="absolute inset-0">
                             <Terminal
                               pty={pty()}
-                              autoFocus={opened()}
+                              autoFocus={false}
                               onConnect={() => ops.trim(id)}
                               onCleanup={ops.update}
                               onConnectError={() => ops.clone(id)}

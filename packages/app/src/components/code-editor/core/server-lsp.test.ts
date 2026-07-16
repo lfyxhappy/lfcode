@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
+  getCodeEditorServerLspRegistryKey,
   getCodeEditorFilePathFromUri,
   shouldAcceptCodeEditorCompletionResult,
+  shouldAcceptCodeEditorServerLspResult,
   shouldUseCodeEditorServerLsp,
 } from "./server-lsp"
 
@@ -20,6 +22,50 @@ describe("code editor server LSP", () => {
     expect(shouldAcceptCodeEditorCompletionResult({ aborted: false, expectedVersion: 12, currentVersion: 12 })).toBe(true)
     expect(shouldAcceptCodeEditorCompletionResult({ aborted: true, expectedVersion: 12, currentVersion: 12 })).toBe(false)
     expect(shouldAcceptCodeEditorCompletionResult({ aborted: false, expectedVersion: 12, currentVersion: 13 })).toBe(false)
+  })
+
+  test("shares provider registrations by endpoint, directory, and language rather than file path", () => {
+    const keys = ["C:/workspace/main.ts", "C:/workspace/other.ts"].map(() =>
+      getCodeEditorServerLspRegistryKey({
+        serverURL: "http://127.0.0.1:4096",
+        directory: "C:/workspace",
+        language: "typescript",
+      }),
+    )
+    const otherLanguage = getCodeEditorServerLspRegistryKey({
+      serverURL: "http://127.0.0.1:4096",
+      directory: "C:/workspace",
+      language: "python",
+    })
+
+    expect(new Set(keys).size).toBe(1)
+    expect(keys[0]).not.toContain("main.ts")
+    expect(keys[0]).not.toBe(otherLanguage)
+  })
+
+  test("rejects provider results after a revision, model version, or path binding changes", () => {
+    const stamp = { key: "lfcode-editor://model/C:/workspace/main.ts", revision: 4, modelVersion: 12 }
+    const accepted = {
+      aborted: false,
+      expectedVersion: 12,
+      currentVersion: 12,
+      expectedPath: "C:/workspace/main.ts",
+      currentPath: "C:/workspace/main.ts",
+      pathIsRegistered: true,
+      expectedStamp: stamp,
+      currentStamp: stamp,
+    }
+
+    expect(shouldAcceptCodeEditorServerLspResult(accepted)).toBe(true)
+    expect(
+      shouldAcceptCodeEditorServerLspResult({
+        ...accepted,
+        currentStamp: { ...stamp, revision: 5 },
+      }),
+    ).toBe(false)
+    expect(shouldAcceptCodeEditorServerLspResult({ ...accepted, currentVersion: 13 })).toBe(false)
+    expect(shouldAcceptCodeEditorServerLspResult({ ...accepted, currentPath: "C:/workspace/other.ts" })).toBe(false)
+    expect(shouldAcceptCodeEditorServerLspResult({ ...accepted, pathIsRegistered: false })).toBe(false)
   })
 
   test("uses the server LSP for project-aware TypeScript and JavaScript semantics", () => {

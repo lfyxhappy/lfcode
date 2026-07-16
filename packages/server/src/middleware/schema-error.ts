@@ -15,9 +15,9 @@ export class SchemaErrorMiddleware extends HttpApiMiddleware.Service<SchemaError
 ) {}
 
 export const schemaErrorLayer = HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrorMiddleware, (error) => {
-  const reason = truncateReason(error.cause.message)
+  const reason = truncateReason(error.message)
   return Effect.logWarning("schema rejection").pipe(
-    Effect.annotateLogs({ kind: error.kind, reason }),
-    Effect.andThen(Effect.fail(new InvalidRequestError({ message: reason, kind: error.kind }))),
+    Effect.annotateLogs({ kind: error._tag, reason }),
+    Effect.andThen(Effect.fail(new InvalidRequestError({ message: reason, kind: error._tag }))),
   )
 })

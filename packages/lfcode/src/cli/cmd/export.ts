@@ -177,10 +177,6 @@ function sanitize(data: { info: Session.Info; messages: MessageV2.WithParts[] })
         ? data.info.revert
         : {
             ...data.info.revert,
-            snapshot:
-              data.info.revert.snapshot === undefined
-                ? undefined
-                : redact("revert-snapshot", data.info.id, data.info.revert.snapshot),
             diff:
               data.info.revert.diff === undefined
                 ? undefined

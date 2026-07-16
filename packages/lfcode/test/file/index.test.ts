@@ -16,7 +16,10 @@ const init = () => run(File.Service.use((svc) => svc.init()))
 const run = <A, E>(eff: Effect.Effect<A, E, File.Service>) =>
   Effect.runPromise(provideInstance(Instance.directory)(eff.pipe(Effect.provide(File.defaultLayer))))
 const status = () => run(File.Service.use((svc) => svc.status()))
-const read = (file: string) => run(File.Service.use((svc) => svc.read(file)))
+const read = (file: string, options?: { withDiff?: boolean }) =>
+  run(File.Service.use((svc) => svc.read(file, options)))
+const write = (input: { path: string; content: string; expectedChecksum?: string; createParents?: boolean }) =>
+  run(File.Service.use((svc) => svc.write(input)))
 const list = (dir?: string) => run(File.Service.use((svc) => svc.list(dir)))
 const search = (input: { query: string; limit?: number; dirs?: boolean; type?: "file" | "directory" }) =>
   run(File.Service.use((svc) => svc.search(input)))
@@ -34,6 +37,7 @@ describe("file/index Filesystem patterns", () => {
           const result = await read("test.txt")
           expect(result.type).toBe("text")
           expect(result.content).toBe("Hello World")
+          expect(result.checksum.length).toBeGreaterThan(0)
         },
       })
     })
@@ -68,7 +72,7 @@ describe("file/index Filesystem patterns", () => {
       })
     })
 
-    test("trims whitespace from text content", async () => {
+    test("preserves leading and trailing whitespace in text content", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "test.txt")
       await fs.writeFile(filepath, "  content with spaces  \n\n", "utf-8")
@@ -77,7 +81,7 @@ describe("file/index Filesystem patterns", () => {
         directory: tmp.path,
         fn: async () => {
           const result = await read("test.txt")
-          expect(result.content).toBe("content with spaces")
+          expect(result.content).toBe("  content with spaces  \n\n")
         },
       })
     })
@@ -107,6 +111,37 @@ describe("file/index Filesystem patterns", () => {
         fn: async () => {
           const result = await read("multiline.txt")
           expect(result.content).toBe("line1\nline2\nline3")
+        },
+      })
+    })
+
+    test("decodes GBK/GB18030 text files", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "gbk.txt")
+      await fs.writeFile(filepath, Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a]))
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read("gbk.txt")
+          expect(result.type).toBe("text")
+          expect(result.content).toBe("中文\n")
+        },
+      })
+    })
+
+    test("decodes utf-16le text files with BOM", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "utf16le.txt")
+      const content = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("Hello 世界", "utf16le")])
+      await fs.writeFile(filepath, content)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read("utf16le.txt")
+          expect(result.type).toBe("text")
+          expect(result.content).toBe("Hello 世界")
         },
       })
     })
@@ -910,9 +945,9 @@ describe("file/index Filesystem patterns", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const result = await read("file.txt")
+          const result = await read("file.txt", { withDiff: true })
           expect(result.type).toBe("text")
-          expect(result.content).toBe("modified content")
+          expect(result.content).toBe("modified content\n")
           expect(result.diff).toBeDefined()
           expect(result.diff).toContain("original content")
           expect(result.diff).toContain("modified content")
@@ -934,7 +969,7 @@ describe("file/index Filesystem patterns", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          const result = await read("staged.txt")
+          const result = await read("staged.txt", { withDiff: true })
           expect(result.diff).toBeDefined()
           expect(result.patch).toBeDefined()
         },
@@ -953,9 +988,93 @@ describe("file/index Filesystem patterns", () => {
         fn: async () => {
           const result = await read("clean.txt")
           expect(result.type).toBe("text")
-          expect(result.content).toBe("unchanged")
+          expect(result.content).toBe("unchanged\n")
           expect(result.diff).toBeUndefined()
           expect(result.patch).toBeUndefined()
+        },
+      })
+    })
+
+    test("does not compute diff unless explicitly requested", async () => {
+      await using tmp = await tmpdir({ git: true })
+      const filepath = path.join(tmp.path, "plain.txt")
+      await fs.writeFile(filepath, "before\n", "utf-8")
+      await $`git add .`.cwd(tmp.path).quiet()
+      await $`git commit -m "add file"`.cwd(tmp.path).quiet()
+      await fs.writeFile(filepath, "after\n", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await read("plain.txt")
+          expect(result.type).toBe("text")
+          expect(result.content).toBe("after\n")
+          expect(result.diff).toBeUndefined()
+          expect(result.patch).toBeUndefined()
+        },
+      })
+    })
+  })
+
+  describe("write()", () => {
+    test("writes content and returns latest checksum", async () => {
+      await using tmp = await tmpdir()
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const created = await write({
+            path: "src/main.cpp",
+            content: "int main() { return 0; }\n",
+            createParents: true,
+          })
+          expect(created.type).toBe("text")
+          expect(created.content).toBe("int main() { return 0; }\n")
+          expect(created.checksum.length).toBeGreaterThan(0)
+
+          const saved = await fs.readFile(path.join(tmp.path, "src", "main.cpp"), "utf8")
+          expect(saved).toBe("int main() { return 0; }\n")
+        },
+      })
+    })
+
+    test("rejects writes when expected checksum is stale", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "main.cpp")
+      await fs.writeFile(filepath, "int main() { return 0; }\n", "utf8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const current = await read("main.cpp")
+          await fs.writeFile(filepath, "int main() { return 1; }\n", "utf8")
+          await expect(
+            write({
+              path: "main.cpp",
+              content: "int main() { return 2; }\n",
+              expectedChecksum: current.checksum,
+            }),
+          ).rejects.toThrow(/Checksum mismatch/)
+        },
+      })
+    })
+
+    test("accepts expected checksum for files with trailing whitespace", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "main.cpp")
+      await fs.writeFile(filepath, "int main() { return 0; }\n\n", "utf8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const current = await read("main.cpp")
+          const saved = await write({
+            path: "main.cpp",
+            content: "int main() { return 1; }\n\n",
+            expectedChecksum: current.checksum,
+          })
+          expect(saved.content).toBe("int main() { return 1; }\n\n")
+          expect(await fs.readFile(filepath, "utf8")).toBe("int main() { return 1; }\n\n")
         },
       })
     })

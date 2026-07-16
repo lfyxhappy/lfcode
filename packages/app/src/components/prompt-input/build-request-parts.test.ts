@@ -21,7 +21,15 @@ describe("buildRequestParts", () => {
       prompt,
       context: [{ key: "ctx:1", type: "file", path: "src/bar.ts", comment: "check this" }],
       images: [
-        { type: "image", id: "img_1", filename: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAA" },
+        {
+          type: "image",
+          id: "img_1",
+          filename: "a.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,AAA",
+          previewDataUrl: "data:image/webp;base64,BBB",
+          byteSize: 123,
+        },
       ],
       text: "hello @src/foo.ts @planner",
       messageID: "msg_1",
@@ -73,6 +81,117 @@ describe("buildRequestParts", () => {
 
     expect(files).toHaveLength(2)
     expect(files.map((part) => (part.type === "file" ? part.filename : ""))).toEqual(["a.png", "b.pdf"])
+  })
+
+  test("uploaded image previews do not affect submitted file payload", () => {
+    const result = buildRequestParts({
+      prompt: [{ type: "text", content: "look", start: 0, end: 4 }],
+      context: [],
+      images: [
+        {
+          type: "image",
+          id: "img_preview",
+          filename: "preview.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64,ORIGINAL",
+          previewDataUrl: "data:image/webp;base64,THUMBNAIL",
+          byteSize: 999999,
+        },
+      ],
+      text: "look",
+      messageID: "msg_preview",
+      sessionID: "ses_preview",
+      sessionDirectory: "/repo",
+    })
+
+    const file = result.requestParts.find(
+      (part) => part.type === "file" && part.filename === "preview.png",
+    )
+
+    expect(file).toMatchObject({
+      type: "file",
+      url: "data:image/png;base64,ORIGINAL",
+    })
+  })
+
+  test("keeps selected text as metadata-backed text part", () => {
+    const prompt: Prompt = [
+      {
+        type: "selected-text",
+        text: "quoted selection",
+        content: "quoted selection",
+        start: 0,
+        end: 16,
+      },
+    ]
+
+    const result = buildRequestParts({
+      prompt,
+      context: [],
+      images: [],
+      text: "quoted selection",
+      messageID: "msg_selected",
+      sessionID: "ses_selected",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.requestParts).toHaveLength(1)
+    expect(result.requestParts[0]).toMatchObject({
+      type: "text",
+      text: "quoted selection",
+      metadata: {
+        lfcodeSelectedText: [
+          {
+            text: "quoted selection",
+            messageID: undefined,
+          },
+        ],
+      },
+    })
+  })
+
+  test("expands web references into synthetic text parts with source metadata", () => {
+    const prompt: Prompt = [
+      {
+        type: "web-reference",
+        label: "Example page",
+        text: "Captured excerpt",
+        url: "https://example.com/post",
+        title: "Example page",
+        selector: "main article",
+        mode: "selection",
+        content: "[web:Example page]",
+        start: 0,
+        end: 18,
+      },
+    ]
+
+    const result = buildRequestParts({
+      prompt,
+      context: [],
+      images: [],
+      text: "[web:Example page]",
+      messageID: "msg_web_ref",
+      sessionID: "ses_web_ref",
+      sessionDirectory: "/repo",
+    })
+
+    expect(result.requestParts).toHaveLength(2)
+    expect(result.requestParts[1]).toMatchObject({
+      type: "text",
+      synthetic: true,
+      metadata: {
+        lfcodeWebReference: {
+          label: "Example page",
+          url: "https://example.com/post",
+          selector: "main article",
+          mode: "selection",
+        },
+      },
+    })
+    if (result.requestParts[1]?.type !== "text") throw new Error("expected text part")
+    expect(result.requestParts[1].text).toContain("Captured excerpt")
+    expect(result.requestParts[1].text).toContain("https://example.com/post")
   })
 
   test("deduplicates context files when prompt already includes same path", () => {

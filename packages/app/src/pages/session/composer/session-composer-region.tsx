@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, onCleanup } from "solid-js"
+import { Show, createEffect, createMemo } from "solid-js"
 import { Portal } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
@@ -15,20 +15,22 @@ import { SessionFollowupDock } from "@/pages/session/composer/session-followup-d
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
-import type { FollowupDraft } from "@/components/prompt-input/submit"
+import type { FollowupDraft, FollowupMode } from "@/components/prompt-input/submit"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import type { PromptScope } from "@/context/prompt"
 
 export function SessionComposerRegion(props: {
   state: SessionComposerState
   ready: boolean
   centered: boolean
+  rightInset?: boolean
   inputRef: (el: HTMLDivElement) => void
   newSessionWorktree: string
   onNewSessionWorktreeReset: () => void
   onSubmit: () => void
   onResponseSubmit: () => void
   followup?: {
-    queue: () => boolean
+    mode: () => FollowupMode | undefined
     items: { id: string; text: string }[]
     sending?: string
     edit?: { id: string; prompt: FollowupDraft["prompt"]; context: FollowupDraft["context"] }
@@ -44,6 +46,9 @@ export function SessionComposerRegion(props: {
     disabled?: boolean
     onRestore: (id: string) => void
   }
+  scope?: PromptScope
+  dropRoot?: () => HTMLElement | undefined
+  disabledMessage?: string
   setPromptDockRef: (el: HTMLDivElement) => void
 }) {
   const navigate = useNavigate()
@@ -80,39 +85,11 @@ export function SessionComposerRegion(props: {
     height: 320,
     body: undefined as HTMLDivElement | undefined,
   })
-  let timer: number | undefined
-  let frame: number | undefined
-
-  const clear = () => {
-    if (timer !== undefined) {
-      window.clearTimeout(timer)
-      timer = undefined
-    }
-    if (frame !== undefined) {
-      cancelAnimationFrame(frame)
-      frame = undefined
-    }
-  }
 
   createEffect(() => {
     route.sessionKey()
-    const ready = props.ready
-    const delay = 140
-
-    clear()
-    setStore("ready", false)
-    if (!ready) return
-
-    frame = requestAnimationFrame(() => {
-      frame = undefined
-      timer = window.setTimeout(() => {
-        setStore("ready", true)
-        timer = undefined
-      }, delay)
-    })
+    setStore("ready", props.ready)
   })
-
-  onCleanup(clear)
 
   const open = createMemo(() => store.ready && props.state.dock() && !props.state.closing())
   const progress = useSpring(() => (open() ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
@@ -171,11 +148,15 @@ export function SessionComposerRegion(props: {
         </Portal>
       </Show>
       <div
-        classList={{
-          "w-full px-3 pointer-events-auto": true,
-          "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
-        }}
+        class="w-full self-start"
+        style={{ width: props.rightInset ? "calc(100% - clamp(336px, 22vw, 440px))" : undefined }}
       >
+        <div
+          classList={{
+            "w-full px-3 pointer-events-auto": true,
+            "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
+          }}
+        >
         <Show when={showComposer()}>
           <Show
             when={prompt.ready()}
@@ -256,17 +237,30 @@ export function SessionComposerRegion(props: {
                 when={child()}
                 fallback={
                   <Show when={!props.state.blocked()}>
-                    <PromptInput
-                      ref={props.inputRef}
-                      newSessionWorktree={props.newSessionWorktree}
-                      onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
-                      edit={props.followup?.edit}
-                      onEditLoaded={props.followup?.onEditLoaded}
-                      shouldQueue={props.followup?.queue}
-                      onQueue={props.followup?.onQueue}
-                      onAbort={props.followup?.onAbort}
-                      onSubmit={props.onSubmit}
-                    />
+                    <div class="relative">
+                      <div classList={{ "pointer-events-none select-none opacity-60": !!props.disabledMessage }}>
+                        <PromptInput
+                          ref={props.inputRef}
+                          newSessionWorktree={props.newSessionWorktree}
+                          onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
+                          edit={props.followup?.edit}
+                          onEditLoaded={props.followup?.onEditLoaded}
+                          followupMode={props.followup?.mode}
+                          onQueue={props.followup?.onQueue}
+                          onAbort={props.followup?.onAbort}
+                          onSubmit={props.onSubmit}
+                          scope={props.scope}
+                          dropRoot={props.dropRoot}
+                        />
+                      </div>
+                      <Show when={props.disabledMessage}>
+                        {(message) => (
+                          <div class="absolute inset-0 z-10 flex items-center justify-center rounded-[12px] border border-border-weak-base bg-background-base/88 px-4 text-center text-14-regular text-text-weak">
+                            {message()}
+                          </div>
+                        )}
+                      </Show>
+                    </div>
                   </Show>
                 }
               >
@@ -289,6 +283,7 @@ export function SessionComposerRegion(props: {
             </div>
           </Show>
         </Show>
+        </div>
       </div>
     </div>
   )

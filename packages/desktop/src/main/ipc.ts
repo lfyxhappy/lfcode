@@ -4,6 +4,8 @@ import { basename, extname, isAbsolute, join, relative, resolve } from "node:pat
 import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type {
+  BrowserAutofillCandidate,
+  BrowserAutofillRequest,
   BrowserCacheOverview,
   BrowserCookieIdentity,
   BrowserPasswordCapturePrompt,
@@ -32,6 +34,7 @@ import { openExternal } from "./external"
 import { clipboardFilePaths } from "./clipboard-files"
 import { getStore } from "./store"
 import { setTitlebar } from "./windows"
+import { browserAutofillOriginMatches } from "./browser-management-core"
 
 type BrowserReferenceCandidate = {
   label?: string
@@ -115,7 +118,8 @@ type Deps = {
   upsertSavedBrowserLogin: (input: SavedBrowserLoginUpsert) => Promise<SavedBrowserLoginRecord> | SavedBrowserLoginRecord
   deleteSavedBrowserLogin: (id: string) => Promise<void> | void
   acknowledgeBrowserSavePasswordPrompt: (input: BrowserPasswordPromptAck) => Promise<SavedBrowserLoginRecord | null> | SavedBrowserLoginRecord | null
-  resolveBrowserAutofill: (origin: string) => Promise<{ username: string; password: string } | null> | { username: string; password: string } | null
+  listBrowserAutofillCandidates: (origin: string) => Promise<BrowserAutofillCandidate[]> | BrowserAutofillCandidate[]
+  resolveBrowserAutofill: (input: BrowserAutofillRequest) => Promise<{ username: string; password: string } | null> | { username: string; password: string } | null
   captureBrowserPassword: (input: { guestID: number; payload: BrowserPasswordCapturePayload }) => Promise<void> | void
   setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void> | void
 }
@@ -347,10 +351,16 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("acknowledge-browser-save-password-prompt", (_event: IpcMainInvokeEvent, input: BrowserPasswordPromptAck) => {
     return deps.acknowledgeBrowserSavePasswordPrompt(input)
   })
-  ipcMain.handle("browser-request-autofill", (_event: IpcMainInvokeEvent, origin: string) => {
-    return deps.resolveBrowserAutofill(origin)
+  ipcMain.handle("browser-list-autofill-candidates", (event: IpcMainInvokeEvent, origin: string) => {
+    if (!browserAutofillOriginMatches(event.sender.getURL(), origin)) return []
+    return deps.listBrowserAutofillCandidates(origin)
+  })
+  ipcMain.handle("browser-request-autofill", (event: IpcMainInvokeEvent, input: BrowserAutofillRequest) => {
+    if (!browserAutofillOriginMatches(event.sender.getURL(), input.origin)) return null
+    return deps.resolveBrowserAutofill(input)
   })
   ipcMain.on("browser-password-capture", (event: IpcMainEvent, payload: BrowserPasswordCapturePayload) => {
+    if (!browserAutofillOriginMatches(event.sender.getURL(), payload.origin)) return
     return deps.captureBrowserPassword({
       guestID: event.sender.id,
       payload,

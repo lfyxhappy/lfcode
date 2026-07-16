@@ -1,7 +1,7 @@
 export { CassetteNotFoundError, hasCassetteSync, UnsafeCassetteError } from "./cassette.js"
 export { cassetteLayer, recordingLayer, type RecordReplayMode, type RecordReplayOptions } from "./internal-effect.js"
 export { redactHeaders, redactUrl, secretFindings, type SecretFinding } from "./redaction.js"
-export { socketLayer } from "./socket.js"
+export { makeSocket, socketLayer } from "./socket.js"
 export {
   makeWebSocketExecutor,
   type WebSocketConnection,

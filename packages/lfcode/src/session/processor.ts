@@ -7,7 +7,6 @@ import { Metrics } from "@/metrics"
 import { Config } from "@/config"
 import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
-import { Snapshot } from "@/snapshot"
 import * as Session from "./session"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
@@ -17,13 +16,19 @@ import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
+import { SessionInteraction } from "./interaction"
+import { Goal } from "./goal"
 import type { Provider } from "@/provider"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { Log } from "@/util"
 import { isRecord } from "@/util/record"
+import { redactSensitiveText } from "@/util/redact"
+import { classifyValidationError } from "@/tool/tool"
+import { sameToolFailureCount } from "./part-helpers"
 
 const DOOM_LOOP_THRESHOLD = 3
+const REDACTION_TAIL_CHARS = 128
 const log = Log.create({ service: "session.processor" })
 
 export type Result = "overflow" | "stop" | "continue"
@@ -119,7 +124,9 @@ type Input = {
   assistantMessage: MessageV2.Assistant
   sessionID: SessionID
   model: Provider.Model
+  submitAt?: number
   agentMetrics?: AgentMetrics
+  manageSessionStatus?: boolean
 }
 
 export interface Interface {
@@ -172,6 +179,9 @@ interface ProcessorContext extends Input {
   snapshot: string | undefined
   blocked: boolean
   needsOverflowHandling: boolean
+  submitAt: number | undefined
+  streamStartedAt: number | undefined
+  firstDeltaAt: number | undefined
   currentText: MessageV2.TextPart | undefined
   reasoningMap: Record<string, MessageV2.ReasoningPart>
   stepStartedAt: number | undefined
@@ -180,6 +190,7 @@ interface ProcessorContext extends Input {
   responseFirstTokenAt: number | undefined
   responseTokens: MessageV2.Assistant["tokens"]
   stepPartIds: PartID[]
+  pendingText: string
 }
 
 type StreamEvent = Event
@@ -192,11 +203,11 @@ export const layer: Layer.Layer<
   | Session.Service
   | Config.Service
   | Bus.Service
-  | Snapshot.Service
   | Agent.Service
   | LLM.Service
   | Permission.Service
   | Plugin.Service
+  | Goal.Service
   | SessionSummary.Service
   | SessionStatus.Service
 > = Layer.effect(
@@ -205,20 +216,16 @@ export const layer: Layer.Layer<
     const session = yield* Session.Service
     const config = yield* Config.Service
     const bus = yield* Bus.Service
-    const snapshot = yield* Snapshot.Service
     const agents = yield* Agent.Service
     const llm = yield* LLM.Service
     const permission = yield* Permission.Service
     const plugin = yield* Plugin.Service
+    const goal = yield* Goal.Service
     const summary = yield* SessionSummary.Service
     const scope = yield* Scope.Scope
     const status = yield* SessionStatus.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
-      // Pre-capture snapshot before the LLM stream starts. The AI SDK
-      // may execute tools internally before emitting start-step events,
-      // so capturing inside the event handler can be too late.
-      const initialSnapshot = yield* snapshot.track()
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
@@ -226,9 +233,12 @@ export const layer: Layer.Layer<
         agentMetrics: input.agentMetrics,
         toolcalls: {},
         shouldBreak: false,
-        snapshot: initialSnapshot,
+        snapshot: undefined,
         blocked: false,
         needsOverflowHandling: false,
+        submitAt: input.submitAt,
+        streamStartedAt: undefined,
+        firstDeltaAt: undefined,
         currentText: undefined,
         reasoningMap: {},
         stepStartedAt: undefined,
@@ -237,6 +247,7 @@ export const layer: Layer.Layer<
         responseFirstTokenAt: undefined,
         responseTokens: emptyResponseTokens(),
         stepPartIds: [],
+        pendingText: "",
       }
       let aborted = false
       // Only the main agent owns session-level status. Subagents (explore,
@@ -245,6 +256,10 @@ export const layer: Layer.Layer<
       // if a subagent's stream sets session status here, nothing ever clears it
       // and the TUI spinner stays spinning after the main agent has finished.
       const isMain = !ctx.assistantMessage.agentID || ctx.assistantMessage.agentID === "main"
+      // Prompt loop runs under SessionRunState, so the runner owns busy/idle.
+      // Direct processor callers (tests, compaction) still rely on processor-
+      // managed status and keep the historical default.
+      const manageSessionStatus = input.manageSessionStatus ?? true
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
 
       const parse = (e: unknown) =>
@@ -263,6 +278,23 @@ export const layer: Layer.Layer<
           tokens: ctx.responseTokens,
         }
       }
+
+      const syncInteractiveWaiting = Effect.fn("SessionProcessor.syncInteractiveWaiting")(function* () {
+        if (!isMain || ctx.assistantMessage.error) return
+        const current = yield* session.get(ctx.sessionID)
+        if (current.interaction?.mode === "interactive-html") return
+        const text = MessageV2.parts(ctx.assistantMessage.id)
+          .filter((part): part is MessageV2.TextPart => part.type === "text")
+          .map((part) => part.text)
+          .join("\n")
+        if (!SessionInteraction.containsInteractiveHtmlBlock(text)) return
+        yield* session.setInteraction({
+          sessionID: ctx.sessionID,
+          interaction: {
+            mode: "interactive-html",
+          },
+        })
+      })
 
       const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
         const done = ctx.toolcalls[toolCallID]?.done
@@ -283,6 +315,9 @@ export const layer: Layer.Layer<
           start,
           end,
           ttft: ctx.stepStartedAt && ctx.stepFirstTokenAt ? Math.max(0, ctx.stepFirstTokenAt - ctx.stepStartedAt) : null,
+          submit_to_first_delta:
+            ctx.submitAt && ctx.firstDeltaAt ? Math.max(0, ctx.firstDeltaAt - ctx.submitAt) : null,
+          pre_stream: ctx.submitAt && ctx.streamStartedAt ? Math.max(0, ctx.streamStartedAt - ctx.submitAt) : null,
         }
       }
 
@@ -301,7 +336,6 @@ export const layer: Layer.Layer<
           reason: input.reason,
           status: input.status,
           time: stepTime(),
-          snapshot: yield* snapshot.track(),
           messageID: ctx.assistantMessage.id,
           sessionID: ctx.assistantMessage.sessionID,
           type: "step-finish",
@@ -406,7 +440,8 @@ export const layer: Layer.Layer<
       const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
         switch (value.type) {
           case "start":
-            if (isMain) yield* status.set(ctx.sessionID, { type: "busy" })
+            ctx.streamStartedAt = Date.now()
+            if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "busy" })
             return
 
           case "reasoning-start":
@@ -428,6 +463,7 @@ export const layer: Layer.Layer<
             return
 
           case "reasoning-delta":
+            if (!ctx.firstDeltaAt) ctx.firstDeltaAt = Date.now()
             if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
             if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
             if (!(value.id in ctx.reasoningMap)) return
@@ -536,6 +572,24 @@ export const layer: Layer.Layer<
 
           case "tool-error": {
             yield* failToolCall(value.toolCallId, value.error)
+            const error = errorMessage(value.error)
+            const retryCount = yield* session
+              .messages({ sessionID: ctx.sessionID, limit: 100, agentID: ctx.assistantMessage.agentID })
+              .pipe(
+                Effect.map(
+                  (messages) =>
+                    Math.max(
+                      0,
+                      sameToolFailureCount({
+                        messages,
+                        tool: value.toolName,
+                        toolInput: value.input,
+                        error,
+                      }) - 1,
+                    ),
+                ),
+                Effect.catch(() => Effect.succeed(0)),
+              )
             yield* bus
               .publish(Metrics.ToolCall, {
                 sessionID: ctx.sessionID,
@@ -544,6 +598,8 @@ export const layer: Layer.Layer<
                 output_bytes: 0,
                 tool_call_id: value.toolCallId,
                 tool_call_status: "error",
+                error_category: classifyValidationError(value.error),
+                retry_count: retryCount,
               })
               .pipe(Effect.ignore)
             return
@@ -553,18 +609,27 @@ export const layer: Layer.Layer<
             throw value.error
 
           case "start-step":
+            if (ctx.stepStartedAt && !ctx.stepFinished) return
             ctx.stepStartedAt = Date.now()
             ctx.stepFirstTokenAt = undefined
             ctx.stepFinished = false
-            if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
             const stepStartPartId = PartID.ascending()
-            yield* session.updatePart({
-              id: stepStartPartId,
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              snapshot: ctx.snapshot,
-              type: "step-start",
-            })
+            yield* session.updatePart(
+              ctx.snapshot
+                ? {
+                    id: stepStartPartId,
+                    messageID: ctx.assistantMessage.id,
+                    sessionID: ctx.sessionID,
+                    snapshot: ctx.snapshot,
+                    type: "step-start",
+                  }
+                : {
+                    id: stepStartPartId,
+                    messageID: ctx.assistantMessage.id,
+                    sessionID: ctx.sessionID,
+                    type: "step-start",
+                  },
+            )
             ctx.stepPartIds.push(stepStartPartId)
             return
 
@@ -587,22 +652,19 @@ export const layer: Layer.Layer<
               overhead,
             })
             yield* session.updateMessage(ctx.assistantMessage)
-            let stepFilesChanged = 0
-            if (ctx.snapshot) {
-              const patch = yield* snapshot.patch(ctx.snapshot)
-              stepFilesChanged = patch.files.length
-              if (patch.files.length) {
-                yield* session.updatePart({
-                  id: PartID.ascending(),
-                  messageID: ctx.assistantMessage.id,
-                  sessionID: ctx.sessionID,
-                  type: "patch",
-                  hash: patch.hash,
-                  files: patch.files,
-                })
-              }
-              ctx.snapshot = undefined
-            }
+            yield* goal.addStats({
+              sessionID: ctx.sessionID,
+              usage: {
+                input: usage.tokens.input,
+                output: usage.tokens.output,
+                reasoning: usage.tokens.reasoning,
+                cache: {
+                  read: usage.tokens.cache.read,
+                  write: usage.tokens.cache.write,
+                },
+              },
+            })
+            const stepFilesChanged = 0
             const stepTokensIn = usage.tokens.input + usage.tokens.cache.read + usage.tokens.cache.write
             const stepTokensOut = usage.tokens.output + usage.tokens.reasoning
             if (ctx.agentMetrics) {
@@ -616,6 +678,9 @@ export const layer: Layer.Layer<
                 finish_reason: value.finishReason,
                 ttft_ms:
                   ctx.stepFirstTokenAt && ctx.stepStartedAt ? ctx.stepFirstTokenAt - ctx.stepStartedAt : undefined,
+                submit_to_first_delta_ms:
+                  ctx.submitAt && ctx.firstDeltaAt ? ctx.firstDeltaAt - ctx.submitAt : undefined,
+                pre_stream_ms: ctx.submitAt && ctx.streamStartedAt ? ctx.streamStartedAt - ctx.submitAt : undefined,
                 latency_ms: ctx.stepStartedAt ? Date.now() - ctx.stepStartedAt : 0,
                 cached_read_tokens: usage.tokens.cache.read,
                 model_id: ctx.model.id,
@@ -640,6 +705,7 @@ export const layer: Layer.Layer<
           }
 
           case "text-start":
+            ctx.pendingText = ""
             ctx.currentText = {
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -654,22 +720,40 @@ export const layer: Layer.Layer<
             return
 
           case "text-delta":
+            if (!ctx.firstDeltaAt) ctx.firstDeltaAt = Date.now()
             if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
             if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
             if (!ctx.currentText) return
-            ctx.currentText.text += value.text
+            const combined = ctx.pendingText + value.text
+            const emitted = combined.slice(0, Math.max(0, combined.length - REDACTION_TAIL_CHARS))
+            ctx.pendingText = combined.slice(emitted.length)
+            if (!emitted) return
+            const safeDelta = redactSensitiveText(emitted)
+            ctx.currentText.text += safeDelta
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
               sessionID: ctx.currentText.sessionID,
               messageID: ctx.currentText.messageID,
               partID: ctx.currentText.id,
               field: "text",
-              delta: value.text,
+              delta: safeDelta,
             })
             return
 
           case "text-end":
             if (!ctx.currentText) return
+            const tail = redactSensitiveText(ctx.pendingText)
+            ctx.pendingText = ""
+            if (tail) {
+              ctx.currentText.text += tail
+              yield* session.updatePartDelta({
+                sessionID: ctx.currentText.sessionID,
+                messageID: ctx.currentText.messageID,
+                partID: ctx.currentText.id,
+                field: "text",
+                delta: tail,
+              })
+            }
             // oxlint-disable-next-line no-self-assign -- reactivity trigger
             ctx.currentText.text = ctx.currentText.text
             ctx.currentText.text = (yield* plugin.trigger(
@@ -688,6 +772,7 @@ export const layer: Layer.Layer<
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
             yield* session.updatePart(ctx.currentText)
             ctx.currentText = undefined
+            ctx.pendingText = ""
             return
 
           case "finish":
@@ -700,22 +785,11 @@ export const layer: Layer.Layer<
       })
 
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
-        if (ctx.snapshot) {
-          const patch = yield* snapshot.patch(ctx.snapshot)
-          if (patch.files.length) {
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
-            })
-          }
-          ctx.snapshot = undefined
-        }
+        ctx.snapshot = undefined
 
         if (ctx.currentText) {
+          ctx.currentText.text += redactSensitiveText(ctx.pendingText)
+          ctx.pendingText = ""
           const end = Date.now()
           ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
           yield* session.updatePart(ctx.currentText)
@@ -786,7 +860,31 @@ export const layer: Layer.Layer<
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
         })
-        if (isMain) yield* status.set(ctx.sessionID, { type: "idle" })
+        if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "idle" })
+      })
+
+      const ensureTerminalStep = Effect.fn("SessionProcessor.ensureTerminalStep")(function* () {
+        if (ctx.stepFinished || ctx.assistantMessage.error) return
+        slog.warn("process ended without finish-step", {
+          sessionID: ctx.sessionID,
+          messageID: ctx.assistantMessage.id,
+          streamStartedAt: ctx.streamStartedAt,
+          firstDeltaAt: ctx.firstDeltaAt,
+        })
+        ctx.assistantMessage.error = new MessageV2.ModelError({
+          message: "The model stream ended before a completion event was received.",
+        }).toObject()
+        yield* writeStepFinish({
+          reason: "missing-finish-step",
+          status: "error",
+          usage: { cost: 0, tokens: emptyResponseTokens() },
+        })
+        yield* session.updateMessage(ctx.assistantMessage)
+        yield* bus.publish(Session.Event.Error, {
+          sessionID: ctx.assistantMessage.sessionID,
+          error: ctx.assistantMessage.error,
+        })
+        if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "idle" })
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
@@ -795,12 +893,13 @@ export const layer: Layer.Layer<
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
         return yield* Effect.gen(function* () {
+          const abortController = new AbortController()
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
             ctx.stepPartIds = []
             ctx.toolcalls = {}
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({ ...streamInput, abortSignal: abortController.signal })
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -810,6 +909,7 @@ export const layer: Layer.Layer<
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
+                abortController.abort()
                 aborted = true
                 if (!ctx.assistantMessage.error) {
                   yield* halt(new DOMException("Aborted", "AbortError"))
@@ -850,6 +950,8 @@ export const layer: Layer.Layer<
             Effect.ensuring(cleanup()),
           )
 
+          yield* ensureTerminalStep()
+          yield* syncInteractiveWaiting()
           if (ctx.needsOverflowHandling) return "overflow"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"
           return "continue"
@@ -1047,6 +1149,7 @@ export const layer: Layer.Layer<
             Effect.ensuring(cleanup()),
           )
 
+          yield* syncInteractiveWaiting()
           if (ctx.needsOverflowHandling) return "overflow"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"
           return "continue"
@@ -1071,11 +1174,11 @@ export const layer: Layer.Layer<
 export const defaultLayer = Layer.suspend(() =>
   layer.pipe(
     Layer.provide(Session.defaultLayer),
-    Layer.provide(Snapshot.defaultLayer),
     Layer.provide(Agent.defaultLayer),
     Layer.provide(LLM.defaultLayer),
     Layer.provide(Permission.defaultLayer),
     Layer.provide(Plugin.defaultLayer),
+    Layer.provide(Goal.defaultLayer),
     Layer.provide(SessionSummary.defaultLayer),
     Layer.provide(SessionStatus.defaultLayer),
     Layer.provide(Bus.layer),

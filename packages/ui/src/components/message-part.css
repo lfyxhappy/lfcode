@@ -7,6 +7,10 @@
   gap: 12px;
 }
 
+[data-virtual-timeline-item] [data-component="assistant-message"] {
+  content-visibility: visible;
+}
+
 [data-component="user-message"] {
   font-family: var(--font-family-sans);
   font-size: var(--font-size-base);
@@ -72,6 +76,14 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  [data-component="image-thumbnail-placeholder"].user-message-attachment-image-placeholder,
+  [data-slot="user-message-attachment-image-placeholder"] {
+    width: 100%;
+    height: 100%;
+    background:
+      linear-gradient(135deg, var(--surface-weak), var(--surface-raised-stronger-non-alpha));
   }
 
   [data-slot="user-message-attachment-icon"] {

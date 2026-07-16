@@ -49,6 +49,19 @@ export function pluginOptions(plugin: Spec): Options | undefined {
   return Array.isArray(plugin) ? plugin[1] : undefined
 }
 
+// `plugins` is the forward config field while `plugin` remains a compat alias.
+// Normalize both into the in-memory `plugin` field so downstream loaders only
+// need one code path.
+export function normalizePluginConfigAliases(data: Record<string, unknown>): Record<string, unknown> {
+  const legacy = Array.isArray(data.plugin) ? data.plugin : undefined
+  const current = Array.isArray(data.plugins) ? data.plugins : undefined
+  if (!legacy && !current) return data
+  const next = { ...data }
+  delete next.plugins
+  next.plugin = [...(legacy ?? []), ...(current ?? [])]
+  return next
+}
+
 // Path-like specs are resolved relative to the config file that declared them so merges later on do not
 // accidentally reinterpret `./plugin.ts` relative to some other directory.
 export async function resolvePluginSpec(plugin: Spec, configFilepath: string): Promise<Spec> {

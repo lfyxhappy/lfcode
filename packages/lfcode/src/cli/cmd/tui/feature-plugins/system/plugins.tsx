@@ -23,19 +23,40 @@ function state(api: TuiPluginApi, item: TuiPluginStatus) {
   )
 }
 
+function trustLabel(item: TuiPluginStatus) {
+  if (!item.trust) return
+  if (item.trust === "bundled") return "bundled"
+  if (item.trust === "official") return "official"
+  if (item.trust === "dev-local") return "dev-local"
+  return "external"
+}
+
 function source(spec: string) {
   if (!spec.startsWith("file://")) return
   return fileURLToPath(spec)
 }
 
 function meta(item: TuiPluginStatus, width: number) {
+  const details = [
+    item.name && item.name !== item.id ? item.id : undefined,
+    item.apiVersion ? `api ${item.apiVersion}` : undefined,
+    trustLabel(item),
+    item.lfcodeRange ? `lfcode ${item.lfcodeRange}` : undefined,
+  ].filter(Boolean)
+
   if (item.source === "internal") {
-    if (width >= 120) return "Built-in plugin"
-    return "Built-in"
+    if (width >= 120) {
+      return ["Built-in plugin", ...details].join(" · ")
+    }
+    return details.length ? `Built-in · ${details.join(" · ")}` : "Built-in"
   }
   const next = source(item.spec)
-  if (next) return next
-  return item.spec
+  const location = next ?? item.spec
+  if (width >= 120) {
+    return [...details, location].filter(Boolean).join(" · ")
+  }
+  if (details.length) return details.join(" · ")
+  return location
 }
 
 function Install(props: { api: TuiPluginApi }) {
@@ -140,7 +161,7 @@ function Install(props: { api: TuiPluginApi }) {
 
 function row(api: TuiPluginApi, item: TuiPluginStatus, width: number): DialogSelectOption<string> {
   return {
-    title: item.id,
+    title: item.name ?? item.id,
     value: item.id,
     category: item.source === "internal" ? "Internal" : "External",
     description: meta(item, width),

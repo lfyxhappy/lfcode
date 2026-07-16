@@ -23,6 +23,17 @@ type RawSnippet = {
   scope?: string
 }
 
+type SnippetProviderRegistryEntry = {
+  count: number
+  paths: Map<string, number>
+  cache?: { expiresAt: number; value: Promise<CodeEditorSnippet[]> }
+  loadFiles: (directory: string) => Promise<CodeEditorSnippetFile[]>
+  provider: import("monaco-editor").IDisposable
+  disposeGeneration: number
+}
+
+const snippetProviderRegistry = new Map<string, SnippetProviderRegistryEntry>()
+
 export function parseCodeEditorSnippetFiles(input: { files: CodeEditorSnippetFile[]; language: string }) {
   return input.files.flatMap((file) => {
     const snippets = parse(file.content) as Record<string, RawSnippet> | undefined
@@ -51,26 +62,52 @@ export function registerCodeEditorSnippetProvider(input: {
   language: string
   loadFiles: (directory: string) => Promise<CodeEditorSnippetFile[]>
 }) {
-  let cache: { expiresAt: number; value: Promise<CodeEditorSnippet[]> } | undefined
-  const load = () => {
-    if (cache && cache.expiresAt > Date.now()) return cache.value
-    const value = input
-      .loadFiles(input.directory)
-      .then((files) => parseCodeEditorSnippetFiles({ files, language: input.language }))
-      .catch(() => [])
-    cache = { expiresAt: Date.now() + CACHE_TTL_MS, value }
-    return value
-  }
+  const key = [normalizeCodeEditorNavigationPath(input.directory), input.language].join("\n")
+  const path = normalizeCodeEditorNavigationPath(input.path)
+  const entry = snippetProviderRegistry.get(key) ?? createSnippetProviderRegistryEntry(input)
+  snippetProviderRegistry.set(key, entry)
+  entry.count += 1
+  entry.paths.set(path, (entry.paths.get(path) ?? 0) + 1)
+  entry.disposeGeneration += 1
 
-  return input.monaco.languages.registerCompletionItemProvider(input.language, {
+  let disposed = false
+  return {
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      releaseCodeEditorSnippetProvider(key, path, entry)
+    },
+  } satisfies import("monaco-editor").IDisposable
+}
+
+function createSnippetProviderRegistryEntry(input: {
+  monaco: typeof import("monaco-editor")
+  directory: string
+  language: string
+  loadFiles: (directory: string) => Promise<CodeEditorSnippetFile[]>
+}) {
+  const entry: SnippetProviderRegistryEntry = {
+    count: 0,
+    paths: new Map(),
+    loadFiles: input.loadFiles,
+    provider: { dispose: () => {} },
+    disposeGeneration: 0,
+  }
+  entry.provider = input.monaco.languages.registerCompletionItemProvider(input.language, {
     provideCompletionItems: async (model, position, _context, token) => {
       const actualPath = getCodeEditorFilePathFromUri(model.uri.toString())
-      if (!actualPath || normalizeCodeEditorNavigationPath(actualPath) !== normalizeCodeEditorNavigationPath(input.path)) {
+      const path = actualPath && normalizeCodeEditorNavigationPath(actualPath)
+      if (!path || !entry.paths.has(path)) return { suggestions: [] }
+      const version = model.getVersionId()
+      const snippets = await loadCodeEditorSnippets(entry, input.directory, input.language)
+      if (
+        token.isCancellationRequested ||
+        model.isDisposed() ||
+        model.getVersionId() !== version ||
+        !entry.paths.has(path)
+      ) {
         return { suggestions: [] }
       }
-
-      const snippets = await load()
-      if (token.isCancellationRequested) return { suggestions: [] }
       const word = model.getWordUntilPosition(position)
       const range = new input.monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
       return {
@@ -86,6 +123,33 @@ export function registerCodeEditorSnippetProvider(input: {
         })),
       }
     },
+  })
+  return entry
+}
+
+function loadCodeEditorSnippets(entry: SnippetProviderRegistryEntry, directory: string, language: string) {
+  if (entry.cache && entry.cache.expiresAt > Date.now()) return entry.cache.value
+  const value = entry
+    .loadFiles(directory)
+    .then((files) => parseCodeEditorSnippetFiles({ files, language }))
+    .catch(() => [])
+  entry.cache = { expiresAt: Date.now() + CACHE_TTL_MS, value }
+  return value
+}
+
+function releaseCodeEditorSnippetProvider(key: string, path: string, entry: SnippetProviderRegistryEntry) {
+  if (snippetProviderRegistry.get(key) !== entry) return
+  const count = entry.paths.get(path) ?? 0
+  if (count > 1) entry.paths.set(path, count - 1)
+  if (count === 1) entry.paths.delete(path)
+  entry.count = Math.max(0, entry.count - 1)
+  if (entry.count > 0) return
+
+  const generation = ++entry.disposeGeneration
+  queueMicrotask(() => {
+    if (snippetProviderRegistry.get(key) !== entry || entry.count > 0 || generation !== entry.disposeGeneration) return
+    entry.provider.dispose()
+    snippetProviderRegistry.delete(key)
   })
 }
 

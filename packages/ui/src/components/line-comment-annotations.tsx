@@ -322,6 +322,7 @@ export function createLineCommentController<T extends LineCommentShape>(
   note: ReturnType<typeof createLineCommentState<string>>
   annotations: Accessor<DiffLineAnnotation<LineCommentAnnotationMeta<T>>[]>
   renderAnnotation: ReturnType<typeof createManagedLineCommentAnnotationRenderer<T>>["renderAnnotation"]
+  renderDetachedAnnotation: ReturnType<typeof createManagedLineCommentAnnotationRenderer<T>>["renderAnnotation"]
   renderHoverUtility: ReturnType<typeof createLineCommentHoverRenderer>
   onLineSelected: (range: SelectedLineRange | null) => void
   onLineSelectionEnd: (range: SelectedLineRange | null) => void
@@ -333,6 +334,7 @@ export function createLineCommentController<T extends LineCommentShape>(
   note: ReturnType<typeof createLineCommentState<string>>
   annotations: Accessor<LineCommentAnnotation<T>[]>
   renderAnnotation: ReturnType<typeof createManagedLineCommentAnnotationRenderer<T>>["renderAnnotation"]
+  renderDetachedAnnotation: ReturnType<typeof createManagedLineCommentAnnotationRenderer<T>>["renderAnnotation"]
   renderHoverUtility: ReturnType<typeof createLineCommentHoverRenderer>
   onLineSelected: (range: SelectedLineRange | null) => void
   onLineSelectionEnd: (range: SelectedLineRange | null) => void
@@ -362,9 +364,9 @@ export function createLineCommentController<T extends LineCommentShape>(
           draftKey: props.draftKey,
         })
 
-  const { renderAnnotation } = createManagedLineCommentAnnotationRenderer<T>({
+  const createRendererProps = () => ({
     annotations,
-    renderComment: (comment) => {
+    renderComment: (comment: T) => {
       const edit = () => note.openEditor(comment.id, comment.selection, comment.comment)
       const remove = () => {
         note.reset()
@@ -410,7 +412,7 @@ export function createLineCommentController<T extends LineCommentShape>(
         },
       }
     },
-    renderDraft: (range) => ({
+    renderDraft: (range: SelectedLineRange) => ({
       get value() {
         return note.draft()
       },
@@ -418,13 +420,17 @@ export function createLineCommentController<T extends LineCommentShape>(
       mention: props.mention,
       onInput: note.setDraft,
       onCancel: note.cancelDraft,
-      onSubmit: (comment) => {
+      onSubmit: (comment: string) => {
         props.onSubmit({ comment, selection: cloneSelectedLineRange(range) })
         note.cancelDraft()
       },
       onPopoverFocusOut: props.onDraftPopoverFocusOut,
     }),
   })
+  const { renderAnnotation } = createManagedLineCommentAnnotationRenderer<T>(createRendererProps())
+  const { renderAnnotation: renderDetachedAnnotation } = createManagedLineCommentAnnotationRenderer<T>(
+    createRendererProps(),
+  )
 
   const renderHoverUtility = createLineCommentHoverRenderer({
     label: props.label,
@@ -464,6 +470,7 @@ export function createLineCommentController<T extends LineCommentShape>(
     note,
     annotations,
     renderAnnotation,
+    renderDetachedAnnotation,
     renderHoverUtility,
     onLineSelected,
     onLineSelectionEnd,

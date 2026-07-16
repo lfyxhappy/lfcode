@@ -9,6 +9,7 @@ import { usePermission } from "@/context/permission"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { formatServerError } from "@/utils/server-errors"
+import { isSessionStreaming } from "@/utils/session-status"
 import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 export const todoState = (input: {
@@ -64,7 +65,7 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
     return sync.data.session_status[id] ?? idle
   })
 
-  const busy = createMemo(() => status().type !== "idle")
+  const busy = createMemo(() => isSessionStreaming(status()))
   const live = createMemo(() => busy() || blocked())
 
   const [store, setStore] = createStore({

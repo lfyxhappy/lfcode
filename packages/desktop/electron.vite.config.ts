@@ -9,8 +9,16 @@ const channel = (() => {
 })()
 
 const LFCODE_SERVER_DIST = "../lfcode/dist/node"
+let serverAssets: { name: string; data: Uint8Array }[] = []
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
+const esmShim = `
+// -- CommonJS Shims --
+import __cjs_mod__ from 'node:module';
+const __filename = import.meta.filename;
+const __dirname = import.meta.dirname;
+const require = __cjs_mod__.createRequire(import.meta.url);
+`
 
 export default defineConfig({
   main: {
@@ -24,6 +32,22 @@ export default defineConfig({
       externalizeDeps: { include: [nodePtyPkg] },
     },
     plugins: [
+      {
+        name: "lfcode:esm-shim",
+        enforce: "pre",
+        renderChunk: {
+          order: "pre",
+          handler(code, _chunk, options) {
+            if (options.format !== "es") return null
+            if (code.includes(esmShim)) return null
+            if (!/__filename|__dirname|require\(|require\.resolve\(/.test(code)) return null
+
+            // electron-vite 5 finds the insertion point with a regex that can mistake
+            // prose ending in `import` for a static import inside large generated chunks.
+            return `${esmShim}${code}`
+          },
+        },
+      },
       {
         name: "lfcode:node-pty-narrower",
         enforce: "pre",
@@ -40,11 +64,15 @@ export default defineConfig({
       },
       {
         name: "lfcode:copy-server-assets",
+        async buildStart() {
+          serverAssets = await Promise.all(
+            (await fs.readdir(LFCODE_SERVER_DIST))
+              .filter((name) => name.endsWith(".wasm"))
+              .map(async (name) => ({ name, data: await fs.readFile(`${LFCODE_SERVER_DIST}/${name}`) })),
+          )
+        },
         async writeBundle() {
-          for (const l of await fs.readdir(LFCODE_SERVER_DIST)) {
-            if (!l.endsWith(".wasm")) continue
-            await fs.writeFile(`./out/main/chunks/${l}`, await fs.readFile(`${LFCODE_SERVER_DIST}/${l}`))
-          }
+          await Promise.all(serverAssets.map((asset) => fs.writeFile(`./out/main/chunks/${asset.name}`, asset.data)))
         },
       },
     ],

@@ -379,6 +379,11 @@ registerCustomTheme("Lfcode", () => {
 function renderMathInText(text: string): string {
   let result = text
 
+  // Normalize common LaTeX delimiters to KaTeX-friendly forms before rendering.
+  result = result
+    .replace(/\\\[((?:.|\r?\n)*?)\\\]/g, (_, math) => `$$${math}$$`)
+    .replace(/\\\(((?:[^\\]|\\.)*?)\\\)/g, (_, math) => `$${math}$`)
+
   // Display math: $$...$$
   const displayMathRegex = /\$\$([\s\S]*?)\$\$/g
   result = result.replace(displayMathRegex, (_, math) => {
@@ -421,6 +426,12 @@ function renderMathExpressions(html: string): string {
       return renderMathInText(part)
     })
     .join("")
+}
+
+function normalizeMathDelimiters(markdown: string) {
+  return markdown
+    .replace(/\\\[((?:.|\r?\n)*?)\\\]/g, (_, math) => `$$${math}$$`)
+    .replace(/\\\(((?:[^\\]|\\.)*?)\\\)/g, (_, math) => `$${math}$`)
 }
 
 async function highlightCodeBlocks(html: string): Promise<string> {
@@ -468,7 +479,7 @@ export type NativeMarkdownParser = (markdown: string) => Promise<string>
 export const { use: useMarked, provider: MarkedProvider } = createSimpleContext({
   name: "Marked",
   init: (props: { nativeParser?: NativeMarkdownParser }) => {
-    const jsParser = marked.use(
+    const baseParser = marked.use(
       {
         renderer: {
           link({ href, title, text }) {
@@ -514,6 +525,10 @@ export const { use: useMarked, provider: MarkedProvider } = createSimpleContext(
       }
     }
 
-    return jsParser
+    return {
+      async parse(markdown: string) {
+        return baseParser.parse(normalizeMathDelimiters(markdown))
+      },
+    }
   },
 })

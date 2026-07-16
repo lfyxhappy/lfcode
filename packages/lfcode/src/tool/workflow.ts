@@ -107,7 +107,7 @@ export const WorkflowTool = Tool.define<typeof parameters, Metadata, Config.Serv
         const started = yield* runtime.start({
           script,
           sessionID: ctx.sessionID as SessionID,
-          parentActorID: ctx.agent ?? "main",
+          parentActorID: ctx.actorID ?? "main",
           args: input.args,
           workspace: input.workspace,
           maxConcurrentAgents: cfg.workflow?.maxConcurrentAgents,

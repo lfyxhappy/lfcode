@@ -27,27 +27,13 @@ const CHECKPOINT_RESERVED = 13_000
 const MAX_WRITER_FAILURES = 3
 
 /**
- * Default checkpoint thresholds by context window size.
- *
- * Schedule (Part 2 density):
- *   < 25K          → []                    (subsystem disabled)
- *   25K ≤ w ≤ 200K → 4 triggers @ 20%      (mid-tier models)
- *   200K < w ≤ 500K → 9 triggers @ 10%     (extended-context models)
- *   w > 500K        → 18 triggers @ 5%     (1M+ window models)
- *
- * Density mirrors cc's intent that writers fire often enough that overflow
- * almost always finds a fresh `checkpoint.md` to rebuild from (avoiding
- * fallback to lossy compaction). cc uses growth+toolcall triggers; we use
- * % of window for a simpler implementation that doesn't require new state.
- * See docs/superpowers/specs/2026-06-03-checkpoint-threshold-density-design.md.
+ * Checkpoint writers are opt-in. The default hot path uses direct compaction,
+ * so threshold-triggered checkpoint writes stay disabled unless explicitly
+ * configured.
  */
 export function defaultThresholdsFor(window: number): readonly string[] {
-  if (window < 25_000) return []
-  if (window <= 200_000) return ["20%", "40%", "60%", "80%"]
-  if (window <= 500_000) {
-    return ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"]
-  }
-  return Array.from({ length: 18 }, (_, i) => `${(i + 1) * 5}%`)
+  void window
+  return []
 }
 
 function isCacheCold(model?: Provider.Model, lastAssistantTime?: number): boolean {

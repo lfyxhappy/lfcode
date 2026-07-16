@@ -1,5 +1,5 @@
 import z from "zod"
-import { Effect, Option, Scope } from "effect"
+import { Effect, Scope } from "effect"
 import { createReadStream } from "fs"
 import * as path from "path"
 import { createInterface } from "readline"
@@ -12,6 +12,8 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import { SessionCwd } from "./session-cwd"
 import { Instruction } from "../session/instruction"
 import { isImageAttachment, isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { inferReadKind, inspectArchiveFile, isBinaryFile, type ReadKind } from "./file-inspect"
+import * as PatchRecovery from "./patch-recovery"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -19,12 +21,29 @@ const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
+const MAX_ARCHIVE_INSPECT_BYTES = 20 * 1024 * 1024
 
 const parameters = z.object({
-  filePath: z.string().describe("The absolute path to the file or directory to read"),
+  filePath: z.string().describe("The absolute or relative path to the file or directory to read."),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
   limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
 })
+
+type ReadMetadata = {
+  kind: ReadKind
+  mime: string
+  fileSize: number
+  preview?: string
+  truncated: boolean
+  totalLines?: number
+  nextOffset?: number
+  version?: string
+  resolvedSelection?: {
+    startLine: number
+    endLine: number
+  }
+  loaded: string[]
+}
 
 export const ReadTool = Tool.define(
   "read",
@@ -84,62 +103,16 @@ export const ReadTool = Tool.define(
       fileSize: number,
       sampleSize: number,
     ) {
-      if (fileSize === 0) return new Uint8Array()
-
-      return yield* Effect.scoped(
-        Effect.gen(function* () {
-          const file = yield* fs.open(filepath, { flag: "r" })
-          return Option.getOrElse(yield* file.readAlloc(Math.min(sampleSize, fileSize)), () => new Uint8Array())
-        }),
-      )
+      if (fileSize === 0) {
+        const bytes = new Uint8Array()
+        return { sample: bytes, version: PatchRecovery.contentVersion(bytes) }
+      }
+      const bytes = yield* fs.readFile(filepath)
+      return {
+        sample: bytes.slice(0, Math.min(sampleSize, fileSize)),
+        version: PatchRecovery.contentVersion(bytes),
+      }
     })
-
-    const isBinaryFile = (filepath: string, bytes: Uint8Array) => {
-      const ext = path.extname(filepath).toLowerCase()
-      switch (ext) {
-        case ".zip":
-        case ".tar":
-        case ".gz":
-        case ".exe":
-        case ".dll":
-        case ".so":
-        case ".class":
-        case ".jar":
-        case ".war":
-        case ".7z":
-        case ".doc":
-        case ".docx":
-        case ".xls":
-        case ".xlsx":
-        case ".ppt":
-        case ".pptx":
-        case ".odt":
-        case ".ods":
-        case ".odp":
-        case ".bin":
-        case ".dat":
-        case ".obj":
-        case ".o":
-        case ".a":
-        case ".lib":
-        case ".wasm":
-        case ".pyc":
-        case ".pyo":
-          return true
-      }
-
-      if (bytes.length === 0) return false
-
-      let nonPrintableCount = 0
-      for (let i = 0; i < bytes.length; i++) {
-        if (bytes[i] === 0) return true
-        if (bytes[i] < 9 || (bytes[i] > 13 && bytes[i] < 32)) {
-          nonPrintableCount++
-        }
-      }
-
-      return nonPrintableCount / bytes.length > 0.3
-    }
 
     const run = Effect.fn("ReadTool.execute")(function* (params: z.infer<typeof parameters>, ctx: Tool.Context) {
       if (params.offset !== undefined && params.offset < 1) {
@@ -176,6 +149,11 @@ export const ReadTool = Tool.define(
 
       if (!stat) return yield* miss(filepath)
 
+      if (stat.type !== "Directory" && PatchRecovery.needsRead(ctx.sessionID, ctx.messageID, filepath)) {
+        const recoveryContent = yield* fs.readFile(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        if (recoveryContent) PatchRecovery.recordRead(ctx.sessionID, ctx.messageID, filepath, recoveryContent)
+      }
+
       if (stat.type === "Directory") {
         const items = yield* list(filepath)
         const limit = params.limit ?? DEFAULT_READ_LIMIT
@@ -183,6 +161,7 @@ export const ReadTool = Tool.define(
         const start = offset - 1
         const sliced = items.slice(start, start + limit)
         const truncated = start + sliced.length < items.length
+        const nextOffset = truncated ? offset + sliced.length : undefined
 
         return {
           title,
@@ -197,24 +176,42 @@ export const ReadTool = Tool.define(
             `</entries>`,
           ].join("\n"),
           metadata: {
+            kind: "directory" as const,
+            mime: "application/x-directory",
             preview: sliced.slice(0, 20).join("\n"),
             truncated,
+            fileSize: items.length,
+            nextOffset,
+            resolvedSelection: sliced.length
+              ? {
+                  startLine: offset,
+                  endLine: offset + sliced.length - 1,
+                }
+              : undefined,
             loaded: [] as string[],
           },
         }
       }
 
       const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
-      const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
+      const sampled = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
+      const sample = sampled.sample
+      const version = sampled.version
+      const fileSize = Number(stat.size)
 
       const mime = sniffAttachmentMime(sample, AppFileSystem.mimeType(filepath))
       if (isImageAttachment(mime) || isPdfAttachment(mime)) {
         const bytes = yield* fs.readFile(filepath)
         const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
+        const kind: ReadKind = isPdfAttachment(mime) ? "pdf" : "image"
         return {
           title,
           output: msg,
           metadata: {
+            kind,
+            mime,
+            fileSize,
+            version,
             preview: msg,
             truncated: false,
             loaded: loaded.map((item) => item.filepath),
@@ -229,8 +226,123 @@ export const ReadTool = Tool.define(
         }
       }
 
+      const inferredKind = inferReadKind(filepath, mime)
+      if (inferredKind === "archive" || inferredKind === "document") {
+        if (fileSize > MAX_ARCHIVE_INSPECT_BYTES) {
+          return {
+            title,
+            output: [
+              `<path>${filepath}</path>`,
+              `<type>${inferredKind}</type>`,
+              `<mime>${mime}</mime>`,
+              `<size>${fileSize}</size>`,
+              `File is too large to inspect inline (${Math.ceil(fileSize / 1024 / 1024)} MB).`,
+            ].join("\n"),
+            metadata: {
+              kind: inferredKind,
+              mime,
+              fileSize,
+              version,
+              truncated: false,
+              loaded: loaded.map((item) => item.filepath),
+            },
+          }
+        }
+
+        const bytes = yield* fs.readFile(filepath)
+        const inspected = yield* Effect.promise(() => inspectArchiveFile(filepath, bytes)).pipe(
+          Effect.catch(() =>
+            Effect.succeed({
+              kind: inferredKind,
+              entries: [] as string[],
+            }),
+          ),
+        )
+
+        if ("text" in inspected && inspected.text) {
+          const document = paginateText(inspected.text, params.offset ?? 1, params.limit ?? DEFAULT_READ_LIMIT)
+          let output = [`<path>${filepath}</path>`, `<type>${inspected.kind}</type>`, `<mime>${mime}</mime>`, "<content>\n"].join(
+            "\n",
+          )
+          output += document.raw.map((line, i) => `${i + document.offset}: ${line}`).join("\n")
+          const last = document.offset + document.raw.length - 1
+          const next = last + 1
+          if (document.more) {
+            output += `\n\n(Showing lines ${document.offset}-${last} of ${document.count}. Use offset=${next} to continue.)`
+          } else {
+            output += `\n\n(End of file - total ${document.count} lines)`
+          }
+          output += "\n</content>"
+          return {
+            title,
+            output,
+            metadata: {
+              kind: inspected.kind,
+              mime,
+              fileSize,
+              version,
+              truncated: document.more,
+              totalLines: document.count,
+              nextOffset: document.more ? next : undefined,
+              resolvedSelection: document.raw.length
+                ? { startLine: document.offset, endLine: last }
+                : undefined,
+              preview: document.raw.slice(0, 20).join("\n"),
+              loaded: loaded.map((item) => item.filepath),
+            },
+          }
+        }
+
+        const archive = paginateEntries(inspected.entries, params.offset ?? 1, params.limit ?? DEFAULT_READ_LIMIT)
+        return {
+          title,
+          output: [
+            `<path>${filepath}</path>`,
+            `<type>${inspected.kind}</type>`,
+            `<mime>${mime}</mime>`,
+            `<entries>`,
+            archive.raw.join("\n"),
+            archive.more
+              ? `\n(Showing ${archive.raw.length} of ${archive.count} entries. Use offset=${archive.offset + archive.raw.length} to continue.)`
+              : `\n(${archive.count} entries)`,
+            `</entries>`,
+          ].join("\n"),
+          metadata: {
+            kind: inspected.kind,
+            mime,
+            fileSize,
+            version,
+            truncated: archive.more,
+            nextOffset: archive.more ? archive.offset + archive.raw.length : undefined,
+            resolvedSelection: archive.raw.length
+              ? { startLine: archive.offset, endLine: archive.offset + archive.raw.length - 1 }
+              : undefined,
+            preview: archive.raw.slice(0, 20).join("\n"),
+            loaded: loaded.map((item) => item.filepath),
+          },
+        }
+      }
+
       if (isBinaryFile(filepath, sample)) {
-        return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
+        return {
+          title,
+          output: [
+            `<path>${filepath}</path>`,
+            `<type>binary</type>`,
+            `<mime>${mime}</mime>`,
+            `<size>${fileSize}</size>`,
+            "Binary file cannot be rendered as text by read().",
+          ].join("\n"),
+          metadata: {
+            kind: "binary" as const,
+            mime,
+            fileSize,
+            version,
+            preview: "",
+            truncated: false,
+            loaded: loaded.map((item) => item.filepath),
+          },
+        }
       }
 
       const file = yield* Effect.promise(() =>
@@ -267,18 +379,26 @@ export const ReadTool = Tool.define(
         title,
         output,
         metadata: {
+          kind: "file" as const,
+          mime,
+          fileSize,
+          version,
           preview: file.raw.slice(0, 20).join("\n"),
           truncated,
+          totalLines: file.count,
+          nextOffset: truncated ? next : undefined,
+          resolvedSelection: file.raw.length ? { startLine: file.offset, endLine: last } : undefined,
           loaded: loaded.map((item) => item.filepath),
         },
       }
     })
 
-    return {
+    const definition: Tool.DefWithoutID<typeof parameters, ReadMetadata> = {
       description: DESCRIPTION,
       parameters,
       execute: (params: z.infer<typeof parameters>, ctx: Tool.Context) => run(params, ctx).pipe(Effect.orDie),
     }
+    return definition
   }),
 )
 
@@ -324,5 +444,21 @@ async function lines(filepath: string, opts: { limit: number; offset: number }) 
   }
 
   return { raw, count, cut, more, offset: opts.offset }
+}
+
+function paginateText(input: string, offset: number, limit: number) {
+  const all = input.length === 0 ? [] : input.split(/\r?\n/u)
+  return paginateEntries(all, offset, limit)
+}
+
+function paginateEntries(all: string[], offset: number, limit: number) {
+  const start = Math.max(0, offset - 1)
+  const raw = all.slice(start, start + limit)
+  return {
+    raw,
+    count: all.length,
+    more: start + raw.length < all.length,
+    offset,
+  }
 }
 

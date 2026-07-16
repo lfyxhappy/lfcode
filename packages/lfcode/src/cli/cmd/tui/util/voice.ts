@@ -1,5 +1,5 @@
 import { Process } from "@/util"
-import { which } from "@/util/which"
+import { resolveRecorderCommand } from "@/runtime-registry"
 import { RealtimeVAD, type VADSegment } from "./vad"
 import z from "zod"
 
@@ -8,49 +8,22 @@ type Recorder = {
   pipeArgs: () => string[]
 }
 
-const RECORDERS: Record<string, Array<() => Recorder | null>> = {
-  darwin: [
-    () =>
-      which("sox")
-        ? { cmd: "sox", pipeArgs: () => ["-d", "-r", "16000", "-c", "1", "-b", "16", "-t", "raw", "-"] }
-        : null,
-    () =>
-      which("rec")
-        ? { cmd: "rec", pipeArgs: () => ["-r", "16000", "-c", "1", "-b", "16", "-t", "raw", "-"] }
-        : null,
-  ],
-  linux: [
-    () =>
-      which("arecord")
-        ? { cmd: "arecord", pipeArgs: () => ["-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "raw"] }
-        : null,
-    () =>
-      which("sox")
-        ? { cmd: "sox", pipeArgs: () => ["-d", "-r", "16000", "-c", "1", "-b", "16", "-t", "raw", "-"] }
-        : null,
-  ],
-  win32: [
-    () =>
-      which("sox")
-        ? { cmd: "sox", pipeArgs: () => ["-d", "-r", "16000", "-c", "1", "-b", "16", "-t", "raw", "-"] }
-        : null,
-  ],
-}
-
 let cachedRecorder: Recorder | null | undefined
+
+export function refreshRecorderAvailability() {
+  cachedRecorder = undefined
+}
 
 function detectRecorder(): Recorder | null {
   if (cachedRecorder !== undefined) return cachedRecorder
-  const candidates = RECORDERS[process.platform] ?? []
-  for (const factory of candidates) {
-    const recorder = factory()
-    if (recorder) {
-      cachedRecorder = recorder
-      return recorder
-    }
-  }
-  cachedRecorder = null
-  return null
+  const recorder = resolveRecorderCommand()
+  cachedRecorder = recorder
+    ? {
+        cmd: recorder.path,
+        pipeArgs: recorder.pipeArgs,
+      }
+    : null
+  return cachedRecorder
 }
 
 export function isAvailable(): boolean {
@@ -63,6 +36,46 @@ export type StreamingHandle = {
   startTime: number
   aborted: boolean
   reading: Promise<void>
+}
+
+type VoiceProvider = {
+  id: string
+  protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
+  key?: string
+  options: Record<string, unknown>
+}
+
+type VoiceModel = {
+  id: string
+  protocol?: VoiceProvider["protocol"]
+  api: { url: string; npm: string }
+  headers: Record<string, string>
+  capabilities: { input: { audio: boolean } }
+}
+
+export type VoiceTransport = {
+  apiKey: string
+  baseUrl: string
+  headers: Record<string, string>
+  modelID: string
+  providerID: string
+}
+
+export function resolveTransport(input: { provider: VoiceProvider | undefined; model: VoiceModel | undefined }): VoiceTransport | undefined {
+  if (!input.provider?.key || !input.model?.capabilities.input.audio) return
+  const protocol = input.model.protocol ?? input.provider.protocol
+  const compatible = protocol === undefined || protocol === "openai-chat" || input.model.api.npm === "@ai-sdk/openai-compatible"
+  if (!compatible) return
+  const configured = input.provider.options.baseURL
+  const baseUrl = typeof configured === "string" && configured !== "" ? configured : input.model.api.url
+  if (!baseUrl) return
+  return {
+    apiKey: input.provider.key,
+    baseUrl,
+    headers: input.model.headers,
+    modelID: input.model.id,
+    providerID: input.provider.id,
+  }
 }
 
 export function startStreaming(opts: {
@@ -122,26 +135,21 @@ export async function stopStreaming(handle: StreamingHandle) {
 
 export async function transcribeAudio(opts: {
   audio: Int16Array
-  apiKey: string
-  baseUrl: string
+  transport: VoiceTransport
 }): Promise<string | null> {
   const wavBuffer = encodeWav(opts.audio)
   const base64 = Buffer.from(wavBuffer).toString("base64")
   const dataUrl = `data:audio/wav;base64,${base64}`
-  const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`
+  const url = `${opts.transport.baseUrl.replace(/\/+$/, "")}/chat/completions`
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": opts.apiKey,
-      "X-Mimo-Source": "lfcode-cli",
-    },
+    headers: requestHeaders(opts.transport),
     body: JSON.stringify({
-      model: "mimo-v2.5-asr",
+      model: opts.transport.modelID,
       messages: [{ role: "user", content: [{ type: "input_audio", input_audio: { data: dataUrl } }] }],
       asr_options: { language: "auto" },
     }),
@@ -300,8 +308,7 @@ export function parseVoiceControl(raw: string): VoiceControlResult | null {
 
 export async function processVoiceControl(opts: {
   audio: Int16Array
-  apiKey: string
-  baseUrl: string
+  transport: VoiceTransport
   currentText: string
   currentAgent: string
   availableAgents: string[]
@@ -310,7 +317,7 @@ export async function processVoiceControl(opts: {
   const wavBuffer = encodeWav(opts.audio)
   const base64 = Buffer.from(wavBuffer).toString("base64")
   const dataUrl = `data:audio/wav;base64,${base64}`
-  const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`
+  const url = `${opts.transport.baseUrl.replace(/\/+$/, "")}/chat/completions`
 
   const userContext = JSON.stringify({
     current_text: opts.currentText,
@@ -325,13 +332,9 @@ export async function processVoiceControl(opts: {
 
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": opts.apiKey,
-      "X-Mimo-Source": "lfcode-cli",
-    },
+    headers: requestHeaders(opts.transport),
     body: JSON.stringify({
-      model: "mimo-v2.5",
+      model: opts.transport.modelID,
       messages: [
         { role: "system", content: VOICE_CONTROL_SYSTEM_PROMPT },
         {
@@ -357,4 +360,14 @@ export async function processVoiceControl(opts: {
   } catch {
     return null
   }
+}
+
+function requestHeaders(transport: VoiceTransport) {
+  const headers: Record<string, string> = {
+    ...transport.headers,
+    "Content-Type": "application/json",
+  }
+  if (transport.providerID === "azure") return { ...headers, "api-key": transport.apiKey }
+  if (headers.Authorization || headers.authorization) return headers
+  return { ...headers, Authorization: `Bearer ${transport.apiKey}` }
 }

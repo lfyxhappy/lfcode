@@ -156,6 +156,10 @@ export const Instance = {
       },
     })
   },
+  async invalidateAllCaches() {
+    Log.Default.info("invalidating all instance caches")
+    await Promise.allSettled([...cache.keys()].map((directory) => disposeInstance(directory)))
+  },
   async disposeAll() {
     if (disposal.all) return disposal.all
 

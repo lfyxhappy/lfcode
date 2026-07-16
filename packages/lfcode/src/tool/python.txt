@@ -1,0 +1,15 @@
+Execute a Python script with the preferred project/runtime interpreter.
+
+Use this when Python is the natural tool for the job:
+- parsing or transforming structured data
+- quick numeric or text processing
+- lightweight automation that is easier to express in Python than shell
+
+Do not use this for simple file reads, searches, or small edits when the dedicated tools already cover the task better.
+
+Notes:
+- The script is executed from a temporary `.py` file, so multi-line code is safe.
+- Use `args` when the script should read extra CLI arguments from `sys.argv[1:]`.
+- Lfcode maintains a writable managed Python environment for this tool.
+- Common packages such as `httpx`, `beautifulsoup4`, `lxml`, `pydantic`, `openpyxl`, `python-docx`, `pypdf`, `pillow`, `PyYAML`, and `tenacity` are preinstalled there.
+- Install or upgrade Python dependencies with the dedicated `pip` tool instead of shelling out manually.

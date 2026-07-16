@@ -30,10 +30,8 @@ jobs:
       - name: Setup Bun
         if: steps.team-check.outputs.is_team != 'true'
         uses: ./.github/actions/setup-bun
-
-      - name: Install dependencies
-        if: steps.team-check.outputs.is_team != 'true'
-        run: bun install
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Install Lfcode
         if: steps.team-check.outputs.is_team != 'true'

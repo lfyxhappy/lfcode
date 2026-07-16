@@ -37,7 +37,7 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
 import { drizzle } from "drizzle-orm/bun-sqlite"
-import { ensureProcessMetadata } from "./util/mimo-process"
+import { ensureProcessMetadata } from "./util/process-metadata"
 
 const processMetadata = ensureProcessMetadata("main")
 
@@ -160,6 +160,25 @@ const cli = yargs(args)
         await ClaudeImport.run()
       } catch (e) {
         Log.Default.warn("claude-import failed", { e: errorMessage(e) })
+      }
+    }
+
+    if (!process.env.LFCODE_DISABLE_BACKGROUND_JOB_RECONCILE && !process.env.LFCODE_BACKGROUND_JOB_RECONCILED) {
+      process.env.LFCODE_BACKGROUND_JOB_RECONCILED = "1"
+      try {
+        const { reconcileRunningBackgroundJobs } = await import("./background-job/control")
+        const results = reconcileRunningBackgroundJobs("startup", { includeShellJobs: false })
+        const total = results.length
+        if (total > 0) {
+          Log.Default.info("background-job reconcile", {
+            total,
+            reconciled_missing_process: results.filter((item) => item.ok && item.code === "reconciled_missing_process").length,
+            still_running: results.filter((item) => item.ok && item.code === "still_running").length,
+            unmanaged_running: results.filter((item) => item.ok && item.code === "unmanaged_running").length,
+          })
+        }
+      } catch (e) {
+        Log.Default.warn("background-job reconcile failed", { e: errorMessage(e) })
       }
     }
   })

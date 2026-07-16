@@ -15,7 +15,7 @@ import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { findLast } from "@lfcode-ai/shared/util/array"
-import { BROWSER_COMMAND_EVENT, BROWSER_REQUEST_OPEN_EVENT, DEFAULT_BROWSER_URL, browserTab, browserTabID, createSessionTabs } from "@/pages/session/helpers"
+import { BROWSER_COMMAND_EVENT, BROWSER_REQUEST_OPEN_EVENT, createBrowserRequestID, DEFAULT_BROWSER_URL, browserTab, browserTabID, createSessionTabs } from "@/pages/session/helpers"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@lfcode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
@@ -229,7 +229,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const openBrowser = () => {
     window.dispatchEvent(
       new CustomEvent(BROWSER_REQUEST_OPEN_EVENT, {
-        detail: { url: DEFAULT_BROWSER_URL },
+        detail: {
+          requestID: createBrowserRequestID(),
+          url: DEFAULT_BROWSER_URL,
+          sessionKey: sessionKey(),
+          sessionID: params.id,
+          reason: "human" as const,
+        },
         cancelable: true,
       }),
     )
@@ -595,7 +601,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       id: "review.toggle",
       title: language.t("command.review.toggle"),
       keybind: "mod+shift+r",
-      onSelect: () => view().reviewPanel.toggle(),
+      onSelect: () => {
+        if (!view().reviewPanel.opened()) view().setReviewEnabled(true)
+        view().reviewPanel.toggle()
+      },
     }),
     ...(shown()
       ? [

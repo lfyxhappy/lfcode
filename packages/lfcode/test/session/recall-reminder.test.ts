@@ -24,14 +24,14 @@ describe("recallHintLines", () => {
     expect(lines).toContain(`- actor({ operation: "status", actor_id: "<id>" })`)
   })
 
-  // Guards the positional contract the reminder block relies on: hints[0]=memory,
-  // hints[1]=task, hints[2]=actor. A future edit that reorders the returned array
+  // Guards the positional contract the reminder block relies on: hints[0]=task,
+  // hints[1]=actor, hints[2]=memory. A future edit that reorders the returned array
   // would silently swap which hint lands in which reminder slot — this catches it.
-  test("returned order is [memory, task, actor]", () => {
+  test("returned order is [task, actor, memory]", () => {
     const lines = recallHintLines({ invocation_style: "shell" })
     expect(lines).toHaveLength(3)
-    expect(lines[0]).toContain("memory(")
-    expect(lines[1]).toBe("- task list")
-    expect(lines[2]).toBe("- actor status <actor_id>")
+    expect(lines[0]).toBe("- task list")
+    expect(lines[1]).toBe("- actor status <actor_id>")
+    expect(lines[2]).toContain("memory(")
   })
 })

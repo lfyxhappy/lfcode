@@ -54,6 +54,7 @@ import {
   clearBrowserCookiesByDomain,
   deleteSavedBrowserLogin,
   getBrowserPasswordStorageState,
+  listBrowserAutofillCandidates,
   listBrowserCookies,
   listSavedBrowserLogins,
   removeBrowserCookie,
@@ -717,8 +718,11 @@ registerIpcHandlers({
   acknowledgeBrowserSavePasswordPrompt: async (input) => {
     return acknowledgeBrowserSavePasswordPrompt(input)
   },
-  resolveBrowserAutofill: async (origin) => {
-    return resolveBrowserAutofill(origin)
+  listBrowserAutofillCandidates: async (origin) => {
+    return listBrowserAutofillCandidates(origin)
+  },
+  resolveBrowserAutofill: async (input) => {
+    return resolveBrowserAutofill(input)
   },
   captureBrowserPassword: async (input) => {
     captureBrowserPassword(input)

@@ -1,7 +1,8 @@
 import type { FilePart } from "@lfcode-ai/sdk/v2"
+import { isInlineImageCacheUrl } from "./inline-image-cache"
 
 export function attached(part: FilePart) {
-  return part.url.startsWith("data:")
+  return part.url.startsWith("data:") || isInlineImageCacheUrl(part.url)
 }
 
 export function inline(part: FilePart) {

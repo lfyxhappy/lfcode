@@ -14,6 +14,10 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Global } from "../../src/global"
+import { Memory } from "../../src/memory"
+import { Database } from "../../src/storage"
+import { MemoryFtsTable } from "../../src/memory/fts.sql"
+import fs from "fs/promises"
 
 // Reuses the same HTTP-mock approach from llm.test.ts to capture the
 // system prompt the LLM layer assembled before sending. The system prompt
@@ -61,6 +65,28 @@ function createChatStream(text: string) {
   })
 }
 
+async function seedMemoryRoot() {
+  const rt = ManagedRuntime.make(Layer.mergeAll(Memory.defaultLayer))
+  try {
+    const root = await rt.runPromise(Memory.Service.use((svc) => svc.root()))
+    await Bun.write(path.join(root, "global", "MEMORY.md"), "durable memory entry")
+    await rt.runPromise(Memory.Service.use((svc) => svc.reconcile()))
+  } finally {
+    await rt.dispose()
+  }
+}
+
+async function resetMemoryState() {
+  const rt = ManagedRuntime.make(Layer.mergeAll(Memory.defaultLayer))
+  try {
+    const root = await rt.runPromise(Memory.Service.use((svc) => svc.root()))
+    await fs.rm(root, { recursive: true, force: true })
+    Database.use((db) => db.delete(MemoryFtsTable).run())
+  } finally {
+    await rt.dispose()
+  }
+}
+
 async function loadFixture(providerID: string, modelID: string) {
   const fixturePath = path.join(import.meta.dir, "../tool/fixtures/models-api.json")
   const data = await Filesystem.readJson<Record<string, any>>(fixturePath)
@@ -88,6 +114,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   queueState.queue.length = 0
+  return resetMemoryState()
 })
 
 afterAll(() => {
@@ -153,6 +180,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
+        await seedMemoryRoot()
         const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
         const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
         let sessionID: SessionID
@@ -210,6 +238,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
+        await seedMemoryRoot()
         const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
         // Create a real session row first — actor_registry.session_id is a FK to session.id.
         const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
@@ -294,6 +323,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
+        await seedMemoryRoot()
         const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
         const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
         let sessionID: SessionID
@@ -328,12 +358,78 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
         expect(allSys).toContain("Active recall protocol")
-        expect(allSys).toContain("use Grep with a keyword pattern")
+        expect(allSys).toContain("targeted `read(offset)`")
+        expect(allSys).toContain("do not Read them again as whole files")
       },
     })
   })
 
-  test("v8.1 buildMemoryInstructions reflects writer-as-curator ownership (F22)", async () => {
+  test("buildMemoryInstructions keeps compact ownership rules (F22)", async () => {
+    const server = queueState.server!
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Hi"), { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "lfcode.json"), tmpConfig(providerID, `${server.url.origin}/v1`))
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await seedMemoryRoot()
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
+        const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
+        let sessionID: SessionID
+        try {
+          const info = await sessionRt.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+          sessionID = info.id
+        } finally {
+          await sessionRt.dispose()
+        }
+        const rt = ManagedRuntime.make(Layer.mergeAll(LLM.defaultLayer))
+        try {
+          await rt.runPromise(
+            LLM.Service.use((svc) =>
+              svc
+                .stream({
+                  user: makeBaseUser(sessionID, providerID, resolved.id),
+                  sessionID,
+                  model: resolved,
+                  agent: makeAgent(),
+                  system: ["You are a helpful assistant."],
+                  messages: [{ role: "user", content: "Hello" }],
+                  tools: {},
+                })
+                .pipe(Stream.runDrain),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+        const capture = await request
+        const messages = capture.body.messages as Array<{ role: string; content: string }>
+        const sysMsgs = messages.filter((m) => m.role === "system")
+        const allSys = sysMsgs.map((m) => m.content).join("\n")
+
+        expect(allSys).toContain("Active recall protocol")
+        expect(allSys).toContain("only scratchpad")
+        expect(allSys).toContain("MEMORY.md")
+        expect(allSys).toContain("Do not create other ad-hoc memory files")
+        expect(allSys).toContain("higher-priority instruction explicitly requires it")
+        expect(allSys).toContain("relevant topic memory")
+        expect(allSys).not.toContain("Subagent return format")
+      },
+    })
+  })
+
+  test("memory instructions degrade when memory is not initialized", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -385,32 +481,8 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const messages = capture.body.messages as Array<{ role: string; content: string }>
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
-
-        // F22 v8.1 assertions:
-        // (1) writer-as-sole-curator language
-        expect(allSys).toContain("sole curator")
-
-        // (2) Active recall protocol still present (carried over from v8 F8)
-        expect(allSys).toContain("Active recall protocol")
-        expect(allSys).toContain("already in your context")
-
-        // (3) Subagent return format hint mentioned
-        expect(allSys).toContain("Subagent return format")
-        expect(allSys).toContain("**Status**:")
-
-        // (4) Agent's mid-task writing duties removed (v8.0 sections):
-        expect(allSys).not.toContain("Maintaining task progress")
-        expect(allSys).not.toContain("Notes.md format")
-
-        // v8.2: notes.md is back as the agent's only legal scratchpad (F26b).
-        expect(allSys).toContain("Notes scratchpad")
-        expect(allSys).toContain("notes.md")
-
-        // (5) MEMORY.md exception still present
-        expect(allSys).toContain("MEMORY.md")
-        expect(allSys).toContain("User states a project-level rule")
-        expect(allSys).toContain("Relevant topic memory")
-        expect(allSys).toContain("were not auto-injected")
+        expect(allSys).toContain("Memory is currently not initialized as a reliable searchable corpus")
+        expect(allSys).not.toContain("You have a persistent file-based memory system")
       },
     })
   })
@@ -434,6 +506,7 @@ describe("session.llm system prompt — memory-instructions guard", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
+        await seedMemoryRoot()
         const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
         const sessionRt = ManagedRuntime.make(SessionNs.defaultLayer)
         let sessionID: SessionID
@@ -470,8 +543,8 @@ describe("session.llm system prompt — memory-instructions guard", () => {
           .join("\n")
         expect(allSys).toContain(path.join(Global.Path.data, "memory", "projects", Instance.current.project.id, "MEMORY.md"))
         expect(allSys).toContain(path.join(Global.Path.data, "memory", "sessions", sessionID, "checkpoint.md"))
-        // Global memory is taught (read-side) and points at the canonical path.
-        expect(allSys).toContain("## Global memory")
+        expect(allSys).toContain(path.join(Global.Path.data, "memory", "sessions", sessionID, "notes.md"))
+        expect(allSys).toContain("Global memory")
         expect(allSys).toContain(path.join(Global.Path.data, "memory", "global", "MEMORY.md"))
         expect(allSys).not.toContain("<data>/memory/projects")
         expect(allSys).not.toContain("<data>/memory/sessions")

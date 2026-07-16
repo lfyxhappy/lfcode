@@ -1,13 +1,14 @@
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
+import { readLfcodePluginManifest, type PluginCategory, type PluginTrust } from "@lfcode-ai/plugin"
 import npa from "npm-package-arg"
 import semver from "semver"
 import { Filesystem } from "@/util"
 import { isRecord } from "@/util/record"
 import { Npm } from "@/npm"
+import { isManagedPluginSpecifier, resolveManagedPluginTarget } from "./library"
 
-// Old npm package names for plugins that are now built-in
-export const DEPRECATED_PLUGIN_PACKAGES = ["opencode-openai-codex-auth", "opencode-copilot-auth"]
+export const DEPRECATED_PLUGIN_PACKAGES: string[] = []
 
 export function isDeprecatedPlugin(spec: string) {
   return DEPRECATED_PLUGIN_PACKAGES.some((pkg) => spec.includes(pkg))
@@ -33,7 +34,7 @@ export function parsePluginSpecifier(spec: string) {
   return { pkg: hit.name, version: hit.rawSpec }
 }
 
-export type PluginSource = "file" | "npm"
+export type PluginSource = "file" | "npm" | "managed"
 export type PluginKind = "server" | "tui"
 type PluginMode = "strict" | "detect"
 
@@ -51,9 +52,23 @@ export type PluginEntry = {
   entry?: string
 }
 
+export type PluginManifestSummary = {
+  id?: string
+  name?: string
+  version?: string
+  description?: string
+  category?: PluginCategory
+  trust?: PluginTrust
+  apiVersion?: string
+  capabilities?: string[]
+  lfcodeRange?: string
+  runtimeDependencies?: { id: string; version?: string; required?: boolean }[]
+}
+
 const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.mjs", "index.cjs"]
 
 export function pluginSource(spec: string): PluginSource {
+  if (isManagedPluginSpecifier(spec)) return "managed"
   if (isPathPluginSpec(spec)) return "file"
   return "npm"
 }
@@ -101,6 +116,12 @@ function resolvePackagePath(spec: string, raw: string, kind: PluginKind, pkg: Pl
 }
 
 function resolvePackageEntrypoint(spec: string, kind: PluginKind, pkg: PluginPackage) {
+  const manifest = readLfcodePluginManifest(pkg.json.lfcode, spec)
+  const manifestTarget = kind === "server" ? manifest?.entrypoints.location : manifest?.entrypoints.tui
+  if (manifestTarget) {
+    return resolvePackagePath(spec, manifestTarget.path, kind, pkg)
+  }
+
   const exports = pkg.json.exports
   if (isRecord(exports)) {
     const raw = extractExportValue(exports[`./${kind}`])
@@ -114,8 +135,14 @@ function resolvePackageEntrypoint(spec: string, kind: PluginKind, pkg: PluginPac
 }
 
 function targetPath(target: string) {
-  if (target.startsWith("file://")) return fileURLToPath(target)
+  if (target.startsWith("file:")) return fileSpecifierPath(target)
   if (path.isAbsolute(target)) return target
+}
+
+function fileSpecifierPath(spec: string) {
+  const raw = spec.slice("file:".length)
+  if (!raw.startsWith(".") && (raw.startsWith("/") || isAbsolutePath(raw))) return fileURLToPath(spec)
+  return path.resolve(raw)
 }
 
 async function resolveDirectoryIndex(dir: string) {
@@ -168,12 +195,39 @@ async function resolvePluginEntrypoint(spec: string, target: string, kind: Plugi
   return target
 }
 
+export function readPluginManifestSummary(spec: string, pkg?: PluginPackage): PluginManifestSummary | undefined {
+  if (!pkg) return
+  const manifest = readLfcodePluginManifest(pkg.json.lfcode, spec)
+  if (!manifest) return
+  return {
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description,
+    category: manifest.category,
+    trust: manifest.trust,
+    apiVersion: `${manifest.apiVersion}`.trim(),
+    capabilities: manifest.capabilities?.length ? [...manifest.capabilities] : undefined,
+    lfcodeRange: manifest.compatibility?.lfcode,
+    runtimeDependencies: manifest.runtimeDependencies?.length ? [...manifest.runtimeDependencies] : undefined,
+  }
+}
+
 export function isPathPluginSpec(spec: string) {
-  return spec.startsWith("file://") || spec.startsWith(".") || isAbsolutePath(spec)
+  return (
+    spec.startsWith("file:") ||
+    spec === "." ||
+    spec === ".." ||
+    spec.startsWith("./") ||
+    spec.startsWith("../") ||
+    spec.startsWith(".\\") ||
+    spec.startsWith("..\\") ||
+    isAbsolutePath(spec)
+  )
 }
 
 export async function resolvePathPluginTarget(spec: string) {
-  const raw = spec.startsWith("file://") ? fileURLToPath(spec) : spec
+  const raw = spec.startsWith("file:") ? fileSpecifierPath(spec) : spec
   const file = path.isAbsolute(raw) || /^[A-Za-z]:[\\/]/.test(raw) ? raw : path.resolve(raw)
   const stat = await Filesystem.statAsync(file)
   if (!stat?.isDirectory()) {
@@ -195,6 +249,14 @@ export async function checkPluginCompatibility(target: string, lfcodeVersion: st
   if (!semver.valid(lfcodeVersion) || semver.major(lfcodeVersion) === 0) return
   const hit = pkg ?? (await readPluginPackage(target).catch(() => undefined))
   if (!hit) return
+  const manifest = readLfcodePluginManifest(hit.json.lfcode, hit.pkg)
+  const manifestRange = manifest?.compatibility?.lfcode
+  if (manifestRange) {
+    if (!semver.satisfies(lfcodeVersion, manifestRange)) {
+      throw new Error(`Plugin requires lfcode ${manifestRange} but running ${lfcodeVersion}`)
+    }
+    return
+  }
   const engines = hit.json.engines
   if (!isRecord(engines)) return
   const range = engines.lfcode
@@ -205,6 +267,7 @@ export async function checkPluginCompatibility(target: string, lfcodeVersion: st
 }
 
 export async function resolvePluginTarget(spec: string) {
+  if (isManagedPluginSpecifier(spec)) return resolveManagedPluginTarget(spec)
   if (isPathPluginSpec(spec)) return resolvePathPluginTarget(spec)
   const hit = parse(spec)
   const pkg = hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec
@@ -310,12 +373,21 @@ export async function resolvePluginId(
   id: string | undefined,
   pkg?: PluginPackage,
 ) {
+  const hit = pkg ?? (await readPluginPackage(target).catch(() => undefined))
+  const manifestID = readPluginManifestSummary(spec, hit)?.id
+  if (manifestID) return manifestID
   if (source === "file") {
     if (id) return id
     throw new TypeError(`Path plugin ${spec} must export id`)
   }
+  if (source === "managed") {
+    if (manifestID) return manifestID
+    throw new TypeError(`Managed plugin ${spec} must declare lfcode.id`)
+  }
   if (id) return id
-  const hit = pkg ?? (await readPluginPackage(target))
+  if (!hit) {
+    throw new TypeError(`Plugin ${spec} package metadata is unavailable`)
+  }
   if (typeof hit.json.name !== "string" || !hit.json.name.trim()) {
     throw new TypeError(`Plugin package ${hit.pkg} is missing name`)
   }

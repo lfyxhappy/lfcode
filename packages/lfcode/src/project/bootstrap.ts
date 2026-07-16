@@ -2,15 +2,14 @@ import { Plugin } from "../plugin"
 import { Format } from "../format"
 import { LSP } from "../lsp"
 import { File } from "../file"
-import { Snapshot } from "../snapshot"
 import * as Project from "./project"
 import * as Vcs from "./vcs"
 import { Bus } from "../bus"
 import { Command } from "../command"
 import { Instance } from "./instance"
-import { Log } from "@/util"
 import { FileWatcher } from "@/file/watcher"
 import { ShareNext } from "@/share"
+import { Log } from "@/util"
 import * as Effect from "effect/Effect"
 import { Config } from "@/config"
 import { Metrics } from "@/metrics"
@@ -40,7 +39,6 @@ export const InstanceBootstrap = Effect.gen(function* () {
       File.Service,
       FileWatcher.Service,
       Vcs.Service,
-      Snapshot.Service,
       WriterService,
       BackfillService,
     ].map((s) => Effect.forkDetach(s.use((i) => i.init()))),
@@ -56,11 +54,11 @@ export const InstanceBootstrap = Effect.gen(function* () {
     Effect.forkDetach,
   )
 
+  const projectID = Instance.project.id
   yield* Bus.Service.use((svc) =>
     svc.subscribeCallback(Command.Event.Executed, async (payload) => {
-      if (payload.properties.name === Command.Default.INIT) {
-        Project.setInitialized(Instance.project.id)
-      }
+      if (payload.properties.name !== Command.Default.INIT) return
+      Project.setInitialized(projectID)
     }),
   )
 

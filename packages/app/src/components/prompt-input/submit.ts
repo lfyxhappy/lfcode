@@ -10,10 +10,11 @@ import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
-import { type ContextItem, type ImageAttachmentPart, type Prompt, usePrompt } from "@/context/prompt"
+import { type ContextItem, type ImageAttachmentPart, type Prompt, type PromptScope, usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
+import { promptFeaturesSystem, type PromptFeature } from "@/utils/prompt-features"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { questionGuidanceSystem, type QuestionGuidance } from "@/utils/question-guidance"
 import { buildRequestParts } from "./build-request-parts"
@@ -36,13 +37,17 @@ export type FollowupDraft = {
   model: { providerID: string; modelID: string }
   variant?: string
   questionGuidance?: QuestionGuidance
+  promptFeatures?: PromptFeature[]
 }
+
+export type FollowupMode = "queue" | "steer"
 
 type FollowupSendInput = {
   client: ReturnType<typeof useSDK>["client"]
   globalSync: ReturnType<typeof useGlobalSync>
   sync: ReturnType<typeof useSync>
   draft: FollowupDraft
+  delivery?: "steer"
   messageID?: string
   initialPrompt?: boolean
   optimisticBusy?: boolean
@@ -61,11 +66,13 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
   const setBusy = () => {
     if (!input.optimisticBusy) return
     setStore("session_status", input.draft.sessionID, { type: "busy" })
+    input.globalSync.sessionStatus.markBusy(input.draft.sessionDirectory, input.draft.sessionID)
   }
 
   const setIdle = () => {
     if (!input.optimisticBusy) return
     setStore("session_status", input.draft.sessionID, { type: "idle" })
+    input.globalSync.sessionStatus.stop(input.draft.sessionDirectory, input.draft.sessionID)
   }
 
   const wait = async () => {
@@ -73,6 +80,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     if (ok === false) return false
     return true
   }
+
+  const system = [questionGuidanceSystem(input.draft.questionGuidance), promptFeaturesSystem(input.draft.promptFeatures)]
+    .filter(Boolean)
+    .join("\n")
 
   const [head, ...tail] = text.split(" ")
   const cmd = head?.startsWith("/") ? head.slice(1) : undefined
@@ -155,25 +166,16 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    const sendPrompt = input.initialPrompt
-      ? input.client.session.prompt({
-          sessionID: input.draft.sessionID,
-          agent: input.draft.agent,
-          model: input.draft.model,
-          messageID,
-          parts: requestParts,
-          variant: input.draft.variant,
-          system: questionGuidanceSystem(input.draft.questionGuidance),
-        })
-      : input.client.session.promptAsync({
-          sessionID: input.draft.sessionID,
-          agent: input.draft.agent,
-          model: input.draft.model,
-          messageID,
-          parts: requestParts,
-          variant: input.draft.variant,
-          system: questionGuidanceSystem(input.draft.questionGuidance),
-        })
+    const sendPrompt = input.client.session.promptAsync({
+      sessionID: input.draft.sessionID,
+      agent: input.draft.agent,
+      model: input.draft.model,
+      delivery: input.delivery,
+      messageID,
+      parts: requestParts,
+      variant: input.draft.variant,
+      system: system || undefined,
+    })
 
     await sendPrompt
     return true
@@ -190,9 +192,10 @@ type PromptSubmitInput = {
   info: Accessor<{ id: string } | undefined>
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
+  selectedTextCount?: Accessor<number>
   autoAccept: Accessor<boolean>
   mode: Accessor<"normal" | "shell">
-  working: Accessor<boolean>
+  streaming: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
   queueScroll: () => void
   promptLength: (prompt: Prompt) => number
@@ -202,10 +205,11 @@ type PromptSubmitInput = {
   setPopover: (popover: "at" | "slash" | null) => void
   newSessionWorktree?: Accessor<string | undefined>
   onNewSessionWorktreeReset?: () => void
-  shouldQueue?: Accessor<boolean>
+  followupMode?: Accessor<FollowupMode | undefined>
   onQueue?: (draft: FollowupDraft) => void
   onAbort?: () => void
   onSubmit?: () => void
+  scope?: Accessor<PromptScope | undefined>
 }
 
 type CommentItem = {
@@ -228,6 +232,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const layout = useLayout()
   const language = useLanguage()
   const params = useParams()
+  const scope = () => input.scope?.()
+  const activePrompt = () => prompt.scope(scope())
+  const sessionID = () => scope()?.id ?? params.id
+  const sessionDirectory = () => scope()?.dir ?? sdk.directory
+  const client = () => {
+    const directory = sessionDirectory()
+    if (directory === sdk.directory) return sdk.client
+    return sdk.createClient({
+      directory,
+      throwOnError: true,
+    })
+  }
 
   const errorMessage = (err: unknown) => {
     if (err && typeof err === "object" && "data" in err) {
@@ -238,33 +254,36 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     return language.t("common.requestFailed")
   }
 
-  const abort = async () => {
-    const sessionID = params.id
-    if (!sessionID) return Promise.resolve()
+  const abort = async (options?: { pauseQueue?: boolean; clearTodo?: boolean }) => {
+    const currentSessionID = sessionID()
+    if (!currentSessionID) return Promise.resolve()
 
-    globalSync.todo.set(sessionID, [])
-    const [, setStore] = globalSync.child(sdk.directory)
-    setStore("todo", sessionID, [])
+    if (options?.clearTodo !== false) {
+      globalSync.todo.set(currentSessionID, [])
+      const [, setStore] = globalSync.child(sessionDirectory())
+      setStore("todo", currentSessionID, [])
+    }
 
-    input.onAbort?.()
+    if (options?.pauseQueue !== false) input.onAbort?.()
 
-    const queued = pending.get(sessionID)
+    const queued = pending.get(currentSessionID)
     if (queued) {
       queued.abort.abort()
       queued.cleanup()
-      pending.delete(sessionID)
+      pending.delete(currentSessionID)
       return Promise.resolve()
     }
-    return sdk.client.session
+    return client()
+      .session
       .abort({
-        sessionID,
+        sessionID: currentSessionID,
       })
       .catch(() => {})
   }
 
   const restoreCommentItems = (items: CommentItem[]) => {
     for (const item of items) {
-      prompt.context.add({
+      activePrompt().context.add({
         type: "file",
         path: item.path,
         selection: item.selection,
@@ -278,13 +297,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
   const removeCommentItems = (items: { key: string }[]) => {
     for (const item of items) {
-      prompt.context.remove(item.key)
+      activePrompt().context.remove(item.key)
     }
   }
 
   const clearContext = () => {
-    for (const item of prompt.context.items()) {
-      prompt.context.remove(item.key)
+    for (const item of activePrompt().context.items()) {
+      activePrompt().context.remove(item.key)
     }
   }
 
@@ -302,16 +321,24 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
   }
 
-  const handleSubmit = async (event: Event) => {
+  const invertFollowupMode = (mode: FollowupMode | undefined) =>
+    mode === "queue" ? "steer" : mode === "steer" ? "queue" : undefined
+
+  const handleSubmit = async (event: Event, options?: { invertFollowupMode?: boolean }) => {
     event.preventDefault()
 
-    const currentPrompt = prompt.current()
+    const currentPrompt = activePrompt().current()
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
     const images = input.imageAttachments().slice()
     const mode = input.mode()
 
-    if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
-      if (input.working()) void abort()
+    if (
+      text.trim().length === 0 &&
+      images.length === 0 &&
+      input.commentCount() === 0 &&
+      (input.selectedTextCount?.() ?? 0) === 0
+    ) {
+      if (input.streaming()) void abort()
       return
     }
 
@@ -329,17 +356,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
-    const projectDirectory = sdk.directory
-    const isNewSession = !params.id
+    const projectDirectory = sessionDirectory()
+    const isNewSession = !sessionID()
     const shouldAutoAccept = isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"
 
-    let sessionDirectory = projectDirectory
-    let client = sdk.client
+    let targetDirectory = projectDirectory
+    let targetClient = client()
 
     if (isNewSession) {
       if (worktreeSelection === "create") {
-        const createdWorktree = await client.worktree
+        const createdWorktree = await targetClient.worktree
           .create({ directory: projectDirectory })
           .then((x) => x.data)
           .catch((err) => {
@@ -358,19 +385,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return
         }
         WorktreeState.pending(createdWorktree.directory)
-        sessionDirectory = createdWorktree.directory
+        targetDirectory = createdWorktree.directory
       }
 
       if (worktreeSelection !== "main" && worktreeSelection !== "create") {
-        sessionDirectory = worktreeSelection
+        targetDirectory = worktreeSelection
       }
 
-      if (sessionDirectory !== projectDirectory) {
-        client = sdk.createClient({
-          directory: sessionDirectory,
+      if (targetDirectory !== projectDirectory) {
+        targetClient = sdk.createClient({
+          directory: targetDirectory,
           throwOnError: true,
         })
-        globalSync.child(sessionDirectory)
+        globalSync.child(targetDirectory)
       }
 
       input.onNewSessionWorktreeReset?.()
@@ -378,7 +405,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     let session = input.info()
     if (!session && isNewSession) {
-      const created = await client.session
+      const created = await targetClient.session
         .create()
         .then((x) => x.data ?? undefined)
         .catch((err) => {
@@ -389,12 +416,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
       if (created) {
-        seed(sessionDirectory, created)
+        seed(targetDirectory, created)
         session = created
-        if (shouldAutoAccept) permission.enableAutoAccept(session.id, sessionDirectory)
-        local.session.promote(sessionDirectory, session.id)
-        layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
-        navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+        if (shouldAutoAccept) permission.enableAutoAccept(session.id, targetDirectory)
+        local.session.promote(targetDirectory, session.id)
+        layout.handoff.setTabs(base64Encode(targetDirectory), session.id)
+        navigate(`/${base64Encode(targetDirectory)}/session/${session.id}`)
       }
     }
     if (!session) {
@@ -411,26 +438,28 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
     const agent = currentAgent.name
     const questionGuidance = local.questionGuidance.current()
-    const context = prompt.context.items().slice()
+    const promptFeatures = local.promptFeatures.current()
+    const context = activePrompt().context.items().slice()
     const draft: FollowupDraft = {
       sessionID: session.id,
-      sessionDirectory,
+      sessionDirectory: targetDirectory,
       prompt: currentPrompt,
       context,
       agent,
       model,
       variant,
       questionGuidance,
+      promptFeatures,
     }
 
     const clearInput = () => {
-      prompt.reset()
+      activePrompt().reset()
       input.setMode("normal")
       input.setPopover(null)
     }
 
     const restoreInput = () => {
-      prompt.set(currentPrompt, input.promptLength(currentPrompt))
+      activePrompt().set(currentPrompt, input.promptLength(currentPrompt))
       input.setMode(mode)
       input.setPopover(null)
       requestAnimationFrame(() => {
@@ -442,7 +471,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       })
     }
 
-    if (!isNewSession && mode === "normal" && input.shouldQueue?.()) {
+    const followupMode =
+      !isNewSession && mode === "normal"
+        ? input.streaming()
+          ? "steer"
+          : options?.invertFollowupMode
+          ? invertFollowupMode(input.followupMode?.())
+          : input.followupMode?.()
+        : undefined
+
+    if (followupMode === "queue") {
       input.onQueue?.(draft)
       clearContext()
       clearInput()
@@ -453,7 +491,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     if (mode === "shell") {
       clearInput()
-      client.session
+      targetClient.session
         .shell({
           sessionID: session.id,
           agent,
@@ -476,7 +514,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       const customCommand = sync.data.command.find((c) => c.name === commandName)
       if (customCommand) {
         clearInput()
-        client.session
+        targetClient.session
           .command({
             sessionID: session.id,
             command: commandName,
@@ -508,7 +546,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const removeOptimisticMessage = () => {
       sync.session.optimistic.remove({
-        directory: sessionDirectory,
+        directory: targetDirectory,
         sessionID: session.id,
         messageID,
       })
@@ -518,16 +556,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     clearInput()
 
     const waitForWorktree = async () => {
-      const worktree = WorktreeState.get(sessionDirectory)
+      const worktree = WorktreeState.get(targetDirectory)
       if (!worktree || worktree.status !== "pending") return true
 
-      if (sessionDirectory === projectDirectory) {
+      if (targetDirectory === projectDirectory) {
         sync.set("session_status", session.id, { type: "busy" })
       }
 
       const controller = new AbortController()
       const cleanup = () => {
-        if (sessionDirectory === projectDirectory) {
+        if (targetDirectory === projectDirectory) {
           sync.set("session_status", session.id, { type: "idle" })
         }
         removeOptimisticMessage()
@@ -562,7 +600,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         }, timeoutMs)
       })
 
-      const result = await Promise.race([WorktreeState.wait(sessionDirectory), abortWait, timeout]).finally(() => {
+      const result = await Promise.race([WorktreeState.wait(targetDirectory), abortWait, timeout]).finally(() => {
         if (timer.id === undefined) return
         clearTimeout(timer.id)
       })
@@ -573,17 +611,18 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     void sendFollowupDraft({
-      client,
+      client: targetClient,
       sync,
       globalSync,
       draft,
+      delivery: followupMode === "steer" ? "steer" : undefined,
       messageID,
       initialPrompt: isNewSession,
-      optimisticBusy: sessionDirectory === projectDirectory,
+      optimisticBusy: targetDirectory === projectDirectory,
       before: waitForWorktree,
     }).catch((err) => {
       pending.delete(session.id)
-      if (sessionDirectory === projectDirectory) {
+      if (targetDirectory === projectDirectory) {
         sync.set("session_status", session.id, { type: "idle" })
       }
       showToast({

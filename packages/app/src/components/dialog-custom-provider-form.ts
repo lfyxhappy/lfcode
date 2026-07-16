@@ -5,6 +5,7 @@ import {
   ProviderProtocol,
   type ModelCapabilityConfig,
 } from "@lfcode-ai/shared/model-capabilities"
+import { MODEL_CAPABILITY_KEYS } from "./settings-models-helpers"
 import {
   VOLCENGINE_CODING_PLAN_BASE_URL,
   VOLCENGINE_CODING_PLAN_MODELS,
@@ -24,17 +25,7 @@ export const PROTOCOLS = [
 ] as const
 export type Protocol = (typeof PROTOCOLS)[number]
 
-export const CAPABILITY_KEYS = [
-  "text",
-  "image",
-  "audio",
-  "video",
-  "pdf",
-  "tool_call",
-  "reasoning",
-  "native_web",
-  "temperature",
-] as const
+export const CAPABILITY_KEYS = MODEL_CAPABILITY_KEYS
 export type CapabilityKey = (typeof CAPABILITY_KEYS)[number]
 
 export type ModelCapabilities = Record<CapabilityKey, boolean>
@@ -266,8 +257,10 @@ export const defaultCapabilities = (): ModelCapabilities => ({
   audio: false,
   video: false,
   pdf: false,
+  attachment: false,
   tool_call: true,
   reasoning: false,
+  patch_editing: false,
   native_web: false,
   temperature: true,
 })
@@ -289,8 +282,10 @@ export const inferCapabilities = (input: {
     audio: normalized.input.audio,
     video: normalized.input.video,
     pdf: normalized.input.pdf,
+    attachment: normalized.attachment,
     tool_call: normalized.tool_call,
     reasoning: normalized.reasoning,
+    patch_editing: normalized.patch_editing,
     native_web: normalized.native_web,
     temperature: normalized.temperature,
   }
@@ -345,8 +340,10 @@ function volcengineModel(id: string, context: number, image: boolean): CustomPro
       audio: false,
       video: false,
       pdf: false,
+      attachment: image,
       tool_call: true,
       reasoning: false,
+      patch_editing: false,
       native_web: false,
       temperature: true,
     },

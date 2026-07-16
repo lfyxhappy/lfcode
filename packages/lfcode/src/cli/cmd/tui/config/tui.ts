@@ -20,6 +20,7 @@ import { makeRuntime } from "@/effect/runtime"
 import { Filesystem, Log } from "@/util"
 import { ConfigVariable } from "@/config/variable"
 import { Npm } from "@/npm"
+import { listManagedPluginSpecs, registryFile } from "@/plugin/library"
 
 const log = Log.create({ service: "tui.config" })
 
@@ -52,20 +53,30 @@ function pluginScope(file: string, ctx: { directory: string }): ConfigPlugin.Sco
   return "global"
 }
 
+function mergePluginOrigins(acc: Acc, source: string, list: ConfigPlugin.Spec[], scope: ConfigPlugin.Scope) {
+  if (!list.length) return
+  const plugins = ConfigPlugin.deduplicatePluginOrigins([
+    ...(acc.result.plugin_origins ?? []),
+    ...list.map((spec) => ({ spec, scope, source })),
+  ])
+  acc.result.plugin = plugins.map((item) => item.spec)
+  acc.result.plugin_origins = plugins
+}
+
 function normalize(raw: Record<string, unknown>) {
   const data = { ...raw }
-  if (!("tui" in data)) return data
+  if (!("tui" in data)) return ConfigPlugin.normalizePluginConfigAliases(data)
   if (!isRecord(data.tui)) {
     delete data.tui
-    return data
+    return ConfigPlugin.normalizePluginConfigAliases(data)
   }
 
   const tui = data.tui
   delete data.tui
-  return {
+  return ConfigPlugin.normalizePluginConfigAliases({
     ...tui,
     ...data,
-  }
+  })
 }
 
 async function resolvePlugins(config: Info, configFilepath: string) {
@@ -88,14 +99,7 @@ async function mergeFile(acc: Acc, file: string, ctx: { directory: string }) {
   const data = await loadFile(file)
   acc.result = mergeDeep(acc.result, data)
   if (!data.plugin?.length) return
-
-  const scope = pluginScope(file, ctx)
-  const plugins = ConfigPlugin.deduplicatePluginOrigins([
-    ...(acc.result.plugin_origins ?? []),
-    ...data.plugin.map((spec) => ({ spec, scope, source: file })),
-  ])
-  acc.result.plugin = plugins.map((item) => item.spec)
-  acc.result.plugin_origins = plugins
+  mergePluginOrigins(acc, file, data.plugin, pluginScope(file, ctx))
 }
 
 const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: string }) {
@@ -138,6 +142,13 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       yield* Effect.promise(() => mergeFile(acc, file, ctx)).pipe(Effect.orDie)
     }
   }
+
+  mergePluginOrigins(
+    acc,
+    registryFile(),
+    yield* Effect.promise(() => listManagedPluginSpecs()),
+    "global",
+  )
 
   const keybinds = { ...(acc.result.keybinds ?? {}) }
   if (process.platform === "win32") {

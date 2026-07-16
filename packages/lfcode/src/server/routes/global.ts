@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { streamSSE } from "hono/streaming"
 import { Effect } from "effect"
+import fsNode from "fs/promises"
 import z from "zod"
 import { BusEvent } from "@/bus/bus-event"
 import { SyncEvent } from "@/sync"
@@ -14,10 +15,25 @@ import { InstallationVersion } from "@/installation/version"
 import { Log } from "../../util"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config"
+import { ConfigProvider } from "../../config"
 import { ProviderID } from "@/provider/schema"
 import { errors } from "../error"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { PlaywrightMcpRoutes } from "./global-playwright"
+import { MaintenanceRoutes } from "./global-maintenance"
+import { createAppControlClient } from "@/app-control/client"
+import {
+  getRuntimeManageState,
+  activateRuntime,
+  installRuntime,
+  listRuntimeOperationLogs,
+  repairRuntime,
+  updateRuntime,
+  RuntimeManageItemID,
+  RuntimeOperationLogState,
+  RuntimeManageMutationResult,
+  RuntimeManageState,
+} from "@/runtime-registry"
 
 const log = Log.create({ service: "server" })
 
@@ -76,6 +92,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
 export const GlobalRoutes = lazy(() =>
   new Hono()
     .route("/", PlaywrightMcpRoutes())
+    .route("/maintenance", MaintenanceRoutes())
     .get(
       "/health",
       describeRoute({
@@ -186,6 +203,469 @@ export const GlobalRoutes = lazy(() =>
         return c.json(next)
       },
     )
+    .get(
+      "/personalization",
+      describeRoute({
+        summary: "Get global personalization",
+        description: "Retrieve managed global personalization settings and instruction content.",
+        operationId: "global.personalization.get",
+        responses: {
+          200: {
+            description: "Get global personalization info",
+            content: {
+              "application/json": {
+                schema: resolver(Config.GlobalPersonalization),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobalPersonalization())))
+      },
+    )
+    .put(
+      "/personalization",
+      describeRoute({
+        summary: "Save global personalization",
+        description: "Persist managed global personalization instructions and memory preferences.",
+        operationId: "global.personalization.save",
+        responses: {
+          200: {
+            description: "Saved global personalization info",
+            content: {
+              "application/json": {
+                schema: resolver(Config.GlobalPersonalization),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", Config.GlobalPersonalizationSave),
+      async (c) => {
+        const personalization = c.req.valid("json")
+        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.saveGlobalPersonalization(personalization))))
+      },
+    )
+    .get(
+      "/runtime/manage",
+      describeRoute({
+        summary: "Get managed runtime status",
+        description: "List locally detected runtimes and voice dependencies managed by the desktop app.",
+        operationId: "global.runtime.manage",
+        responses: {
+          200: {
+            description: "Runtime dependency status",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeManageState),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await AppRuntime.runPromise(Effect.promise(() => getRuntimeManageState())))
+      },
+    )
+    .post(
+      "/runtime/install",
+      describeRoute({
+        summary: "Install a managed runtime",
+        description: "Install or initialize a managed runtime supported by Lfcode.",
+        operationId: "global.runtime.install",
+        responses: {
+          200: {
+            description: "Runtime installation result",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeManageMutationResult),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          id: RuntimeManageItemID,
+        }),
+      ),
+      async (c) => {
+        const { id } = c.req.valid("json")
+        return AppRuntime.runPromise(installRuntime(id))
+          .then((result) => c.json(result))
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            return c.json(new NamedError.Unknown({ message }).toObject(), 400)
+          })
+      },
+    )
+    .post(
+      "/runtime/activate",
+      describeRoute({
+        summary: "Activate a runtime target",
+        description: "Switch the active managed or system runtime target used by Lfcode for a given capability.",
+        operationId: "global.runtime.activate",
+        responses: {
+          200: {
+            description: "Runtime activation result",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeManageMutationResult),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          id: RuntimeManageItemID,
+          target: z.string().min(1),
+        }),
+      ),
+      async (c) => {
+        const { id, target } = c.req.valid("json")
+        return AppRuntime.runPromise(activateRuntime(id, target))
+          .then((result) => c.json(result))
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            return c.json(new NamedError.Unknown({ message }).toObject(), 400)
+          })
+      },
+    )
+    .post(
+      "/runtime/update",
+      describeRoute({
+        summary: "Update a managed runtime",
+        description: "Check the official release and atomically update a managed runtime when a verified version is available.",
+        operationId: "global.runtime.update",
+        responses: {
+          200: {
+            description: "Runtime update result",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeManageMutationResult),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          id: RuntimeManageItemID,
+        }),
+      ),
+      async (c) => {
+        const { id } = c.req.valid("json")
+        return AppRuntime.runPromise(updateRuntime(id))
+          .then((result) => c.json(result))
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            return c.json(new NamedError.Unknown({ message }).toObject(), 400)
+          })
+      },
+    )
+    .post(
+      "/runtime/repair",
+      describeRoute({
+        summary: "Repair a managed runtime",
+        description: "Repair a managed runtime supported by Lfcode.",
+        operationId: "global.runtime.repair",
+        responses: {
+          200: {
+            description: "Runtime repair result",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeManageMutationResult),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          id: RuntimeManageItemID,
+        }),
+      ),
+      async (c) => {
+        const { id } = c.req.valid("json")
+        return AppRuntime.runPromise(repairRuntime(id))
+          .then((result) => c.json(result))
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            return c.json(new NamedError.Unknown({ message }).toObject(), 400)
+          })
+      },
+    )
+    .get(
+      "/runtime/logs",
+      describeRoute({
+        summary: "Get recent managed runtime operation logs",
+        description: "List recent install and repair results for locally managed runtimes.",
+        operationId: "global.runtime.logs",
+        responses: {
+          200: {
+            description: "Recent runtime logs",
+            content: {
+              "application/json": {
+                schema: resolver(RuntimeOperationLogState),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          limit: z.coerce.number().int().min(1).max(100).optional(),
+          id: RuntimeManageItemID.optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        return c.json(await AppRuntime.runPromise(Effect.promise(() => listRuntimeOperationLogs(query))))
+      },
+    )
+    .get(
+      "/app-control/events",
+      describeRoute({
+        summary: "Get recent desktop app-control events",
+        description: "Proxy recent desktop automation events from the running local desktop app for settings diagnostics.",
+        operationId: "global.appControl.events",
+        responses: {
+          200: {
+            description: "Recent desktop automation events",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.array(
+                    z.object({
+                      id: z.number(),
+                      scope: z.string(),
+                      type: z.string(),
+                      timestamp: z.number(),
+                      data: z.record(z.string(), z.unknown()).optional(),
+                    }),
+                  ),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          scope: z.enum(["main", "renderer", "server"]).optional(),
+          type: z.string().optional(),
+          limit: z.coerce.number().int().positive().max(500).optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        return c.json(
+          await AppRuntime.runPromise(
+            Config.Service.use(() =>
+              Effect.promise(async () => {
+                const client = await createAppControlClient()
+                const params = new URLSearchParams()
+                if (query.scope) params.set("scope", query.scope)
+                if (query.type) params.set("type", query.type)
+                if (query.limit) params.set("limit", String(query.limit))
+                return client.get(`/diagnostics/events${params.size ? `?${params.toString()}` : ""}`)
+              }),
+            ),
+          ),
+        )
+      },
+    )
+    .post(
+      "/app-control/diagnostics-bundle",
+      describeRoute({
+        summary: "Capture a desktop diagnostics bundle",
+        description:
+          "Proxy a compact desktop diagnostics bundle from the running local desktop app, including ui-state, recent events, and a screenshot.",
+        operationId: "global.appControl.diagnosticsBundle",
+        responses: {
+          200: {
+            description: "Desktop diagnostics bundle",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    state: z.unknown(),
+                    events: z.unknown(),
+                    capture: z.unknown(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          windowID: z.number().optional(),
+          eventLimit: z.number().int().positive().max(500).optional(),
+          label: z.string().optional(),
+        }),
+      ),
+      async (c) => {
+        const input = c.req.valid("json")
+        return c.json(
+          await AppRuntime.runPromise(
+            Config.Service.use(() =>
+              Effect.promise(async () => {
+                const client = await createAppControlClient()
+                const state = await client.get(`/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`)
+                const params = new URLSearchParams()
+                if (input.eventLimit) params.set("limit", String(input.eventLimit))
+                const events = await client.get(`/diagnostics/events${params.size ? `?${params.toString()}` : ""}`)
+                const capture = await client.post("/capture/window", {
+                  windowID: input.windowID,
+                  label: input.label ?? "app-control-settings",
+                })
+                return {
+                  state,
+                  events,
+                  capture,
+                }
+              }),
+            ),
+          ),
+        )
+      },
+    )
+    .post(
+      "/app-control/diagnostics-bundle/export",
+      describeRoute({
+        summary: "Export a desktop diagnostics bundle",
+        description:
+          "Capture a desktop diagnostics bundle from the running local desktop app and save it as a JSON file on this machine.",
+        operationId: "global.appControl.exportDiagnosticsBundle",
+        responses: {
+          200: {
+            description: "Exported desktop diagnostics bundle",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.object({
+                    path: z.string(),
+                    capturePath: z.string().optional(),
+                  }),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          path: z.string().min(1),
+          windowID: z.number().optional(),
+          eventLimit: z.number().int().positive().max(500).optional(),
+          label: z.string().optional(),
+        }),
+      ),
+      async (c) => {
+        const input = c.req.valid("json")
+        return c.json(
+          await AppRuntime.runPromise(
+            Config.Service.use(() =>
+              Effect.promise(async () => {
+                const client = await createAppControlClient()
+                const state = await client.get(`/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`)
+                const params = new URLSearchParams()
+                if (input.eventLimit) params.set("limit", String(input.eventLimit))
+                const events = await client.get(`/diagnostics/events${params.size ? `?${params.toString()}` : ""}`)
+                const capture = await client.post("/capture/window", {
+                  windowID: input.windowID,
+                  label: input.label ?? "app-control-settings",
+                })
+                await fsNode.writeFile(
+                  input.path,
+                  JSON.stringify(
+                    {
+                      exportedAt: Date.now(),
+                      state,
+                      events,
+                      capture,
+                    },
+                    null,
+                    2,
+                  ),
+                  "utf8",
+                )
+                return {
+                  path: input.path,
+                  capturePath:
+                    typeof capture === "object" && capture && "path" in capture ? (capture as { path?: string }).path : undefined,
+                }
+              }),
+            ),
+          ),
+        )
+      },
+    )
+    .get(
+      "/app-control",
+      describeRoute({
+        summary: "Get global app control settings",
+        description: "Retrieve host-level app-control settings and current desktop automation discovery status.",
+        operationId: "global.appControl.get",
+        responses: {
+          200: {
+            description: "Get global app control info",
+            content: {
+              "application/json": {
+                schema: resolver(Config.GlobalAppControl),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobalAppControl())))
+      },
+    )
+    .put(
+      "/app-control",
+      describeRoute({
+        summary: "Save global app control settings",
+        description: "Persist host-level app-control settings for the desktop app.",
+        operationId: "global.appControl.save",
+        responses: {
+          200: {
+            description: "Saved global app control info",
+            content: {
+              "application/json": {
+                schema: resolver(Config.GlobalAppControl),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", Config.GlobalAppControlSave),
+      async (c) => {
+        const appControl = c.req.valid("json")
+        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.saveGlobalAppControl(appControl))))
+      },
+    )
     .delete(
       "/config/custom-provider/:providerID",
       describeRoute({
@@ -213,6 +693,56 @@ export const GlobalRoutes = lazy(() =>
       async (c) => {
         const providerID = c.req.valid("param").providerID
         return AppRuntime.runPromise(Config.Service.use((cfg) => cfg.removeGlobalCustomProvider(providerID)))
+          .then((next) => c.json(next))
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            if (
+              message === `Provider ${providerID} is not configured in global config files` ||
+              message === `Provider ${providerID} is not a custom provider`
+            ) {
+              return c.json(new NamedError.Unknown({ message }).toObject(), 400)
+            }
+          throw err
+        })
+      },
+    )
+    .put(
+      "/config/custom-provider/:providerID",
+      describeRoute({
+        summary: "Save custom provider",
+        description: "Create or update a custom global provider configuration and optional stored authentication.",
+        operationId: "global.config.upsertCustomProvider",
+        responses: {
+          200: {
+            description: "Successfully saved custom provider",
+            content: {
+              "application/json": {
+                schema: resolver(Config.Info),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          providerID: ProviderID.zod,
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          provider: ConfigProvider.Info.zod,
+          key: z.string().optional(),
+        }),
+      ),
+      async (c) => {
+        const providerID = c.req.valid("param").providerID
+        const { provider, key } = c.req.valid("json")
+        return AppRuntime.runPromise(
+          Config.Service.use((cfg) => cfg.upsertGlobalCustomProvider(providerID, provider, key)),
+        )
           .then((next) => c.json(next))
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err)

@@ -2,6 +2,7 @@ import { createStore, reconcile } from "solid-js/store"
 import { batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
+import { showToast } from "@lfcode-ai/ui/toast"
 import { useGlobalSDK } from "./global-sdk"
 import { useGlobalSync } from "./global-sync"
 import { usePlatform } from "@/context/platform"
@@ -103,6 +104,26 @@ function buildNotificationIndex(list: Notification[]) {
   })
 
   return index
+}
+
+function describeError(error: unknown, fallback: string) {
+  if (typeof error === "string") {
+    const text = error.trim()
+    if (text) return text
+  }
+  if (!error || typeof error !== "object") return fallback
+  const name = "name" in error && typeof error.name === "string" ? error.name : undefined
+  const data = "data" in error && error.data && typeof error.data === "object" ? error.data : undefined
+  const message =
+    data && "message" in data && typeof data.message === "string"
+      ? data.message
+      : "message" in error && typeof error.message === "string"
+        ? error.message
+        : undefined
+  if (name && message) return `${name}: ${message}`
+  if (message) return message
+  if (name) return name
+  return fallback
 }
 
 export const { use: useNotification, provider: NotificationProvider } = createSimpleContext({
@@ -267,6 +288,8 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         }
 
         const error = "error" in event.properties ? event.properties.error : undefined
+        const fallback = language.t("notification.session.error.fallbackDescription")
+        const toastDescription = describeError(error, fallback)
         append({
           directory,
           time,
@@ -275,9 +298,16 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
           session: sessionID ?? "global",
           error,
         })
+        if (viewedInCurrentSession(directory, sessionID)) {
+          showToast({
+            variant: "error",
+            title: language.t("notification.session.error.title"),
+            description: toastDescription,
+          })
+        }
         const description =
           session?.title ??
-          (typeof error === "string" ? error : language.t("notification.session.error.fallbackDescription"))
+          (typeof error === "string" ? error : fallback)
         const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
         if (settings.notifications.errors()) {
           void platform.notify(language.t("notification.session.error.title"), description, href)
@@ -316,6 +346,17 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         },
         unseenHasError(session: string) {
           return index.session.unseenHasError[session] ?? false
+        },
+        markUnread(session: string, directory: string) {
+          if (index.session.unseenCount[session] > 0) return
+          append({
+            directory,
+            session,
+            time: Date.now(),
+            viewed: false,
+            type: "turn-complete",
+            metadata: { source: "manual-unread" },
+          })
         },
         markViewed(session: string) {
           const unseen = index.session.unseen[session] ?? empty

@@ -312,8 +312,8 @@ export const runSearchWithFallback = Effect.fn("WebSearchTool.runSearchWithFallb
 export function formatWebSearchModelOutput(output: {
   text: string
   provider: WebSearchProvider
-  sources: WebSearchSource[]
-  warnings: string[]
+  sources: ReadonlyArray<WebSearchSource>
+  warnings: ReadonlyArray<string>
 }) {
   const provenance = output.sources.slice(0, 12).map((source) => {
     const label = source.title ?? source.domain
@@ -350,12 +350,18 @@ export const layer = Layer.effectDiscard(
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
 
-              return yield* runSearchWithFallback({ http, config, sessionID: context.sessionID, query: input })
+              return yield* runSearchWithFallback({ http, config, sessionID: context.sessionID, query: input }).pipe(
+                Effect.mapError((failure) =>
+                  new ToolFailure({
+                    message: `Unable to search the web for ${input.query} (${formatSearchFailure(failure)})`,
+                  }),
+                ),
+              )
             }).pipe(
-              Effect.mapError((failure) =>
-                new ToolFailure({
-                  message: `Unable to search the web for ${input.query} (${formatSearchFailure(failure)})`,
-                }),
+              Effect.mapError((error) =>
+                error instanceof ToolFailure
+                  ? error
+                  : new ToolFailure({ message: error instanceof Error ? error.message : String(error) }),
               ),
             )
           },

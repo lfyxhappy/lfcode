@@ -75,6 +75,8 @@ const UsageLog = z.object({
   cost: z.number(),
   duration: z.number().nullable(),
   ttft: z.number().nullable(),
+  submitToFirstDelta: z.number().nullable(),
+  preStream: z.number().nullable(),
   status: UsageStatus,
   source: z.literal("lfcode"),
 })
@@ -322,6 +324,8 @@ function toUsageLog(row: {
     }
     return typeof current === "number" ? current : null
   })()
+  const submitToFirstDelta = jsonNumber(row.partData, ["time", "submit_to_first_delta"]) || null
+  const preStream = jsonNumber(row.partData, ["time", "pre_stream"]) || null
 
   return {
     id: row.id,
@@ -348,6 +352,8 @@ function toUsageLog(row: {
     cost: cost + overheadCost,
     duration,
     ttft,
+    submitToFirstDelta,
+    preStream,
     status,
     source: "lfcode",
   } satisfies UsageLog

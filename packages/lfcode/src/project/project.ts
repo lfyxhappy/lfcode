@@ -1,13 +1,14 @@
 import z from "zod"
 import * as nodeFs from "fs/promises"
 import * as nodePath from "path"
-import { and, Database, eq, inArray } from "../storage"
+import { and, Database, desc, eq, inArray, sql } from "../storage"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
 import { sessionDirectoryAliases } from "../session/directory"
 import { Flag } from "@/flag/flag"
 import { BusEvent } from "@/bus/bus-event"
 import { GlobalBus } from "@/bus/global"
+import { resolveGitCommand } from "@/git/runtime"
 import { which } from "../util/which"
 import { ProjectID } from "./schema"
 import { resolveMainGitDir, resolveProjectId } from "./project-id"
@@ -61,6 +62,7 @@ const ProjectCommands = Schema.Struct({
 const ProjectTime = Schema.Struct({
   created: Schema.Number,
   updated: Schema.Number,
+  lastUser: Schema.optional(Schema.Number),
   initialized: Schema.optional(Schema.Number),
 })
 
@@ -96,6 +98,7 @@ export function fromRow(row: Row): Info {
     time: {
       created: row.time_created,
       updated: row.time_updated,
+      lastUser: row.time_last_user ?? undefined,
       initialized: row.time_initialized ?? undefined,
     },
     sandboxes: row.sandboxes,
@@ -142,11 +145,12 @@ export const layer: Layer.Layer<
     const fs = yield* AppFileSystem.Service
     const pathSvc = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const gitCommand = resolveGitCommand()
 
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
         const handle = yield* spawner.spawn(
-          ChildProcess.make("git", args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
+          ChildProcess.make(gitCommand, args, { cwd: opts?.cwd, extendEnv: true, stdin: "ignore" }),
         )
         const [text, stderr] = yield* Effect.all(
           [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
@@ -300,6 +304,7 @@ export const layer: Layer.Layer<
             icon_color: result.icon?.color,
             time_created: result.time.created,
             time_updated: result.time.updated,
+            time_last_user: result.time.lastUser,
             time_initialized: result.time.initialized,
             sandboxes: result.sandboxes,
             commands: result.commands,
@@ -313,6 +318,7 @@ export const layer: Layer.Layer<
               icon_url: result.icon?.url,
               icon_color: result.icon?.color,
               time_updated: result.time.updated,
+              time_last_user: result.time.lastUser,
               time_initialized: result.time.initialized,
               sandboxes: result.sandboxes,
               commands: result.commands,
@@ -363,7 +369,14 @@ export const layer: Layer.Layer<
     })
 
     const list = Effect.fn("Project.list")(function* () {
-      return yield* db((d) => d.select().from(ProjectTable).all().map(fromRow))
+      return yield* db((d) =>
+        d
+          .select()
+          .from(ProjectTable)
+          .orderBy(desc(sql<number>`coalesce(${ProjectTable.time_last_user}, ${ProjectTable.time_created})`), desc(ProjectTable.id))
+          .all()
+          .map(fromRow),
+      )
     })
 
     const get = Effect.fn("Project.get")(function* (id: ProjectID) {
@@ -394,7 +407,7 @@ export const layer: Layer.Layer<
 
     const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
       if (input.project.vcs === "git") return input.project
-      if (!(yield* Effect.sync(() => which("git")))) throw new Error("Git is not installed")
+      if (!(yield* Effect.sync(() => which(gitCommand)))) throw new Error("Git is not installed")
       const result = yield* git(["init", "--quiet"], { cwd: input.directory })
       if (result.code !== 0) {
         throw new Error(result.stderr.trim() || result.text.trim() || "Failed to initialize git repository")

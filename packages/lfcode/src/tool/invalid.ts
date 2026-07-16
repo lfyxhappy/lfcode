@@ -13,7 +13,9 @@ export const InvalidTool = Tool.define(
     execute: (params: { tool: string; error: string }) =>
       Effect.succeed({
         title: "Invalid Tool",
-        output: `The arguments provided to the tool are invalid: ${params.error}`,
+        output: params.error.includes("is not available in this turn")
+          ? `The requested tool call could not run: ${params.error}`
+          : `The arguments provided to the tool are invalid: ${params.error}`,
         metadata: {},
       }),
   }),

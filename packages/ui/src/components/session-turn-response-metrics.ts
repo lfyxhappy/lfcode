@@ -70,14 +70,20 @@ export function getTurnResponseMetricsLine(input: {
   const totalSeconds = (finishedAt - input.startedAt) / 1000
   if (!(totalSeconds > 0)) return
   const firstSeconds = Math.max(0, (firstTokenAt - input.startedAt) / 1000)
+  const outputSeconds = (finishedAt - firstTokenAt) / 1000
   const formatInt = new Intl.NumberFormat(input.locale)
   const formatTps = new Intl.NumberFormat(input.locale, { maximumFractionDigits: 1 })
   const time = new Intl.DateTimeFormat(input.locale, { timeStyle: "medium" }).format(finishedAt)
 
-  return [
+  const line = [
     `${input.labels.ended} ${time}`,
     `${input.labels.first} ${formatSeconds(firstSeconds, input.locale)} / ${input.labels.total} ${formatSeconds(totalSeconds, input.locale)}`,
-    `${input.labels.input} ${formatTps.format(totals.input / totalSeconds)} ${input.labels.tps} / ${input.labels.output} ${formatTps.format(totals.output / totalSeconds)} ${input.labels.tps}`,
     `${input.labels.tokens} ${formatInt.format(totalTokens)} (${input.labels.in} ${formatInt.format(totals.input)} / ${input.labels.out} ${formatInt.format(totals.output)} / ${input.labels.hit} ${formatInt.format(totals.hit)} / ${input.labels.write} ${formatInt.format(totals.write)})`,
-  ].join(" · ")
+  ]
+
+  if (outputSeconds > 0) {
+    line.splice(2, 0, `${input.labels.output} ${formatTps.format(totals.output / outputSeconds)} ${input.labels.tps}`)
+  }
+
+  return line.join(" · ")
 }

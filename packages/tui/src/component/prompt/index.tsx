@@ -91,6 +91,7 @@ export type PromptRef = {
   blur(): void
   focus(): void
   submit(): void
+  paste(): void
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -370,18 +371,7 @@ export function Prompt(props: PromptProps) {
         run: async (ctx: CommandContext<Renderable, KeyEvent>) => {
           ctx.event.preventDefault()
           ctx.event.stopPropagation()
-          const content = await clipboard.read?.()
-          if (content?.mime.startsWith("image/")) {
-            await pasteAttachment({
-              filename: "clipboard",
-              mime: content.mime,
-              content: content.data,
-            })
-            return
-          }
-          if (content?.mime === "text/plain") {
-            await pasteInputText(content.data)
-          }
+          await pasteClipboard()
         },
       },
       {
@@ -573,6 +563,19 @@ export function Prompt(props: PromptProps) {
     ]),
   }))
 
+  async function pasteClipboard() {
+    const content = await clipboard.read?.()
+    if (content?.mime.startsWith("image/")) {
+      await pasteAttachment({
+        filename: "clipboard",
+        mime: content.mime,
+        content: content.data,
+      })
+      return
+    }
+    if (content?.mime === "text/plain") await pasteInputText(content.data)
+  }
+
   const ref: PromptRef = {
     get focused() {
       return input.focused
@@ -603,6 +606,9 @@ export function Prompt(props: PromptProps) {
     },
     submit() {
       void submit()
+    },
+    paste() {
+      void pasteClipboard()
     },
   }
 

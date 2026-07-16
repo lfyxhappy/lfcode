@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
+import { createTwoFilesPatch } from "diff"
 import { Effect, Layer } from "effect"
 import { Session } from "../../src/session"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -459,8 +460,6 @@ describe("revert + compact workflow", () => {
         Effect.gen(function* () {
           const session = yield* Session.Service
           const revert = yield* SessionRevert.Service
-          const snapshot = yield* Snapshot.Service
-
           yield* write(path.join(dir, "a.txt"), "a0")
           yield* write(path.join(dir, "b.txt"), "b0")
           yield* write(path.join(dir, "c.txt"), "c0")
@@ -472,36 +471,38 @@ describe("revert + compact workflow", () => {
             const u = yield* user(sid)
             yield* text(sid, u.id, `${file}:${next}`)
             const a = yield* assistant(sid, u.id, dir)
-            const before = yield* snapshot.track()
-            if (!before) throw new Error("expected snapshot")
-            yield* write(path.join(dir, file), next)
-            const after = yield* snapshot.track()
-            if (!after) throw new Error("expected snapshot")
-            const patch = yield* snapshot.patch(before)
+            const filePath = path.join(dir, file)
+            const relativeFilePath = path.relative(dir, filePath).replaceAll("\\", "/")
+            const before = yield* read(filePath)
+            yield* write(filePath, next)
+            const after = yield* read(filePath)
+            const patch = createTwoFilesPatch(relativeFilePath, relativeFilePath, before, after)
+            const additions = after === before ? 0 : 1
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: a.id,
               sessionID: sid,
-              type: "step-start",
-              snapshot: before,
-            })
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: a.id,
-              sessionID: sid,
-              type: "step-finish",
-              reason: "stop",
-              snapshot: after,
-              cost: 0,
-              tokens,
-            })
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: a.id,
-              sessionID: sid,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
+              type: "tool",
+              tool: "edit",
+              callID: `call-${file}`,
+              state: {
+                status: "completed",
+                input: {},
+                output: "done",
+                title: "",
+                metadata: {
+                  files: [
+                    {
+                      file: filePath,
+                      patch,
+                      additions,
+                      deletions: additions,
+                      status: "modified",
+                    },
+                  ],
+                },
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
             })
             return u.id
           })
@@ -556,8 +557,6 @@ describe("revert + compact workflow", () => {
         Effect.gen(function* () {
           const session = yield* Session.Service
           const revert = yield* SessionRevert.Service
-          const snapshot = yield* Snapshot.Service
-
           yield* write(path.join(dir, "a.txt"), "a0")
 
           const info = yield* session.create({})
@@ -567,36 +566,38 @@ describe("revert + compact workflow", () => {
             const u = yield* user(sid)
             yield* text(sid, u.id, `a.txt:${next}`)
             const a = yield* assistant(sid, u.id, dir)
-            const before = yield* snapshot.track()
-            if (!before) throw new Error("expected snapshot")
-            yield* write(path.join(dir, "a.txt"), next)
-            const after = yield* snapshot.track()
-            if (!after) throw new Error("expected snapshot")
-            const patch = yield* snapshot.patch(before)
+            const filePath = path.join(dir, "a.txt")
+            const relativeFilePath = path.relative(dir, filePath).replaceAll("\\", "/")
+            const before = yield* read(filePath)
+            yield* write(filePath, next)
+            const after = yield* read(filePath)
+            const patch = createTwoFilesPatch(relativeFilePath, relativeFilePath, before, after)
+            const additions = after === before ? 0 : 1
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: a.id,
               sessionID: sid,
-              type: "step-start",
-              snapshot: before,
-            })
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: a.id,
-              sessionID: sid,
-              type: "step-finish",
-              reason: "stop",
-              snapshot: after,
-              cost: 0,
-              tokens,
-            })
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: a.id,
-              sessionID: sid,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
+              type: "tool",
+              tool: "edit",
+              callID: `call-a.txt-${next}`,
+              state: {
+                status: "completed",
+                input: {},
+                output: "done",
+                title: "",
+                metadata: {
+                  files: [
+                    {
+                      file: filePath,
+                      patch,
+                      additions,
+                      deletions: additions,
+                      status: "modified",
+                    },
+                  ],
+                },
+                time: { start: Date.now(), end: Date.now() + 1 },
+              },
             })
             return u.id
           })

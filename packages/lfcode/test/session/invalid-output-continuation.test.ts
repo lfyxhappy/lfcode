@@ -22,9 +22,11 @@ import {
   textStopResponse,
   emptyStopResponse,
   reasoningStopResponse,
+  toolCallResponse,
 } from "../lib/scripted-llm-server"
 
 void Log.init({ print: false })
+const integrationTimeout = { timeout: 15000 }
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -146,5 +148,42 @@ describe("invalid-output continuation — integration", () => {
     } finally {
       await stub.stop()
     }
-  })
+  }, integrationTimeout)
+
+  test("usable tool progress resets invalid-output continuation budget before a later empty stop", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const readmePath = path.join(tmp.path, "README.md")
+    await Bun.write(readmePath, "hello")
+    const stub = startScriptedLLMServer([
+      ...Array.from({ length: Flag.LFCODE_INVALID_OUTPUT_CONTINUATION_LIMIT }, () => ({ lines: emptyStopResponse() })),
+      { lines: toolCallResponse({ id: "call_1", name: "read", args: JSON.stringify({ filePath: readmePath }) }) },
+      { lines: emptyStopResponse() },
+      { lines: textStopResponse("final answer after progress reset") },
+    ])
+    try {
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "invalid-budget-reset-after-tool-progress" })
+              const result = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "Read the README and then answer." }],
+              })
+              expect(stub.captures.length).toBe(Flag.LFCODE_INVALID_OUTPUT_CONTINUATION_LIMIT + 3)
+              expect(result.info.role).toBe("assistant")
+              if (result.info.role === "assistant") expect(result.info.error).toBeUndefined()
+              expect(result.parts.some((part) => part.type === "text" && part.text === "final answer after progress reset")).toBe(true)
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  }, integrationTimeout)
 })

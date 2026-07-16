@@ -77,7 +77,7 @@ export function DetachedSidePanelView(props: {
             </div>
           </Show>
           <Show when={props.context.kind === "browser"}>
-            <BrowserPanel tab={props.context.tab} visible />
+            <BrowserPanel sessionKey={props.context.sessionKey} tab={props.context.tab} visible />
           </Show>
           <Show when={props.context.kind === "file"}>
             <Show when={readyFile()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("common.loading")}</div>}>

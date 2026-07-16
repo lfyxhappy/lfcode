@@ -81,8 +81,36 @@ describe("session turn response metrics", () => {
 
     const expectedTime = new Intl.DateTimeFormat("en", { timeStyle: "medium" }).format(finishedAt)
     expect(line).toBe(
-      `Ended ${expectedTime} · First 1s / Total 5s · Input 2.4 TPS / Output 1.2 TPS · Tokens 25 (In 12 / Out 6 / Hit 3 / Write 4)`,
+      `Ended ${expectedTime} · First 1s / Total 5s · Output 1.5 TPS · Tokens 25 (In 12 / Out 6 / Hit 3 / Write 4)`,
     )
+  })
+
+  test("omits input TPS and computes output TPS after first token", () => {
+    const finishedAt = Date.UTC(2026, 0, 1, 10, 0, 5)
+    const line = getTurnResponseMetricsLine({
+      locale: "en",
+      labels,
+      startedAt: finishedAt - 5_000,
+      messages: [
+        assistant({
+          time: { created: finishedAt - 2_000, completed: finishedAt },
+          responseMetrics: {
+            firstTokenAt: finishedAt - 2_000,
+            tokens: {
+              total: 12,
+              input: 9,
+              output: 3,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(line).toBeDefined()
+    expect(line).toContain("Output 1.5 TPS")
+    expect(line).not.toContain("Input")
   })
 
   test("returns undefined when metrics are missing", () => {

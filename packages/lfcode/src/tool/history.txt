@@ -2,7 +2,8 @@ Search RAW conversation trajectory: prior user/assistant messages, tool inputs, 
 
 USE ONLY WHEN MEMORY SEARCH RETURNS NOTHING USEFUL.
 
-memory is your curated notebook — small, fast, semantically organized. ALWAYS try `memory` first.
+memory is your curated notebook — small, fast, semantically organized. Prefer `memory` only when you need cross-session recall or durable prior context.
+Do not interrupt ordinary current-turn work just to "check memory status" first.
 history is the unindexed firehose of your past sessions: bigger, noisier, slower, and tool result
 cap will likely truncate `around` output forcing a follow-up Grep/Read. Reach for it as a last
 resort, e.g.:
@@ -13,5 +14,6 @@ resort, e.g.:
 Two operations:
   - search: FTS BM25 over text/tool kinds (returns snippets + message_ids)
   - around: given a search hit's message_id, pull ±N surrounding messages from the raw store
+  - session: read the raw recent messages for a session id, including whether a checkpoint exists
 
 Default scope is current project; pass scope="global" to search every project on this machine.

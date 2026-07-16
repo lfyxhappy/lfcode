@@ -12,7 +12,7 @@ import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useLayout } from "@/context/layout"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { browserTabID, formatBrowserTabLabel } from "@/pages/session/helpers"
+import { browserTabID, formatBrowserTabLabel, sideChatTabID } from "@/pages/session/helpers"
 
 export function FileVisual(props: { path: string; active?: boolean }): JSX.Element {
   return (
@@ -35,6 +35,8 @@ export function SortableTab(props: {
   tab: string
   onTabClose: (tab: string) => void
   onBrowserTabClose?: (tabID: string) => void
+  onSideChatTabClose?: (tabID: string) => void
+  getSideChatTitle?: (tabID: string) => string
   onDetach?: (tab: string) => void
   detachBounds?: () => DOMRect | undefined
   onDetachPreviewChange?: (
@@ -59,6 +61,7 @@ export function SortableTab(props: {
   const sortable = createSortable(props.tab)
   const path = createMemo(() => file.pathFromTab(props.tab))
   const browserID = createMemo(() => browserTabID(props.tab))
+  const sideChatID = createMemo(() => sideChatTabID(props.tab))
   const browser = createMemo(() => {
     const id = browserID()
     if (!id) return
@@ -78,6 +81,18 @@ export function SortableTab(props: {
           <Icon name="window-cursor" size="small" class="text-text-weak" />
         </div>
         <span class="text-14-medium truncate">{formatBrowserTabLabel(value.title ?? value.url)}</span>
+      </div>
+    )
+  })
+  const sideChatContent = createMemo(() => {
+    const id = sideChatID()
+    if (!id) return
+    return (
+      <div class="flex items-center gap-1.5 min-w-0">
+        <div class="flex size-4 shrink-0 items-center justify-center rounded-sm bg-surface-base">
+          <Icon name="prompt" size="small" class="text-text-weak" />
+        </div>
+        <span class="text-14-medium truncate">{props.getSideChatTitle?.(id) ?? language.t("session.sideChat.title")}</span>
       </div>
     )
   })
@@ -167,6 +182,11 @@ export function SortableTab(props: {
                     props.onBrowserTabClose?.(browser)
                     return
                   }
+                  const sideChat = sideChatID()
+                  if (sideChat) {
+                    props.onSideChatTabClose?.(sideChat)
+                    return
+                  }
                   props.onTabClose(props.tab)
                 }}
                 aria-label={language.t("common.closeTab")}
@@ -180,11 +200,19 @@ export function SortableTab(props: {
               props.onBrowserTabClose?.(browser)
               return
             }
+            const sideChat = sideChatID()
+            if (sideChat) {
+              props.onSideChatTabClose?.(sideChat)
+              return
+            }
             props.onTabClose(props.tab)
           }}
           onPointerDown={trackDetachGesture}
         >
-          <Show when={browserContent()} fallback={<Show when={content()}>{(value) => value()}</Show>}>
+          <Show
+            when={browserContent() ?? sideChatContent()}
+            fallback={<Show when={content()}>{(value) => value()}</Show>}
+          >
             {(value) => value()}
           </Show>
         </Tabs.Trigger>

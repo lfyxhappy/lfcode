@@ -12,7 +12,7 @@ import { VOLCENGINE_CODING_PLAN_PROVIDER_ID } from "@lfcode-ai/shared/volcengine
 
 const CUSTOM_ID = "_custom"
 
-export const DialogSelectProvider: Component<{ returnTo?: "models" }> = (props) => {
+export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-models" }> = (props) => {
   const dialog = useDialog()
   const providers = useProviders()
   const language = useLanguage()

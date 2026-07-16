@@ -35,6 +35,13 @@ export function resolveModelVariant(input: VariantInput) {
   return undefined
 }
 
+export function displayModelVariant(input: VariantInput) {
+  if (input.selected === null) return undefined
+  if (input.selected && input.variants.includes(input.selected)) return input.selected
+  if (input.configured && input.variants.includes(input.configured)) return input.configured
+  return input.variants[0]
+}
+
 export function cycleModelVariant(input: VariantInput) {
   if (input.variants.length === 0) return undefined
   if (input.selected === null) return input.variants[0]

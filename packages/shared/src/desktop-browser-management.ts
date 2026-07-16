@@ -33,6 +33,12 @@ export type BrowserPasswordStorageState = {
   reason?: "safeStorageUnavailable"
 }
 
+export type BrowserCacheOverview = {
+  cacheSizeBytes: number
+  indexedEntryCount: number
+  lastSeenAt: number | null
+}
+
 export type BrowserPasswordCapturePrompt = {
   id: string
   origin: string
@@ -53,4 +59,15 @@ export type BrowserPasswordCapturePayload = {
 export type BrowserAutofillMatch = {
   username: string
   password: string
+}
+
+export type BrowserAutofillCandidate = {
+  id: string
+  origin: string
+  username: string
+}
+
+export type BrowserAutofillRequest = {
+  id: string
+  origin: string
 }

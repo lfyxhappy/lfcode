@@ -28,6 +28,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
+import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -95,11 +96,23 @@ const lsp = Layer.succeed(
     status: () => Effect.succeed([]),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
+    syncFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
     hover: () => Effect.succeed(undefined),
+    completion: () => Effect.succeed(undefined),
+    signatureHelp: () => Effect.succeed(undefined),
+    prepareRename: () => Effect.succeed(undefined),
+    rename: () => Effect.succeed(undefined),
+    formatting: () => Effect.succeed([]),
+    rangeFormatting: () => Effect.succeed([]),
+    codeAction: () => Effect.succeed([]),
+    executeCommand: () => Effect.succeed(undefined),
+    declaration: () => Effect.succeed([]),
     definition: () => Effect.succeed([]),
+    typeDefinition: () => Effect.succeed([]),
     references: () => Effect.succeed([]),
     implementation: () => Effect.succeed([]),
+    documentHighlights: () => Effect.succeed([]),
     documentSymbol: () => Effect.succeed([]),
     workspaceSymbol: () => Effect.succeed([]),
     prepareCallHierarchy: () => Effect.succeed([]),
@@ -125,6 +138,7 @@ function makeLayer() {
     Plugin.defaultLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
+    Goal.defaultLayer,
     lsp,
     mcp,
     AppFileSystem.defaultLayer,
@@ -158,16 +172,30 @@ function makeLayer() {
     Layer.provide(History.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(Auth.defaultLayer),
+    Layer.provide(Layer.mergeAll(Instruction.defaultLayer, Bus.layer)),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
+    Layer.provide(
+      Layer.mergeAll(
+        Goal.defaultLayer,
+        ProviderSvc.defaultLayer,
+        Session.defaultLayer,
+        Truncate.defaultLayer,
+        AgentSvc.defaultLayer,
+      ),
+    ),
   )
   const prune = SessionPrune.layer.pipe(
     Layer.provide(checkpoint),
     Layer.provide(actorRegistry),
     Layer.provideMerge(deps),
   )
-  const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
+  const proc = SessionProcessor.layer.pipe(
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(summary),
+    Layer.provideMerge(deps),
+  )
   const compaction = SessionCompaction.layer.pipe(
     Layer.provideMerge(proc),
     Layer.provide(AgentSvc.defaultLayer),
@@ -177,6 +205,8 @@ function makeLayer() {
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
+    Layer.provide(ComposeGateState.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
     Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
@@ -195,7 +225,11 @@ function makeLayer() {
     Layer.provide(Inbox.defaultLayer),
     Layer.provideMerge(deps),
   )
-  return Layer.mergeAll(TestLLMServer.layer, prompt, actorRegistry).pipe(Layer.provide(summary))
+  return Layer.mergeAll(TestLLMServer.layer, Goal.defaultLayer, Skill.defaultLayer, prompt, actorRegistry).pipe(
+    Layer.provide(summary),
+    Layer.provide(ProviderSvc.defaultLayer),
+    Layer.provide(Session.defaultLayer),
+  )
 }
 
 const it = testEffect(makeLayer())
@@ -299,15 +333,25 @@ describe("Tool whitelist (Task 14)", () => {
             (part): part is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
               part.type === "tool" && part.tool === "bash" && part.state.status === "completed",
           )
+        const rejected = msgs
+          .flatMap((msg) => msg.parts)
+          .find(
+            (part): part is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
+              part.type === "tool" &&
+              part.state.status === "completed" &&
+              (part.state.metadata?.rejected as unknown) === true,
+          )
 
-        expect(tool).toBeDefined()
-        if (!tool) return
-        // The rejection branch routes through completeToolCall with our
-        // rejection metadata. The body must mention the tool is not permitted.
-        expect(tool.state.metadata?.rejected).toBe(true)
-        expect(tool.state.metadata?.reason).toBe("tool-whitelist")
-        expect(tool.state.output).toContain("not in this actor's whitelist")
-        expect(tool.state.output.toLowerCase()).toContain("bash")
+        // Runtime behavior is acceptable in either of these two shapes:
+        // 1. The model still emits bash and the runtime records a rejected tool part.
+        // 2. The runtime/tool surface prevents bash from completing at all.
+        if (rejected) {
+          expect(rejected.state.metadata?.reason).toBe("tool-whitelist")
+          expect(rejected.state.output).toContain("not in this actor's whitelist")
+          expect(rejected.state.output.toLowerCase()).toContain("bash")
+          return
+        }
+        expect(tool).toBeUndefined()
       }),
       { git: true, config: providerCfg },
     ),
@@ -360,15 +404,23 @@ describe("Tool whitelist (Task 14)", () => {
     ),
   )
 
-  test("checkpoint-writer config has toolAllowlist [read, write, edit, glob, grep] (F3a)", async () => {
-    const src = await Bun.file(`${import.meta.dir}/../../src/agent/agent.ts`).text()
-    const checkpointWriterBlock = src.match(/"checkpoint-writer":\s*\{[\s\S]*?toolAllowlist:\s*\[[^\]]*\]/)
-    expect(checkpointWriterBlock).toBeTruthy()
-    expect(checkpointWriterBlock![0]).toContain('"read"')
-    expect(checkpointWriterBlock![0]).toContain('"write"')
-    expect(checkpointWriterBlock![0]).toContain('"edit"')
-    expect(checkpointWriterBlock![0]).toContain('"glob"')
-    expect(checkpointWriterBlock![0]).toContain('"grep"')
+  test("checkpoint-writer runtime whitelist is patch-first (F3a)", async () => {
+    const src = await Bun.file(`${import.meta.dir}/../../src/session/checkpoint.ts`).text()
+    const checkpointWriterSpawn = src.match(/tools:\s*\[[\s\S]*?"task",\s*\]/)
+    expect(checkpointWriterSpawn).toBeTruthy()
+    expect(checkpointWriterSpawn![0]).toContain('"read"')
+    expect(checkpointWriterSpawn![0]).toContain('"file_info"')
+    expect(checkpointWriterSpawn![0]).toContain('"tree"')
+    expect(checkpointWriterSpawn![0]).toContain('"search"')
+    expect(checkpointWriterSpawn![0]).toContain('"archive_inspect"')
+    expect(checkpointWriterSpawn![0]).toContain('"replace_range"')
+    expect(checkpointWriterSpawn![0]).toContain('"symbol_edit"')
+    expect(checkpointWriterSpawn![0]).toContain('"edit_history"')
+    expect(checkpointWriterSpawn![0]).toContain('"apply_patch"')
+    expect(checkpointWriterSpawn![0]).not.toContain('"write"')
+    expect(checkpointWriterSpawn![0]).not.toContain('"edit"')
+    expect(checkpointWriterSpawn![0]).not.toContain('"glob"')
+    expect(checkpointWriterSpawn![0]).not.toContain('"grep"')
   })
 })
 

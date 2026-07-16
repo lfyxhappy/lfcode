@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { APICallError } from "ai"
-import { MessageV2 } from "../../src/session/message-v2"
+import { MessageV2, selectContinuationMessages } from "../../src/session/message-v2"
 import { ProviderTransform } from "../../src/provider"
 import type { Provider } from "../../src/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -108,7 +108,157 @@ function basePart(messageID: string, id: string) {
   }
 }
 
+function userMessage(id: string, parts: MessageV2.Part[]): MessageV2.WithParts {
+  return {
+    info: userInfo(id),
+    parts,
+  }
+}
+
+function assistantMessage(id: string, parts: MessageV2.Part[]): MessageV2.WithParts {
+  return {
+    info: assistantInfo(id, "m-user"),
+    parts,
+  }
+}
+
 describe("session.message-v2.toModelMessage", () => {
+  test("falls back to raw history when the latest compaction boundary has no assistant summary", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-1", [
+        {
+          ...basePart("m-1", "p1"),
+          type: "text",
+          text: "keep this",
+        },
+      ]),
+      userMessage("m-2", [
+        {
+          ...basePart("m-2", "p1"),
+          type: "compaction",
+          auto: true,
+        },
+      ]),
+    ]
+
+    expect(selectContinuationMessages(history)).toMatchObject({
+      messages: history,
+      source: "raw",
+      fallbackReason: "compaction: missing summary assistant after compaction boundary",
+      boundary: {
+        messageID: "m-2",
+        kind: "compaction",
+        valid: false,
+      },
+    })
+  })
+
+  test("keeps the latest checkpoint boundary when it has rebuild text", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-1", [
+        {
+          ...basePart("m-1", "p1"),
+          type: "text",
+          text: "older",
+        },
+      ]),
+      userMessage("m-2", [
+        {
+          ...basePart("m-2", "p1"),
+          type: "checkpoint",
+          checkpointDir: "C:/tmp",
+          checkpointNumber: 1,
+          coveredUpTo: MessageID.make("m-1"),
+        },
+        {
+          ...basePart("m-2", "p2"),
+          type: "text",
+          text: "## Checkpoint\nrebuild context",
+          synthetic: true,
+        },
+      ]),
+    ]
+
+    expect(selectContinuationMessages(history).messages).toStrictEqual(history.slice(1))
+  })
+
+  test("falls back to raw history when a checkpoint boundary has no rebuild text", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-1", [
+        {
+          ...basePart("m-1", "p1"),
+          type: "text",
+          text: "older",
+        },
+      ]),
+      userMessage("m-2", [
+        {
+          ...basePart("m-2", "p1"),
+          type: "checkpoint",
+          checkpointDir: "C:/tmp",
+          checkpointNumber: 1,
+          coveredUpTo: MessageID.make("m-1"),
+        },
+      ]),
+    ]
+
+    expect(selectContinuationMessages(history)).toMatchObject({
+      messages: history,
+      source: "raw",
+      fallbackReason: "checkpoint: missing checkpoint rebuild body",
+      boundary: {
+        messageID: "m-2",
+        kind: "checkpoint",
+        valid: false,
+      },
+    })
+  })
+
+  test("falls back to the earlier valid boundary when the latest boundary is invalid", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-1", [
+        {
+          ...basePart("m-1", "p1"),
+          type: "text",
+          text: "older",
+        },
+      ]),
+      userMessage("m-2", [
+        {
+          ...basePart("m-2", "p1"),
+          type: "checkpoint",
+          checkpointDir: "C:/tmp",
+          checkpointNumber: 1,
+          coveredUpTo: MessageID.make("m-1"),
+        },
+        {
+          ...basePart("m-2", "p2"),
+          type: "text",
+          text: "## Checkpoint\nrebuild context",
+          synthetic: true,
+        },
+      ]),
+      userMessage("m-3", [
+        {
+          ...basePart("m-3", "p1"),
+          type: "compaction",
+          auto: true,
+        },
+      ]),
+    ]
+
+    expect(selectContinuationMessages(history)).toMatchObject({
+      messages: history.slice(1),
+      source: "checkpoint",
+      fallbackReason: "compaction: missing summary assistant after compaction boundary",
+      boundary: {
+        messageID: "m-2",
+        kind: "checkpoint",
+        valid: true,
+      },
+    })
+  })
+
   test("filters out messages with no parts", async () => {
     const input: MessageV2.WithParts[] = [
       {
@@ -582,6 +732,128 @@ describe("session.message-v2.toModelMessage", () => {
             toolCallId: "call-1",
             toolName: "bash",
             output: { type: "text", value: "[Old tool result content cleared]" },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("omits completed tool output during compaction summaries", async () => {
+    const userID = "m-user-summary"
+    const assistantID = "m-assistant-summary"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1-summary"),
+            type: "text",
+            text: "summarize this",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1-summary"),
+            type: "tool",
+            callID: "call-summary-1",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { path: "/tmp/huge.log" },
+              output: "very large tool output that should not be sent into compaction",
+              title: "Read",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [
+                {
+                  ...basePart(assistantID, "file-summary-1"),
+                  type: "file",
+                  mime: "application/pdf",
+                  filename: "debug.pdf",
+                  url: "data:application/pdf;base64,Zm9v",
+                },
+              ],
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(
+      await MessageV2.toModelMessages(input, model, {
+        stripMedia: true,
+        compactToolResults: true,
+      }),
+    ).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "summarize this" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-summary-1",
+            toolName: "read",
+            input: { path: "/tmp/huge.log" },
+            providerExecuted: undefined,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-summary-1",
+            toolName: "read",
+            output: { type: "text", value: "[Tool result omitted during compaction]" },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("expands metadata-backed selected text into user-visible model content", async () => {
+    const messageID = "m-user"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "text",
+            text: "",
+            metadata: {
+              lfcodeSelectedText: [
+                {
+                  text: "const answer = 42",
+                  messageID: "m-source",
+                  selection: { startLine: 12, endLine: 12 },
+                },
+              ],
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "" },
+          {
+            type: "text",
+            text: ["[User selected text]", "Source message: m-source", "Lines: 12", "Excerpt:", "const answer = 42"].join(
+              "\n",
+            ),
           },
         ],
       },

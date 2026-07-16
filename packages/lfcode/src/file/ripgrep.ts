@@ -9,8 +9,9 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
+import { Shell } from "@/shell/shell"
 import { Log } from "@/util"
-import { sanitizedProcessEnv } from "@/util/mimo-process"
+import { sanitizedProcessEnv } from "@/util/process-metadata"
 import { which } from "@/util/which"
 
 const log = Log.create({ service: "ripgrep" })
@@ -256,7 +257,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         const dir = yield* fs.makeTempDirectoryScoped({ directory: Global.Path.bin, prefix: "ripgrep-" })
 
         if (config.extension === "zip") {
-          const shell = (yield* Effect.sync(() => which("powershell.exe") ?? which("pwsh.exe"))) ?? "powershell.exe"
+          const shell = yield* Effect.sync(() => Shell.resolvePowerShell())
           const result = yield* run(shell, [
             "-NoProfile",
             "-NonInteractive",

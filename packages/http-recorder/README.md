@@ -9,13 +9,13 @@ Use it for provider integrations, retries, polling, multi-step flows, and any te
 ## Install
 
 ```sh
-bun add effect@4.0.0-beta.74
+bun add effect@4.0.0-beta.48
 bun add -d @lfcode-ai/http-recorder@beta @effect/vitest vitest
 ```
 
 The package supports Node.js 22+ and Bun. It is not intended for browsers, workers, or Deno.
 
-Effect `4.0.0-beta.74` has a known declaration error (`SchemaErrorTypeId` is missing). Until that upstream declaration is fixed, TypeScript consumers need:
+Effect `4.0.0-beta.48` has a known declaration error (`SchemaErrorTypeId` is missing). Until that upstream declaration is fixed, TypeScript consumers need:
 
 ```json
 {
@@ -102,9 +102,10 @@ const echo = Effect.gen(function* () {
   const socket = yield* Socket.Socket
   const write = yield* socket.writer
 
-  yield* socket.runString(
+  yield* socket.runRaw(
     (message) =>
       Effect.gen(function* () {
+        if (typeof message !== "string") return yield* Effect.die("Expected a text WebSocket frame")
         assert.strictEqual(message, "hello")
         yield* write(new Socket.CloseEvent(1000))
       }),

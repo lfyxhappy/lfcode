@@ -3,6 +3,7 @@ import type { Prompt } from "@/context/prompt"
 import {
   canNavigateHistoryAtCursor,
   clonePromptParts,
+  compactPromptHistoryEntries,
   normalizePromptHistoryEntry,
   navigatePromptHistory,
   prependHistoryEntry,
@@ -13,6 +14,31 @@ import {
 const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 
 const text = (value: string): Prompt => [{ type: "text", content: value, start: 0, end: value.length }]
+const selected = (value: string, messageID = "msg_1"): Prompt => [
+  {
+    type: "selected-text",
+    text: value,
+    content: value,
+    start: 0,
+    end: value.length,
+    messageID,
+    selection: { startLine: 1, startChar: 1, endLine: 1, endChar: value.length },
+  },
+]
+const webReference = (value: string, url = "https://example.com/article"): Prompt => [
+  {
+    type: "web-reference",
+    label: "Example article",
+    text: value,
+    url,
+    title: "Example article",
+    selector: "main article",
+    mode: "selection",
+    content: "[web:Example article]",
+    start: 0,
+    end: 21,
+  },
+]
 const comment = (id: string, value = "note"): PromptHistoryComment => ({
   id,
   path: "src/a.ts",
@@ -39,6 +65,26 @@ describe("prompt-input history", () => {
 
     const dedupedComments = prependHistoryEntry(commentsOnly, DEFAULT_PROMPT, [comment("c1")])
     expect(dedupedComments).toBe(commentsOnly)
+  })
+
+  test("prependHistoryEntry distinguishes different selected-text attachments", () => {
+    const withOne = prependHistoryEntry([], selected("alpha"))
+    const withDifferent = prependHistoryEntry(withOne, selected("beta"))
+
+    expect(withDifferent).toHaveLength(2)
+    expect(normalizePromptHistoryEntry(withDifferent[0]).prompt[0]).toMatchObject({ type: "selected-text", text: "beta" })
+    expect(normalizePromptHistoryEntry(withDifferent[1]).prompt[0]).toMatchObject({ type: "selected-text", text: "alpha" })
+  })
+
+  test("prependHistoryEntry distinguishes different web references", () => {
+    const withOne = prependHistoryEntry([], webReference("alpha excerpt"))
+    const withDifferent = prependHistoryEntry(withOne, webReference("beta excerpt"))
+
+    expect(withDifferent).toHaveLength(2)
+    expect(normalizePromptHistoryEntry(withDifferent[0]).prompt[0]).toMatchObject({
+      type: "web-reference",
+      text: "beta excerpt",
+    })
   })
 
   test("navigatePromptHistory restores saved prompt when moving down from newest", () => {
@@ -121,6 +167,63 @@ describe("prompt-input history", () => {
     copy[1].selection!.startLine = 9
     if (original[1]?.type !== "file") throw new Error("expected file")
     expect(original[1].selection?.startLine).toBe(1)
+  })
+
+  test("history cloning trims oversized selected text, comments, and image payloads", () => {
+    const oversized = normalizePromptHistoryEntry({
+      prompt: [
+        {
+          type: "selected-text",
+          text: "x".repeat(5_000),
+          content: "x".repeat(5_000),
+          start: 0,
+          end: 5_000,
+          messageID: "msg_1",
+          selection: { startLine: 1, startChar: 1, endLine: 1, endChar: 5_000 },
+        },
+        {
+          type: "image",
+          id: "img_1",
+          filename: "big.png",
+          mime: "image/png",
+          dataUrl: "data:image/png;base64," + "A".repeat(130_000),
+        },
+      ],
+      comments: [comment("c1", "n".repeat(3_000))],
+    })
+
+    expect(oversized.prompt).toHaveLength(1)
+    expect(oversized.prompt[0]).toMatchObject({
+      type: "selected-text",
+      text: "x".repeat(4_000),
+      content: "x".repeat(4_000),
+    })
+    expect(oversized.comments[0]?.comment).toBe("n".repeat(2_000))
+  })
+
+  test("compactPromptHistoryEntries normalizes existing oversized entries", () => {
+    const original = [
+      {
+        prompt: [
+          {
+            type: "selected-text" as const,
+            text: "x".repeat(5_000),
+            content: "x".repeat(5_000),
+            start: 0,
+            end: 5_000,
+            messageID: "msg_1",
+            selection: { startLine: 1, startChar: 1, endLine: 1, endChar: 5_000 },
+          },
+        ],
+        comments: [],
+      },
+    ]
+    const compacted = compactPromptHistoryEntries(original)
+    expect(compacted).not.toBe(original)
+    expect(normalizePromptHistoryEntry(compacted[0]!).prompt[0]).toMatchObject({
+      type: "selected-text",
+      text: "x".repeat(4_000),
+    })
   })
 
   test("canNavigateHistoryAtCursor only allows prompt boundaries", () => {

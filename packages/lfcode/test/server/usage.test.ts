@@ -81,6 +81,8 @@ async function fillStep(
     start?: number
     end?: number
     ttft?: number | null
+    submitToFirstDelta?: number | null
+    preStream?: number | null
   },
 ) {
   const messageID = MessageID.ascending()
@@ -119,6 +121,8 @@ async function fillStep(
             start: options.start,
             end: options.end,
             ttft: options?.ttft ?? null,
+            submit_to_first_delta: options?.submitToFirstDelta ?? null,
+            pre_stream: options?.preStream ?? null,
           }
         : undefined,
     cost,
@@ -200,9 +204,36 @@ describe("usage route", () => {
           expect(body.logs[0]?.status).toBe("error")
           expect(body.logs[0]?.duration).toBe(800)
           expect(body.logs[0]?.ttft).toBeNull()
+          expect(body.logs[0]?.submitToFirstDelta).toBeNull()
+          expect(body.logs[0]?.preStream).toBeNull()
           expect(body.logs[1]?.status).toBe("completed")
           expect(body.logs[1]?.duration).toBe(3500)
           expect(body.logs[1]?.ttft).toBe(500)
+        },
+      }),
+    )
+  }, 20000)
+
+  test("reads submit to first delta and pre stream timing from step finish parts", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({ title: "timing-usage-session" })
+          await fillStep(session.id, "openai", "gpt-5", 1, 10, 20, 0, {
+            start: 1_000,
+            end: 2_000,
+            ttft: 100,
+            submitToFirstDelta: 450,
+            preStream: 300,
+          })
+
+          const body = SessionUsage.get({ range: "all", source: "lfcode", search: "timing-usage-session" })
+
+          expect(body.summary.requestCount).toBe(1)
+          expect(body.logs[0]?.submitToFirstDelta).toBe(450)
+          expect(body.logs[0]?.preStream).toBe(300)
         },
       }),
     )

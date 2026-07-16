@@ -11,7 +11,7 @@ import { KeyedMutex } from "./effect/keyed-mutex"
 export const ID = Schema.String.pipe(Schema.brand("Plugin.ID"))
 export type ID = typeof ID.Type
 
-export const Lifecycle = Schema.Literal("discovered", "installed", "resolved", "active", "degraded", "disabled", "removed")
+export const Lifecycle = Schema.Literals(["discovered", "installed", "resolved", "active", "degraded", "disabled", "removed"])
 export type Lifecycle = typeof Lifecycle.Type
 
 export type Identity = {
@@ -188,7 +188,7 @@ export const layer = Layer.effect(
               entry.hooks = undefined
               entry.lifecycle = "degraded"
               entry.error = Cause.pretty(exit.cause).slice(0, 1_000)
-              return Scope.close(childScope, exit).pipe(Effect.zipRight(publishStatus(entry)))
+              return Scope.close(childScope, exit).pipe(Effect.andThen(publishStatus(entry)))
             }),
           )
           entry.scope = childScope

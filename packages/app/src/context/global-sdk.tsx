@@ -8,6 +8,7 @@ import { createSdkForServer, type ServerSdkOptions } from "@/utils/server"
 import { useLanguage } from "./language"
 import { usePlatform } from "./platform"
 import { useServer } from "./server"
+import { queueGlobalSdkEvent, type GlobalSdkQueuedEvent } from "./global-sdk-queue"
 
 const abortError = z.object({
   name: z.literal("AbortError"),
@@ -55,28 +56,16 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       [key: string]: Event
     }>()
 
-    type Queued = { directory: string; payload: Event }
     const FLUSH_FRAME_MS = 16
     const STREAM_YIELD_MS = 8
     const RECONNECT_DELAY_MS = 250
 
-    let queue: Queued[] = []
-    let buffer: Queued[] = []
-    const coalesced = new Map<string, number>()
-    const staleDeltas = new Set<string>()
+    let queue: GlobalSdkQueuedEvent[] = []
+    let buffer: GlobalSdkQueuedEvent[] = []
+    const coalesced = new Map<string, { index: number; deltaSeq: number }>()
+    const deltaSeq = new Map<string, number>()
     let timer: ReturnType<typeof setTimeout> | undefined
     let last = 0
-
-    const deltaKey = (directory: string, messageID: string, partID: string) => `${directory}:${messageID}:${partID}`
-
-    const key = (directory: string, payload: Event) => {
-      if (payload.type === "session.status") return `session.status:${directory}:${payload.properties.sessionID}`
-      if (payload.type === "lsp.updated") return `lsp.updated:${directory}`
-      if (payload.type === "message.part.updated") {
-        const part = payload.properties.part
-        return `message.part.updated:${directory}:${part.messageID}:${part.id}`
-      }
-    }
 
     const flush = () => {
       if (timer) clearTimeout(timer)
@@ -85,20 +74,15 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
       if (queue.length === 0) return
 
       const events = queue
-      const skip = staleDeltas.size > 0 ? new Set(staleDeltas) : undefined
       queue = buffer
       buffer = events
       queue.length = 0
       coalesced.clear()
-      staleDeltas.clear()
+      deltaSeq.clear()
 
       last = Date.now()
       batch(() => {
         for (const event of events) {
-          if (skip && event.payload.type === "message.part.delta") {
-            const props = event.payload.properties
-            if (skip.has(deltaKey(event.directory, props.messageID, props.partID))) continue
-          }
           emitter.emit(event.directory, event.payload)
         }
       })
@@ -173,20 +157,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
 
               const payload = event.payload as Event
 
-              const k = key(directory, payload)
-              if (k) {
-                const i = coalesced.get(k)
-                if (i !== undefined) {
-                  queue[i] = { directory, payload }
-                  if (payload.type === "message.part.updated") {
-                    const part = payload.properties.part
-                    staleDeltas.add(deltaKey(directory, part.messageID, part.id))
-                  }
-                  continue
-                }
-                coalesced.set(k, queue.length)
-              }
-              queue.push({ directory, payload })
+              queueGlobalSdkEvent({ queue, coalesced, deltaSeq, directory, payload })
               schedule()
 
               if (Date.now() - yielded < STREAM_YIELD_MS) continue

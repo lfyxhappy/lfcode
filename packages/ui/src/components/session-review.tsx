@@ -10,10 +10,11 @@ import { StickyAccordionHeader } from "./sticky-accordion-header"
 import { Tooltip } from "./tooltip"
 import { ScrollView } from "./scroll-view"
 import { useFileComponent } from "../context/file"
+import { useDialog } from "../context/dialog"
 import { useI18n } from "../context/i18n"
 import { getDirectory, getFilename } from "@lfcode-ai/shared/util/path"
 import { checksum } from "@lfcode-ai/shared/util/encode"
-import { createEffect, createMemo, For, Match, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, lazy, Match, onCleanup, Show, Switch, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { type FileContent, type SnapshotFileDiff, type VcsFileDiff } from "@lfcode-ai/sdk/v2"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
@@ -23,7 +24,11 @@ import { mediaKindFromPath } from "../pierre/media"
 import { cloneSelectedLineRange, previewSelectedLines } from "../pierre/selection-bridge"
 import { createLineCommentController } from "./line-comment-annotations"
 import type { LineCommentEditorProps } from "./line-comment"
+import { Dialog } from "./dialog"
+import { canUseCodeDiffView } from "./code-diff-shared"
 import { normalize, text, type ViewDiff } from "./session-diff"
+
+const CodeDiffView = lazy(() => import("./code-diff-view").then((mod) => ({ default: mod.CodeDiffView })))
 
 const MAX_DIFF_CHANGED_LINES = 500
 const REVIEW_MOUNT_MARGIN = 300
@@ -61,6 +66,7 @@ export type SessionReviewCommentActions = {
 }
 
 export type SessionReviewFocus = { file: string; id: string }
+type ReviewRenderMode = "native" | "monaco"
 
 type ReviewDiff = (SnapshotFileDiff | VcsFileDiff) & { preloaded?: PreloadMultiFileDiffResult<any> }
 type NormalizedDiff = ViewDiff & { preloaded?: PreloadMultiFileDiffResult<any> }
@@ -160,6 +166,7 @@ export const SessionReview = (props: SessionReviewProps) => {
   let scroll: HTMLDivElement | undefined
   let focusToken = 0
   let frame: number | undefined
+  const dialog = useDialog()
   const i18n = useI18n()
   const fileComponent = useFileComponent()
   const anchors = new Map<string, HTMLElement>()
@@ -168,6 +175,7 @@ export const SessionReview = (props: SessionReviewProps) => {
     open: [] as string[],
     visible: {} as Record<string, boolean>,
     force: {} as Record<string, boolean>,
+    viewMode: {} as Record<string, ReviewRenderMode | undefined>,
     selection: null as SessionReviewSelection | null,
     commenting: null as SessionReviewSelection | null,
     opened: null as SessionReviewFocus | null,
@@ -391,6 +399,7 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const expanded = createMemo(() => open().includes(file))
                     const mounted = createMemo(() => expanded() && (!!store.visible[file] || pinned(file)))
                     const force = () => !!store.force[file]
+                    const [codeDiffUnavailable, setCodeDiffUnavailable] = createSignal(false)
                     const comments = createMemo(() => grouped().get(file) ?? [])
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
                     const changedLines = () => diff.additions + diff.deletions
@@ -411,6 +420,73 @@ export const SessionReview = (props: SessionReviewProps) => {
 
                     const isAdded = () => diff.status === "added" || (diff.deletions === 0 && diff.additions > 0)
                     const isDeleted = () => diff.status === "deleted" || (diff.additions === 0 && diff.deletions > 0)
+                    const codeDiffViewProps = () => {
+                      const current = viewDiff() ?? normalize(diff)
+                      return {
+                        path: file,
+                        before: text(current, "deletions"),
+                        after: text(current, "additions"),
+                        diffStyle: diffStyle(),
+                        selectedLines: selectedLines(),
+                        commentedLines: commentedLines(),
+                        reviewAnnotations: commentsUi.annotations(),
+                        renderHoverUtility: props.onLineComment ? commentsUi.renderHoverUtility : undefined,
+                        onLineSelected: props.onLineComment ? handleLineSelected : undefined,
+                        onLineSelectionEnd: props.onLineComment ? handleLineSelectionEnd : undefined,
+                        onLineNumberSelectionEnd: props.onLineComment ? commentsUi.onLineNumberSelectionEnd : undefined,
+                      }
+                    }
+                    const openCodeDiff = () => {
+                      const current = viewDiff() ?? normalize(diff)
+                      const before = text(current, "deletions")
+                      const after = text(current, "additions")
+                      if (!canUseCodeDiffView({ path: file, before, after })) return
+                      dialog.show(() => (
+                        <Dialog
+                          size="x-large"
+                          title={i18n.t("ui.sessionReview.openDiff")}
+                          description={file}
+                          class="max-w-[min(96vw,1440px)]"
+                        >
+                          <CodeDiffView
+                            {...codeDiffViewProps()}
+                            before={before}
+                            after={after}
+                            heightClass="h-[min(78vh,900px)]"
+                            renderReviewAnnotation={
+                              commentsUi.renderDetachedAnnotation as (
+                                annotation: import("@pierre/diffs").DiffLineAnnotation<
+                                  import("./line-comment-annotations").LineCommentAnnotationMeta<unknown>
+                                >,
+                              ) => HTMLElement | undefined
+                            }
+                            onReady={() => {
+                              props.onDiffRendered?.()
+                            }}
+                            onUnavailable={() => {
+                              setCodeDiffUnavailable(true)
+                              dialog.close()
+                            }}
+                          />
+                        </Dialog>
+                      ))
+                    }
+                    const canOpenCodeDiff = () => {
+                      if (codeDiffUnavailable()) return false
+                      if (!diffCanRender()) return false
+                      if (mediaKind()) return false
+                      if (tooLarge()) return false
+                      const current = viewDiff() ?? normalize(diff)
+                      return canUseCodeDiffView({
+                        path: file,
+                        before: text(current, "deletions"),
+                        after: text(current, "additions"),
+                      })
+                    }
+                    const inlineMode = createMemo<ReviewRenderMode>(() => {
+                      if (!canOpenCodeDiff()) return "native"
+                      return store.viewMode[file] === "monaco" ? "monaco" : "native"
+                    })
 
                     const selectedLines = createMemo(() => {
                       const current = selection()
@@ -574,6 +650,28 @@ export const SessionReview = (props: SessionReviewProps) => {
                             }}
                           >
                             <Show when={expanded()}>
+                              <Show when={canOpenCodeDiff()}>
+                                <div class="mb-3 flex items-center justify-between gap-3">
+                                  <RadioGroup
+                                    options={["native", "monaco"] as const}
+                                    current={inlineMode()}
+                                    size="small"
+                                    value={(mode) => mode}
+                                    label={(mode) =>
+                                      i18n.t(
+                                        mode === "native"
+                                          ? "ui.sessionReview.renderMode.native"
+                                          : "ui.sessionReview.renderMode.monaco",
+                                      )
+                                    }
+                                    onSelect={(mode) => setStore("viewMode", file, mode ?? "native")}
+                                  />
+                                  <Button size="small" variant="ghost" onClick={() => void openCodeDiff()}>
+                                    <Icon name="review" class="mr-1 size-4" />
+                                    {i18n.t("ui.sessionReview.openDiff")}
+                                  </Button>
+                                </div>
+                              </Show>
                               <Switch>
                                 <Match when={!mounted() && !tooLarge()}>
                                   <div
@@ -607,32 +705,56 @@ export const SessionReview = (props: SessionReviewProps) => {
                                 <Match when={true}>
                                   <Show when={viewDiff()}>
                                     {(view) => (
-                                      <Dynamic
-                                        component={fileComponent}
-                                        mode="diff"
-                                        fileDiff={view().fileDiff}
-                                        preloadedDiff={view().preloaded}
-                                        diffStyle={diffStyle()}
-                                        onRendered={() => {
-                                          props.onDiffRendered?.()
-                                        }}
-                                        enableLineSelection={props.onLineComment != null}
-                                        enableHoverUtility={props.onLineComment != null}
-                                        onLineSelected={handleLineSelected}
-                                        onLineSelectionEnd={handleLineSelectionEnd}
-                                        onLineNumberSelectionEnd={commentsUi.onLineNumberSelectionEnd}
-                                        annotations={commentsUi.annotations()}
-                                        renderAnnotation={commentsUi.renderAnnotation}
-                                        renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
-                                        selectedLines={selectedLines()}
-                                        commentedLines={commentedLines()}
-                                        media={{
-                                          mode: "auto",
-                                          path: file,
-                                          deleted: diff.status === "deleted",
-                                          readFile: diff.status === "deleted" ? undefined : props.readFile,
-                                        }}
-                                      />
+                                      <Switch>
+                                        <Match when={inlineMode() === "monaco"}>
+                                          <CodeDiffView
+                                            {...codeDiffViewProps()}
+                                            before={text(view(), "deletions")}
+                                            after={text(view(), "additions")}
+                                            heightClass="h-[min(72vh,900px)]"
+                                            reviewAnnotations={commentsUi.annotations()}
+                                            renderReviewAnnotation={
+                                              commentsUi.renderAnnotation as (
+                                                annotation: import("@pierre/diffs").DiffLineAnnotation<
+                                                  import("./line-comment-annotations").LineCommentAnnotationMeta<unknown>
+                                                >,
+                                              ) => HTMLElement | undefined
+                                            }
+                                            onReady={() => {
+                                              props.onDiffRendered?.()
+                                            }}
+                                            onUnavailable={() => setCodeDiffUnavailable(true)}
+                                          />
+                                        </Match>
+                                        <Match when={true}>
+                                          <Dynamic
+                                            component={fileComponent}
+                                            mode="diff"
+                                            fileDiff={view().fileDiff}
+                                            preloadedDiff={view().preloaded}
+                                            diffStyle={diffStyle()}
+                                            onRendered={() => {
+                                              props.onDiffRendered?.()
+                                            }}
+                                            enableLineSelection={props.onLineComment != null}
+                                            enableHoverUtility={props.onLineComment != null}
+                                            onLineSelected={handleLineSelected}
+                                            onLineSelectionEnd={handleLineSelectionEnd}
+                                            onLineNumberSelectionEnd={commentsUi.onLineNumberSelectionEnd}
+                                            annotations={commentsUi.annotations()}
+                                            renderAnnotation={commentsUi.renderAnnotation}
+                                            renderHoverUtility={props.onLineComment ? commentsUi.renderHoverUtility : undefined}
+                                            selectedLines={selectedLines()}
+                                            commentedLines={commentedLines()}
+                                            media={{
+                                              mode: "auto",
+                                              path: file,
+                                              deleted: diff.status === "deleted",
+                                              readFile: diff.status === "deleted" ? undefined : props.readFile,
+                                            }}
+                                          />
+                                        </Match>
+                                      </Switch>
                                     )}
                                   </Show>
                                 </Match>

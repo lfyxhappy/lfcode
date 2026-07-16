@@ -272,7 +272,7 @@ export class Service extends Context.Service<Service, Interface>()("@lfcode/v2/S
 
 export const layer = Layer.effect(
   Service,
-  SessionRunner.Service.pipe(
+  SessionRunner.Service.asEffect().pipe(
     Effect.flatMap((runner) =>
       make<SessionSchema.ID, void, SessionRunner.RunError>({
         drain: (sessionID, mode) => runner.run({ sessionID, force: mode === "run" }),

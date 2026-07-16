@@ -17,20 +17,11 @@ function mimeToModality(mime: string): Modality | undefined {
   return undefined
 }
 
-// MiMo vision support isn't reflected in models.dev modality data, so the
-// generic capability check would strip images before they reach the model.
-// mimo-auto and mimo-v2.5 accept images; mimo-v2.5-pro is text-only.
 function supportsImageInput(model: Provider.Model): boolean {
-  if (model.providerID === "mimo" || model.providerID === "xiaomi") {
-    const id = model.id.toLowerCase()
-    if (id.includes("v2.5-pro")) return false
-    if (id === "mimo-auto" || id.includes("v2.5")) return true
-  }
   return model.capabilities.input.image
 }
 
 export const OUTPUT_TOKEN_MAX = Flag.LFCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
-const MIMO_OUTPUT_TOKEN_MAX = 128_000
 
 // Maps npm package to the key the AI SDK expects for providerOptions
 function sdkKey(npm: string): string | undefined {
@@ -453,7 +444,6 @@ export function temperature(model: Provider.Model) {
   if (id.includes("glm-4.6")) return 1.0
   if (id.includes("glm-4.7")) return 1.0
   if (id.includes("minimax-m2")) return 1.0
-  if (id.includes("mimo")) return 1.0
   if (id.includes("kimi-k2")) {
     // kimi-k2-thinking & kimi-k2.5 && kimi-k2p5 && kimi-k2-5
     if (["thinking", "k2.", "k2p", "k2-5"].some((s) => id.includes(s))) {
@@ -496,22 +486,16 @@ function anthropicAdaptiveEfforts(apiId: string): string[] | null {
   return null
 }
 
-export function variants(model: Provider.Model): Record<string, Record<string, any>> {
-  if (!model.capabilities.reasoning) return {}
+export function variants(
+  model: Provider.Model,
+  options?: {
+    ignoreReasoningCapability?: boolean
+  },
+): Record<string, Record<string, any>> {
+  if (!options?.ignoreReasoningCapability && !model.capabilities.reasoning) return {}
 
   const id = model.id.toLowerCase()
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
-  if (
-    id.includes("deepseek") ||
-    id.includes("minimax") ||
-    id.includes("glm") ||
-    id.includes("mistral") ||
-    id.includes("kimi") ||
-    id.includes("k2p5") ||
-    id.includes("qwen") ||
-    id.includes("big-pickle")
-  )
-    return {}
 
   // see: https://docs.x.ai/docs/guides/reasoning#control-how-hard-the-model-thinks
   if (id.includes("grok") && id.includes("grok-3-mini")) {
@@ -1106,13 +1090,10 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
 }
 
 export function maxOutputTokens(model: Provider.Model): number {
-  if (model.providerID === "mimo" || model.providerID === "xiaomi" || model.id.toLowerCase().includes("mimo")) {
-    return MIMO_OUTPUT_TOKEN_MAX
-  }
   return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
 }
 
-// Flatten a root-level `anyOf` / `oneOf` (typically from `z.discriminatedUnion`)
+// Flatten an `anyOf` / `oneOf` node (typically from `z.discriminatedUnion`)
 // into a single `type: "object"` schema with all variant properties merged at
 // the root. The discriminator key becomes an `enum`, and per-variant required
 // fields are encoded as a textual hint on the discriminator's description.
@@ -1145,6 +1126,7 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
       break
     }
   }
+  if (!discriminator) return schema as JSONSchema7
 
   // Merge non-discriminator properties from every variant. Track which variants
   // each property appeared in so the description can tell the model
@@ -1199,12 +1181,25 @@ function flattenDiscriminatedUnion(schema: JSONSchema.BaseSchema | JSONSchema7):
     }
   }
 
+  const base = Object.fromEntries(Object.entries(root).filter(([key]) => key !== "anyOf" && key !== "oneOf"))
   return {
+    ...base,
     type: "object",
     properties,
     required: discriminator ? [discriminator] : [],
     additionalProperties: false,
   } as JSONSchema7
+}
+
+function flattenDiscriminatedUnions(schema: JSONSchema.BaseSchema | JSONSchema7): JSONSchema7 {
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit)
+    if (!value || typeof value !== "object") return value
+    return flattenDiscriminatedUnion(
+      Object.fromEntries(Object.entries(value).map(([key, child]) => [key, visit(child)])) as JSONSchema7,
+    )
+  }
+  return visit(schema) as JSONSchema7
 }
 
 export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JSONSchema7): JSONSchema7 {
@@ -1232,7 +1227,7 @@ export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JS
   // - Anthropic proxies to Bedrock: same Bedrock error
   // Flatten unconditionally — all providers accept a flat `type: "object"` schema,
   // and zod's runtime parse still enforces per-variant required fields strictly.
-  schema = flattenDiscriminatedUnion(schema)
+  schema = flattenDiscriminatedUnions(schema)
 
   // Convert integer enums to string enums for Google/Gemini
   if (model.providerID === "google" || model.api.id.includes("gemini")) {

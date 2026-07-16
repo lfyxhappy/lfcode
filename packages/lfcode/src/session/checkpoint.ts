@@ -122,7 +122,7 @@ async function readRelevantTopicMemory(input: {
       limit: Math.max(input.fileLimit * 3, input.fileLimit),
     }),
   )
-  const selected = hits
+  const selected = hits.results
     .filter((hit) => isProjectMemorySpillover(hit.path))
     .filter((hit, index, rows) => rows.findIndex((row) => row.path === hit.path) === index)
     .slice(0, input.fileLimit)
@@ -341,7 +341,7 @@ function composeWriterPrompt(input: {
 }): string {
   return [
     "<system-reminder>",
-    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The read, write, edit, glob, grep, and task tools are available; do not invoke others.",
+    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The available tools are read, file_info, tree, search, archive_inspect, replace_range, symbol_edit, edit_history, apply_patch, and task; do not invoke others.",
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",
@@ -352,7 +352,7 @@ function composeWriterPrompt(input: {
     `TASK_MEM_DIR    = ${input.taskMemDir}`,
     `NOTES_PATH      = ${input.notesFile}`,
     "",
-    "When using the Write tool, the first arg MUST be one of these literal",
+    "When editing checkpoint files, the path you target MUST be one of these literal",
     "absolute paths (or for task narrative, TASK_MEM_DIR + '/' + task_id +",
     "'/progress.md' or '/notes.md'). Do NOT abbreviate. Do NOT change",
     "parent directories. Do NOT insert paths from memory of similar projects.",
@@ -370,7 +370,7 @@ function composeWriterPrompt(input: {
     "",
     input.rangeDesc,
     "",
-    "Use the `task` tool for ALL task state ops (create / start / progress / done / abandon / approve / rename / block / unblock / batch_create). Use the Write tool for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above. After all writes and tool calls, stop immediately.",
+    "Use the `task` tool for ALL task state ops (create / start / progress / done / abandon / approve / rename / block / unblock / batch_create). Use patch-first file editing only for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above: prefer `replace_range` for small targeted edits, `symbol_edit` when a whole section boundary is clear, and `apply_patch` for broader rewrites or file creation. After all writes and tool calls, stop immediately.",
   ].join("\n")
 }
 
@@ -446,7 +446,7 @@ export interface Interface {
 
   /**
    * Await all in-flight writers across sessions up to `timeoutMs`. Used by
-   * the CLI shutdown path so headless `mimo run` invocations don't exit
+   * the CLI shutdown path so headless `lfcode run` invocations don't exit
    * while a forked checkpoint writer is still waiting on its LLM round-trip.
    * Returns the count of writers that completed vs. still pending when the
    * timeout fired.
@@ -889,7 +889,18 @@ export const layer: Layer.Layer<
         description: `checkpoint writer for session ${input.sessionID} covering ${rangeDesc}`,
         task: promptText,
         context: "full",
-        tools: ["read", "write", "edit", "apply_patch", "glob", "grep", "task"],
+        tools: [
+          "read",
+          "file_info",
+          "tree",
+          "search",
+          "archive_inspect",
+          "replace_range",
+          "symbol_edit",
+          "edit_history",
+          "apply_patch",
+          "task",
+        ],
         model: {
           providerID: input.model.providerID as ProviderID,
           modelID: input.model.modelID as ModelID,
@@ -1184,7 +1195,7 @@ export const layer: Layer.Layer<
       // F17: Explicit "already loaded" header. Anchors the active recall
       // protocol's "look for this header" instruction in buildMemoryInstructions.
       lines.push(
-        "The following blocks are auto-loaded from your session memory. They are already in your context — do not Read them as whole files. Use Grep for specific facts instead.",
+        'The following blocks are auto-loaded from your session memory. They are already in your context — do not Read them as whole files. Use `search` with `kind="content"` for specific facts instead.',
       )
       lines.push("")
 

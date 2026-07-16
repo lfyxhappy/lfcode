@@ -15,6 +15,8 @@
 export interface LLMCapture {
   /** Raw messages array from the OpenAI-compatible request body */
   messages: Array<{ role: string; content: unknown }>
+  /** Full request body for assertions on tools and other provider fields */
+  body: Record<string, unknown>
 }
 
 type ScriptedResponse = {
@@ -54,6 +56,18 @@ export function textStopResponse(text: string): string[] {
  */
 export function emptyStopResponse(): string[] {
   return [sseChunk({ role: "assistant" }), sseChunk({}, "stop"), "data: [DONE]\n\n"]
+}
+
+/**
+ * Build SSE lines for a stream that starts but ends before emitting any
+ * completion event. This exercises the processor's `missing-finish-step`
+ * terminalization path.
+ */
+export function interruptedResponse(reasoning?: string): string[] {
+  return [
+    sseChunk({ role: "assistant" }),
+    ...(reasoning ? [sseChunk({ reasoning_content: reasoning })] : []),
+  ]
 }
 
 /**
@@ -213,8 +227,11 @@ export function startScriptedLLMServer(responses: ScriptedResponse[]): ScriptedL
         return new Response("not found", { status: 404 })
       }
 
-      const body = (await req.json()) as { messages: Array<{ role: string; content: unknown }> }
-      captures.push({ messages: body.messages })
+      const body = (await req.json()) as Record<string, unknown>
+      captures.push({
+        messages: Array.isArray(body.messages) ? (body.messages as Array<{ role: string; content: unknown }>) : [],
+        body,
+      })
 
       const response = responses[Math.min(callIdx, responses.length - 1)]
       callIdx++

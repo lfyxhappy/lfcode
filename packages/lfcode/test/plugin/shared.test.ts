@@ -1,5 +1,7 @@
+import path from "path"
+import { pathToFileURL } from "url"
 import { describe, expect, test } from "bun:test"
-import { parsePluginSpecifier } from "../../src/plugin/shared"
+import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "../../src/plugin/shared"
 
 describe("parsePluginSpecifier", () => {
   test("parses standard npm package without version", () => {
@@ -84,5 +86,23 @@ describe("parsePluginSpecifier", () => {
       pkg: "@lfcode/acme",
       version: "latest",
     })
+  })
+})
+
+describe("plugin path specifiers", () => {
+  test("distinguishes file, relative, absolute, and registry specs", () => {
+    expect(isPathPluginSpec("file:./plugin")).toBe(true)
+    expect(isPathPluginSpec("file:///tmp/plugin")).toBe(true)
+    expect(isPathPluginSpec("./plugin")).toBe(true)
+    expect(isPathPluginSpec("../plugin")).toBe(true)
+    expect(isPathPluginSpec(path.resolve("plugin"))).toBe(true)
+    expect(isPathPluginSpec("plugin")).toBe(false)
+    expect(isPathPluginSpec("plugin@file:../plugin")).toBe(false)
+    expect(isPathPluginSpec("@lfcode/plugin@latest")).toBe(false)
+  })
+
+  test("resolves file: directory specs without routing through npm", async () => {
+    const target = await resolvePathPluginTarget(`file:${path.resolve("test", "fixture", "plugin")}`)
+    expect(target).toBe(pathToFileURL(path.resolve("test", "fixture", "plugin")).href)
   })
 })

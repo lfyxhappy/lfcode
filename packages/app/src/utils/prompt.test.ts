@@ -41,4 +41,37 @@ describe("extractPromptFromParts", () => {
       { type: "image", filename: "b.pdf", mime: "application/pdf", dataUrl: "data:application/pdf;base64,BBB" },
     ])
   })
+
+  test("restores selected text from metadata-backed text parts", () => {
+    const parts = [
+      {
+        id: "text_1",
+        type: "text",
+        text: "quoted selection",
+        metadata: {
+          lfcodeSelectedText: [
+            {
+              text: "quoted selection",
+              messageID: "msg_1",
+            },
+          ],
+        },
+        sessionID: "ses_1",
+        messageID: "msg_1",
+      },
+    ] satisfies Part[]
+
+    const result = extractPromptFromParts(parts)
+
+    expect(result).toEqual([
+      {
+        type: "selected-text",
+        text: "quoted selection",
+        content: "quoted selection",
+        start: 0,
+        end: "quoted selection".length,
+        messageID: "msg_1",
+      },
+    ])
+  })
 })

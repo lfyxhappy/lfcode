@@ -26,14 +26,22 @@ const FileReadCommand = cmd({
   command: "read <path>",
   describe: "read file contents as JSON",
   builder: (yargs) =>
-    yargs.positional("path", {
-      type: "string",
-      demandOption: true,
-      description: "File path to read",
-    }),
+    yargs
+      .positional("path", {
+        type: "string",
+        demandOption: true,
+        description: "File path to read",
+      })
+      .option("with-diff", {
+        type: "boolean",
+        default: false,
+        description: "Include git diff and parsed patch for tracked modifications",
+      }),
   async handler(args) {
     await bootstrap(process.cwd(), async () => {
-      const content = await AppRuntime.runPromise(File.Service.use((svc) => svc.read(args.path)))
+      const content = await AppRuntime.runPromise(
+        File.Service.use((svc) => svc.read(args.path, { withDiff: args.withDiff })),
+      )
       process.stdout.write(JSON.stringify(content, null, 2) + EOL)
     })
   },

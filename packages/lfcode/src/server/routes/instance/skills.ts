@@ -45,6 +45,24 @@ const ImportInput = z.object({
   name: skillName.optional(),
 })
 
+const CODEX_IMPORT_ALLOWLIST = new Set([
+  "archive-extract",
+  "effect",
+  "define-goal",
+  "doc",
+  "formula-pdf-ocr",
+  "humanizer",
+  "inspect-readonly",
+  "pdf",
+  "playwright",
+  "playwright-interactive",
+  "screenshot",
+  "system__skill-creator",
+  "system__skill-installer",
+  "transcribe",
+  "update",
+])
+
 const CreateInput = z.object({
   name: skillName,
   description: z.string().min(1),
@@ -450,15 +468,16 @@ export const SkillsRoutes = lazy(() =>
             "SkillsRoutes.import",
             c,
             Effect.gen(function* () {
-              const input = c.req.valid("json")
-              const fs = yield* AppFileSystem.Service
-              const source = yield* resolveImportSource(fs, input)
-              const targets = yield* importSkillCandidates(fs, source.path, {
-                fallbackName: source.fallbackName,
-                name: input.name,
-              }).pipe(
-                Effect.ensuring(source.cleanup),
-              )
+                const input = c.req.valid("json")
+                const fs = yield* AppFileSystem.Service
+                const source = yield* resolveImportSource(fs, input)
+                const targets = yield* importSkillCandidates(fs, source.path, {
+                  fallbackName: source.fallbackName,
+                  name: input.name,
+                  allowedNames: source.allowedNames,
+                }).pipe(
+                  Effect.ensuring(source.cleanup),
+                )
               const skill = yield* Skill.Service
               yield* skill.refresh()
               return yield* importedItems(skill, targets)
@@ -803,6 +822,7 @@ type ImportSource = {
   path: string
   cleanup: Effect.Effect<void, never, AppFileSystem.Service>
   fallbackName?: string
+  allowedNames?: ReadonlySet<string>
 }
 
 function resolveImportSource(
@@ -820,15 +840,16 @@ function resolveImportSource(
         fallbackName: undefined,
       }
     }
-    if (kind === "codex") {
-      const target = path.join(Global.Path.home, ".codex", "skills")
-      if (!(yield* fs.existsSafe(target))) throw new NotFoundError({ message: `Preset skill root not found: ${target}` })
-      return {
-        path: target,
-        cleanup: Effect.void,
-        fallbackName: undefined,
+      if (kind === "codex") {
+        const target = path.join(Global.Path.home, ".codex", "skills")
+        if (!(yield* fs.existsSafe(target))) throw new NotFoundError({ message: `Preset skill root not found: ${target}` })
+        return {
+          path: target,
+          cleanup: Effect.void,
+          fallbackName: undefined,
+          allowedNames: CODEX_IMPORT_ALLOWLIST,
+        }
       }
-    }
     if (kind === "agents") {
       const target = path.join(Global.Path.home, ".agents", "skills")
       if (!(yield* fs.existsSafe(target))) throw new NotFoundError({ message: `Preset skill root not found: ${target}` })
@@ -864,7 +885,7 @@ function resolveImportSource(
 function importSkillCandidates(
   fs: AppFileSystem.Interface,
   source: string,
-  options?: { fallbackName?: string; name?: string },
+  options?: { fallbackName?: string; name?: string; allowedNames?: ReadonlySet<string> },
 ): Effect.Effect<Array<{ target: string; targetName: string }>, unknown, AppFileSystem.Service> {
   return Effect.gen(function* () {
     const resolvedSource = AppFileSystem.resolve(source)
@@ -882,17 +903,24 @@ function importSkillCandidates(
 function discoverImportCandidates(
   fs: AppFileSystem.Interface,
   source: string,
-  options?: { fallbackName?: string; name?: string },
+  options?: { fallbackName?: string; name?: string; allowedNames?: ReadonlySet<string> },
 ): Effect.Effect<ImportCandidate[], unknown, AppFileSystem.Service> {
   return Effect.gen(function* () {
     const direct = path.join(source, "SKILL.md")
     if (yield* fs.isFile(direct)) {
+      if (options?.allowedNames && !options.allowedNames.has(path.basename(source))) return []
       return [{ source, targetName: options?.name ?? options?.fallbackName ?? path.basename(source) }]
     }
 
     const entries = yield* fs.readDirectoryEntries(source)
     const candidates = yield* Effect.forEach(
-      entries.filter((entry) => entry.type === "directory" && entry.name !== ".git" && entry.name !== "node_modules"),
+      entries.filter(
+        (entry) =>
+          entry.type === "directory" &&
+          entry.name !== ".git" &&
+          entry.name !== "node_modules" &&
+          (!options?.allowedNames || options.allowedNames.has(entry.name)),
+      ),
       (entry) =>
         Effect.gen(function* () {
           const candidate = path.join(source, entry.name)

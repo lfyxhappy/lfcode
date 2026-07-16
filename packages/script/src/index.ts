@@ -57,6 +57,7 @@ const VERSION = await (async () => {
   const version = await Bun.file(path.resolve(import.meta.dir, "../../../package.json"))
     .json()
     .then((data) => (data as { version?: string }).version)
+  if (!version) throw new Error("Root package.json is missing a version")
   const t = env.LFCODE_BUMP?.toLowerCase()
   if (!t) return version
   const [major, minor, patch] = version.split(".").map((x: string) => Number(x) || 0)

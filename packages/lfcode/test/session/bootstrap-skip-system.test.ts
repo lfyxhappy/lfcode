@@ -38,6 +38,7 @@ const stubActorRegistry = Layer.succeed(
     // Force the guard inside tryStartCheckpointWriter to fire by always reporting true.
     isSystemSpawned: () => Effect.succeed(true),
     allocateActorID: () => Effect.die("not used"),
+    remove: () => Effect.void,
   }),
 )
 

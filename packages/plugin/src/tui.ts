@@ -16,9 +16,12 @@ import type {
   TextPart,
   Config as SdkConfig,
 } from "@lfcode-ai/sdk/v2"
-import type { CliRenderer, ParsedKey, RGBA, SlotMode } from "@opentui/core"
+import type { CliRenderer, KeyEvent, ParsedKey, Renderable, RGBA, SlotMode } from "@opentui/core"
+import type { ActiveBinding, Binding, Keymap } from "@opentui/keymap"
+import type { BindingLookup, KeySequenceFormatPart } from "@opentui/keymap/extras"
 import type { JSX, SolidPlugin } from "@opentui/solid"
 import type { Config as PluginConfig, PluginOptions } from "./index.js"
+import type { PluginTrust } from "./manifest.js"
 
 export type { CliRenderer, SlotMode } from "@opentui/core"
 
@@ -77,6 +80,15 @@ export type TuiKeybindSet = {
   print: (name: string) => string
 }
 
+export type TuiKeymap = Keymap<Renderable, KeyEvent>
+export type TuiBinding = Binding<Renderable, KeyEvent>
+export type TuiActiveBinding = ActiveBinding<Renderable, KeyEvent>
+export type TuiKeySequencePart = KeySequenceFormatPart
+export type TuiBindingLookup = Pick<
+  BindingLookup<Renderable, KeyEvent>,
+  "bindings" | "get" | "has" | "gather" | "pick" | "omit"
+>
+
 export type TuiDialogProps = {
   size?: "medium" | "large" | "xlarge"
   onClose: () => void
@@ -107,7 +119,7 @@ export type TuiDialogConfirmProps = {
 
 export type TuiDialogPromptProps = {
   title: string
-  description?: () => JSX.Element
+  description?: JSX.Element | (() => JSX.Element)
   placeholder?: string
   value?: string
   busy?: boolean
@@ -260,6 +272,55 @@ export type TuiKV = {
   get: <Value = unknown>(key: string, fallback?: Value) => Value
   set: (key: string, value: unknown) => void
   readonly ready: boolean
+}
+
+export type TuiAttentionSoundName = "default" | "question" | "permission" | "error" | "done" | "subagent_done"
+
+export type TuiAttentionWhen = "always" | "focused" | "blurred"
+
+export type TuiAttentionNotifyInput = {
+  title?: string
+  message: string
+  notification?: boolean | { when?: TuiAttentionWhen }
+  sound?: boolean | { name?: TuiAttentionSoundName; when?: TuiAttentionWhen; volume?: number }
+}
+
+export type TuiAttentionNotifySkipReason =
+  | "attention_disabled"
+  | "renderer_destroyed"
+  | "empty_message"
+  | "focus_unknown"
+  | "focused"
+  | "blurred"
+
+export type TuiAttentionNotifyResult = {
+  ok: boolean
+  notification: boolean
+  sound: boolean
+  skipped?: TuiAttentionNotifySkipReason
+}
+
+export type TuiAttentionSoundPack = {
+  id: string
+  name?: string
+  sounds: Partial<Record<TuiAttentionSoundName, string>>
+}
+
+export type TuiAttentionSoundPackInfo = {
+  id: string
+  name?: string
+  active: boolean
+  builtin: boolean
+}
+
+export type TuiAttention = {
+  notify: (input: TuiAttentionNotifyInput) => Promise<TuiAttentionNotifyResult>
+  soundboard: {
+    registerPack: (pack: TuiAttentionSoundPack) => () => void
+    activate: (id: string, options?: { persist?: boolean }) => boolean
+    current: () => string
+    list: () => TuiAttentionSoundPackInfo[]
+  }
 }
 
 export type TuiState = {
@@ -424,7 +485,12 @@ export type TuiPluginState = "first" | "updated" | "same"
 
 export type TuiPluginEntry = {
   id: string
-  source: "file" | "npm" | "internal"
+  name?: string
+  trust?: PluginTrust
+  apiVersion?: string
+  capabilities?: string[]
+  lfcodeRange?: string
+  source: "file" | "npm" | "managed" | "internal"
   spec: string
   target: string
   requested?: string
@@ -443,6 +509,11 @@ export type TuiPluginMeta = TuiPluginEntry & {
 
 export type TuiPluginStatus = {
   id: string
+  name?: string
+  trust?: PluginTrust
+  apiVersion?: string
+  capabilities?: string[]
+  lfcodeRange?: string
   source: TuiPluginEntry["source"]
   spec: string
   target: string
@@ -523,4 +594,8 @@ export type TuiPluginModule = {
   id?: string
   tui: TuiPlugin
   server?: never
+}
+
+export function defineTuiPlugin<const T extends TuiPluginModule>(plugin: T): T {
+  return plugin
 }

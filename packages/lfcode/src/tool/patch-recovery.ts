@@ -17,14 +17,14 @@ function key(sessionID: string, messageID: string, filepath: string) {
   return `${sessionID}\0${messageID}\0${normalize(filepath)}`
 }
 
-function version(content: Uint8Array) {
+export function contentVersion(content: Uint8Array) {
   return createHash("sha256").update(content).digest("hex")
 }
 
 export function recordRead(sessionID: string, messageID: string, filepath: string, content: Uint8Array) {
   const entry = recovery.get(key(sessionID, messageID, filepath))
   if (!entry) return
-  entry.version = version(content)
+  entry.version = contentVersion(content)
 }
 
 export function needsRead(sessionID: string, messageID: string, filepath: string) {
@@ -40,7 +40,7 @@ export function requireFreshRead(sessionID: string, messageID: string, filepath:
   if (!entry.version) {
     return "Patch recovery requires a fresh structured read of this target before another edit. Read the file now; do not reuse remembered context."
   }
-  if (entry.version !== version(content)) {
+  if (entry.version !== contentVersion(content)) {
     entry.version = undefined
     return "The file changed after the required recovery read. Read the current file again before editing; the previous context is stale."
   }

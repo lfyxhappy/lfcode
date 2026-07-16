@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@lfcode-ai/sdk/v2/client"
+import { isInlineImageCacheUrl, resolveInlineImageUrl } from "@lfcode-ai/ui/inline-image-cache"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -15,13 +16,14 @@ const rootSession = (input: { id: string; parentID?: string; archived?: number }
     },
   }) as Session
 
-const userMessage = (id: string, sessionID: string) =>
+const userMessage = (id: string, sessionID: string, agentID?: string) =>
   ({
     id,
     sessionID,
     role: "user",
     time: { created: 1 },
     agent: "assistant",
+    agentID,
     model: { providerID: "openai", modelID: "gpt" },
   }) as Message
 
@@ -32,6 +34,39 @@ const textPart = (id: string, sessionID: string, messageID: string) =>
     messageID,
     type: "text",
     text: id,
+  }) as Part
+
+const imagePart = (id: string, sessionID: string, messageID: string) =>
+  ({
+    id,
+    sessionID,
+    messageID,
+    type: "file",
+    mime: "image/png",
+    filename: "image.png",
+    url: "data:image/png;base64," + "A".repeat(400_000),
+  }) as Part
+
+const toolPart = (id: string, sessionID: string, messageID: string) =>
+  ({
+    id,
+    sessionID,
+    messageID,
+    type: "tool",
+    callID: "call_1",
+    tool: "read",
+    state: {
+      status: "completed",
+      input: {},
+      output: "Image read successfully",
+      title: "Read image",
+      metadata: {},
+      time: {
+        start: 1,
+        end: 2,
+      },
+      attachments: [imagePart("prt_tool_img", sessionID, messageID)],
+    },
   }) as Part
 
 const permissionRequest = (id: string, sessionID: string, title = id) =>
@@ -71,6 +106,7 @@ const baseState = (input: Partial<State> = {}) =>
     session: [],
     sessionTotal: 0,
     session_status: {},
+    session_goal: {},
     session_diff: {},
     todo: {},
     permission: {},
@@ -80,6 +116,8 @@ const baseState = (input: Partial<State> = {}) =>
     vcs: undefined,
     limit: 10,
     message: {},
+    messageByAgent: {},
+    actor: {},
     part: {},
     ...input,
   }) as State
@@ -304,6 +342,50 @@ describe("applyDirectoryEvent", () => {
     expect(store.part.msg_1).toBeUndefined()
   })
 
+  test("stores session.goal state and verdicts from goal events", () => {
+    const [store, setStore] = createStore(baseState())
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.goal",
+        properties: {
+          sessionID: "ses_1",
+          goal: {
+            status: "paused",
+            objective: "Ship release",
+            condition: "Ship release",
+            stats: {
+              elapsed: 120_000,
+              tokens: {
+                input: 12,
+                output: 8,
+                reasoning: 3,
+                cache: { read: 5, write: 1 },
+              },
+            },
+            time: { created: 1, updated: 2 },
+          },
+          lastVerdict: {
+            ok: false,
+            reason: "installer still missing",
+            attempt: 2,
+            messageID: "msg_goal_1",
+          },
+        },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.session_goal.ses_1?.state?.status).toBe("paused")
+    expect(store.session_goal.ses_1?.state?.stats?.tokens?.input).toBe(12)
+    expect(store.session_goal.ses_1?.lastMessageID).toBe("msg_goal_1")
+    expect(store.session_goal.ses_1?.verdicts.msg_goal_1?.reason).toBe("installer still missing")
+  })
+
   test("upserts and removes messages while clearing orphaned parts", () => {
     const sessionID = "ses_1"
     const [store, setStore] = createStore(
@@ -354,6 +436,68 @@ describe("applyDirectoryEvent", () => {
 
     expect(store.message[sessionID]?.map((x) => x.id)).toEqual(["msg_1", "msg_3"])
     expect(store.part.msg_2).toBeUndefined()
+  })
+
+  test("removes actor caches and message slices on actor.removed", () => {
+    const sessionID = "ses_actors"
+    const childA = userMessage("msg_child_a", sessionID, "child-1")
+    const childB = userMessage("msg_child_b", sessionID, "child-1")
+    const other = userMessage("msg_other", sessionID, "child-2")
+    const main = userMessage("msg_main", sessionID)
+    const [store, setStore] = createStore(
+      baseState({
+        actor: {
+          [sessionID]: [
+            {
+              actorID: "child-1",
+              sessionID,
+              mode: "subagent",
+              status: "idle",
+              description: "child 1",
+              time: { created: 1 },
+            },
+            {
+              actorID: "child-2",
+              sessionID,
+              mode: "subagent",
+              status: "idle",
+              description: "child 2",
+              time: { created: 1 },
+            },
+          ],
+        },
+        message: { [sessionID]: [main, childA, childB, other] },
+        messageByAgent: {
+          [sessionID]: {
+            main: [main],
+            "child-1": [childA, childB],
+            "child-2": [other],
+          },
+        },
+        part: {
+          [childA.id]: [textPart("prt_child_a", sessionID, childA.id)],
+          [childB.id]: [textPart("prt_child_b", sessionID, childB.id)],
+          [other.id]: [textPart("prt_other", sessionID, other.id)],
+        },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: { type: "actor.removed", properties: { sessionID, actorID: "child-1" } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.actor[sessionID]?.map((item) => item.actorID)).toEqual(["child-2"])
+    expect(store.message[sessionID]?.map((item) => item.id)).toEqual(["msg_main", "msg_other"])
+    expect(store.messageByAgent[sessionID]?.["child-1"]).toBeUndefined()
+    expect(store.messageByAgent[sessionID]?.["child-2"]?.map((item) => item.id)).toEqual(["msg_other"])
+    expect(store.part[childA.id]).toBeUndefined()
+    expect(store.part[childB.id]).toBeUndefined()
+    expect(store.part[other.id]?.map((item) => item.id)).toEqual(["prt_other"])
   })
 
   test("upserts and prunes message parts", () => {
@@ -421,6 +565,80 @@ describe("applyDirectoryEvent", () => {
     })
 
     expect(store.part[messageID]).toBeUndefined()
+  })
+
+  test("stashes oversized inline image parts on update and clears them on removal", () => {
+    const sessionID = "ses_1"
+    const messageID = "msg_1"
+    const [store, setStore] = createStore(baseState())
+
+    applyDirectoryEvent({
+      event: { type: "message.part.updated", properties: { part: imagePart("prt_img", sessionID, messageID) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    const stored = store.part[messageID]?.[0]
+    expect(stored?.type).toBe("file")
+    if (stored?.type === "file") {
+      expect(isInlineImageCacheUrl(stored.url)).toBe(true)
+      expect(resolveInlineImageUrl(stored)).toContain("data:image/png;base64,")
+    }
+
+    applyDirectoryEvent({
+      event: { type: "message.part.removed", properties: { messageID, partID: "prt_img" } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.part[messageID]).toBeUndefined()
+    if (stored?.type === "file") {
+      expect(resolveInlineImageUrl(stored)).toBeUndefined()
+    }
+  })
+
+  test("stashes oversized tool attachments on update and clears them on message removal", () => {
+    const sessionID = "ses_1"
+    const messageID = "msg_1"
+    const [store, setStore] = createStore(baseState({ message: { [sessionID]: [userMessage(messageID, sessionID)] } }))
+
+    applyDirectoryEvent({
+      event: { type: "message.part.updated", properties: { part: toolPart("prt_tool", sessionID, messageID) } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    const stored = store.part[messageID]?.[0]
+    expect(stored?.type).toBe("tool")
+    if (stored?.type === "tool" && stored.state.status === "completed") {
+      const attachment = stored.state.attachments?.[0]
+      expect(attachment).toBeDefined()
+      expect(isInlineImageCacheUrl(attachment!.url)).toBe(true)
+      expect(resolveInlineImageUrl(attachment!)).toContain("data:image/png;base64,")
+    }
+
+    applyDirectoryEvent({
+      event: { type: "message.removed", properties: { sessionID, messageID } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.part[messageID]).toBeUndefined()
+    if (stored?.type === "tool" && stored.state.status === "completed") {
+      expect(resolveInlineImageUrl(stored.state.attachments?.[0]!)).toBeUndefined()
+    }
   })
 
   test("tracks permission and question request lifecycles", () => {

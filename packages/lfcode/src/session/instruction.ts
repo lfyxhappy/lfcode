@@ -1,6 +1,6 @@
 import os from "os"
 import path from "path"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Option } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Config } from "@/config"
 import { InstanceState } from "@/effect"
@@ -80,6 +80,9 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
           Effect.succeed({
             // Track which instruction files have already been attached for a given assistant message.
             claims: new Map<MessageID, Set<string>>(),
+            pathsCache: new Map<string, { expires: number; paths: string[] }>(),
+            contentCache: new Map<string, { fingerprint: string; content: string }>(),
+            remoteCache: new Map<string, { expires: number; content: string }>(),
           }),
         ),
       )
@@ -102,18 +105,53 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
           .pipe(Effect.catch(() => Effect.succeed([] as string[])))
       })
 
+      const fileFingerprint = Effect.fnUntraced(function* (filepath: string) {
+        const info = yield* fs.stat(filepath).pipe(Effect.option)
+        if (Option.isNone(info)) return
+        return [
+          info.value.type,
+          Number(info.value.size),
+          info.value.mtime.pipe(
+            Option.map((date) => date.getTime()),
+            Option.getOrElse(() => 0),
+          ),
+        ].join(":")
+      })
+
       const read = Effect.fnUntraced(function* (filepath: string) {
-        return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+        const fingerprint = yield* fileFingerprint(filepath)
+        const s = yield* InstanceState.get(state)
+        if (!fingerprint) {
+          s.contentCache.delete(filepath)
+          return ""
+        }
+
+        const cached = s.contentCache.get(filepath)
+        if (cached?.fingerprint === fingerprint) return cached.content
+
+        const content = yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+        s.contentCache.set(filepath, { fingerprint, content })
+        return content
       })
 
       const fetch = Effect.fnUntraced(function* (url: string) {
+        const s = yield* InstanceState.get(state)
+        const cached = s.remoteCache.get(url)
+        if (cached && cached.expires > Date.now()) return cached.content
+
         const res = yield* http.execute(HttpClientRequest.get(url)).pipe(
           Effect.timeout(5000),
           Effect.catch(() => Effect.succeed(null)),
         )
-        if (!res) return ""
+        if (!res) {
+          s.remoteCache.set(url, { expires: Date.now() + 30_000, content: "" })
+          return ""
+        }
+
         const body = yield* res.arrayBuffer.pipe(Effect.catch(() => Effect.succeed(new ArrayBuffer(0))))
-        return new TextDecoder().decode(body)
+        const content = new TextDecoder().decode(body)
+        s.remoteCache.set(url, { expires: Date.now() + 30_000, content })
+        return content
       })
 
       const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
@@ -124,6 +162,18 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
       const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
         const config = yield* cfg.get()
         const ctx = yield* InstanceState.context
+        const cacheKey = JSON.stringify({
+          directory: ctx.directory,
+          worktree: ctx.worktree,
+          configDir: Flag.LFCODE_CONFIG_DIR ?? "",
+          disableProjectConfig: Flag.LFCODE_DISABLE_PROJECT_CONFIG,
+          disableClaudeCodePrompt: Flag.LFCODE_DISABLE_CLAUDE_CODE_PROMPT,
+          instructions: config.instructions ?? [],
+        })
+        const s = yield* InstanceState.get(state)
+        const cached = s.pathsCache.get(cacheKey)
+        if (cached && cached.expires > Date.now()) return new Set(cached.paths)
+
         const paths = new Set<string>()
 
         // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
@@ -175,6 +225,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
           }
         }
 
+        s.pathsCache.set(cacheKey, { expires: Date.now() + 5_000, paths: [...paths] })
         return paths
       })
 

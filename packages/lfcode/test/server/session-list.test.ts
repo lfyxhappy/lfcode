@@ -124,12 +124,14 @@ describe("session.list", () => {
       fn: async () => {
         const root = await svc.create({ title: "root-session" })
         const child = await svc.create({ title: "child-session", parentID: root.id })
+        const inherited = await svc.create({ title: "inherited-session", contextFrom: root.id })
 
         const sessions = [...svc.list({ roots: true })]
         const ids = sessions.map((s) => s.id)
 
         expect(ids).toContain(root.id)
         expect(ids).not.toContain(child.id)
+        expect(ids).not.toContain(inherited.id)
       },
     })
   })

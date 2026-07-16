@@ -103,9 +103,9 @@ export namespace PluginLoader {
         },
       }
 
-    // npm plugins can declare supported Lfcode versions; file plugins are treated
-    // as local development code and skip this compatibility gate.
-    if (base.source === "npm") {
+    // Managed and npm plugins are immutable installed packages, so both must pass
+    // compatibility checks. File plugins remain local development code.
+    if (base.source !== "file") {
       try {
         await checkPluginCompatibility(base.target, InstallationVersion, base.pkg)
       } catch (error) {

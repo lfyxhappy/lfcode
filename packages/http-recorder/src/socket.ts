@@ -31,6 +31,21 @@ interface ActiveRecording {
 
 type Frame = string | Uint8Array
 
+/** @internal */
+export const makeSocket = (options: Pick<Socket.Socket, "runRaw" | "writer">): Socket.Socket => {
+  const encoder = new TextEncoder()
+  return Socket.Socket.of({
+    [Socket.TypeId]: Socket.TypeId,
+    run: (handler, runOptions) =>
+      options.runRaw(
+        (message) => handler(typeof message === "string" ? encoder.encode(message) : message),
+        runOptions,
+      ),
+    runRaw: options.runRaw,
+    writer: options.writer,
+  })
+}
+
 const encodeEvent = (direction: "client" | "server", message: Frame): WebSocketEvent =>
   typeof message === "string"
     ? { direction, kind: "text", body: message }
@@ -128,7 +143,7 @@ const makeRecordingSocket = (
     const active = yield* Ref.make<ActiveRecording | undefined>(undefined)
     const writeLock = yield* Semaphore.make(1)
 
-    return Socket.make({
+    return makeSocket({
       runRaw: (handler, runOptions) =>
         Effect.gen(function* () {
           const state: ActiveRecording = {
@@ -210,7 +225,7 @@ const makeReplaySocket = (
     const replay = yield* makeReplayState(cassette, name, webSocketInteractions)
     const active = yield* Ref.make<ActiveReplay | undefined>(undefined)
 
-    return Socket.make({
+    return makeSocket({
       runRaw: (handler, runOptions) =>
         Effect.gen(function* () {
           const claimed = yield* replay

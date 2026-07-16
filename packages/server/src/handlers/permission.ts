@@ -8,7 +8,7 @@ import { PermissionNotFoundError } from "../errors"
 import { response } from "../groups/location"
 
 function missingRequest(id: PermissionV2.ID) {
-  return new PermissionNotFoundError({ requestID: id, message: `Permission request not found: ${id}` })
+  return Effect.fail(new PermissionNotFoundError({ requestID: id, message: `Permission request not found: ${id}` }))
 }
 
 export const PermissionHandler = HttpApiBuilder.group(Api, "server.permission", (handlers) =>

@@ -8,7 +8,7 @@ import { Flock } from "@lfcode-ai/shared/util/flock"
 
 import { parsePluginSpecifier, pluginSource } from "./shared"
 
-type Source = "file" | "npm"
+type Source = "file" | "npm" | "managed"
 
 export type Theme = {
   src: string
@@ -100,7 +100,7 @@ async function entryCore(item: Touch): Promise<Core> {
     source,
     spec,
     target,
-    requested: parsePluginSpecifier(spec).version,
+    requested: source === "managed" ? undefined : parsePluginSpecifier(spec).version,
     version: await npmVersion(target),
   }
 }

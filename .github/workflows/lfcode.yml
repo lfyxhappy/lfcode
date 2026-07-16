@@ -26,6 +26,8 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Run Lfcode
         uses: lfyxhappy/lfcode/github@2c14fc5586fe0b88e5c04732d2e846769cc35671 # latest

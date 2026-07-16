@@ -1,30 +1,13 @@
-import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
-import {
-  DragDropProvider,
-  DragDropSensors,
-  DragOverlay,
-  SortableProvider,
-  closestCenter,
-  type DragEvent,
-} from "@thisbeyond/solid-dnd"
-import { ConstrainDragXAxis } from "@/utils/solid-dnd"
+import { createMemo, Show, type Accessor, type JSX } from "solid-js"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Tooltip, TooltipKeybind } from "@lfcode-ai/ui/tooltip"
-import { type LocalProject } from "@/context/layout"
 
 export const SidebarContent = (props: {
   mobile?: boolean
-  opened: Accessor<boolean>
-  aimMove: (event: MouseEvent) => void
-  projects: Accessor<LocalProject[]>
-  renderProject: (project: LocalProject) => JSX.Element
-  handleDragStart: (event: unknown) => void
-  handleDragEnd: () => void
-  handleDragOver: (event: DragEvent) => void
-  openProjectLabel: JSX.Element
-  openProjectKeybind: Accessor<string | undefined>
-  onOpenProject: () => void
-  renderProjectOverlay: () => JSX.Element
+  sections: Accessor<JSX.Element[]>
+  onOpenProject?: () => void
+  openProjectLabel?: JSX.Element
+  openProjectKeybind?: Accessor<string | undefined>
   settingsOpen: Accessor<boolean>
   settingsLabel: Accessor<string>
   settingsKeybind: Accessor<string | undefined>
@@ -32,9 +15,7 @@ export const SidebarContent = (props: {
   onCloseSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
-  renderPanel: () => JSX.Element
 }): JSX.Element => {
-  const expanded = createMemo(() => !!props.mobile || props.opened())
   const placement = () => (props.mobile ? "bottom" : "right")
   const settingsIcon = createMemo(() => (props.settingsOpen() ? "arrow-left" : "settings-gear"))
   const toggleSettings = () => {
@@ -44,45 +25,22 @@ export const SidebarContent = (props: {
     }
     props.onOpenSettings()
   }
-  let panel: HTMLDivElement | undefined
-
-  createEffect(() => {
-    const el = panel
-    if (!el) return
-    if (expanded()) {
-      el.removeAttribute("inert")
-      return
-    }
-    el.setAttribute("inert", "")
-  })
-
   return (
     <div class="flex h-full w-full min-w-0 overflow-hidden">
-      <div
-        data-component="sidebar-rail"
-        class="w-16 shrink-0 bg-background-base flex flex-col items-center overflow-hidden"
-        onMouseMove={props.aimMove}
-      >
-        <div class="flex-1 min-h-0 w-full">
-          <DragDropProvider
-            onDragStart={props.handleDragStart}
-            onDragEnd={props.handleDragEnd}
-            onDragOver={props.handleDragOver}
-            collisionDetector={closestCenter}
-          >
-            <DragDropSensors />
-            <ConstrainDragXAxis />
-            <div class="h-full w-full flex flex-col items-center gap-3 px-3 py-3 overflow-y-auto no-scrollbar">
-              <SortableProvider ids={props.projects().map((p) => p.worktree)}>
-                <For each={props.projects()}>{(project) => props.renderProject(project)}</For>
-              </SortableProvider>
+      <div class="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
+        <div class="flex-1 min-h-0 min-w-0 overflow-y-auto no-scrollbar px-3 py-3">
+          <div class="flex flex-col gap-4">{props.sections()}</div>
+        </div>
+        <div class="shrink-0 px-3 py-3 flex items-center justify-between gap-2 border-t border-border-weak-base">
+          <div class="flex items-center gap-2">
+            <Show when={props.onOpenProject && props.openProjectLabel}>
               <Tooltip
                 placement={placement()}
                 value={
                   <div class="flex items-center gap-2">
                     <span>{props.openProjectLabel}</span>
-                    <Show when={!props.mobile && !!props.openProjectKeybind()}>
-                      <span class="text-icon-base text-12-medium">{props.openProjectKeybind()}</span>
+                    <Show when={!props.mobile && !!props.openProjectKeybind?.()}>
+                      <span class="text-icon-base text-12-medium">{props.openProjectKeybind?.()}</span>
                     </Show>
                   </div>
                 }
@@ -95,44 +53,34 @@ export const SidebarContent = (props: {
                   aria-label={typeof props.openProjectLabel === "string" ? props.openProjectLabel : undefined}
                 />
               </Tooltip>
-            </div>
-            <DragOverlay>{props.renderProjectOverlay()}</DragOverlay>
-          </DragDropProvider>
+            </Show>
+          </div>
+          <div class="flex items-center gap-2">
+            <TooltipKeybind
+              placement={placement()}
+              title={props.settingsLabel()}
+              keybind={props.settingsOpen() ? "" : (props.settingsKeybind?.() ?? "")}
+            >
+              <IconButton
+                icon={settingsIcon()}
+                variant="ghost"
+                size="large"
+                data-action="settings-toggle"
+                onClick={toggleSettings}
+                aria-label={props.settingsLabel()}
+              />
+            </TooltipKeybind>
+            <Tooltip placement={placement()} value={props.helpLabel()}>
+              <IconButton
+                icon="help"
+                variant="ghost"
+                size="large"
+                onClick={props.onOpenHelp}
+                aria-label={props.helpLabel()}
+              />
+            </Tooltip>
+          </div>
         </div>
-        <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
-          <TooltipKeybind
-            placement={placement()}
-            title={props.settingsLabel()}
-            keybind={props.settingsOpen() ? "" : (props.settingsKeybind() ?? "")}
-          >
-            <IconButton
-              icon={settingsIcon()}
-              variant="ghost"
-              size="large"
-              onClick={toggleSettings}
-              aria-label={props.settingsLabel()}
-            />
-          </TooltipKeybind>
-          <Tooltip placement={placement()} value={props.helpLabel()}>
-            <IconButton
-              icon="help"
-              variant="ghost"
-              size="large"
-              onClick={props.onOpenHelp}
-              aria-label={props.helpLabel()}
-            />
-          </Tooltip>
-        </div>
-      </div>
-
-      <div
-        ref={(el) => {
-          panel = el
-        }}
-        classList={{ "flex-1 flex h-full min-h-0 min-w-0 overflow-hidden": true, "pointer-events-none": !expanded() }}
-        aria-hidden={!expanded()}
-      >
-        {props.renderPanel()}
       </div>
     </div>
   )

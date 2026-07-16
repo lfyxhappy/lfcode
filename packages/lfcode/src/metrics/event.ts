@@ -7,6 +7,8 @@ export const ModelCall = BusEvent.define(
     sessionID: z.string(),
     finish_reason: z.string(),
     ttft_ms: z.number().optional(),
+    submit_to_first_delta_ms: z.number().optional(),
+    pre_stream_ms: z.number().optional(),
     latency_ms: z.number(),
     cached_read_tokens: z.number(),
     model_id: z.string(),
@@ -25,6 +27,13 @@ export const ToolCall = BusEvent.define(
     output_bytes: z.number(),
     tool_call_id: z.string(),
     tool_call_status: z.enum(["success", "error"]),
+    execute_ms: z.number().optional(),
+    schema_build_ms: z.number().optional(),
+    error_category: z.string().optional(),
+    retry_count: z.number().optional(),
+    kind: z.string().optional(),
+    namespace: z.string().optional(),
+    latency_class: z.string().optional(),
   }),
 )
 

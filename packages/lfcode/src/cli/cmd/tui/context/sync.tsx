@@ -597,6 +597,24 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
+        case "actor.removed": {
+          const sid = event.properties.sessionID
+          const actorID = event.properties.actorID
+          const bucket = store.message[sid]?.[actorID]
+          setStore(
+            produce((draft) => {
+              const list = draft.actor[sid]
+              if (list) draft.actor[sid] = list.filter((a) => a.actor_id !== actorID)
+              const messages = draft.message[sid]
+              if (messages) delete messages[actorID]
+              if (bucket) {
+                for (const message of bucket) delete draft.part[message.id]
+              }
+            }),
+          )
+          break
+        }
+
         case "workflow.started": {
           // Upsert a fresh run row; counters stay zero until loadWorkflows /
           // the dialog's poll (T7) refreshes them from the list route.

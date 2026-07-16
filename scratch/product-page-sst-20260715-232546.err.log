@@ -1,0 +1,7 @@
+✕  Failed to build sst.config.ts
+   - ../../../node_modules/.bun/lightningcss@1.30.1/node_modules/lightningcss/node/index.js:18:27 Could not resolve "../pkg"
+   - ../../../node_modules/.bun/nf3@0.1.12/node_modules/nf3/dist/node_modules/@mapbox/node-pre-gyp/lib/node-pre-gyp.js:2:898 No loader is configured for ".html" files: ../../../node_modules/.bun/nf3@0.1.12/node_modules/nf3/dist/node_modules/@mapbox/node-pre-gyp/lib/util/nw-pre-gyp/index.html
+   - ../../../node_modules/.bun/nf3@0.1.12/node_modules/nf3/dist/node_modules/@mapbox/node-pre-gyp/lib/util/s3_setup.js:2:778 Could not resolve "mock-aws-s3"
+   - ../../../node_modules/.bun/nf3@0.1.12/node_modules/nf3/dist/node_modules/@mapbox/node-pre-gyp/lib/util/s3_setup.js:2:1475 Could not resolve "nock"
+   - ../../../node_modules/.bun/nitro@3.0.1-alpha.1+12a80e7710688b0f/node_modules/nitro/dist/_build/rolldown.mjs:113:31 Could not resolve "rolldown"
+error: "sst.exe" exited with code 1

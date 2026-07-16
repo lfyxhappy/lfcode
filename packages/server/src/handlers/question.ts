@@ -6,21 +6,22 @@ import { QuestionNotFoundError } from "../errors"
 import { response } from "../groups/location"
 
 function missingRequest(id: QuestionV2.ID) {
-  return new QuestionNotFoundError({ requestID: id, message: `Question request not found: ${id}` })
+  return Effect.fail(new QuestionNotFoundError({ requestID: id, message: `Question request not found: ${id}` }))
 }
 
 export const QuestionHandler = HttpApiBuilder.group(Api, "server.question", (handlers) =>
   Effect.gen(function* () {
-    const withOwnedQuestion = Effect.fnUntraced(function* <A, E>(
+    const withOwnedQuestion = <A, E, R>(
       sessionID: QuestionV2.Request["sessionID"],
       requestID: QuestionV2.ID,
-      use: (question: QuestionV2.Interface) => Effect.Effect<A, E>,
-    ) {
-      const question = yield* QuestionV2.Service
-      const request = (yield* question.list()).find((request) => request.id === requestID)
-      if (!request || request.sessionID !== sessionID) return yield* missingRequest(requestID)
-      return yield* use(question)
-    })
+      use: (question: QuestionV2.Interface) => Effect.Effect<A, E, R>,
+    ) =>
+      Effect.gen(function* () {
+        const question = yield* QuestionV2.Service
+        const request = (yield* question.list()).find((request) => request.id === requestID)
+        if (!request || request.sessionID !== sessionID) return yield* missingRequest(requestID)
+        return yield* use(question)
+      })
 
     return handlers
       .handle(

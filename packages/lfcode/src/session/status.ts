@@ -20,6 +20,11 @@ export const Info = z
       type: z.literal("busy"),
       message: z.string().optional(),
     }),
+    z.object({
+      type: z.literal("waiting"),
+      mode: z.literal("interactive-html"),
+      message: z.string().optional(),
+    }),
   ])
   .meta({
     ref: "SessionStatus",

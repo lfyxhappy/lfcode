@@ -59,7 +59,7 @@ function toCommand(item: TuiCommand, dialog: LegacyDialog) {
     slashName: item.slash?.name,
     slashAliases: item.slash?.aliases,
     run() {
-      return item.onSelect?.(dialog)
+      return item.onSelect?.()
     },
   }
 }

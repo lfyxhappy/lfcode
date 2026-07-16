@@ -11,12 +11,12 @@ import { createLineCommentController } from "@lfcode-ai/ui/line-comment-annotati
 import { canUseCodeDiffView } from "@lfcode-ai/ui/code-diff-shared"
 import { sampledChecksum } from "@lfcode-ai/shared/util/encode"
 import { encodeFilePath } from "@/context/file/path"
-import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { ScrollView } from "@lfcode-ai/ui/scroll-view"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { CodeEditorCommandStrip } from "@/components/code-editor/core/command-strip"
+import DropdownMenu from "@/components/code-editor/core/dropdown-menu"
 import type { CodeEditorCommandHandle } from "@/components/code-editor/core/command-handle"
 import { getCodeEditorDocumentGuard } from "@/components/code-editor/core/document-guard"
 import { getCodeEditorLanguage } from "@/components/code-editor/core/language"
@@ -55,6 +55,7 @@ type FileEditorMode = "preview" | "edit" | "diff"
 type FileEditorState = {
   mode: FileEditorMode
   draft: string
+  revision: number
   dirty: boolean
   saving: boolean
   saveReason: "auto" | "manual" | "run" | undefined
@@ -71,6 +72,7 @@ function createFileEditorState(input: Partial<FileEditorState> = {}): FileEditor
   return {
     mode: "preview",
     draft: "",
+    revision: 0,
     dirty: false,
     saving: false,
     saveReason: undefined,
@@ -414,14 +416,17 @@ export function FileTabContent(props: { tab: string }) {
     setEditor(next)
   }
   const [commandHandle, setCommandHandle] = createSignal<CodeEditorCommandHandle>()
+  const [codeDiffUnavailable, setCodeDiffUnavailable] = createSignal(false)
   const saveConflict = createMemo(() => isFileChecksumConflict(editor.saveError))
   const diffMode = createMemo(() => editor.mode === "diff")
-  const diffUseCodeView = createMemo(() =>
-    canUseCodeDiffView({
-      path: path(),
-      before: contents(),
-      after: editor.draft,
-    }),
+  const diffUseCodeView = createMemo(
+    () =>
+      !codeDiffUnavailable() &&
+      canUseCodeDiffView({
+        path: path(),
+        before: contents(),
+        after: editor.draft,
+      }),
   )
   const externalChanged = createMemo(() => {
     const checksum = state()?.content?.checksum
@@ -533,6 +538,7 @@ export function FileTabContent(props: { tab: string }) {
             ? createFileEditorState({
                 ...current,
                 draft: content.content,
+                revision: current.revision + 1,
                 dirty: false,
                 saving: false,
                 saveReason: undefined,
@@ -541,6 +547,7 @@ export function FileTabContent(props: { tab: string }) {
               })
             : createFileEditorState({
                 ...current,
+                revision: current.revision + 1,
                 saving: false,
                 saveReason: undefined,
                 saveError: undefined,
@@ -680,6 +687,7 @@ export function FileTabContent(props: { tab: string }) {
         createFileEditorState({
           ...editor,
           draft: content.content,
+          revision: editor.revision + 1,
           dirty: false,
           saving: false,
           saveReason: undefined,
@@ -812,7 +820,14 @@ export function FileTabContent(props: { tab: string }) {
           if (editor.baseChecksum !== checksum) return
           return
         }
-        replaceEditor(createFileEditorState({ ...editor, draft: source, baseChecksum: checksum }))
+        replaceEditor(
+          createFileEditorState({
+            ...editor,
+            draft: source,
+            revision: editor.revision + 1,
+            baseChecksum: checksum,
+          }),
+        )
       },
     ),
   )
@@ -1141,6 +1156,7 @@ export function FileTabContent(props: { tab: string }) {
                       after={editor.draft}
                       diffStyle="split"
                       heightClass="h-full"
+                      onUnavailable={() => setCodeDiffUnavailable(true)}
                     />
                   </Show>
                 </div>
@@ -1166,15 +1182,14 @@ export function FileTabContent(props: { tab: string }) {
           <CodeEditorPhase0Editor
             path={path()!}
             value={editor.draft}
+            revision={editor.revision}
+            dirty={editor.dirty}
             language={editorLanguage()}
             onOpenPath={openLfcodeEditorPath}
             onCommandHandle={setCommandHandle}
             onSave={() => saveEditor("manual")}
             onInput={(value) => {
               updateEditor({ draft: value, dirty: true, saveError: undefined })
-            }}
-            onBlur={() => {
-              void saveThroughCommandHandle("manual")
             }}
           />
         </Show>

@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect"
-import { and, asc, desc, eq, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { Database } from "../storage"
-import { MessageTable, PartTable } from "../session/session.sql"
-import type { MessageID } from "../session/schema"
+import { MessageTable, PartTable, SessionTable } from "../session/session.sql"
+import type { MessageID, SessionID } from "../session/schema"
 import { Config } from "../config"
 import { Bus } from "../bus"
 import { Instance } from "../project/instance"
@@ -10,6 +10,7 @@ import { buildFtsQuery } from "./fts-query"
 import type { Kind } from "./extract"
 import { layer as writerLayer, Service as WriterService } from "./writer"
 import { layer as backfillLayer, Service as BackfillService } from "./backfill"
+import { Log } from "../util"
 
 export type SearchHit = {
   part_id: string
@@ -32,6 +33,7 @@ export type MessagePart = {
 }
 
 export type MessageContext = {
+  role: "user" | "assistant"
   message_id: string
   matched: boolean
   time_created: number
@@ -55,11 +57,24 @@ export interface Interface {
     before?: number
     after?: number
   }) => Effect.Effect<{ session_id: string; messages: MessageContext[] }>
+
+  readonly session: (input: {
+    session_id: string
+    agent_scope?: "main" | "all"
+    limit?: number
+    include_boundaries?: boolean
+  }) => Effect.Effect<{
+    session_found: boolean
+    checkpoint_found: boolean
+    session_id: string
+    messages: MessageContext[]
+  }>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/History") {}
 
 const HARD_CAP = 50
+const log = Log.create({ service: "history" })
 
 type Row = {
   part_id: string
@@ -243,6 +258,7 @@ export const layer = Layer.effect(
           }
         })
         return {
+          role,
           message_id: m.id,
           matched: m.id === input.message_id,
           time_created: m.time_created,
@@ -253,6 +269,148 @@ export const layer = Layer.effect(
       return { session_id: anchor.session_id, messages: out }
     })
 
-    return Service.of({ search, around })
+    const session = Effect.fn("History.session")(function* (input: Parameters<Interface["session"]>[0]) {
+      const limit = Math.min(input.limit ?? 200, 500)
+      const sessionID = input.session_id as SessionID
+      const sessionRow = Database.use((db) =>
+        db
+          .select({
+            id: SessionTable.id,
+            last_checkpoint_message_id: SessionTable.last_checkpoint_message_id,
+          })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get(),
+      )
+      if (!sessionRow) {
+        log.info("history_session_lookup", {
+          sessionID: input.session_id,
+          agentScope: input.agent_scope ?? "main",
+          includeBoundaries: input.include_boundaries ?? true,
+          limit,
+          sessionFound: false,
+          checkpointFound: false,
+          messageCount: 0,
+        })
+        return {
+          session_found: false,
+          checkpoint_found: false,
+          session_id: input.session_id,
+          messages: [],
+        }
+      }
+
+      const base = [eq(MessageTable.session_id, sessionID)]
+      const scope = input.agent_scope ?? "main"
+      if (scope === "main") base.push(eq(MessageTable.agent_id, "main"))
+      const rows = Database.use((db) =>
+        db
+          .select({ id: MessageTable.id, time_created: MessageTable.time_created, data: MessageTable.data })
+          .from(MessageTable)
+          .where(and(...base))
+          .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
+          .limit(limit)
+          .all(),
+      ).reverse()
+      if (rows.length === 0) {
+        log.info("history_session_lookup", {
+          sessionID: input.session_id,
+          agentScope: scope,
+          includeBoundaries: input.include_boundaries ?? true,
+          limit,
+          sessionFound: true,
+          checkpointFound: !!sessionRow.last_checkpoint_message_id,
+          messageCount: 0,
+        })
+        return {
+          session_found: true,
+          checkpoint_found: !!sessionRow.last_checkpoint_message_id,
+          session_id: input.session_id,
+          messages: [],
+        }
+      }
+
+      const messageIDs = rows.map((m) => m.id)
+      const parts = Database.use((db) =>
+        db
+          .select()
+          .from(PartTable)
+          .where(and(eq(PartTable.session_id, sessionID), inArray(PartTable.message_id, messageIDs)))
+          .orderBy(asc(PartTable.message_id), asc(PartTable.id))
+          .all(),
+      )
+      const byMessage = new Map<string, typeof parts>()
+      for (const p of parts) {
+        const list = byMessage.get(p.message_id) ?? []
+        list.push(p)
+        byMessage.set(p.message_id, list)
+      }
+
+      const messages = rows.map((m) => {
+        const role: "user" | "assistant" =
+          (m.data as { role?: "user" | "assistant" })?.role === "user" ? "user" : "assistant"
+        return {
+          role,
+          message_id: m.id,
+          matched: false,
+          time_created: m.time_created,
+          parts: (byMessage.get(m.id) ?? []).map((p) => {
+            const d = p.data as {
+              type: string
+              text?: string
+              tool?: string
+              state?: { input?: unknown; output?: unknown; error?: string }
+            }
+            const text =
+              d.type === "text" || d.type === "reasoning"
+                ? (d.text ?? "")
+                : d.type === "tool"
+                  ? `tool: ${d.tool ?? ""}\ninput: ${JSON.stringify(d.state?.input ?? {})}\n${d.state?.error ? `error: ${d.state.error}` : `output: ${JSON.stringify(d.state?.output ?? "")}`}`
+                  : `[${d.type}]`
+            return {
+              part_id: p.id,
+              type: d.type,
+              role,
+              tool_name: d.type === "tool" ? (d.tool ?? null) : null,
+              text,
+            }
+          }),
+        }
+      })
+
+      const checkpoint_found =
+        !!sessionRow.last_checkpoint_message_id ||
+        messages.some(
+          (message) =>
+            message.parts.some((part) => part.type === "checkpoint") ||
+            message.parts.some((part) => part.type === "text" && part.text.includes("Summary of previous conversation from checkpoint files:")),
+        )
+
+      const filtered =
+        input.include_boundaries === false
+          ? messages.filter(
+              (message) => !message.parts.some((part) => part.type === "checkpoint" || part.type === "compaction"),
+            )
+          : messages
+
+      log.info("history_session_lookup", {
+        sessionID: input.session_id,
+        agentScope: scope,
+        includeBoundaries: input.include_boundaries ?? true,
+        limit,
+        sessionFound: true,
+        checkpointFound: checkpoint_found,
+        messageCount: filtered.length,
+      })
+
+      return {
+        session_found: true,
+        checkpoint_found,
+        session_id: input.session_id,
+        messages: filtered,
+      }
+    })
+
+    return Service.of({ search, around, session })
   }),
 )

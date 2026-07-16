@@ -1,8 +1,10 @@
-import { test, expect, describe, mock, afterEach, beforeEach } from "bun:test"
+import { test, expect, describe, mock, afterEach, beforeEach, spyOn } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Config, ConfigManaged } from "../../src/config"
+import { ConfigProvider } from "../../src/config"
 import { ConfigParse } from "../../src/config/parse"
+import { ConfigMCP } from "../../src/config/mcp"
 import { EffectFlock } from "@/util/effect-flock"
 
 import { Instance } from "../../src/project/instance"
@@ -35,8 +37,14 @@ const emptyAccount = Layer.mock(Account.Service)({
 })
 
 const removedAuthProviders: string[] = []
+const savedAuthProviders: { providerID: string; key: string }[] = []
 const emptyAuth = Layer.mock(Auth.Service)({
   all: () => Effect.succeed({}),
+  set: (providerID: string, auth: { type: string; key?: string }) =>
+    Effect.sync(() => {
+      if (auth.type !== "api" || !auth.key) return
+      savedAuthProviders.push({ providerID, key: auth.key })
+    }),
   remove: (providerID: string) =>
     Effect.sync(() => {
       removedAuthProviders.push(providerID)
@@ -62,9 +70,28 @@ const save = (config: Config.Info) =>
   Effect.runPromise(Config.Service.use((svc) => svc.update(config)).pipe(Effect.scoped, Effect.provide(layer)))
 const saveGlobal = (config: Config.Patch) =>
   Effect.runPromise(Config.Service.use((svc) => svc.updateGlobal(config)).pipe(Effect.scoped, Effect.provide(layer)))
+const getGlobalPersonalization = () =>
+  Effect.runPromise(
+    Config.Service.use((svc) => svc.getGlobalPersonalization()).pipe(Effect.scoped, Effect.provide(layer)),
+  )
+const saveGlobalPersonalization = (input: Config.GlobalPersonalizationSave) =>
+  Effect.runPromise(
+    Config.Service.use((svc) => svc.saveGlobalPersonalization(input)).pipe(Effect.scoped, Effect.provide(layer)),
+  )
 const removeGlobalCustomProvider = (providerID: string) =>
   Effect.runPromise(
     Config.Service.use((svc) => svc.removeGlobalCustomProvider(providerID)).pipe(Effect.scoped, Effect.provide(layer)),
+  )
+const upsertGlobalCustomProvider = (providerID: string, provider: ConfigProvider.Info, key?: string) =>
+  Effect.runPromise(
+    Config.Service.use((svc) => svc.upsertGlobalCustomProvider(providerID, provider, key)).pipe(
+      Effect.scoped,
+      Effect.provide(layer),
+    ),
+  )
+const upsertMcp = (name: string, config: ConfigMCP.Info, target?: "auto" | "project" | "global") =>
+  Effect.runPromise(
+    Config.Service.use((svc) => svc.upsertMcp(name, config, { target })).pipe(Effect.scoped, Effect.provide(layer)),
   )
 const clear = (wait = false) =>
   Effect.runPromise(Config.Service.use((svc) => svc.invalidate(wait)).pipe(Effect.scoped, Effect.provide(layer)))
@@ -78,6 +105,7 @@ const managedConfigDir = process.env.LFCODE_TEST_MANAGED_CONFIG_DIR!
 
 beforeEach(async () => {
   removedAuthProviders.length = 0
+  savedAuthProviders.length = 0
   await clear(true)
 })
 
@@ -501,6 +529,334 @@ test("updateGlobal merges subagent model patches and deletes null model keys", a
     const text = await fs.readFile(file, "utf-8")
     expect(text).toContain('"prompt": "keep me"')
     expect(text).not.toContain('"model": "openai/gpt-5"')
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("updateGlobal model-selection patches invalidate caches without disposing instances", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  const disposeAll = spyOn(Instance, "disposeAll")
+  const invalidateAllCaches = spyOn(Instance, "invalidateAllCaches")
+  try {
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      `{
+        "$schema": "https://lfcode.ai/config.json",
+        "enabled_providers": ["openai"],
+        "model": "openai/gpt-4.1",
+        "small_model": "openai/gpt-4.1-mini",
+        "agent": {
+          "general": {
+            "prompt": "keep me"
+          }
+        }
+      }`,
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const before = await load()
+        expect(before.agent?.general?.model).toBeUndefined()
+        expect(before.agent?.general?.prompt).toBe("keep me")
+
+        const written = await saveGlobal({
+          model: "openai/gpt-5",
+          small_model: "openai/gpt-5-mini",
+          agent: {
+            general: {
+              model: "openai/gpt-5",
+            },
+          },
+        })
+
+        expect(written.model).toBe("openai/gpt-5")
+        expect(written.small_model).toBe("openai/gpt-5-mini")
+        expect(written.agent?.general?.model).toBe("openai/gpt-5")
+        expect(written.agent?.general?.prompt).toBe("keep me")
+
+        const after = await load()
+        expect(after.agent?.general?.model).toBe("openai/gpt-5")
+        expect(after.agent?.general?.prompt).toBe("keep me")
+      },
+    })
+
+    expect(disposeAll).not.toHaveBeenCalled()
+    expect(invalidateAllCaches).toHaveBeenCalledTimes(1)
+    const text = await fs.readFile(file, "utf-8")
+    expect(text).toContain('"model": "openai/gpt-5"')
+    expect(text).toContain('"small_model": "openai/gpt-5-mini"')
+  } finally {
+    disposeAll.mockRestore()
+    invalidateAllCaches.mockRestore()
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("saveGlobalPersonalization writes managed instructions and appends the absolute path once", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      `{
+        "$schema": "https://lfcode.ai/config.json",
+        "instructions": [
+          "C:/shared/one.md",
+          "C:/shared/two.md"
+        ]
+      }`,
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const saved = await saveGlobalPersonalization({
+          customInstructions: "Always explain tradeoffs.",
+          memory: {
+            ccIndex: true,
+            autoConsolidation: false,
+          },
+          maintenance: {
+            enabled: true,
+            schedulerEnabled: true,
+            dreamEnabled: false,
+            distillEnabled: true,
+          },
+        })
+
+        const managedFile = path.join(globalTmp.path, "instructions", "personalization.md")
+        expect(saved.customInstructions).toBe("Always explain tradeoffs.")
+        expect(saved.instructionFile).toBe(managedFile)
+        expect(saved.memory).toEqual({
+          ccIndex: true,
+          autoConsolidation: false,
+        })
+        expect(saved.config.instructions).toEqual(["C:/shared/one.md", "C:/shared/two.md", managedFile])
+        expect(saved.config.memory?.cc_index).toBe(true)
+        expect(saved.config.dream?.auto).toBe(false)
+        expect(await fs.readFile(managedFile, "utf8")).toBe("Always explain tradeoffs.")
+      },
+    })
+
+    const written = JSON.parse(await fs.readFile(file, "utf8")) as { instructions?: string[] }
+    const managedFile = path.join(globalTmp.path, "instructions", "personalization.md")
+    expect(written.instructions?.filter((item) => item === managedFile)).toHaveLength(1)
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("saveGlobalPersonalization removes only the managed path and preserves unrelated instructions", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    const managedFile = path.join(globalTmp.path, "instructions", "personalization.md")
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      JSON.stringify(
+        {
+          $schema: "https://lfcode.ai/config.json",
+          instructions: ["C:/shared/one.md", managedFile, "C:/shared/two.md"],
+          memory: { cc_index: true },
+          dream: { auto: false },
+        },
+        null,
+        2,
+      ),
+    )
+    await Filesystem.write(managedFile, "Old instructions")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const saved = await saveGlobalPersonalization({
+          customInstructions: "   \n",
+          memory: {
+            ccIndex: false,
+            autoConsolidation: true,
+          },
+          maintenance: {
+            enabled: true,
+            schedulerEnabled: true,
+            dreamEnabled: true,
+            distillEnabled: true,
+          },
+        })
+
+        expect(saved.customInstructions).toBe("")
+        expect(saved.config.instructions).toEqual(["C:/shared/one.md", "C:/shared/two.md"])
+        expect(saved.config.memory?.cc_index).toBe(false)
+        expect(saved.config.dream?.auto).toBe(true)
+        expect(await fs.access(managedFile).then(() => true).catch(() => false)).toBe(false)
+      },
+    })
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("getGlobalPersonalization returns effective memory defaults from global config", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const personalization = await getGlobalPersonalization()
+        expect(personalization.customInstructions).toBe("")
+        expect(personalization.memory).toEqual({
+          ccIndex: false,
+          autoConsolidation: true,
+        })
+        expect(personalization.maintenance).toEqual({
+          enabled: true,
+          schedulerEnabled: true,
+          dreamEnabled: true,
+          distillEnabled: true,
+        })
+      },
+    })
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("upserts custom providers into global lfcode.jsonc, re-enables them, and stores auth", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      `{
+        "$schema": "https://lfcode.ai/config.json",
+        "disabled_providers": ["custom-provider", "openai"]
+      }`,
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const next = await upsertGlobalCustomProvider(
+          "custom-provider",
+          {
+            name: "Custom Provider",
+            npm: "@ai-sdk/openai-compatible",
+            protocol: "openai-chat",
+            env: ["CUSTOM_PROVIDER_KEY"],
+            options: {
+              baseURL: "https://example.com/v1",
+            },
+            models: {
+              "model-a": {
+                name: "Model A",
+              },
+            },
+          },
+          "secret-key",
+        )
+        expect(next.provider?.["custom-provider"]).toMatchObject({
+          name: "Custom Provider",
+          protocol: "openai-chat",
+        })
+        expect(next.disabled_providers).toEqual(["openai"])
+        expect(savedAuthProviders).toEqual([{ providerID: "custom-provider", key: "secret-key" }])
+      },
+    })
+
+    const written = await fs.readFile(file, "utf-8")
+    expect(written).toContain('"custom-provider"')
+    expect(written).toContain('"disabled_providers"')
+    expect(written).toContain('"openai"')
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("upserts existing custom providers back into their source global config file", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    await Filesystem.write(
+      path.join(globalTmp.path, "config.json"),
+      JSON.stringify(
+        {
+          provider: {
+            "custom-provider": {
+              name: "Lower Priority Provider",
+              npm: "@ai-sdk/openai-compatible",
+              protocol: "openai-chat",
+              options: {
+                baseURL: "https://lower.example.com/v1",
+              },
+              models: {
+                "lower-model": {
+                  name: "Lower Model",
+                },
+              },
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    )
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await upsertGlobalCustomProvider("custom-provider", {
+          name: "Highest Priority Provider",
+          npm: "@ai-sdk/openai-compatible",
+          protocol: "openai-chat",
+          options: {
+            baseURL: "https://highest.example.com/v1",
+          },
+          models: {
+            "highest-model": {
+              name: "Highest Model",
+            },
+          },
+        })
+      },
+    })
+
+    expect(await fs.readFile(path.join(globalTmp.path, "config.json"), "utf-8")).toContain("Highest Priority Provider")
   } finally {
     await Instance.disposeAll()
     ;(Global.Path as { config: string }).config = prev
@@ -2261,6 +2617,80 @@ test("local .lfcode config can override MCP from project config", async () => {
       expect(config.mcp?.docs?.enabled).toBe(true)
     },
   })
+})
+
+test("loads plugins alias from lfcode config", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        $schema: "https://lfcode.ai/config.json",
+        plugins: ["demo-plugin@1.0.0"],
+      })
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await load()
+      expect(config.plugin).toEqual(["demo-plugin@1.0.0"])
+      expect(config.plugin_origins?.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(["demo-plugin@1.0.0"])
+    },
+  })
+})
+
+test("upsertMcp defaults to global config when no origin exists", async () => {
+  await using tmp = await tmpdir()
+  const globalFile = path.join(Global.Path.config, "lfcode.jsonc")
+  const projectFile = path.join(tmp.path, ".lfcode", "lfcode.jsonc")
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await upsertMcp("docs", {
+        type: "remote",
+        url: "https://docs.example.com/mcp",
+        enabled: true,
+      })
+    },
+  })
+
+  expect(JSON.parse(await fs.readFile(globalFile, "utf8")).mcp.docs).toEqual({
+    type: "remote",
+    url: "https://docs.example.com/mcp",
+    enabled: true,
+  })
+  await expect(fs.readFile(projectFile, "utf8")).rejects.toThrow()
+})
+
+test("upsertMcp still supports explicit project target", async () => {
+  await using tmp = await tmpdir()
+  const globalFile = path.join(Global.Path.config, "lfcode.jsonc")
+  const projectFile = path.join(tmp.path, ".lfcode", "lfcode.jsonc")
+  await fs.rm(globalFile, { force: true }).catch(() => undefined)
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      await upsertMcp(
+        "docs",
+        {
+          type: "remote",
+          url: "https://docs.example.com/mcp",
+          enabled: true,
+        },
+        "project",
+      )
+    },
+  })
+
+  expect(JSON.parse(await fs.readFile(projectFile, "utf8")).mcp.docs).toEqual({
+    type: "remote",
+    url: "https://docs.example.com/mcp",
+    enabled: true,
+  })
+  const globalText = await fs.readFile(globalFile, "utf8").catch(() => undefined)
+  expect(globalText ? JSON.parse(globalText).mcp?.docs : undefined).toBeUndefined()
 })
 
 test("project config overrides remote well-known config", async () => {

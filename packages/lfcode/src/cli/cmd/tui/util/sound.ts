@@ -2,6 +2,7 @@ import { Player } from "cli-sound"
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import { Shell } from "@/shell/shell"
 import { Process } from "@/util"
 import { which } from "@/util/which"
 import pulseA from "../asset/pulse-a.wav" with { type: "file" }
@@ -26,20 +27,20 @@ const LIST = [
   "aplay",
   "cmdmp3",
   "cvlc",
-  "powershell.exe",
 ] as const
 
-type Kind = (typeof LIST)[number]
+type Kind = string
 
 function args(kind: Kind, file: string, volume: number) {
-  if (kind === "ffplay") return [kind, "-autoexit", "-nodisp", "-af", `volume=${volume}`, file]
-  if (kind === "mpv")
+  const shell = Shell.name(kind)
+  if (shell === "ffplay") return [kind, "-autoexit", "-nodisp", "-af", `volume=${volume}`, file]
+  if (shell === "mpv")
     return [kind, "--no-video", "--audio-display=no", "--volume", String(Math.round(volume * 100)), file]
-  if (kind === "mpg123" || kind === "mpg321") return [kind, "-g", String(Math.round(volume * 100)), file]
-  if (kind === "mplayer") return [kind, "-vo", "null", "-volume", String(Math.round(volume * 100)), file]
-  if (kind === "afplay" || kind === "omxplayer" || kind === "aplay" || kind === "cmdmp3") return [kind, file]
-  if (kind === "play") return [kind, "-v", String(volume), file]
-  if (kind === "cvlc") return [kind, `--gain=${volume}`, "--play-and-exit", file]
+  if (shell === "mpg123" || shell === "mpg321") return [kind, "-g", String(Math.round(volume * 100)), file]
+  if (shell === "mplayer") return [kind, "-vo", "null", "-volume", String(Math.round(volume * 100)), file]
+  if (shell === "afplay" || shell === "omxplayer" || shell === "aplay" || shell === "cmdmp3") return [kind, file]
+  if (shell === "play") return [kind, "-v", String(volume), file]
+  if (shell === "cvlc") return [kind, `--gain=${volume}`, "--play-and-exit", file]
   return [kind, "-c", `(New-Object Media.SoundPlayer '${file.replace(/'/g, "''")}').PlaySync()`]
 }
 
@@ -77,7 +78,7 @@ function asset() {
 
 function pick() {
   if (kind !== undefined) return kind
-  kind = LIST.find((item) => which(item)) ?? null
+  kind = LIST.find((item) => which(item)) ?? (process.platform === "win32" ? Shell.resolvePowerShell() : null)
   return kind
 }
 

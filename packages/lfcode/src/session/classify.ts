@@ -55,19 +55,21 @@ export function classifyAssistantStep(input: {
   )
     return { type: "continue" }
 
-  // 2. Nothing finalized yet.
+  // 2. Errored step — checked before finish because some abnormal terminations
+  // never emit a finish reason (for example a stream that dies before the
+  // provider sends a completion event). Those must not be mis-routed to
+  // `continue`.
+  if (assistant.error) return { type: "failed", reason: assistant.error.name }
+
+  // 3. Nothing finalized yet.
   if (!assistant.finish) return { type: "continue" }
 
-  // 3. Provider-executed-only tool step (no client tool part left, see #1).
+  // 4. Provider-executed-only tool step (no client tool part left, see #1).
   if (assistant.finish === "tool-calls") return { type: "continue" }
 
-  // 4. Stale assistant predating the current user turn — don't terminate on it.
+  // 5. Stale assistant predating the current user turn — don't terminate on it.
   if (input.phase === "existing-assistant" && !(input.lastUser.id < assistant.id))
     return { type: "continue" }
-
-  // 5. Errored step — checked before content so an errored message that also
-  // carries text isn't misjudged `final`.
-  if (assistant.error) return { type: "failed", reason: assistant.error.name }
 
   // 6. Already-resolved structured output / summary — terminal, never nudge-able.
   if (assistant.structured !== undefined) return { type: "final" }

@@ -36,17 +36,21 @@ export interface RunResult {
   readonly stderrTruncated: boolean
 }
 
+export function makeTextDecoder(encoding: string, options?: { fatal?: boolean; ignoreBOM?: boolean }): TextDecoder {
+  return Reflect.construct(TextDecoder, options ? [encoding, options] : [encoding])
+}
+
 export function decodeProcessText(bytes: Uint8Array) {
   const source = Buffer.from(bytes)
   if (source.length === 0) return ""
-  if (source[0] === 0xff && source[1] === 0xfe) return new TextDecoder("utf-16le").decode(source.subarray(2))
-  if (source[0] === 0xfe && source[1] === 0xff) return new TextDecoder("utf-16be").decode(source.subarray(2))
+  if (source[0] === 0xff && source[1] === 0xfe) return makeTextDecoder("utf-16le").decode(source.subarray(2))
+  if (source[0] === 0xfe && source[1] === 0xff) return makeTextDecoder("utf-16be").decode(source.subarray(2))
   if (source[0] === 0xef && source[1] === 0xbb && source[2] === 0xbf)
     return new TextDecoder("utf-8").decode(source.subarray(3))
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(source)
   } catch {
-    if (process.platform === "win32") return new TextDecoder("gb18030").decode(source)
+    if (process.platform === "win32") return makeTextDecoder("gb18030").decode(source)
     return new TextDecoder("utf-8").decode(source)
   }
 }

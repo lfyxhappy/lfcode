@@ -1,5 +1,5 @@
 import type { AgentPart as MessageAgentPart, FilePart, Part, TextPart } from "@lfcode-ai/sdk/v2"
-import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
+import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt, SelectedTextAttachmentPart } from "@/context/prompt"
 
 type Inline =
   | {
@@ -21,6 +21,19 @@ type Inline =
       end: number
       value: string
       name: string
+    }
+  | {
+      type: "selected-text"
+      start: number
+      end: number
+      value: string
+      messageID?: string
+      selection?: {
+        startLine: number
+        endLine: number
+        startChar: number
+        endChar: number
+      }
     }
 
 function selectionFromFileUrl(url: string): Extract<Inline, { type: "file" }>["selection"] {
@@ -123,6 +136,23 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
         value: source.value,
         name: agentPart.name,
       })
+      continue
+    }
+
+    if (part.type === "text" && part.metadata && "lfcodeSelectedText" in part.metadata) {
+      const selected = part.metadata.lfcodeSelectedText
+      const values = Array.isArray(selected) ? selected : [selected]
+      for (const item of values) {
+        if (!item?.text) continue
+        inline.push({
+          type: "selected-text",
+          start: item.start ?? 0,
+          end: item.end ?? item.text.length,
+          value: item.text,
+          messageID: item.messageID,
+          selection: item.selection,
+        })
+      }
     }
   }
 
@@ -173,6 +203,21 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
     position += content.length
   }
 
+  const pushSelectedText = (item: Extract<Inline, { type: "selected-text" }>) => {
+    const attachment: SelectedTextAttachmentPart = {
+      type: "selected-text",
+      text: item.value,
+      content: "",
+      start: position,
+      end: position,
+      messageID: item.messageID,
+      selection: item.selection,
+    }
+    result.push(attachment)
+  }
+
+  const unmatchedSelectedText: Extract<Inline, { type: "selected-text" }>[] = []
+
   for (const item of inline) {
     if (item.start < 0 || item.end < item.start) continue
 
@@ -181,18 +226,23 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
 
     const mismatch = item.end > text.length || item.start < cursor || text.slice(item.start, item.end) !== expected
     const start = mismatch ? text.indexOf(expected, cursor) : item.start
-    if (start === -1) continue
+    if (start === -1) {
+      if (item.type === "selected-text") unmatchedSelectedText.push(item)
+      continue
+    }
     const end = mismatch ? start + expected.length : item.end
 
     pushText(text.slice(cursor, start))
 
     if (item.type === "file") pushFile(item)
     if (item.type === "agent") pushAgent(item)
+    if (item.type === "selected-text") pushSelectedText(item)
 
     cursor = end
   }
 
   pushText(text.slice(cursor))
+  unmatchedSelectedText.forEach(pushSelectedText)
 
   if (result.length === 0) {
     result.push({ type: "text", content: "", start: 0, end: 0 })

@@ -6,7 +6,7 @@ import { EventV2 } from "@lfcode-ai/core/event"
 import { Location } from "@lfcode-ai/core/location"
 import { ModelV2 } from "@lfcode-ai/core/model"
 import { PluginV2 } from "@lfcode-ai/core/plugin"
-import { OpencodePlugin } from "@lfcode-ai/core/plugin/provider/opencode"
+import { LfcodePlugin } from "@lfcode-ai/core/plugin/provider/lfcode"
 import { ProviderV2 } from "@lfcode-ai/core/provider"
 import { AbsolutePath } from "@lfcode-ai/core/schema"
 import { location } from "../fixture/location"
@@ -18,13 +18,13 @@ const locationLayer = Layer.succeed(
   Location.Service.of(location({ directory: AbsolutePath.make("test") })),
 )
 
-describe("OpencodePlugin", () => {
+describe("LfcodePlugin", () => {
   it.effect("uses a public key and disables paid models without credentials", () =>
     withEnv({ LFCODE_API_KEY: undefined }, () =>
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode")
@@ -45,7 +45,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode")
@@ -66,7 +66,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode")
@@ -87,7 +87,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode")
@@ -108,7 +108,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode", { env: ["CUSTOM_LFCODE_API_KEY"] })
@@ -131,7 +131,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode", {
@@ -159,7 +159,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("opencode", {
@@ -184,7 +184,7 @@ describe("OpencodePlugin", () => {
       Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
         const catalog = yield* Catalog.Service
-        yield* plugin.add(OpencodePlugin)
+        yield* plugin.add(LfcodePlugin)
         const transform = yield* catalog.transform()
         yield* transform((catalog) => {
           const item = provider("openai")

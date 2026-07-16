@@ -1,0 +1,10 @@
+Unified search tool for both file discovery and content search.
+
+Usage:
+- Use `kind="path"` to find files or directories by name or fuzzy path match.
+- Use `kind="content"` to search file contents with a regex pattern.
+- The `path` parameter may be absolute or relative. Relative paths are resolved from the current session working directory.
+- Use `include` to narrow the scope with a file glob such as `*.ts` or `*.{ts,tsx}`.
+- Path search expects `path` to resolve to a directory.
+- Content search returns grep-style matches. Path search returns absolute paths.
+- Prefer this tool over legacy `glob` / `grep` when those tools are unavailable.

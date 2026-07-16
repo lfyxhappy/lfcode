@@ -26,6 +26,7 @@ async function start() {
     execPath: process.execPath,
     isPackaged: app.isPackaged,
     legacyUserDataDir: join(app.getPath("appData"), appId),
+    legacyUserDataOverride: process.env.LFCODE_USER_DATA_DIR,
     platform: process.platform,
     portableRoot: process.env.LFCODE_PORTABLE_ROOT,
   }

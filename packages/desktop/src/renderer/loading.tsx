@@ -16,6 +16,7 @@ render(() => {
   const [step, setStep] = createSignal<InitStep | null>(null)
   const [line, setLine] = createSignal(0)
   const [percent, setPercent] = createSignal(0)
+  const [ready, setReady] = createSignal(false)
 
   const phase = createMemo(() => step()?.phase)
 
@@ -24,7 +25,12 @@ render(() => {
     return Math.max(25, Math.min(100, percent()))
   })
 
-  window.api.awaitInitialization((next) => setStep(next as InitStep)).catch(() => undefined)
+  window.api.awaitInitialization((next) => setStep(next as InitStep))
+    .then(() => {
+      setReady(true)
+      setStep((current) => current ?? { phase: "done" })
+    })
+    .catch(() => undefined)
 
   onMount(() => {
     setLine(0)
@@ -47,7 +53,7 @@ render(() => {
   })
 
   createEffect(() => {
-    if (phase() !== "done") return
+    if (phase() !== "done" && !ready()) return
 
     const timer = setTimeout(() => window.api.loadingWindowComplete(), 1000)
     onCleanup(() => clearTimeout(timer))

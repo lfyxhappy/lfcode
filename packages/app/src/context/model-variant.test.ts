@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
+import { cycleModelVariant, displayModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 
 describe("model variant", () => {
   test("resolves configured agent variant when model matches", () => {
@@ -46,6 +46,36 @@ describe("model variant", () => {
 
   test("lets an explicit default override the configured variant", () => {
     const value = resolveModelVariant({
+      variants: ["low", "high", "xhigh"],
+      selected: null,
+      configured: "xhigh",
+    })
+
+    expect(value).toBeUndefined()
+  })
+
+  test("displays configured variant when effective variant is inherited", () => {
+    const value = displayModelVariant({
+      variants: ["low", "high", "xhigh"],
+      selected: undefined,
+      configured: "xhigh",
+    })
+
+    expect(value).toBe("xhigh")
+  })
+
+  test("displays first detected variant when no explicit or configured variant exists", () => {
+    const value = displayModelVariant({
+      variants: ["low", "high", "xhigh"],
+      selected: undefined,
+      configured: undefined,
+    })
+
+    expect(value).toBe("low")
+  })
+
+  test("keeps explicit default visible as default", () => {
+    const value = displayModelVariant({
       variants: ["low", "high", "xhigh"],
       selected: null,
       configured: "xhigh",

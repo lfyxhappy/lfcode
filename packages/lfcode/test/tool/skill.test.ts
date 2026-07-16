@@ -94,4 +94,132 @@ Use this skill.
       { git: true },
     ),
   )
+
+  it.live("keyword input returns matching skill candidates without loading", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const originalConfig = Global.Path.config
+          Object.assign(Global.Path, { config: dir })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              Object.assign(Global.Path, { config: originalConfig })
+            }),
+          )
+
+          const alpha = path.join(dir, "skills", "react-testing")
+          const beta = path.join(dir, "skills", "vite-build")
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(alpha, "SKILL.md"),
+              `---
+name: react-testing
+description: Testing React UI behavior.
+---
+
+# React Testing
+`,
+            ),
+          )
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(beta, "SKILL.md"),
+              `---
+name: vite-build
+description: Build and bundle Vite projects.
+---
+
+# Vite Build
+`,
+            ),
+          )
+
+          const registry = yield* ToolRegistry.Service
+          const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
+          const tool = (yield* registry.tools({
+            providerID: "lfcode" as any,
+            modelID: "gpt-5" as any,
+            agent,
+          })).find((tool) => tool.id === SkillTool.id)
+          if (!tool) throw new Error("Skill tool not found")
+
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          const ctx: Tool.Context = {
+            ...baseCtx,
+            ask: (req) =>
+              Effect.sync(() => {
+                requests.push(req)
+              }),
+          }
+
+          const result = yield* tool.execute({ name: "react test" }, ctx)
+
+          expect(requests.length).toBe(0)
+          expect(result.metadata.mode).toBe("search")
+          expect(result.metadata.matches).toContain("react-testing")
+          expect(result.output).toContain("<skill_search_results>")
+          expect(result.output).toContain("- react-testing: Testing React UI behavior.")
+          expect(result.output).toContain("Call the skill tool again with one of the exact names above")
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("blank or list-style input returns the current available skills without error", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const originalConfig = Global.Path.config
+          Object.assign(Global.Path, { config: dir })
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              Object.assign(Global.Path, { config: originalConfig })
+            }),
+          )
+
+          const alpha = path.join(dir, "skills", "alpha-skill")
+          yield* Effect.promise(() =>
+            Bun.write(
+              path.join(alpha, "SKILL.md"),
+              `---
+name: alpha-skill
+description: Alpha skill for list mode.
+---
+
+# Alpha Skill
+`,
+            ),
+          )
+
+          const registry = yield* ToolRegistry.Service
+          const agent = { name: "build", mode: "primary" as const, permission: [], options: {} }
+          const tool = (yield* registry.tools({
+            providerID: "lfcode" as any,
+            modelID: "gpt-5" as any,
+            agent,
+          })).find((tool) => tool.id === SkillTool.id)
+          if (!tool) throw new Error("Skill tool not found")
+
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          const ctx: Tool.Context = {
+            ...baseCtx,
+            ask: (req) =>
+              Effect.sync(() => {
+                requests.push(req)
+              }),
+          }
+
+          const blank = yield* tool.execute({ name: "   " }, ctx)
+          const list = yield* tool.execute({ name: "现在有哪些可用技能" }, ctx)
+
+          expect(requests.length).toBe(0)
+          expect(blank.metadata.mode).toBe("list")
+          expect(blank.output).toContain("<available_skills>")
+          expect(blank.output).toContain("<name>alpha-skill</name>")
+          expect(list.metadata.mode).toBe("list")
+          expect(list.output).toContain("<name>alpha-skill</name>")
+        }),
+      { git: true },
+    ),
+  )
 })

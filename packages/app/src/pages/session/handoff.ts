@@ -10,6 +10,7 @@ type HandoffSession = {
 }
 
 const MAX = 40
+export const SESSION_HANDOFF_EVENT = "lfcode:session-handoff"
 
 const store = {
   session: new Map<string, HandoffSession>(),
@@ -28,7 +29,19 @@ const touch = <K, V>(map: Map<K, V>, key: K, value: V) => {
 
 export const setSessionHandoff = (key: string, patch: Partial<HandoffSession>) => {
   const prev = store.session.get(key) ?? { prompt: "", files: {} }
-  touch(store.session, key, { ...prev, ...patch })
+  const next = { ...prev, ...patch }
+  touch(store.session, key, next)
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(SESSION_HANDOFF_EVENT, {
+        detail: {
+          key,
+          patch,
+          value: next,
+        },
+      }),
+    )
+  }
 }
 
 export const getSessionHandoff = (key: string) => store.session.get(key)

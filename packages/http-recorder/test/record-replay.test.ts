@@ -207,11 +207,37 @@ describe("http-recorder", () => {
     })
   })
 
+  test("adapts raw text frames to the Effect 4 binary Socket.run contract", async () => {
+    const received: number[][] = []
+    const socket = HttpRecorderInternal.makeSocket({
+      runRaw: (handler, options) =>
+        Effect.gen(function* () {
+          if (options?.onOpen) yield* options.onOpen
+          const result = handler("hello")
+          if (Effect.isEffect(result)) yield* result
+        }),
+      writer: Effect.succeed(() => Effect.void),
+    })
+
+    await Effect.runPromise(
+      Effect.scoped(
+        socket.run((message) =>
+          Effect.sync(() => {
+            received.push([...message])
+          }),
+        ),
+      ),
+    )
+
+    expect(Socket.isSocket(socket)).toBe(true)
+    expect(received).toEqual([[104, 101, 108, 108, 111]])
+  })
+
   test("records WebSocket frames in observed client/server order", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-websocket-"))
     const response = JSON.stringify({ type: "response.completed", token: "server-secret" })
     let receive: ((message: string | Uint8Array) => Effect.Effect<unknown, unknown, unknown> | void) | undefined
-    const upstream = Socket.make({
+    const upstream = HttpRecorderInternal.makeSocket({
       runRaw: (handler, options) =>
         Effect.gen(function* () {
           receive = handler
@@ -295,7 +321,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("unexpected live WebSocket run")),
                   writer: Effect.succeed(() => Effect.die(new Error("unexpected live WebSocket write"))),
                 }),
@@ -327,9 +353,10 @@ describe("http-recorder", () => {
       Effect.gen(function* () {
         const socket = yield* Socket.Socket
         const write = yield* socket.writer
-        yield* socket.runString(
+        yield* socket.runRaw(
           (message) =>
             Effect.gen(function* () {
+              if (typeof message !== "string") return yield* Effect.die("Expected a text WebSocket frame")
               received.push(message)
               yield* write(new Socket.CloseEvent(1000))
             }),
@@ -342,7 +369,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("unexpected live WebSocket run")),
                   writer: Effect.succeed(() => Effect.die(new Error("unexpected live WebSocket write"))),
                 }),
@@ -373,9 +400,10 @@ describe("http-recorder", () => {
       Effect.gen(function* () {
         const socket = yield* Socket.Socket
         const second = yield* Deferred.make<void>()
-        yield* socket.runString((message) =>
-          message === "first" ? Deferred.await(second) : Deferred.succeed(second, undefined),
-        )
+        yield* socket.runRaw((message) => {
+          if (typeof message !== "string") return Effect.die(new Error("Expected a text WebSocket frame"))
+          return message === "first" ? Deferred.await(second) : Deferred.succeed(second, undefined)
+        })
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -387,7 +415,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("unexpected live WebSocket run")),
                   writer: Effect.succeed(() => Effect.die(new Error("unexpected live WebSocket write"))),
                 }),
@@ -425,7 +453,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("unexpected live WebSocket run")),
                   writer: Effect.succeed(() => Effect.die(new Error("unexpected live WebSocket write"))),
                 }),
@@ -456,7 +484,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("connection failed")),
                   writer: Effect.succeed(() => Effect.void),
                 }),
@@ -518,7 +546,7 @@ describe("http-recorder", () => {
             Layer.provide(
               Layer.succeed(
                 Socket.Socket,
-                Socket.make({
+                HttpRecorderInternal.makeSocket({
                   runRaw: () => Effect.die(new Error("unexpected live WebSocket run")),
                   writer: Effect.succeed(() => Effect.die(new Error("unexpected live WebSocket write"))),
                 }),

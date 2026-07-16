@@ -24,6 +24,7 @@ describe("inferModelCapabilities", () => {
     expect(capabilities.temperature).toBe(false)
     expect(capabilities.native_web).toBe(true)
     expect(capabilities.attachment).toBe(true)
+    expect(capabilities.patch_editing).toBe(true)
     expect(capabilities.input.image).toBe(true)
     expect(capabilities.input.audio).toBe(true)
     expect(capabilities.input.video).toBe(true)
@@ -38,6 +39,7 @@ describe("inferModelCapabilities", () => {
     expect(capabilities.temperature).toBe(true)
     expect(capabilities.native_web).toBe(false)
     expect(capabilities.attachment).toBe(true)
+    expect(capabilities.patch_editing).toBe(true)
     expect(capabilities.input.image).toBe(true)
     expect(capabilities.input.audio).toBe(false)
     expect(capabilities.input.video).toBe(false)
@@ -52,6 +54,7 @@ describe("inferModelCapabilities", () => {
     expect(capabilities.temperature).toBe(true)
     expect(capabilities.native_web).toBe(false)
     expect(capabilities.attachment).toBe(true)
+    expect(capabilities.patch_editing).toBe(true)
     expect(capabilities.input.image).toBe(true)
     expect(capabilities.input.audio).toBe(true)
     expect(capabilities.input.video).toBe(true)
@@ -68,6 +71,7 @@ describe("normalizeModelCapabilities", () => {
         temperature: false,
         native_web: false,
         attachment: false,
+        patch_editing: false,
         input: { image: false },
         output: { audio: true },
       },
@@ -77,6 +81,7 @@ describe("normalizeModelCapabilities", () => {
         temperature: true,
         native_web: true,
         attachment: true,
+        patch_editing: true,
         input: { image: true },
         output: { audio: false },
       },
@@ -86,6 +91,7 @@ describe("normalizeModelCapabilities", () => {
         temperature: false,
         native_web: false,
         attachment: false,
+        patch_editing: false,
         image: false,
         modalities: {
           input: ["audio"],
@@ -98,6 +104,7 @@ describe("normalizeModelCapabilities", () => {
         temperature: true,
         native_web: false,
         attachment: false,
+        patch_editing: true,
         image: true,
         audio: true,
         modalities: {
@@ -112,6 +119,7 @@ describe("normalizeModelCapabilities", () => {
     expect(capabilities.temperature).toBe(true)
     expect(capabilities.native_web).toBe(false)
     expect(capabilities.attachment).toBe(true)
+    expect(capabilities.patch_editing).toBe(true)
     expect(capabilities.input.text).toBe(true)
     expect(capabilities.input.audio).toBe(true)
     expect(capabilities.input.image).toBe(true)

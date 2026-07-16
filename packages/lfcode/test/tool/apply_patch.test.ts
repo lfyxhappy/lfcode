@@ -88,6 +88,13 @@ describe("tool.apply_patch freeform", () => {
     await expect(execute({ patchText: "invalid patch" }, ctx)).rejects.toThrow("apply_patch verification failed")
   })
 
+  test("rejects missing patch markers with repair guidance", async () => {
+    const { ctx } = makeCtx()
+    await expect(execute({ patchText: "diff --git a/a.txt b/a.txt" }, ctx)).rejects.toThrow(
+      'Submit pure patch text only, with no explanation outside the patch.',
+    )
+  })
+
   test("rejects empty patch", async () => {
     const { ctx } = makeCtx()
     const emptyPatch = "*** Begin Patch\n*** End Patch"

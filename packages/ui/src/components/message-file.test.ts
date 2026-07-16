@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FilePart } from "@lfcode-ai/sdk/v2"
+import { stashInlineImagePart } from "./inline-image-cache"
 import { attached, inline, kind } from "./message-file"
 
 function file(part: Partial<FilePart> = {}): FilePart {
@@ -18,6 +19,7 @@ function file(part: Partial<FilePart> = {}): FilePart {
 describe("message-file", () => {
   test("treats data URLs as attachments", () => {
     expect(attached(file({ url: "data:text/plain;base64,SGVsbG8=" }))).toBe(true)
+    expect(attached(stashInlineImagePart(file({ mime: "image/png", url: "data:image/png;base64," + "A".repeat(400_000) })))).toBe(true)
     expect(attached(file())).toBe(false)
   })
 

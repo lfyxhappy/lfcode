@@ -19,9 +19,11 @@ import { isRecord } from "@/util/record"
 import { Instance } from "@/project/instance"
 import {
   readPackageThemes,
+  readPluginManifestSummary,
   readPluginId,
   readV1Plugin,
   resolvePluginId,
+  type PluginManifestSummary,
   type PluginPackage,
   type PluginSource,
 } from "@/plugin/shared"
@@ -50,6 +52,7 @@ type PluginLoad = {
   origin: ConfigPlugin.Origin
   theme_root: string
   theme_files: string[]
+  manifest?: PluginManifestSummary
 }
 
 type Api = HostPluginApi
@@ -233,9 +236,7 @@ function createThemeInstaller(
 }
 
 function createMeta(
-  source: PluginLoad["source"],
-  spec: string,
-  target: string,
+  load: PluginLoad,
   meta: { state: PluginMeta.State; entry: PluginMeta.Entry } | undefined,
   id?: string,
 ): TuiPluginMeta {
@@ -243,21 +244,31 @@ function createMeta(
     return {
       state: meta.state,
       ...meta.entry,
+      name: load.manifest?.name,
+      trust: load.manifest?.trust,
+      apiVersion: load.manifest?.apiVersion,
+      capabilities: load.manifest?.capabilities,
+      lfcodeRange: load.manifest?.lfcodeRange,
     }
   }
 
   const now = Date.now()
   return {
-    state: source === "internal" ? "same" : "first",
-    id: id ?? spec,
-    source,
-    spec,
-    target,
+    state: load.source === "internal" ? "same" : "first",
+    id: id ?? load.spec,
+    name: load.manifest?.name,
+    trust: load.manifest?.trust,
+    apiVersion: load.manifest?.apiVersion,
+    capabilities: load.manifest?.capabilities,
+    lfcodeRange: load.manifest?.lfcodeRange,
+    source: load.source,
+    spec: load.spec,
+    target: load.target,
     first_time: now,
     last_time: now,
     time_changed: now,
     load_count: 1,
-    fingerprint: target,
+    fingerprint: load.target,
   }
 }
 
@@ -280,6 +291,12 @@ function loadInternalPlugin(item: InternalTuiPlugin): PluginLoad {
     },
     theme_root: process.cwd(),
     theme_files: [],
+    manifest: {
+      id: item.id,
+      name: item.id,
+      trust: "bundled",
+      apiVersion: "internal",
+    },
   }
 }
 
@@ -412,6 +429,11 @@ function writePluginEnabledState(api: Api, id: string, enabled: boolean) {
 function listPluginStatus(state: RuntimeState): TuiPluginStatus[] {
   return state.plugins.map((plugin) => ({
     id: plugin.id,
+    name: plugin.meta.name,
+    trust: plugin.meta.trust,
+    apiVersion: plugin.meta.apiVersion,
+    capabilities: plugin.meta.capabilities,
+    lfcodeRange: plugin.meta.lfcodeRange,
     source: plugin.meta.source,
     spec: plugin.meta.spec,
     target: plugin.meta.target,
@@ -625,6 +647,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
       if (!id) return
 
       const theme_files = await readThemeFiles(loaded.spec, loaded.pkg)
+      const manifest = readPluginManifestSummary(loaded.spec, loaded.pkg)
 
       return {
         options: loaded.options,
@@ -637,6 +660,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         origin,
         theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
         theme_files,
+        manifest,
       }
     },
     missing: async (loaded, origin, retry) => {
@@ -664,6 +688,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         origin,
         theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
         theme_files,
+        manifest: readPluginManifestSummary(loaded.spec, loaded.pkg),
       }
     },
     report: {
@@ -724,7 +749,7 @@ async function addExternalPluginEntries(state: RuntimeState, ready: PluginLoad[]
       })
     }
 
-    const info = createMeta(entry.source, entry.spec, entry.target, hit, entry.id)
+    const info = createMeta(entry, hit, entry.id)
     const themes = hit?.entry.themes ? { ...hit.entry.themes } : {}
     const plugin: PluginEntry = {
       id: entry.id,
@@ -825,6 +850,22 @@ async function addPluginBySpec(state: RuntimeState | undefined, raw: string) {
   return ok
 }
 
+async function reloadServerPluginsForCurrentLocation(directory: string) {
+  const { Effect } = await import("effect")
+  const { Config } = await import("@/config")
+  const { BootstrapRuntime } = await import("@/effect/bootstrap-runtime")
+  await Instance.provide({
+    directory,
+    fn: () =>
+      BootstrapRuntime.runPromise(
+        Effect.gen(function* () {
+          const config = yield* Config.Service
+          yield* config.invalidate(true)
+        }),
+      ),
+  })
+}
+
 async function installPluginBySpec(
   state: RuntimeState | undefined,
   raw: string,
@@ -897,6 +938,21 @@ async function installPluginBySpec(
     return {
       ok: false,
       message: errorMessage(patch.error),
+    }
+  }
+
+  const hasServerTarget = manifest.targets.some((item) => item.kind === "server")
+  if (hasServerTarget) {
+    const reloaded = await reloadServerPluginsForCurrentLocation(state.directory).then(
+      () => undefined,
+      (error) => error,
+    )
+    if (reloaded instanceof Error) {
+      log.error("failed to live reload server plugins after install", { spec, error: errorMessage(reloaded) })
+      return {
+        ok: false,
+        message: `Installed "${spec}" but failed to live reload server plugins: ${errorMessage(reloaded)}`,
+      }
     }
   }
 
@@ -997,7 +1053,7 @@ async function load(input: { api: Api; config: TuiConfig.Info }) {
         for (const item of INTERNAL_TUI_PLUGINS) {
           log.info("loading internal tui plugin", { id: item.id })
           const entry = loadInternalPlugin(item)
-          const meta = createMeta(entry.source, entry.spec, entry.target, undefined, entry.id)
+          const meta = createMeta(entry, undefined, entry.id)
           addPluginEntry(next, {
             id: entry.id,
             load: entry,

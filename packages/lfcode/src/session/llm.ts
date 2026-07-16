@@ -6,7 +6,8 @@ import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
-import { ProviderTransform } from "@/provider"
+import { parse as parseJsonc, type ParseError } from "jsonc-parser"
+import * as ProviderTransform from "@/provider/transform"
 import { Config } from "@/config"
 import { Instance } from "@/project/instance"
 import type { Agent } from "@/agent/agent"
@@ -23,19 +24,26 @@ import * as Session from "@/session/session"
 import { migrateProjectMemory } from "./checkpoint-paths"
 import { ProjectID } from "@/project/schema"
 import { Auth } from "@/auth"
-import { Installation } from "@/installation"
 import { InstallationVersion } from "@/installation/version"
 import { EffectBridge } from "@/effect"
-import { Global } from "@/global"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { ActorRegistry } from "@/actor/registry"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
+import { describeUnavailableTool, findAvailableToolByNormalizedName, repairToolCallAlias } from "./tool-call-repair"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 type Result = Awaited<ReturnType<typeof streamText>>
+const migratedProjectMemory = new Set<string>()
+
+export async function* gateProviderStreamChunks<A>(stream: AsyncIterable<A>, abortSignal: AbortSignal) {
+  for await (const chunk of stream) {
+    if (abortSignal.aborted) return
+    yield chunk
+  }
+}
 
 /**
  * Match transient errors that the PERSISTENT_RETRY layer should retry.
@@ -81,109 +89,227 @@ export const persistentRetrySchedule = Schedule.exponential("500 millis", 2).pip
 /**
  * Memory-system instructions appended to the main agent's system prompt.
  *
- * Teaches the agent its v8.1 ownership of the memory system:
- * - MEMORY.md (project-scoped): writer is sole curator + agent edits for
- *   project-level user-stated rules
- * - checkpoint.md (session-scoped): writer EXCLUSIVE; agent never edits
- * - tasks/<id>/progress.md: writer-derived splitover from session-level
- *   progress.md; not LLM-written. Subagents handed a task may read but
- *   should not write.
- *
- * Also documents the Active recall protocol that prevents re-Reading
- * files already present in the rebuild dump, and the Subagent return
- * format contract.
+ * Keeps the persistent-memory contract short in the hot path:
+ * - where durable project, session, notes, and global memory live
+ * - what the main agent may edit directly
+ * - how to avoid re-reading rebuild dumps unnecessarily
  *
  * `memoryRoot` is the same absolute root returned by Memory.root(), so these
  * paths match the files used by checkpoint restore and memory/task detection.
  */
-function buildMemoryInstructions(sessionID: SessionID, projectID: ProjectID, memoryRoot: string): string {
+function buildMemoryInstructions(input: {
+  sessionID: SessionID
+  projectID: ProjectID
+  memoryRoot: string
+  capability: Memory.MemoryCapability
+}): string {
+  const sessionID = input.sessionID
+  const projectID = input.projectID
+  const memoryRoot = input.memoryRoot
   const memoryFile = path.join(memoryRoot, "projects", projectID, "MEMORY.md")
   const checkpointFile = path.join(memoryRoot, "sessions", sessionID, "checkpoint.md")
   const sessionMemoryDir = path.join(memoryRoot, "sessions", sessionID)
   const globalMemoryFile = path.join(memoryRoot, "global", "MEMORY.md")
+  const notesFile = path.join(sessionMemoryDir, "notes.md")
+  if (!input.capability.root_exists || !input.capability.has_indexed_entries) {
+    return `# Memory system
+
+Memory is currently not initialized as a reliable searchable corpus for this instance.
+
+- Memory root: \`${memoryRoot}\`
+- Searchable entries available: ${input.capability.has_indexed_entries ? "yes" : "no"}
+
+Do not treat memory as available background context here.
+For normal work, rely on the current repo, runtime state, logs, tests, and conversation history instead.
+Only attempt memory access if the user explicitly asks about memory or you first confirm that durable memory content actually exists.`
+  }
   return `# Memory system
 
-You have a persistent file-based memory system. Four file types:
+You have a persistent file-based memory system:
 
-- Project memory at \`${memoryFile}\` — persistent across all sessions in this project. Contains: project context, rules, architecture decisions, durable cross-task knowledge.
-- Session checkpoint at \`${checkpointFile}\` — current session's structured state, written ONLY by the checkpoint-writer subagent. 11 sections covering active intent, next action, directives, task tree, current work, files, learnings, errors, live resources, design decisions, and open notes. Task content lives inside §4 Task tree and §5 Current work.
-- Per-task progress at \`${path.join(sessionMemoryDir, "tasks", "<id>", "progress.md")}\` — writer-derived splitover from session-level progress.md (not LLM-written). When you spawn a subagent on a task, the subagent may be handed this path for reading; you do not maintain it.
-- Global memory at \`${globalMemoryFile}\` — user-level preferences and cross-project feedback that persist across all projects. Auto-injected into rebuild context under the "## Global memory" header when present.
+- Project memory at \`${memoryFile}\` for durable project rules, architecture decisions, and cross-session knowledge.
+- Session checkpoint at \`${checkpointFile}\` for current session state. The checkpoint writer maintains it.
+- Session notes at \`${notesFile}\` as your only scratchpad for durable loose notes.
+- Global memory at \`${globalMemoryFile}\` for cross-project user preferences.
 
-The checkpoint writer is the sole curator of the structured files. You don't maintain them mid-task — the writer extracts everything from the conversation at checkpoint events.
-
-## When to Edit MEMORY.md directly
-
-You may Edit MEMORY.md when:
-- User states a project-level rule that should hold across sessions → ## Rules
-- User states a project-level architectural decision → ## Architecture decisions
-- A clearly durable cross-session fact emerges that you want available immediately, before the next checkpoint → ## Discovered durable knowledge
-
-These are exceptions, not the norm. The writer covers most extraction at checkpoint time.
-
-## Notes scratchpad
-
-You have a single legal scratchpad at \`${path.join(sessionMemoryDir, "notes.md")}\`. Append entries to it when you want to record:
-
-- A quote (from the user, an article, a known engineer) that has lasting value but isn't a task-specific decision
-- An unresolved question — something you noticed but won't answer this turn
-- A cross-project observation — "we did this in project X, similar pattern here"
-- A note for future-self — context that would matter weeks later but doesn't fit any current task
-
-Format each entry as:
-  ## [turn N · YYYY-MM-DDTHH:MM:SSZ]
-  Free-form body. The writer reorganizes structured content at checkpoint time.
-
-This is your ONLY legal scratchpad — don't create \`learning.md\`, \`scratch.md\`, or any other ad-hoc memory file.
-
-## Subagent return format
-
-When you (as a subagent) finish your task, your final assistant message will be delivered to the spawning agent. If the spawn machinery added a "Return format (required)" section to your prompt, follow it exactly:
-
-  **Status**: success | partial | failed | blocked
-  **Summary**: <one-line description>
-
-  <deliverable body>
-
-  **Files touched**: <comma-separated paths or "(none)">
-  **Findings worth promoting**: <bullet list, or "(none)">
-
-If your spawn prompt didn't include this format (e.g., explore/title/summary agents have their own contracts), follow whatever your prompt specifies.
-
-## What NOT to do
-
-- Don't Edit checkpoint.md — that's the writer's domain.
-- Don't create memory files other than notes.md (no learning.md, no scratch.md). Use notes.md for any free-form entry.
-- Don't ask the user about something memory may already record — search first via Grep / Read.
+You may Edit \`MEMORY.md\` when the user states a durable project rule, an architectural decision, or another cross-session fact worth saving immediately.
+Append to \`notes.md\` for unresolved questions, durable quotes, or future-self notes.
+Do not create other ad-hoc memory files.
+Avoid editing \`checkpoint.md\` unless a higher-priority instruction explicitly requires it.
 
 ## Active recall protocol
 
-After a checkpoint rebuild, the following dumps may be already in your context (look for the "Summary of previous conversation from checkpoint files:" header followed by these dumps):
-
-- checkpoint.md (full or budget-truncated)
-- MEMORY.md (full or budget-truncated)
-- notes.md (full or budget-truncated)
-- global/MEMORY.md (full or budget-truncated)
-
-If these dumps are visible in your context:
-
-- Do NOT Read them again as whole files. The bytes are already in front of you.
-- For specific past details (a particular turn's content, a specific tool output, an old command), use Grep with a keyword pattern to target the exact item — do not pull a whole file.
-- Relevant project spillover files may also be auto-injected under the "## Relevant topic memory" header. Treat those injected files the same way as Project memory: if the content is already present in the rebuild dump, do NOT Read the whole file again.
-- For files NOT in the rebuild dump (per-task splitover progress.md files for tasks you don't actively need, spillover files that were not auto-injected, older session checkpoints in other sessions), Read on demand.
-
-If a dump shows "⚠️ Truncated at ~N tokens. Read(<path>, offset=L) for the rest." — that file was budget-cut. Use Read with the offset only when you need the missing tail.
-
-Memory entries name functions, files, flags, paths — those are CLAIMS about a point in time when they were written. Verify before acting on a specific name.
-
-Don't ask the user about something memory may already record.
+Do NOT treat memory as a mandatory pre-flight checklist. For ordinary implementation, debugging, editing, or tool use in the current turn, proceed directly unless you specifically need cross-session recall.
+Only consult memory when you need durable project rules, prior decisions, exact past constraints, or other context that is likely to have been recorded from earlier work.
+Do not reply with meta-steps like "先确认 memory 状态" unless the user explicitly asked you to inspect memory itself.
+If \`checkpoint.md\`, \`MEMORY.md\`, \`notes.md\`, \`global/MEMORY.md\`, or relevant topic memory are already injected into the current context, do not Read them again as whole files.
+Use \`search(kind="content")\` or targeted \`read(offset)\` only for the specific missing detail you need.
+If a memory dump says it was truncated, only Read the missing tail on demand.
+Memory entries can contain stale paths, functions, or flags. Treat them as historical claims and verify before acting.
 `
+}
+
+function repairToolInputJSON(input: string) {
+  const candidates = [input, unwrapJsonFence(input)]
+    .flatMap((text) => {
+      const trimmed = text.trim()
+      const balanced = extractBalancedJson(trimmed)
+      return balanced && balanced !== trimmed ? [trimmed, balanced] : [trimmed]
+    })
+    .filter((text, index, list) => text.length > 0 && list.indexOf(text) === index)
+
+  for (const candidate of candidates) {
+    const parsed = parseToolInputCandidate(candidate)
+    if (parsed === undefined) continue
+    return JSON.stringify(parsed)
+  }
+
+  return undefined
+}
+
+function parseToolInputCandidate(input: string) {
+  const direct = parseStrictJSON(input)
+  if (direct !== undefined) return normalizeNestedJSON(direct)
+
+  const jsonc = parseLooseJSON(input)
+  if (jsonc !== undefined) return normalizeNestedJSON(jsonc)
+
+  const escaped = escapeInvalidJsonStringContent(input)
+  if (escaped === input) return undefined
+
+  const escapedDirect = parseStrictJSON(escaped)
+  if (escapedDirect !== undefined) return normalizeNestedJSON(escapedDirect)
+
+  const escapedJsonc = parseLooseJSON(escaped)
+  if (escapedJsonc !== undefined) return normalizeNestedJSON(escapedJsonc)
+
+  return undefined
+}
+
+function parseStrictJSON(input: string) {
+  try {
+    return JSON.parse(input) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function parseLooseJSON(input: string) {
+  try {
+    const errors: ParseError[] = []
+    const parsed = parseJsonc(input, errors, { allowTrailingComma: true, disallowComments: false })
+    return errors.length === 0 ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeNestedJSON(input: unknown): unknown {
+  if (typeof input !== "string") return input
+  const trimmed = input.trim()
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return input
+  return parseToolInputCandidate(trimmed) ?? input
+}
+
+function unwrapJsonFence(input: string) {
+  const trimmed = input.trim()
+  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  return match?.[1] ?? input
+}
+
+function extractBalancedJson(input: string) {
+  const start = input[0]
+  if (start !== "{" && start !== "[") return undefined
+
+  const stack = [start === "{" ? "}" : "]"]
+  let inString = false
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]
+    const prev = i > 0 ? input[i - 1] : undefined
+    if (char === '"' && prev !== "\\") {
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+    if (char === "{") stack.push("}")
+    if (char === "[") stack.push("]")
+    if (char === "}" || char === "]") {
+      if (stack.at(-1) !== char) return undefined
+      stack.pop()
+      if (stack.length === 0) return input.slice(0, i + 1)
+    }
+  }
+
+  return undefined
+}
+
+function escapeInvalidJsonStringContent(input: string) {
+  let out = ""
+  let inString = false
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i]!
+    const prev = i > 0 ? input[i - 1] : undefined
+    if (char === '"' && prev !== "\\") {
+      inString = !inString
+      out += char
+      continue
+    }
+
+    if (!inString) {
+      out += char
+      continue
+    }
+
+    if (char === "\n") {
+      out += "\\n"
+      continue
+    }
+    if (char === "\r") {
+      out += "\\r"
+      continue
+    }
+    if (char === "\t") {
+      out += "\\t"
+      continue
+    }
+
+    if (char !== "\\") {
+      out += char
+      continue
+    }
+
+    const next = input[i + 1]
+    if (!next) {
+      out += "\\\\"
+      continue
+    }
+
+    if ('"\\/bfnrt'.includes(next)) {
+      out += char + next
+      i++
+      continue
+    }
+
+    if (next === "u" && /^[0-9a-fA-F]{4}$/.test(input.slice(i + 2, i + 6))) {
+      out += input.slice(i, i + 6)
+      i += 5
+      continue
+    }
+
+    out += "\\\\"
+  }
+
+  return out
 }
 
 export type StreamInput = {
   user: MessageV2.User
   sessionID: string
   parentSessionID?: string
+  submitAt?: number
+  abortSignal?: AbortSignal
   model: Provider.Model
   agent: Agent.Info
   permission?: Permission.Ruleset
@@ -276,8 +402,20 @@ const live: Layer.Layer<
         // create an uppercase sibling and orphan the legacy content). The two
         // checkpoint-flow call sites cover the writer/rebuild paths; this covers
         // the "agent edits MEMORY.md before any checkpoint" path. Idempotent.
-        yield* Effect.promise(() => migrateProjectMemory(projectID)).pipe(Effect.ignore)
-        system.push(buildMemoryInstructions(SessionID.make(input.sessionID), projectID, yield* memory.root()))
+        if (!migratedProjectMemory.has(projectID)) {
+          yield* Effect.promise(() => migrateProjectMemory(projectID)).pipe(Effect.ignore)
+          migratedProjectMemory.add(projectID)
+        }
+        const memoryRoot = yield* memory.root()
+        const memoryCapability = yield* memory.capability()
+        system.push(
+          buildMemoryInstructions({
+            sessionID: SessionID.make(input.sessionID),
+            projectID,
+            memoryRoot,
+            capability: memoryCapability,
+          }),
+        )
       }
 
       const header = system[0]
@@ -437,6 +575,7 @@ const live: Layer.Layer<
           execute: async () => ({ output: "", title: "", metadata: {} }),
         })
       }
+      const activeToolNames = Object.keys(tools).filter((x) => x !== "invalid")
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via lfcode's tool system
@@ -450,12 +589,24 @@ const live: Layer.Layer<
         workflowModel.sessionID = input.sessionID
         workflowModel.systemPrompt = system.join("\n")
         workflowModel.toolExecutor = async (toolName, argsJson, _requestID) => {
-          const t = tools[toolName]
+          const normalizedTool = findAvailableToolByNormalizedName(activeToolNames, toolName)
+          const aliasRepair = repairToolCallAlias({
+            requestedToolName: toolName,
+            toolInput: argsJson,
+            activeTools: activeToolNames,
+          })
+          const resolvedToolName =
+            aliasRepair?.type === "repair" ? aliasRepair.toolName : normalizedTool ?? toolName
+          const resolvedInput = aliasRepair?.type === "repair" ? aliasRepair.input : argsJson
+          const t = tools[resolvedToolName]
+          if (aliasRepair?.type === "unavailable") {
+            return { result: "", error: aliasRepair.error }
+          }
           if (!t || !t.execute) {
-            return { result: "", error: `Unknown tool: ${toolName}` }
+            return { result: "", error: describeUnavailableTool(toolName, activeToolNames) }
           }
           try {
-            const result = await t.execute!(JSON.parse(argsJson), {
+            const result = await t.execute!(JSON.parse(resolvedInput), {
               toolCallId: _requestID,
               messages: input.messages,
               abortSignal: input.abort,
@@ -546,9 +697,10 @@ const live: Layer.Layer<
         messageID: input.user.id,
         msgCount: messages.length,
         toolCount: Object.keys(tools).length,
+        submitDelayMs: input.submitAt ? streamStartTs - input.submitAt : undefined,
       })
 
-      return streamText({
+      const result = streamText({
         onError(error) {
           l.debug("streamText error", {
             messageID: input.user.id,
@@ -560,22 +712,76 @@ const live: Layer.Layer<
           })
         },
         async experimental_repairToolCall(failed) {
-          const lower = failed.toolCall.toolName.toLowerCase()
-          if (lower !== failed.toolCall.toolName && tools[lower]) {
-            l.info("repairing tool call", {
+          const repairedTool = findAvailableToolByNormalizedName(activeToolNames, failed.toolCall.toolName)
+          const repairedInput =
+            typeof failed.toolCall.input === "string" ? repairToolInputJSON(failed.toolCall.input) : undefined
+
+          if (repairedInput && repairedTool) {
+            l.info("repairing tool call input", {
               tool: failed.toolCall.toolName,
-              repaired: lower,
+              repaired: repairedTool,
             })
             return {
               ...failed.toolCall,
-              toolName: lower,
+              toolName: repairedTool,
+              input: repairedInput,
             }
           }
+
+          const aliasRepair = repairToolCallAlias({
+            requestedToolName: failed.toolCall.toolName,
+            toolInput: repairedInput ?? failed.toolCall.input,
+            activeTools: activeToolNames,
+          })
+          if (aliasRepair?.type === "repair") {
+            l.info("repairing tool call", {
+              tool: failed.toolCall.toolName,
+              repaired: aliasRepair.toolName,
+              reason: aliasRepair.reason,
+            })
+            return {
+              ...failed.toolCall,
+              toolName: aliasRepair.toolName,
+              input: aliasRepair.input,
+            }
+          }
+          if (aliasRepair?.type === "unavailable") {
+            l.warn("tool alias target unavailable", {
+              tool: failed.toolCall.toolName,
+              repaired: aliasRepair.toolName,
+              reason: aliasRepair.reason,
+              availableTools: activeToolNames,
+            })
+            return {
+              ...failed.toolCall,
+              input: JSON.stringify({
+                tool: failed.toolCall.toolName,
+                error: aliasRepair.error,
+              }),
+              toolName: "invalid",
+            }
+          }
+          if (repairedTool && repairedTool !== failed.toolCall.toolName) {
+            l.info("repairing tool call", {
+              tool: failed.toolCall.toolName,
+              repaired: repairedTool,
+              reason: "normalized available tool name",
+            })
+            return {
+              ...failed.toolCall,
+              toolName: repairedTool,
+            }
+          }
+          l.warn("tool call unavailable", {
+            tool: failed.toolCall.toolName,
+            availableTools: activeToolNames,
+            error: failed.error.message,
+          })
           return {
             ...failed.toolCall,
             input: JSON.stringify({
               tool: failed.toolCall.toolName,
-              error: failed.error.message,
+              error: describeUnavailableTool(failed.toolCall.toolName, activeToolNames),
             }),
             toolName: "invalid",
           }
@@ -584,7 +790,7 @@ const live: Layer.Layer<
         topP: params.topP,
         topK: params.topK,
         providerOptions: ProviderTransform.providerOptions(input.model, params.options),
-        activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
+        activeTools: activeToolNames,
         tools,
         toolChoice: input.toolChoice,
         maxOutputTokens: params.maxOutputTokens,
@@ -605,16 +811,10 @@ const live: Layer.Layer<
           ...input.model.headers,
           ...headers,
         },
-        // AI SDK's internal retry loop is SILENT — it emits no events and does
-        // not update session status, so the TUI shows only a dead spinner while
-        // it runs. Its backoff is also UNCAPPED (delay *= 2 each attempt, capped
-        // only by a retry-after header), so the prior default of 10 meant up to
-        // ~34 min (2+4+…+1024s) of invisible retrying before the error surfaced.
-        // We keep this layer short (absorb a couple of quick blips) and let the
-        // VISIBLE processor-level SessionRetry.policy own long-haul resilience —
-        // it publishes `type: "retry"` so the `[retrying attempt #N]` banner
-        // shows, and its per-attempt delay is capped at 30s.
-        maxRetries: input.retries ?? 2,
+        // Keep provider retries visible at the processor/session layer instead
+        // of the SDK's internal silent retry loop. Internal retries hide long
+        // waits behind a plain busy spinner and delay surfaced retry status.
+        maxRetries: input.retries ?? 0,
         messages,
         model: wrapLanguageModel({
           model: language,
@@ -641,6 +841,8 @@ const live: Layer.Layer<
           },
         },
       })
+
+      return result
     })
 
     const stream: Interface["stream"] = (input) =>
@@ -651,6 +853,24 @@ const live: Layer.Layer<
               Effect.sync(() => new AbortController()),
               (ctrl) => Effect.sync(() => ctrl.abort()),
             )
+            const abortSignal = input.abortSignal
+            if (abortSignal) {
+              yield* Effect.acquireRelease(
+                  Effect.sync(() => {
+                    const abort = () => ctrl.abort()
+                    if (abortSignal.aborted) {
+                      abort()
+                      return undefined
+                    }
+                    abortSignal.addEventListener("abort", abort, { once: true })
+                    return abort
+                  }),
+                  (abort) =>
+                    Effect.sync(() => {
+                      if (abort) abortSignal.removeEventListener("abort", abort)
+                    }),
+                )
+            }
             const attemptRef = yield* Ref.make(0)
 
             const publishRetryEvent = (error: unknown, nextAttempt: number) =>
@@ -690,8 +910,86 @@ const live: Layer.Layer<
                 schedule: persistentRetrySchedule,
               }),
             )
+            let abortDrain: PromiseLike<void> | undefined
+            const startAbortDrain = () => {
+              if (abortDrain) return abortDrain
+              abortDrain = result.consumeStream({
+                onError(error) {
+                  log.debug("streamText abort drain error", {
+                    sessionID: input.sessionID,
+                    messageID: input.user.id,
+                    error: error instanceof Error ? error.message : String(error),
+                  })
+                },
+              })
+              return abortDrain
+            }
+            if (ctrl.signal.aborted) {
+              void startAbortDrain()
+            } else {
+              ctrl.signal.addEventListener(
+                "abort",
+                () => {
+                  void startAbortDrain()
+                },
+                { once: true },
+              )
+            }
 
-            return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
+            const consumeStartTs = Date.now()
+            let sawFirstChunk = false
+            const fullStream = (async function* () {
+              try {
+                yield { type: "start" } as Event
+                yield {
+                  type: "start-step",
+                  request: {},
+                  warnings: [],
+                } as Event
+                for await (const chunk of gateProviderStreamChunks(result.fullStream, ctrl.signal)) {
+                  if (!sawFirstChunk) {
+                    sawFirstChunk = true
+                    const elapsedMs = Date.now() - consumeStartTs
+                    const sinceSubmitMs = input.submitAt ? Date.now() - input.submitAt : undefined
+                    log.debug("streamText first chunk", {
+                      sessionID: input.sessionID,
+                      messageID: input.user.id,
+                      elapsedMs,
+                      sinceSubmitMs,
+                      chunkType:
+                        chunk && typeof chunk === "object" && "type" in chunk
+                          ? String((chunk as { type: unknown }).type)
+                          : typeof chunk,
+                    })
+                    if (sinceSubmitMs && sinceSubmitMs >= 5000) {
+                      log.info("streamText delayed first chunk", {
+                        sessionID: input.sessionID,
+                        messageID: input.user.id,
+                        sinceSubmitMs,
+                        elapsedMs,
+                      })
+                    }
+                  }
+                  yield chunk
+                }
+              } finally {
+                if (abortDrain) {
+                  await Promise.race([
+                    Promise.resolve(abortDrain).catch(() => {}),
+                    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+                  ])
+                }
+                log.debug("streamText finished", {
+                  sessionID: input.sessionID,
+                  messageID: input.user.id,
+                  elapsedMs: Date.now() - consumeStartTs,
+                  sinceSubmitMs: input.submitAt ? Date.now() - input.submitAt : undefined,
+                  sawFirstChunk,
+                })
+              }
+            })()
+
+            return Stream.fromAsyncIterable(fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
           }),
         ),
       )

@@ -8,6 +8,7 @@ import { Identifier } from "../id/id"
 import { Log } from "../util"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
+import { redactSensitiveText } from "@/util/redact"
 
 const log = Log.create({ service: "truncation" })
 const RETENTION = Duration.days(7)
@@ -20,7 +21,7 @@ export const GLOB = path.join(TRUNCATION_DIR, "*")
 const ERROR_PATTERN = /error|exception|failed|fatal|traceback|panic|exit code/i
 const TAIL_SCAN_CHARS = 2048
 
-export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
+export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputRef: string }
 
 export interface Options {
   maxLines?: number
@@ -46,6 +47,21 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/Truncate") {}
 
+const OUTPUT_REFERENCE_PREFIX = "tool-output:"
+
+export const redact = redactSensitiveText
+
+export function outputReference(file: string) {
+  return `${OUTPUT_REFERENCE_PREFIX}${path.basename(file)}`
+}
+
+export function resolveOutputReference(reference: string) {
+  if (!reference.startsWith(OUTPUT_REFERENCE_PREFIX)) return
+  const basename = reference.slice(OUTPUT_REFERENCE_PREFIX.length)
+  if (!basename.startsWith("tool_") || basename !== path.basename(basename)) return
+  return path.join(TRUNCATION_DIR, basename)
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -68,11 +84,12 @@ export const layer = Layer.effect(
     const write = Effect.fn("Truncate.write")(function* (text: string) {
       const file = path.join(TRUNCATION_DIR, ToolID.ascending())
       yield* fs.ensureDir(TRUNCATION_DIR).pipe(Effect.orDie)
-      yield* fs.writeFileString(file, text).pipe(Effect.orDie)
+      yield* fs.writeFileString(file, redact(text)).pipe(Effect.orDie)
       return file
     })
 
     const output = Effect.fn("Truncate.output")(function* (text: string, options: Options = {}, agent?: Agent.Info) {
+      text = redact(text)
       let maxLines = options.maxLines ?? MAX_LINES
       let maxBytes = options.maxBytes ?? MAX_BYTES
       const direction = options.direction ?? "head+tail"
@@ -125,14 +142,15 @@ export const layer = Layer.effect(
           const omitted = lines.length - headOut.length - tailOut.length
           const file = yield* write(text)
 
+          const reference = outputReference(file)
           const hintText = hasActorTool(agent)
-            ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the actor tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
-            : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+            ? `The tool call succeeded but the output was truncated. Full output is available as ${reference}. Use tool_output with operation=\"search\" or a bounded read; delegate broad inspection to an explore actor.`
+            : `The tool call succeeded but the output was truncated. Full output is available as ${reference}. Use tool_output with operation=\"search\" or a bounded read.`
 
           return {
             content: `${headOut.join("\n")}\n\n... ${omitted} lines omitted — showing head and tail ...\n\n${tailOut.join("\n")}\n\n${hintText}`,
             truncated: true,
-            outputPath: file,
+            outputRef: reference,
           } as const
         }
         // No errors in tail: degrade to head behavior
@@ -170,9 +188,10 @@ export const layer = Layer.effect(
       const preview = out.join("\n")
       const file = yield* write(text)
 
+      const reference = outputReference(file)
       const hintText = hasActorTool(agent)
-        ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the actor tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
-        : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+        ? `The tool call succeeded but the output was truncated. Full output is available as ${reference}. Use tool_output with operation=\"search\" or a bounded read; delegate broad inspection to an explore actor.`
+        : `The tool call succeeded but the output was truncated. Full output is available as ${reference}. Use tool_output with operation=\"search\" or a bounded read.`
 
       return {
         content:
@@ -180,7 +199,7 @@ export const layer = Layer.effect(
             ? `${preview}\n\n...${removed} ${unit} truncated...\n\n${hintText}`
             : `...${removed} ${unit} truncated...\n\n${hintText}\n\n${preview}`,
         truncated: true,
-        outputPath: file,
+        outputRef: reference,
       } as const
     })
 

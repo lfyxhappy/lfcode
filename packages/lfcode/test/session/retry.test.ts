@@ -382,6 +382,34 @@ describe("isRetryableTransientError", () => {
     expect(isRetryableTransientError(err400)).toBe(false)
   })
 
+  test("429 insufficient_quota APICallError shape is not transient", () => {
+    const err = Object.assign(new Error("quota"), {
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        type: "error",
+        error: {
+          code: "insufficient_quota",
+          message: "Quota exceeded. Check your plan and billing details.",
+        },
+      }),
+    })
+    expect(isRetryableTransientError(err)).toBe(false)
+  })
+
+  test("429 usage_not_included APICallError shape is not transient", () => {
+    const err = Object.assign(new Error("plan"), {
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        type: "error",
+        error: {
+          code: "usage_not_included",
+          message: "To use Codex with your ChatGPT plan, upgrade to Plus.",
+        },
+      }),
+    })
+    expect(isRetryableTransientError(err)).toBe(false)
+  })
+
   test("non-transient errors return false", () => {
     expect(isRetryableTransientError(new Error("syntax error"))).toBe(false)
     expect(isRetryableTransientError("string not Error")).toBe(false)
@@ -405,6 +433,20 @@ describe("retryable() with raw Error (Spec ③ P2 regression)", () => {
 
   test("non-transient raw Error returns undefined (existing path)", () => {
     const rawErr = new Error("some user mistake")
+    expect(retryable(rawErr as unknown as never)).toBeUndefined()
+  })
+
+  test("429 insufficient_quota raw Error returns undefined", () => {
+    const rawErr = Object.assign(new Error("quota"), {
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        type: "error",
+        error: {
+          code: "insufficient_quota",
+          message: "Quota exceeded. Check your plan and billing details.",
+        },
+      }),
+    })
     expect(retryable(rawErr as unknown as never)).toBeUndefined()
   })
 })

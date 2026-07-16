@@ -8,7 +8,7 @@ import { type ProviderMetadata, type LanguageModelUsage } from "ai"
 import { Flag } from "../flag/flag"
 import { InstallationVersion } from "../installation/version"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, sql } from "../storage"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage"
 import { PartTable, SessionTable, MessageTable } from "./session.sql"
@@ -18,12 +18,19 @@ import { Log } from "../util"
 import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
 import { sessionDirectoryAliases } from "./directory"
+import { GlobalBus } from "@/bus/global"
+import { Project, Vcs } from "../project"
 import { Instance } from "../project/instance"
 import { InstanceState } from "@/effect"
-import { Snapshot } from "@/snapshot"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
+import { GoalState } from "./goal-state"
+import { SessionInteraction } from "./interaction"
+import { ComposeRoute } from "./compose-route"
+import { isRealUserPart } from "./part-helpers"
+import { hydrateStoredPart } from "./part-blob"
+import { MAX_SESSION_DIFF_STORAGE_BYTES, isStoredDiffTooLarge, storedDiffSize } from "./diff-storage"
 
 import type { Provider } from "@/provider"
 import { Permission } from "@/permission"
@@ -36,6 +43,11 @@ const log = Log.create({ service: "session" })
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
 const ORPHAN_ASSISTANT_AGE_MS = 3_600_000
+
+function isRealUserMessage(message: MessageV2.WithParts) {
+  if (message.info.role !== "user") return false
+  return message.parts.some(isRealUserPart)
+}
 
 function createDefaultTitle(isChild = false) {
   return (isChild ? childTitlePrefix : parentTitlePrefix) + new Date().toISOString()
@@ -76,9 +88,13 @@ export function fromRow(row: SessionRow): Info {
     share,
     revert,
     permission: row.permission ?? undefined,
+    goal: row.goal ?? undefined,
+    interaction: row.interaction ?? undefined,
+    composeRoute: row.compose_route ?? undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
+      lastUser: row.time_last_user ?? undefined,
       compacting: row.time_compacting ?? undefined,
       archived: row.time_archived ?? undefined,
     },
@@ -104,8 +120,12 @@ export function toRow(info: Info) {
     summary_diffs: info.summary?.diffs,
     revert: info.revert ?? null,
     permission: info.permission,
+    goal: info.goal,
+    interaction: info.interaction,
+    compose_route: info.composeRoute,
     time_created: info.time.created,
     time_updated: info.time.updated,
+    time_last_user: info.time.lastUser,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
   }
@@ -136,7 +156,7 @@ export const Info = z
         additions: z.number(),
         deletions: z.number(),
         files: z.number(),
-        diffs: Snapshot.FileDiff.array().optional(),
+        diffs: Vcs.FileDiff.array().optional(),
       })
       .optional(),
     share: z
@@ -149,15 +169,18 @@ export const Info = z
     time: z.object({
       created: z.number(),
       updated: z.number(),
+      lastUser: z.number().optional(),
       compacting: z.number().optional(),
       archived: z.number().optional(),
     }),
     permission: Permission.Ruleset.zod.optional(),
+    goal: GoalState.optional(),
+    interaction: SessionInteraction.Info.optional(),
+    composeRoute: ComposeRoute.optional(),
     revert: z
       .object({
         messageID: MessageID.zod,
         partID: PartID.zod.optional(),
-        snapshot: z.string().optional(),
         diff: z.string().optional(),
       })
       .optional(),
@@ -203,7 +226,11 @@ export const ChildrenInput = SessionID.zod
 export const RemoveInput = SessionID.zod
 export const SetTitleInput = z.object({ sessionID: SessionID.zod, title: z.string() })
 export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.number().nullable().optional() })
+export const SetCompactingInput = z.object({ sessionID: SessionID.zod, time: z.number().nullable().optional() })
 export const SetPermissionInput = z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset.zod })
+export const SetGoalInput = z.object({ sessionID: SessionID.zod, goal: GoalState.nullable() })
+export const SetInteractionInput = z.object({ sessionID: SessionID.zod, interaction: SessionInteraction.Info.nullable() })
+export const SetComposeRouteInput = z.object({ sessionID: SessionID.zod, composeRoute: ComposeRoute.nullable() })
 export const SetRevertInput = z.object({
   sessionID: SessionID.zod,
   revert: Info.shape.revert,
@@ -250,7 +277,7 @@ export const Event = {
     "session.diff",
     z.object({
       sessionID: SessionID.zod,
-      diff: Snapshot.FileDiff.array(),
+      diff: Vcs.FileDiff.array(),
     }),
   ),
   Error: BusEvent.define(
@@ -363,10 +390,21 @@ export interface Interface {
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
+  readonly setLastUserActivity: (input: { sessionID: SessionID; at: number }) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number | null }) => Effect.Effect<void>
+  readonly setCompacting: (input: { sessionID: SessionID; time?: number | null }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: Permission.Ruleset }) => Effect.Effect<void>
+  readonly setGoal: (input: { sessionID: SessionID; goal?: z.infer<typeof GoalState> }) => Effect.Effect<void>
+  readonly setInteraction: (input: {
+    sessionID: SessionID
+    interaction?: z.infer<typeof SessionInteraction.Info>
+  }) => Effect.Effect<void>
+  readonly setComposeRoute: (input: {
+    sessionID: SessionID
+    composeRoute?: z.infer<typeof ComposeRoute>
+  }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -374,7 +412,7 @@ export interface Interface {
   }) => Effect.Effect<void>
   readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
   readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
-  readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
+  readonly diff: (sessionID: SessionID) => Effect.Effect<Vcs.FileDiff[]>
   readonly messages: (input: {
     sessionID: SessionID
     limit?: number
@@ -492,6 +530,48 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       return result
     })
 
+    const emitProjectUpdated = Effect.fn("Session.emitProjectUpdated")(function* (projectID: ProjectID) {
+      const row = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get())
+      if (!row) return
+      const project = Project.fromRow(row)
+      yield* Effect.sync(() =>
+        GlobalBus.emit("event", {
+          directory: "global",
+          project: project.id,
+          payload: { type: Project.Event.Updated.type, properties: project },
+        }),
+      )
+    })
+
+    const refreshProjectLastUserActivity = Effect.fn("Session.refreshProjectLastUserActivity")(function* (projectID: ProjectID) {
+      const latest = yield* db((d) =>
+        d
+          .select({ latest: sql<number>`max(${SessionTable.time_last_user})` })
+          .from(SessionTable)
+          .where(eq(SessionTable.project_id, projectID))
+          .get(),
+      )
+      yield* db((d) =>
+        d
+          .update(ProjectTable)
+          .set({ time_last_user: latest?.latest ?? null })
+          .where(eq(ProjectTable.id, projectID))
+          .run(),
+      )
+      yield* emitProjectUpdated(projectID)
+    })
+
+    const replaceLastUserActivity = Effect.fn("Session.replaceLastUserActivity")(function* (input: {
+      sessionID: SessionID
+      at: number | null
+    }) {
+      const session = yield* get(input.sessionID)
+      const next = input.at ?? undefined
+      if (session.time.lastUser === next) return
+      yield* patch(input.sessionID, { time: { lastUser: input.at } })
+      yield* refreshProjectLastUserActivity(session.projectID)
+    })
+
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db((d) => d.select().from(SessionTable).where(eq(SessionTable.id, id)).get())
       if (!row) throw new NotFoundError({ message: `Session not found: ${id}` })
@@ -530,6 +610,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           SyncEvent.run(Event.Deleted, { sessionID, info: session }, { publish: hasInstance })
           SyncEvent.remove(sessionID)
         })
+        yield* refreshProjectLastUserActivity(session.projectID)
       } catch (e) {
         log.error(e)
       }
@@ -568,12 +649,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           .get(),
       )
       if (!row) return
-      return {
+      return hydrateStoredPart({
         ...row.data,
         id: row.id,
         sessionID: row.session_id,
         messageID: row.message_id,
-      } as MessageV2.Part
+      } as MessageV2.Part)
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
@@ -641,6 +722,27 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       yield* patch(sessionID, { time: { updated: Date.now() } })
     })
 
+    const setLastUserActivity = Effect.fn("Session.setLastUserActivity")(function* (input: {
+      sessionID: SessionID
+      at: number
+    }) {
+      const session = yield* get(input.sessionID)
+      const next = session.time.lastUser && session.time.lastUser > input.at ? session.time.lastUser : input.at
+      if (session.time.lastUser !== next) {
+        yield* patch(input.sessionID, { time: { lastUser: next } })
+      }
+      yield* db((d) =>
+        d
+          .update(ProjectTable)
+          .set({
+            time_last_user: sql`max(coalesce(${ProjectTable.time_last_user}, 0), ${next})`,
+          })
+          .where(eq(ProjectTable.id, session.projectID))
+          .run(),
+      )
+      yield* emitProjectUpdated(session.projectID)
+    })
+
     const setTitle = Effect.fn("Session.setTitle")(function* (input: { sessionID: SessionID; title: string }) {
       yield* patch(input.sessionID, { title: input.title })
     })
@@ -652,11 +754,42 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       yield* patch(input.sessionID, { time: { archived: input.time ?? null } })
     })
 
+    const setCompacting = Effect.fn("Session.setCompacting")(function* (input: {
+      sessionID: SessionID
+      time?: number | null
+    }) {
+      yield* patch(input.sessionID, { time: { compacting: input.time ?? null } })
+    })
+
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
       sessionID: SessionID
       permission: Permission.Ruleset
     }) {
       yield* patch(input.sessionID, { permission: input.permission, time: { updated: Date.now() } })
+    })
+
+    const setGoal = Effect.fn("Session.setGoal")(function* (input: {
+      sessionID: SessionID
+      goal?: z.infer<typeof GoalState>
+    }) {
+      yield* patch(input.sessionID, { goal: input.goal ?? null, time: { updated: Date.now() } })
+    })
+
+    const setInteraction = Effect.fn("Session.setInteraction")(function* (input: {
+      sessionID: SessionID
+      interaction?: z.infer<typeof SessionInteraction.Info>
+    }) {
+      yield* patch(input.sessionID, { interaction: input.interaction ?? null })
+    })
+
+    const setComposeRoute = Effect.fn("Session.setComposeRoute")(function* (input: {
+      sessionID: SessionID
+      composeRoute?: z.infer<typeof ComposeRoute>
+    }) {
+      yield* patch(input.sessionID, {
+        composeRoute: input.composeRoute ?? null,
+        time: { updated: Date.now() },
+      })
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
@@ -679,9 +812,17 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
     })
 
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
+      if (isStoredDiffTooLarge(sessionID)) {
+        log.warn("skipping oversized stored session diff", {
+          sessionID,
+          bytes: storedDiffSize(sessionID),
+          limit: MAX_SESSION_DIFF_STORAGE_BYTES,
+        })
+        return [] as Vcs.FileDiff[]
+      }
       return yield* storage
-        .read<Snapshot.FileDiff[]>(["session_diff", sessionID])
-        .pipe(Effect.orElseSucceed((): Snapshot.FileDiff[] => []))
+        .read<Vcs.FileDiff[]>(["session_diff", sessionID])
+        .pipe(Effect.orElseSucceed((): Vcs.FileDiff[] => []))
     })
 
     const messages = Effect.fn("Session.messages")(function* (input: {
@@ -703,12 +844,22 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       sessionID: SessionID
       messageID: MessageID
     }) {
+      const session = yield* get(input.sessionID)
+      const all = yield* messages({ sessionID: input.sessionID, agentID: "*" })
+      const removed = all.find((message) => message.info.id === input.messageID)
+      const shouldRefresh =
+        !!removed && isRealUserMessage(removed) && removed.info.time.created === session.time.lastUser
+
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.Removed, {
           sessionID: input.sessionID,
           messageID: input.messageID,
         }),
       )
+      if (shouldRefresh) {
+        const next = all.filter((message) => message.info.id !== input.messageID).findLast(isRealUserMessage)
+        yield* replaceLastUserActivity({ sessionID: input.sessionID, at: next?.info.time.created ?? null })
+      }
       return input.messageID
     })
 
@@ -769,10 +920,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       create,
       fork,
       touch,
+      setLastUserActivity,
       get,
       setTitle,
       setArchived,
+      setCompacting,
       setPermission,
+      setGoal,
+      setInteraction,
+      setComposeRoute,
       setRevert,
       clearRevert,
       setSummary,
@@ -798,6 +954,8 @@ export const defaultLayer = layer.pipe(
   Layer.provide(Storage.defaultLayer),
 )
 
+const sessionActivityTime = sql<number>`coalesce(${SessionTable.time_last_user}, ${SessionTable.time_created})`
+
 export function* list(input?: {
   directory?: string
   workspaceID?: WorkspaceID
@@ -818,9 +976,10 @@ export function* list(input?: {
   }
   if (input?.roots) {
     conditions.push(isNull(SessionTable.parent_id))
+    conditions.push(isNull(SessionTable.context_from))
   }
   if (input?.start) {
-    conditions.push(gte(SessionTable.time_updated, input.start))
+    conditions.push(gte(sessionActivityTime, input.start))
   }
   if (input?.search) {
     conditions.push(like(SessionTable.title, `%${input.search}%`))
@@ -833,7 +992,7 @@ export function* list(input?: {
       .select()
       .from(SessionTable)
       .where(and(...conditions))
-      .orderBy(desc(SessionTable.time_updated))
+      .orderBy(desc(sessionActivityTime), desc(SessionTable.id))
       .limit(limit)
       .all(),
   )
@@ -858,12 +1017,13 @@ export function* listGlobal(input?: {
   }
   if (input?.roots) {
     conditions.push(isNull(SessionTable.parent_id))
+    conditions.push(isNull(SessionTable.context_from))
   }
   if (input?.start) {
-    conditions.push(gte(SessionTable.time_updated, input.start))
+    conditions.push(gte(sessionActivityTime, input.start))
   }
   if (input?.cursor) {
-    conditions.push(lt(SessionTable.time_updated, input.cursor))
+    conditions.push(lt(sessionActivityTime, input.cursor))
   }
   if (input?.search) {
     conditions.push(like(SessionTable.title, `%${input.search}%`))
@@ -882,7 +1042,7 @@ export function* listGlobal(input?: {
             .from(SessionTable)
             .where(and(...conditions))
         : db.select().from(SessionTable)
-    return query.orderBy(desc(SessionTable.time_updated), desc(SessionTable.id)).limit(limit).all()
+    return query.orderBy(desc(sessionActivityTime), desc(SessionTable.id)).limit(limit).all()
   })
 
   const ids = [...new Set(rows.map((row) => row.project_id))]

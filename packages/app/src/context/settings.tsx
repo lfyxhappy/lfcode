@@ -316,7 +316,7 @@ const defaultSettings: Settings = {
     errors: "nope-03",
   },
   browser: {
-    autofillEnabled: true,
+    autofillEnabled: false,
     promptToSavePasswords: true,
     bookmarks: [],
   },

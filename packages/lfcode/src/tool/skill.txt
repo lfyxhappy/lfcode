@@ -1,5 +1,9 @@
-Load a specialized skill when the task at hand matches one of the skills listed in the system prompt.
+Search installed skills by keyword, or load one by exact name.
 
-Use this tool to inject the skill's instructions and resources into current conversation. The output may contain detailed workflow guidance as well as references to scripts, files, etc in the same directory as the skill.
+Use this tool to inject a skill's instructions and bundled resources into the current conversation.
 
-The skill name must match one of the skills listed in your system prompt.
+Do not use this tool just to ask what skills are currently available; that list is already present in the conversation context.
+Use this tool when you need to search for a relevant skill by topic, or load one exact skill into the conversation.
+
+If you pass an exact installed skill name, the tool loads it.
+If you pass keywords instead, the tool returns matching skill candidates so you can load one by exact name in a second call.

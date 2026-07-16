@@ -68,8 +68,9 @@ type RestoreRequest = {
 }
 
 /**
- * A single semantic restore transaction for a virtualized timeline. It never
- * interprets a new root's scrollTop as a previous session state.
+ * A single semantic restore transaction for a timeline. It never interprets
+ * a new root's scrollTop as a previous session state. A virtualizer is
+ * optional so the stable DOM-list fallback keeps the same restore contract.
  */
 export class TimelineVirtualController {
   #options: TimelineVirtualControllerOptions
@@ -250,9 +251,9 @@ export class TimelineVirtualController {
     const request = this.#request
     const root = this.#root
     const virtualizer = this.#virtualizer ?? this.#options.virtualizer()
-    if (!request || !root || !virtualizer || !this.#options.ready()) return
+    if (!request || !root || !this.#options.ready()) return
     if (request.active.key !== this.#options.active()?.key || root !== this.#options.root()) return
-    this.#virtualizer = virtualizer
+    if (virtualizer) this.#virtualizer = virtualizer
     if (request.phase === "preparing") return
     request.phase = "preparing"
     this.#emit("preparing", request.active.key)
@@ -274,11 +275,10 @@ export class TimelineVirtualController {
 
   #prepareBottom(token: number) {
     const request = this.#current(token)
-    const virtualizer = this.#virtualizer
-    if (!request || !virtualizer) return
+    if (!request) return
     this.#diagnostics = { ...this.#diagnostics, resolved: { mode: "bottom" } }
     const items = this.#options.turnIDs()
-    if (items.length > 0) virtualizer.scrollToIndex(items.length - 1, { align: "end" })
+    if (items.length > 0) this.#virtualizer?.scrollToIndex(items.length - 1, { align: "end" })
     this.#queue(token, () => {
       const current = this.#current(token)
       if (!current) return
@@ -289,9 +289,8 @@ export class TimelineVirtualController {
 
   #prepareAnchor(token: number, attempt = 0) {
     const request = this.#current(token)
-    const virtualizer = this.#virtualizer
     const root = this.#root
-    if (!request || !virtualizer || !root || request.state.viewport.mode !== "anchor") return
+    if (!request || !root || request.state.viewport.mode !== "anchor") return
     const anchor = request.state.viewport
     const index = this.#options.turnIDs().indexOf(anchor.anchorTurnID)
     if (index < 0) {
@@ -304,7 +303,7 @@ export class TimelineVirtualController {
       this.#fallbackBottom(token)
       return
     }
-    if (attempt === 0) virtualizer.scrollToIndex(index, { align: "start" })
+    if (attempt === 0) this.#virtualizer?.scrollToIndex(index, { align: "start" })
     this.#queue(token, () => {
       const current = this.#current(token)
       if (!current || current.state.viewport.mode !== "anchor" || !this.#root) return
@@ -326,7 +325,9 @@ export class TimelineVirtualController {
         resolved: {
           mode: "anchor",
           blockID: target.dataset.viewportAnchor ?? current.state.viewport.anchorRenderBlockID,
-          turnID: target.closest<HTMLElement>("[data-viewport-turn]")?.dataset.viewportTurn ?? current.state.viewport.anchorTurnID,
+          turnID:
+            target.closest<HTMLElement>("[data-viewport-turn]")?.dataset.viewportTurn ??
+            current.state.viewport.anchorTurnID,
           offsetPx: current.state.viewport.offsetPx,
         },
         fallback: target.dataset.viewportAnchor ? "none" : "anchor",
@@ -370,8 +371,8 @@ export class TimelineVirtualController {
       if (!request || !current) return
       const anchor =
         request.state.viewport.mode === "anchor"
-          ? this.#options.anchorElement(current, request.state.viewport.anchorRenderBlockID) ??
-            this.#options.turnElement(current, request.state.viewport.anchorTurnID)
+          ? (this.#options.anchorElement(current, request.state.viewport.anchorRenderBlockID) ??
+            this.#options.turnElement(current, request.state.viewport.anchorTurnID))
           : undefined
       const signature = [
         current.scrollHeight,
@@ -441,9 +442,7 @@ export class TimelineVirtualController {
   #sameActive(left: ActiveViewport | undefined, right: ActiveViewport) {
     if (!left) return false
     return (
-      left.key === right.key &&
-      left.assistantRevision === right.assistantRevision &&
-      left.streaming === right.streaming
+      left.key === right.key && left.assistantRevision === right.assistantRevision && left.streaming === right.streaming
     )
   }
 

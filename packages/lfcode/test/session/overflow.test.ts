@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { isOverflow, pressureLevel, usable } from "../../src/session/overflow"
+import { isOverflow, pressureLevel, shouldAutoCompact, usable } from "../../src/session/overflow"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
@@ -213,6 +213,32 @@ describe("isOverflow", () => {
     const cfg = mockCfg({ auto: false })
     const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } } as any
     expect(isOverflow({ cfg, tokens, model })).toBe(false)
+  })
+})
+
+describe("shouldAutoCompact", () => {
+  test("returns true at 80% of usable context", () => {
+    const model = createModel({ context: 200_000, output: 32_000 })
+    const cfg = mockCfg()
+    const limit = usable({ cfg, model })
+    const tokens = { input: Math.floor(limit * 0.8), output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    expect(shouldAutoCompact({ cfg, tokens, model })).toBe(true)
+  })
+
+  test("returns false below 80% of usable context", () => {
+    const model = createModel({ context: 200_000, output: 32_000 })
+    const cfg = mockCfg()
+    const limit = usable({ cfg, model })
+    const tokens = { input: Math.floor(limit * 0.79), output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    expect(shouldAutoCompact({ cfg, tokens, model })).toBe(false)
+  })
+
+  test("returns false when auto compaction is disabled", () => {
+    const model = createModel({ context: 200_000, output: 32_000 })
+    const cfg = mockCfg({ auto: false })
+    const limit = usable({ cfg, model })
+    const tokens = { input: Math.floor(limit * 0.9), output: 0, reasoning: 0, cache: { read: 0, write: 0 } } as any
+    expect(shouldAutoCompact({ cfg, tokens, model })).toBe(false)
   })
 })
 
@@ -572,5 +598,11 @@ describe("usable", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
     const cfg = mockCfg({ reserved: 5_000 })
     expect(usable({ cfg, model })).toBe(175_000)
+  })
+
+  test("subtracts output reserve for limit.input models too", () => {
+    const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
+    const cfg = mockCfg()
+    expect(usable({ cfg, model })).toBe(232_000)
   })
 })

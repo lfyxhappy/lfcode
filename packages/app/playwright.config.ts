@@ -2,9 +2,11 @@ import { defineConfig, devices } from "@playwright/test"
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`
+const webHost = process.env.PLAYWRIGHT_WEB_HOST ?? "127.0.0.1"
 const serverHost = process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"
 const serverPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
-const command = `bun run dev -- --host 0.0.0.0 --port ${port}`
+const command = `bun run dev -- --host ${webHost} --port ${port}`
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === "1"
 const reuse = !process.env.CI
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? 5 : 0)) || undefined
 const reporter = [["html", { outputFolder: "e2e/playwright-report", open: "never" }], ["line"]] as const
@@ -25,16 +27,18 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers,
   reporter,
-  webServer: {
-    command,
-    url: baseURL,
-    reuseExistingServer: reuse,
-    timeout: 120_000,
-    env: {
-      VITE_LFCODE_SERVER_HOST: serverHost,
-      VITE_LFCODE_SERVER_PORT: serverPort,
-    },
-  },
+  webServer: skipWebServer
+    ? undefined
+    : {
+        command,
+        url: baseURL,
+        reuseExistingServer: reuse,
+        timeout: 120_000,
+        env: {
+          VITE_LFCODE_SERVER_HOST: serverHost,
+          VITE_LFCODE_SERVER_PORT: serverPort,
+        },
+      },
   use: {
     baseURL,
     trace: "on-first-retry",

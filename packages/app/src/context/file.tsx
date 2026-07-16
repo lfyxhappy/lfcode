@@ -200,6 +200,35 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         () => [],
       )
 
+    const write = (input: {
+      path: string
+      content: string
+      expectedChecksum?: string
+      createParents?: boolean
+    }) => {
+      const file = path.normalize(input.path)
+      if (!file) {
+        return Promise.reject(new Error("Invalid file path"))
+      }
+
+      ensure(file)
+      return sdk.client.file
+        .write({
+          path: file,
+          content: input.content,
+          expectedChecksum: input.expectedChecksum,
+          createParents: input.createParents,
+        })
+        .then((x) => {
+          const content = x.data
+          if (!content) return content
+          setLoaded(file, content)
+          touchFileContent(file, approxBytes(content))
+          evictContent(new Set([file]))
+          return content
+        })
+    }
+
     const stop = sdk.event.listen((e) => {
       invalidateFromWatcher(e.details, {
         normalize: path.normalize,
@@ -273,6 +302,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       setScrollLeft,
       selectedLines,
       setSelectedLines,
+      write,
       searchFiles: (query: string) => search(query, "false"),
       searchFilesAndDirectories: (query: string) => search(query, "true"),
     }

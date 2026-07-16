@@ -1,6 +1,6 @@
 import * as i18n from "@solid-primitives/i18n"
 import { createMemo, createResource, type ParentProps } from "solid-js"
-import { I18nProvider } from "@lfcode-ai/ui/context"
+import { I18nProvider } from "@lfcode-ai/ui/context/i18n"
 import { dict as tuiEn } from "../i18n/en"
 import { dict as uiEn } from "@lfcode-ai/ui/i18n/en"
 import { LOCALES, INTL, LABEL_KEY, normalizeLocale, type Locale } from "../i18n/locales"

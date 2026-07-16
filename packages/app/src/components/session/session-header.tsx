@@ -492,7 +492,9 @@ export function SessionHeader() {
                       <Button
                         variant="ghost"
                         class="titlebar-icon w-8 h-6 p-0 box-border"
+                        data-action="session-summary-toggle"
                         onClick={() => view().summaryCard.toggle()}
+                        title={language.t("session.header.summary.toggle")}
                         aria-label={language.t("session.header.summary.toggle")}
                         aria-expanded={view().summaryCard.opened()}
                         aria-controls="session-jobs-rail"

@@ -27,6 +27,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
+import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -95,11 +96,23 @@ const lsp = Layer.succeed(
     status: () => Effect.succeed([]),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
+    syncFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
     hover: () => Effect.succeed(undefined),
+    completion: () => Effect.succeed(undefined),
+    signatureHelp: () => Effect.succeed(undefined),
+    prepareRename: () => Effect.succeed(undefined),
+    rename: () => Effect.succeed(undefined),
+    formatting: () => Effect.succeed([]),
+    rangeFormatting: () => Effect.succeed([]),
+    codeAction: () => Effect.succeed([]),
+    executeCommand: () => Effect.succeed(undefined),
+    declaration: () => Effect.succeed([]),
     definition: () => Effect.succeed([]),
+    typeDefinition: () => Effect.succeed([]),
     references: () => Effect.succeed([]),
     implementation: () => Effect.succeed([]),
+    documentHighlights: () => Effect.succeed([]),
     documentSymbol: () => Effect.succeed([]),
     workspaceSymbol: () => Effect.succeed([]),
     prepareCallHierarchy: () => Effect.succeed([]),
@@ -124,6 +137,7 @@ function makeLayer() {
     Plugin.defaultLayer,
     Config.defaultLayer,
     ProviderSvc.defaultLayer,
+    Goal.defaultLayer,
     lsp,
     mcp,
     AppFileSystem.defaultLayer,
@@ -137,6 +151,7 @@ function makeLayer() {
   const team = Team.defaultLayer
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
+    Layer.provide(Goal.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
@@ -149,16 +164,33 @@ function makeLayer() {
     Layer.provide(History.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(Auth.defaultLayer),
+    Layer.provide(Layer.mergeAll(Instruction.defaultLayer, Bus.layer)),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
-  const proc = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
+  const proc = SessionProcessor.layer.pipe(
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(summary),
+    Layer.provideMerge(deps),
+    Layer.provide(
+      Layer.mergeAll(
+        Goal.defaultLayer,
+        ProviderSvc.defaultLayer,
+        Session.defaultLayer,
+        Truncate.defaultLayer,
+        AgentSvc.defaultLayer,
+      ),
+    ),
+  )
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
+    Layer.provide(ComposeGateState.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
     Layer.provide(TaskGateState.defaultLayer),
+    Layer.provide(ComposeGateState.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
     Layer.provide(summary),
     Layer.provide(checkpoint),
@@ -177,13 +209,19 @@ function makeLayer() {
   )
   return Layer.mergeAll(
     TestLLMServer.layer,
+    Goal.defaultLayer,
     Actor.layer.pipe(
       Layer.provideMerge(prompt),
       Layer.provideMerge(taskRegistry),
       Layer.provide(TaskRegistry.defaultLayer),
       Layer.provide(Inbox.defaultLayer),
     ),
-  ).pipe(Layer.provide(summary))
+  ).pipe(
+    Layer.provide(summary),
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(ProviderSvc.defaultLayer),
+    Layer.provide(Session.defaultLayer),
+  )
 }
 
 const it = testEffect(makeLayer())
@@ -321,7 +359,18 @@ describe("spawn no-deadlock (F56)", () => {
               agentType: "checkpoint-writer",
               task: "write a checkpoint",
               context: "none",
-              tools: ["read", "write", "edit", "apply_patch", "glob", "grep", "task"],
+              tools: [
+                "read",
+                "file_info",
+                "tree",
+                "search",
+                "archive_inspect",
+                "replace_range",
+                "symbol_edit",
+                "edit_history",
+                "apply_patch",
+                "task",
+              ],
               background: false,
               model: ref,
             })

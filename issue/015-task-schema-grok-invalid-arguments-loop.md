@@ -6,7 +6,7 @@
 
 ## 状态
 
-未解决
+已解决
 
 ## 当前实现
 
@@ -88,6 +88,13 @@
 - `packages/ui/src/components/tool-error-card.tsx`
 - 相关 issue：`issue/007-patch-context-retry-and-tool-bypass.md`（同样涉及失败后重复尝试，但根因和修复边界不同）
 
+## 修复记录
+
+- 2026-07-14：`packages/lfcode/src/provider/transform.ts` 改为递归遍历 schema 节点，只对具有明确 discriminator 的 `anyOf` / `oneOf` 执行扁平化。`task.operation` 现在保留普通 object、必填 `action` enum、分支字段 owner 提示和每个 action 的必填字段说明；非 discriminated union 保持原状。
+- 2026-07-14：`packages/lfcode/src/session/part-helpers.ts` 新增连续工具校验失败识别；`packages/lfcode/src/session/prompt.ts` 在相同工具、归一化参数和相同 validation error 连续出现 3 次后写入用户可见 ModelError 并停止自动续跑。
+- 运行时 `TaskTool` 的原始 Zod schema 未放宽；缺少 `summary` 的 create、旧 flat shape 和已废弃 action 仍被拒绝。
+- 当前代码、schema、熔断 helper 和 typecheck 已验证。按用户确认的收口口径，本 issue 标记为 `已解决`；`jws/grok-4.5` 安装版 Compose 连续 3 次真实调用保留为可选观察项，后续若复现则新建 issue。
+
 ## 现场证据
 
 - Session：`ses_0a37a90beffexfLLW9WQmzEr0R`。
@@ -97,3 +104,4 @@
 - 另一次错误为 `operation` 收到 string，而 schema 期望 object。
 - 同 Session 其他工具：`question` 4 次 completed、`read` 3 次 completed、`search` 2 次 completed、`shell` 2 次 completed，另有 `skill`、`tree`、`compose_enter` 成功记录。
 - 调查只读取 SQLite、当前源码、已安装 `app.asar` 和脱敏后的 provider 配置；未修改 Session 数据或业务代码。
+- 2026-07-14 修复验证：实际 `TaskTool` 转换后的 `operation` 无 `anyOf/oneOf`，`required=["action"]`，action enum 包含 create/done；TaskTool 18/18、重复失败 helper 4/4、schema 定向 11/11 通过，`packages/lfcode` 与根 typecheck 通过。

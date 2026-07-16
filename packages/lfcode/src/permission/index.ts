@@ -337,13 +337,22 @@ function expand(pattern: string): string {
 export function fromConfig(permission: ConfigPermission.Info) {
   const ruleset: Ruleset = []
   for (const [key, value] of Object.entries(permission)) {
+    const aliases = key === "shell" || key === "bash" ? ["shell", "bash"] : [key]
     if (typeof value === "string") {
-      ruleset.push({ permission: key, action: value, pattern: "*" })
+      for (const permissionName of aliases) {
+        ruleset.push({ permission: permissionName, action: value, pattern: "*" })
+      }
       continue
     }
-    ruleset.push(
-      ...Object.entries(value).map(([pattern, action]) => ({ permission: key, pattern: expand(pattern), action })),
-    )
+    for (const permissionName of aliases) {
+      ruleset.push(
+        ...Object.entries(value).map(([pattern, action]) => ({
+          permission: permissionName,
+          pattern: expand(pattern),
+          action,
+        })),
+      )
+    }
   }
   return ruleset
 }

@@ -10,7 +10,8 @@ import { provideInstance, tmpdir } from "../fixture/fixture"
 const run = <A, E>(eff: Effect.Effect<A, E, File.Service>) =>
   Effect.runPromise(provideInstance(Instance.directory)(eff.pipe(Effect.provide(File.defaultLayer))))
 const status = () => run(File.Service.use((svc) => svc.status()))
-const read = (file: string) => run(File.Service.use((svc) => svc.read(file)))
+const read = (file: string, options?: { withDiff?: boolean }) =>
+  run(File.Service.use((svc) => svc.read(file, options)))
 
 const wintest = process.platform === "win32" ? test : test.skip
 
@@ -58,7 +59,7 @@ describe("file fsmonitor", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        await read("tracked.txt")
+        await read("tracked.txt", { withDiff: true })
       },
     })
 

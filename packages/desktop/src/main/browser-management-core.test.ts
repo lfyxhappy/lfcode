@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { matchSavedBrowserLoginsByOrigin, normalizeSavedBrowserLoginOrigin, upsertSavedBrowserLoginRecords } from "./browser-management-core"
+import {
+  browserAutofillOriginMatches,
+  matchSavedBrowserLoginsByOrigin,
+  normalizeSavedBrowserLoginOrigin,
+  upsertSavedBrowserLoginRecords,
+} from "./browser-management-core"
 
 describe("browser management core", () => {
   test("normalizes saved login origins", () => {
@@ -62,5 +67,13 @@ describe("browser management core", () => {
       },
     ]
     expect(matchSavedBrowserLoginsByOrigin(current, "https://example.com")).toEqual([current[0]])
+  })
+
+  test("authorizes autofill only for the sender's exact web origin", () => {
+    expect(browserAutofillOriginMatches("https://example.com/login", "https://example.com")).toBe(true)
+    expect(browserAutofillOriginMatches("https://sub.example.com/login", "https://example.com")).toBe(false)
+    expect(browserAutofillOriginMatches("http://example.com/login", "https://example.com")).toBe(false)
+    expect(browserAutofillOriginMatches("file:///tmp/login.html", "null")).toBe(false)
+    expect(browserAutofillOriginMatches("not a url", "https://example.com")).toBe(false)
   })
 })

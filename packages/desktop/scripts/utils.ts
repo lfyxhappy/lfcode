@@ -1,4 +1,5 @@
 import { $ } from "bun"
+import { mkdir, copyFile } from "node:fs/promises"
 
 export type Channel = "stable"
 
@@ -60,9 +61,22 @@ export function getCurrentSidecar(target = RUST_TARGET ?? nativeTarget()) {
 
 export async function copyBinaryToSidecarFolder(source: string) {
   const dir = `resources`
-  await $`mkdir -p ${dir}`
+  await mkdir(dir, { recursive: true })
   const dest = windowsify(`${dir}/lfcode-cli`)
-  await $`cp ${source} ${dest}`
+  await copyFile(source, dest)
+  if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true") {
+    await $`pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../../script/sign-windows.ps1 ${dest}`
+  }
+  if (process.platform === "darwin") await $`codesign --force --sign - ${dest}`
+
+  console.log(`Copied ${source} to ${dest}`)
+}
+
+export async function copyBinaryToCliFolder(source: string) {
+  const dir = `resources/cli`
+  await mkdir(dir, { recursive: true })
+  const dest = windowsify(`${dir}/lfcode`)
+  await copyFile(source, dest)
   if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true") {
     await $`pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../../script/sign-windows.ps1 ${dest}`
   }

@@ -3,7 +3,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { TransactionConnection, type SqlClient } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { EffectCacheShape } from "drizzle-orm/cache/core/cache-effect"
 import type { WithCacheConfig } from "drizzle-orm/cache/core/types"
@@ -108,7 +108,7 @@ export class EffectSQLiteSession<TRelations extends AnyRelations> extends SQLite
   }
 
   private isInTransaction() {
-    return Effect.serviceOption(this.client.transactionService).pipe(Effect.map((option) => option._tag === "Some"))
+    return Effect.serviceOption(TransactionConnection).pipe(Effect.map((option) => option._tag === "Some"))
   }
 
   private executeTransactionStatement(connection: Effect.Success<SqlClient["reserve"]>, query: string) {
@@ -119,7 +119,7 @@ export class EffectSQLiteSession<TRelations extends AnyRelations> extends SQLite
     return Effect.uninterruptibleMask((restore) =>
       Effect.withFiber<A, E | SqlError, R>((fiber) => {
         const services = fiber.context
-        const connectionOption = Context.getOption(services, this.client.transactionService)
+        const connectionOption = Context.getOption(services, TransactionConnection)
         const connection: Effect.Effect<
           readonly [Scope.Closeable | undefined, Effect.Success<SqlClient["reserve"]>],
           SqlError
@@ -147,7 +147,7 @@ export class EffectSQLiteSession<TRelations extends AnyRelations> extends SQLite
               Effect.flatMap(() =>
                 Effect.provideContext(
                   restore(effect),
-                  Context.add(services, this.client.transactionService, [connection, id]),
+                  Context.add(services, TransactionConnection, [connection, id]),
                 ).pipe(
                   Effect.exit,
                   Effect.flatMap((exit) => {

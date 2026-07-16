@@ -10,6 +10,7 @@ export const ProjectTable = sqliteTable("project", {
   icon_url: text(),
   icon_color: text(),
   ...Timestamps,
+  time_last_user: integer(),
   time_initialized: integer(),
   sandboxes: text({ mode: "json" }).notNull().$type<string[]>(),
   commands: text({ mode: "json" }).$type<{ start?: string }>(),

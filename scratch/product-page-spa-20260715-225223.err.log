@@ -1,0 +1,159 @@
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31mInternal server error: The only valid numeric escape in strict mode is '\0'. (2:53)
+  1 | /* @babel/template */;
+> 2 | import { createServerReference } from "C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212\node_modules\@solidjs\start\dist\server\server-runtime"
+    |                                                     ^[39m
+  Plugin: [35mtanstack-start-directive-vite-plugin[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/component/email-signup.tsx[39m:2:53
+[33m  1  |  import { action, useSubmission } from "@solidjs/router"
+  2  |  import { Resource } from "@lfcode-ai/console-resource"
+     |                      ^
+  3  |  import { Show } from "solid-js"
+  4  |  import { useI18n } from "~/context/i18n"[39m
+      at constructor (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:365:19)
+      at PlaceholdersParserMixin.raise (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6616:19)
+      at PlaceholdersParserMixin.recordStrictModeErrors (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6553:12)
+      at Object.strictNumericEscape (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5678:14)
+      at readEscapedChar (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5518:20)
+      at readStringContents (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5393:19)
+      at PlaceholdersParserMixin.readString (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6515:9)
+      at PlaceholdersParserMixin.getTokenFromCode (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6275:14)
+      at PlaceholdersParserMixin.getTokenFromCode (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:10454:13)
+      at PlaceholdersParserMixin.nextToken (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5799:10)
+      at PlaceholdersParserMixin.next (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5709:10)
+      at PlaceholdersParserMixin.eatContextual (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6885:12)
+      at PlaceholdersParserMixin.expectContextual (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6891:15)
+      at PlaceholdersParserMixin.parseImportSpecifiersAndAfter (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14260:10)
+      at PlaceholdersParserMixin.parseImport (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14252:17)
+      at PlaceholdersParserMixin.parseImport (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:10600:36)
+      at PlaceholdersParserMixin.parseStatementContent (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12893:27)
+      at PlaceholdersParserMixin.parseStatementLike (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12784:17)
+      at PlaceholdersParserMixin.parseModuleItem (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12761:17)
+      at PlaceholdersParserMixin.parseBlockOrModuleBlockBody (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:13333:36)
+      at PlaceholdersParserMixin.parseBlockBody (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:13326:10)
+      at PlaceholdersParserMixin.parseProgram (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12639:10)
+      at PlaceholdersParserMixin.parseTopLevel (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12629:25)
+      at PlaceholdersParserMixin.parse (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14505:25)
+      at parse (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parseWithCodeFrame (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\parse.js:150:30)
+      at parseAndBuildMetadata (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\parse.js:31:15)
+      at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\string.js:15:50
+      at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\builder.js:61:14
+      at compileDirectives (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/compilers.js:19:8)
+      at TransformPluginContext.handler (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/index.js:53:54)
+      at EnvironmentPluginContainer.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31320:51)
+      at async loadAndTransform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:26407:26)
+      at compileDirectives (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/compilers.js:17:44)
+      at TransformPluginContext.handler (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/index.js:53:54)
+      at EnvironmentPluginContainer.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31320:51)
+      at async loadAndTransform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:26407:26)
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: The only valid numeric escape in strict mode is '\0'. (2:53)
+  1 | /* @babel/template */;
+> 2 | import { createServerReference } from "C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212\node_modules\@solidjs\start\dist\server\server-runtime"
+    |                                                     ^
+  Plugin: [35mtanstack-start-directive-vite-plugin[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/component/email-signup.tsx[39m:2:53
+[33m  1  |  import { action, useSubmission } from "@solidjs/router"
+  2  |  import { Resource } from "@lfcode-ai/console-resource"
+     |                      ^
+  3  |  import { Show } from "solid-js"
+  4  |  import { useI18n } from "~/context/i18n"[39m
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: The only valid numeric escape in strict mode is '\0'. (2:53)
+  1 | /* @babel/template */;
+> 2 | import { createServerReference } from "C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212\node_modules\@solidjs\start\dist\server\server-runtime"
+    |                                                     ^
+  Plugin: [35mtanstack-start-directive-vite-plugin[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/lib/github.ts[39m:2:53
+[33m  2  |  import { config } from "~/config"
+  3  |  
+  4  |  export const github = query(async () => {
+     |   ^
+  5  |    "use server"
+  6  |    const headers = {[39m
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "../asset/lander/lfcode-wordmark-light.svg" from "src/component/header.tsx". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/component/header.tsx[39m:14:33
+[33m  23 |  import copyLogoSvgLight from "../asset/lander/lfcode-logo-light.svg";
+  24 |  import copyLogoSvgDark from "../asset/lander/lfcode-logo-dark.svg";
+  25 |  import copyWordmarkSvgLight from "../asset/lander/lfcode-wordmark-light.svg";
+     |                                    ^
+  26 |  import copyWordmarkSvgDark from "../asset/lander/lfcode-wordmark-dark.svg";
+  27 |  import { A, useNavigate } from "@solidjs/router";[39m
+      at TransformPluginContext._formatLog (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31522:43)
+      at TransformPluginContext.error (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31519:14)
+      at normalizeUrl (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:29991:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:30049:32
+      at async Promise.all (index 22)
+      at async TransformPluginContext.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:30017:4)
+      at async EnvironmentPluginContainer.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31320:14)
+      at async loadAndTransform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:26407:26)
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: Failed to resolve import "../asset/lander/lfcode-wordmark-light.svg" from "src/component/header.tsx". Does the file exist?
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/component/header.tsx[39m:14:33
+[33m  23 |  import copyLogoSvgLight from "../asset/lander/lfcode-logo-light.svg";
+  24 |  import copyLogoSvgDark from "../asset/lander/lfcode-logo-dark.svg";
+  25 |  import copyWordmarkSvgLight from "../asset/lander/lfcode-wordmark-light.svg";
+     |                                    ^
+  26 |  import copyWordmarkSvgDark from "../asset/lander/lfcode-wordmark-dark.svg";
+  27 |  import { A, useNavigate } from "@solidjs/router";[39m
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m Pre-transform error: The only valid numeric escape in strict mode is '\0'. (2:53)
+  1 | /* @babel/template */;
+> 2 | import { createServerReference } from "C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212\node_modules\@solidjs\start\dist\server\server-runtime"
+    |                                                     ^
+  Plugin: [35mtanstack-start-directive-vite-plugin[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/lib/github.ts[39m:2:53
+[33m  2  |  import { config } from "~/config"
+  3  |  
+  4  |  export const github = query(async () => {
+     |   ^
+  5  |    "use server"
+  6  |    const headers = {[39m
+[2m22:53:33[22m [31m[1m[vite][22m[39m [31mInternal server error: The only valid numeric escape in strict mode is '\0'. (2:53)
+  1 | /* @babel/template */;
+> 2 | import { createServerReference } from "C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212\node_modules\@solidjs\start\dist\server\server-runtime"
+    |                                                     ^[39m
+  Plugin: [35mtanstack-start-directive-vite-plugin[39m
+  File: [36mC:/算法/小应用/知识库/10_Projects/Lfcode/packages/console/app/src/lib/github.ts[39m:2:53
+[33m  2  |  import { config } from "~/config"
+  3  |  
+  4  |  export const github = query(async () => {
+     |   ^
+  5  |    "use server"
+  6  |    const headers = {[39m
+      at constructor (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:365:19)
+      at PlaceholdersParserMixin.raise (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6616:19)
+      at PlaceholdersParserMixin.recordStrictModeErrors (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6553:12)
+      at Object.strictNumericEscape (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5678:14)
+      at readEscapedChar (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5518:20)
+      at readStringContents (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5393:19)
+      at PlaceholdersParserMixin.readString (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6515:9)
+      at PlaceholdersParserMixin.getTokenFromCode (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6275:14)
+      at PlaceholdersParserMixin.getTokenFromCode (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:10454:13)
+      at PlaceholdersParserMixin.nextToken (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5799:10)
+      at PlaceholdersParserMixin.next (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:5709:10)
+      at PlaceholdersParserMixin.eatContextual (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6885:12)
+      at PlaceholdersParserMixin.expectContextual (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:6891:15)
+      at PlaceholdersParserMixin.parseImportSpecifiersAndAfter (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14260:10)
+      at PlaceholdersParserMixin.parseImport (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14252:17)
+      at PlaceholdersParserMixin.parseImport (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:10600:36)
+      at PlaceholdersParserMixin.parseStatementContent (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12893:27)
+      at PlaceholdersParserMixin.parseStatementLike (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12784:17)
+      at PlaceholdersParserMixin.parseModuleItem (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12761:17)
+      at PlaceholdersParserMixin.parseBlockOrModuleBlockBody (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:13333:36)
+      at PlaceholdersParserMixin.parseBlockBody (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:13326:10)
+      at PlaceholdersParserMixin.parseProgram (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12639:10)
+      at PlaceholdersParserMixin.parseTopLevel (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:12629:25)
+      at PlaceholdersParserMixin.parse (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14505:25)
+      at parse (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+parser@7.29.7\node_modules\@babel\parser\lib\index.js:14539:38)
+      at parseWithCodeFrame (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\parse.js:150:30)
+      at parseAndBuildMetadata (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\parse.js:31:15)
+      at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\string.js:15:50
+      at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\@babel+template@7.29.7\node_modules\@babel\template\lib\builder.js:61:14
+      at compileDirectives (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/compilers.js:19:8)
+      at TransformPluginContext.handler (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/index.js:53:54)
+      at EnvironmentPluginContainer.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31320:51)
+      at async loadAndTransform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:26407:26)
+      at compileDirectives (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/compilers.js:17:44)
+      at TransformPluginContext.handler (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/@tanstack+directive-functions-plugin@1.134.5+def0b3610d023e65/node_modules/@tanstack/directive-functions-plugin/dist/esm/index.js:53:54)
+      at EnvironmentPluginContainer.transform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:31320:51)
+      at async loadAndTransform (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:26407:26)

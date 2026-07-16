@@ -73,7 +73,7 @@ export const providerHandlers = Layer.unwrap(
   Effect.gen(function* () {
     const cfg = yield* Config.Service
     const provider = yield* Provider.Service
-    const svc = yield* ProviderAuth.Service
+      const svc = yield* ProviderAuth.Service
 
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()

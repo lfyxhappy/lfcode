@@ -23,6 +23,14 @@ describe("file path helpers", () => {
     expect(path.pathFromTab("file:///D:/outside/image.png")).toBe("D:/outside/image.png")
   })
 
+  test("round-trips external Windows absolute paths through tabs for a stable preview key", () => {
+    const path = createPathHelpers(() => "C:\\repo")
+    const tab = path.tab("D:\\outside\\notes.txt")
+
+    expect(tab).toBe("file:///D:/outside/notes.txt")
+    expect(path.pathFromTab(tab)).toBe("D:/outside/notes.txt")
+  })
+
   test("preserves external absolute POSIX paths", () => {
     const path = createPathHelpers(() => "/repo")
     expect(path.normalize("/tmp/outside/image.png")).toBe("/tmp/outside/image.png")

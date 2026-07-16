@@ -14,10 +14,12 @@ process.chdir(dir)
 
 await import("./generate.ts")
 
-import { Script } from "@lfcode-ai/script"
+import { Script } from "../../script/src/index"
 import pkg from "../package.json"
 
 const BINARY_PREFIX = "lfcode"
+const version = Script.version
+if (!version) throw new Error("Unable to resolve the lfcode build version")
 
 // Load migrations from migration directories
 const migrationDirs = (
@@ -152,6 +154,10 @@ const targets = singleTargetBuild
         return false
       }
 
+      if (baselineFlag && item.avx2 !== false && item.abi === undefined) {
+        return false
+      }
+
       // When building for the current platform, prefer a single native binary by default.
       // Baseline binaries require additional Bun artifacts and can be flaky to download.
       if (item.avx2 === false) {
@@ -214,13 +220,13 @@ for (const item of targets) {
       autoloadPackageJson: true,
       target: name.replace(BINARY_PREFIX, "bun") as any,
       outfile: `dist/${name}/bin/lfcode`,
-      execArgv: [`--user-agent=lfcode/${Script.version}`, "--use-system-ca", "--"],
+      execArgv: [`--user-agent=lfcode/${version}`, "--use-system-ca", "--"],
       windows: {},
     },
     files: embeddedFileMap ? { "lfcode-web-ui.gen.ts": embeddedFileMap } : {},
     entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["lfcode-web-ui.gen.ts"] : [])],
     define: {
-      LFCODE_VERSION: `'${Script.version}'`,
+      LFCODE_VERSION: `'${version}'`,
       LFCODE_MIGRATIONS: JSON.stringify(migrations),
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
       LFCODE_WORKER_PATH: workerPath,
@@ -247,7 +253,7 @@ for (const item of targets) {
     JSON.stringify(
       {
         name,
-        version: Script.version,
+        version,
         os: [item.os],
         cpu: [item.arch],
       },
@@ -255,7 +261,7 @@ for (const item of targets) {
       2,
     ),
   )
-  binaries[name] = Script.version
+  binaries[name] = version
 }
 
 if (Script.release) {
@@ -266,7 +272,7 @@ if (Script.release) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  await $`gh release upload v${version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }

@@ -1,0 +1,1 @@
+Inspect recent file-edit history for the current session. Use `scope="tool"` to list individual write steps captured from session patch/snapshot records, or `scope="session"` to summarize the whole session's net file changes. This is a read-only inspection tool built on the existing snapshot/session diff pipeline.

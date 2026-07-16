@@ -37,6 +37,7 @@ export const Model = Schema.Struct({
       tool_call: Schema.optional(Schema.Boolean),
       toolcall: Schema.optional(Schema.Boolean),
       native_web: Schema.optional(Schema.Boolean),
+      patch_editing: Schema.optional(Schema.Boolean),
       input: Schema.optional(CapabilityInput),
       output: Schema.optional(CapabilityInput),
       modalities: Schema.optional(
@@ -99,6 +100,13 @@ export const Model = Schema.Struct({
   ),
   options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
   headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  request: Schema.optional(
+    Schema.Struct({
+      variant: Schema.optional(Schema.String),
+      variantGroup: Schema.optional(Schema.Literals(["standard", "extended", "deepseek", "custom"])),
+      variantOptions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+    }),
+  ),
   variants: Schema.optional(
     Schema.Record(
       Schema.String,
@@ -110,6 +118,8 @@ export const Model = Schema.Struct({
       ),
     ).annotate({ description: "Variant-specific configuration" }),
   ),
+  variantGroup: Schema.optional(Schema.Literals(["standard", "extended", "deepseek", "custom"])),
+  variantOptions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
 
 export class Info extends Schema.Class<Info>("ProviderConfig")({

@@ -1,0 +1,25 @@
+Error: Cannot find module 'solid-start:get-manifest' imported from 'C:/算法/小应用/知识库/10_Projects/Lfcode/node_modules/.bun/@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212/node_modules/@solidjs/start/dist/shared/lazy.js'
+    at fetchModule (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:34685:34)
+    at FetchableDevEnvironment.fetchModule (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:35524:10)
+    at fetchModule (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:35493:16)
+    at handleInvoke (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:28792:25)
+    at listenerForInvokeHandler (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/chunks/dep-C6pp_iVS.js:28853:19)
+    at listener (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.vite-temp/product-page-spa.vite.config.ts.timestamp-1784129016848-fbcd6750342268.mjs:73981:93)
+    at Worker.<anonymous> (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.vite-temp/product-page-spa.vite.config.ts.timestamp-1784129016848-fbcd6750342268.mjs:65944:58)
+    at Worker.emit (node:events:508:28)
+    at MessagePort.<anonymous> (node:internal/worker:332:53)
+    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:843:20)
+    at MessagePort.<anonymous> (node:internal/per_context/messageport:23:28) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  runnerError: Error: RunnerError
+      at reviveInvokeError (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:476:64)
+      at Object.invoke (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:549:11)
+      at ModuleRunner.getModuleInformation (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:1059:7)
+      at request (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:1076:83)
+      at C:/算法/小应用/知识库/10_Projects/Lfcode/node_modules/.bun/@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212/node_modules/@solidjs/start/dist/shared/lazy.js:3:1
+      at ESModulesEvaluator.runInlinedModule (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:910:3)
+      at ModuleRunner.directRequest (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:1119:59)
+      at ModuleRunner.cachedRequest (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:1037:73)
+      at C:/算法/小应用/知识库/10_Projects/Lfcode/node_modules/.bun/@solidjs+start@https+++pkg.pr.new+@solidjs+start@dfb2020+48c1d59e4f202212/node_modules/@solidjs/start/dist/server/index.jsx:1:1
+      at ESModulesEvaluator.runInlinedModule (file:///C:/%E7%AE%97%E6%B3%95/%E5%B0%8F%E5%BA%94%E7%94%A8/%E7%9F%A5%E8%AF%86%E5%BA%93/10_Projects/Lfcode/node_modules/.bun/vite@7.1.4+57f9c5e1abcc335a/node_modules/vite/dist/node/module-runner.js:910:3)
+}

@@ -32,6 +32,34 @@ describe("isTransientCapacityError", () => {
     }
   })
 
+  test("returns false for 429 quota exhaustion responses", () => {
+    const err = Object.assign(new Error("429 quota"), {
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        type: "error",
+        error: {
+          code: "insufficient_quota",
+          message: "Quota exceeded. Check your plan and billing details.",
+        },
+      }),
+    })
+    expect(isTransientCapacityError(err)).toBe(false)
+  })
+
+  test("returns false for 429 plan entitlement responses", () => {
+    const err = Object.assign(new Error("429 plan"), {
+      statusCode: 429,
+      responseBody: JSON.stringify({
+        type: "error",
+        error: {
+          code: "usage_not_included",
+          message: "To use Codex with your ChatGPT plan, upgrade to Plus.",
+        },
+      }),
+    })
+    expect(isTransientCapacityError(err)).toBe(false)
+  })
+
   test("returns true for network error codes", () => {
     for (const code of ["ECONNRESET", "EPIPE", "ETIMEDOUT"]) {
       const err = Object.assign(new Error("net"), { code })

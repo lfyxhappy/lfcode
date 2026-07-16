@@ -12,11 +12,14 @@ import type {
   Config as SDKConfig,
 } from "@lfcode-ai/sdk"
 import type { Provider as ProviderV2, Model as ModelV2 } from "@lfcode-ai/sdk/v2"
+import type { TuiPlugin } from "./tui.js"
 
 import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
 
 export * from "./tool.js"
+export * from "./manifest.js"
+export * from "./library.js"
 
 export type ProviderContext = {
   source: "env" | "config" | "custom" | "api"
@@ -78,6 +81,29 @@ export type PluginModule = {
   id?: string
   server: Plugin
   tui?: never
+}
+
+export type TuiPluginModule = {
+  id?: string
+  tui: TuiPlugin
+  server?: never
+}
+
+export type PluginDefinition =
+  | PluginModule
+  | TuiPluginModule
+  | {
+      id?: string
+      server: Plugin
+      tui: TuiPlugin
+    }
+
+export function definePlugin<const T extends PluginDefinition>(plugin: T): T {
+  return plugin
+}
+
+export function defineServerPlugin<const T extends PluginModule>(plugin: T): T {
+  return plugin
 }
 
 type Rule = {

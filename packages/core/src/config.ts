@@ -140,8 +140,8 @@ export const layer = Layer.effect(
     const policy = yield* Policy.Service
     const names = ["config.json", "lfcode.json", "lfcode.jsonc"]
     const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
-    const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
-    const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
+    const decodeInfo = (input: unknown) => Schema.decodeUnknownOption(Info)(input, decodeOptions)
+    const decodeV1Info = (input: unknown) => Schema.decodeUnknownOption(ConfigV1.Info)(input, decodeOptions)
 
     const loadFile = Effect.fnUntraced(function* (filepath: string) {
       const text = yield* fs.readFileStringSafe(filepath)

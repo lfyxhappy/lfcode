@@ -1,10 +1,21 @@
-import { intro, log, outro, spinner } from "@clack/prompts"
+import { confirm, intro, isCancel, log, outro, spinner } from "@clack/prompts"
+import path from "path"
 import type { Argv } from "yargs"
 
 import { ConfigPaths } from "../../config"
 import { Global } from "../../global"
 import { installPlugin, patchPluginConfig, readPluginManifest } from "../../plugin/install"
 import { resolvePluginTarget } from "../../plugin/shared"
+import {
+  commitImport,
+  exportPlugin,
+  listInstalledPlugins,
+  previewDirectoryImport,
+  previewNpmImport,
+  previewZipImport,
+  setPluginEnabled,
+  uninstallPlugin,
+} from "../../plugin/library"
 import { Instance } from "../../project/instance"
 import { errorMessage } from "../../util/error"
 import { Filesystem } from "../../util"
@@ -176,11 +187,19 @@ export function createPlugTask(input: PlugInput, dep: PlugDeps = defaultPlugDeps
 }
 
 export const PluginCommand = cmd({
-  command: "plugin <module>",
+  command: "plugin [module]",
   aliases: ["plug"],
-  describe: "install plugin and update config",
+  describe: "install legacy plugins or manage the reviewed plugin library",
   builder: (yargs: Argv) => {
     return yargs
+      .command(PluginListCommand)
+      .command(PluginInspectCommand)
+      .command(PluginImportCommand)
+      .command(PluginCommitCommand)
+      .command(PluginEnableCommand)
+      .command(PluginDisableCommand)
+      .command(PluginUninstallCommand)
+      .command(PluginExportCommand)
       .positional("module", {
         type: "string",
         describe: "npm module name",
@@ -201,7 +220,7 @@ export const PluginCommand = cmd({
   handler: async (args) => {
     const mod = String(args.module ?? "").trim()
     if (!mod) {
-      UI.error("module is required")
+      UI.error("module or plugin subcommand is required")
       process.exitCode = 1
       return
     }
@@ -229,5 +248,156 @@ export const PluginCommand = cmd({
 
     outro("Done")
     if (!ok) process.exitCode = 1
+  },
+})
+
+function json(value: unknown) {
+  process.stdout.write(JSON.stringify(value, null, 2) + "\n")
+}
+
+function spec(value: unknown) {
+  const result = String(value ?? "").trim()
+  if (!result) throw new Error("managed plugin spec is required")
+  return result.startsWith("lfplugin:") ? result : `lfplugin:${result}`
+}
+
+function report(value: Awaited<ReturnType<typeof previewDirectoryImport>>) {
+  log.info(`${value.report.name} ${value.report.version} (${value.report.category})`)
+  log.info(`ID: ${value.report.id}`)
+  log.info(`Operation: ${value.report.operation}`)
+  log.info(`Source: ${value.report.source.type} ${value.report.source.label}`)
+  log.info(`SHA-256: ${value.report.source.digest}`)
+  log.info(`Files: ${value.report.files.count}, bytes: ${value.report.files.bytes}`)
+  if (value.report.entrypoints.length) log.info(`Entrypoints: ${value.report.entrypoints.join(", ")}`)
+  for (const warning of value.report.warnings) log.warn(warning)
+  log.info(`Preview token: ${value.token}`)
+}
+
+export const PluginListCommand = cmd({
+  command: "list",
+  aliases: ["ls"],
+  describe: "list managed plugins",
+  builder: (yargs) => yargs.option("json", { type: "boolean", default: false }),
+  async handler(args) {
+    const items = await listInstalledPlugins()
+    if (args.json) return json(items)
+    if (!items.length) return log.info("No managed plugins installed")
+    for (const item of items)
+      log.info(`${item.enabled ? "enabled" : "disabled"} ${item.spec} ${item.version} ${item.category}`)
+  },
+})
+
+export const PluginInspectCommand = cmd({
+  command: "inspect <spec>",
+  describe: "inspect a managed plugin",
+  builder: (yargs) => yargs.positional("spec", { type: "string" }).option("json", { type: "boolean", default: false }),
+  async handler(args) {
+    const target = spec(args.spec)
+    const item = (await listInstalledPlugins()).find((entry) => entry.spec === target)
+    if (!item) throw new Error(`Managed plugin not found: ${target}`)
+    if (args.json) return json(item)
+    log.info(`${item.name} ${item.version} (${item.category})`)
+    log.info(`${item.spec} ${item.enabled ? "enabled" : "disabled"}`)
+    log.info(`Source: ${item.source.type} ${item.source.label}`)
+    log.info(`SHA-256: ${item.source.digest}`)
+  },
+})
+
+export const PluginImportCommand = cmd({
+  command: "import <source>",
+  describe: "preview and optionally import an npm, directory, or ZIP plugin",
+  builder: (yargs) =>
+    yargs
+      .positional("source", { type: "string" })
+      .option("type", { choices: ["npm", "directory", "zip"] as const, demandOption: true })
+      .option("json", { type: "boolean", default: false })
+      .option("yes", {
+        type: "boolean",
+        default: false,
+        describe: "confirm the reviewed preview in an interactive terminal",
+      }),
+  async handler(args) {
+    const source = String(args.source)
+    const preview =
+      args.type === "npm"
+        ? await previewNpmImport({ spec: source })
+        : args.type === "zip"
+          ? await previewZipImport({ file: source })
+          : await previewDirectoryImport({ directory: source })
+    if (args.json) json(preview)
+    else report(preview)
+    if (!process.stdin.isTTY || !process.stderr.isTTY) {
+      log.info("Preview only. Commit explicitly with: lfcode plugin commit <token>")
+      return
+    }
+    const accepted =
+      args.yes || (await confirm({ message: `Install ${preview.report.name} ${preview.report.version}?` }))
+    if (isCancel(accepted) || !accepted) return log.info("Preview not committed")
+    const item = await commitImport(preview.token)
+    log.success(`Installed ${item.spec}`)
+  },
+})
+
+export const PluginCommitCommand = cmd({
+  command: "commit <token>",
+  describe: "commit a previously reviewed plugin preview token",
+  builder: (yargs) => yargs.positional("token", { type: "string" }).option("json", { type: "boolean", default: false }),
+  async handler(args) {
+    const item = await commitImport(String(args.token))
+    if (args.json) return json(item)
+    log.success(`Installed ${item.spec}`)
+  },
+})
+
+function toggleCommand(enabled: boolean) {
+  return cmd({
+    command: `${enabled ? "enable" : "disable"} <spec>`,
+    describe: `${enabled ? "enable" : "disable"} a managed plugin`,
+    builder: (yargs) =>
+      yargs.positional("spec", { type: "string" }).option("json", { type: "boolean", default: false }),
+    async handler(args) {
+      const item = await setPluginEnabled(spec(args.spec), enabled)
+      if (args.json) return json(item)
+      log.success(`${enabled ? "Enabled" : "Disabled"} ${item.spec}`)
+    },
+  })
+}
+
+export const PluginEnableCommand = toggleCommand(true)
+export const PluginDisableCommand = toggleCommand(false)
+
+export const PluginUninstallCommand = cmd({
+  command: "uninstall <spec>",
+  describe: "uninstall a managed plugin",
+  builder: (yargs) =>
+    yargs.positional("spec", { type: "string" }).option("json", { type: "boolean", default: false }).option("yes", {
+      type: "boolean",
+      default: false,
+    }),
+  async handler(args) {
+    const target = spec(args.spec)
+    if (!args.yes) {
+      if (!process.stdin.isTTY || !process.stderr.isTTY) throw new Error("Use --yes to uninstall non-interactively")
+      const accepted = await confirm({ message: `Uninstall ${target}?` })
+      if (isCancel(accepted) || !accepted) return log.info("Uninstall cancelled")
+    }
+    const item = await uninstallPlugin(target)
+    if (args.json) return json(item)
+    log.success(`Uninstalled ${item.spec}`)
+  },
+})
+
+export const PluginExportCommand = cmd({
+  command: "export <spec> <output>",
+  describe: "export a managed plugin as a deterministic ZIP",
+  builder: (yargs) =>
+    yargs
+      .positional("spec", { type: "string" })
+      .positional("output", { type: "string" })
+      .option("json", { type: "boolean", default: false }),
+  async handler(args) {
+    const item = await exportPlugin(spec(args.spec), path.resolve(String(args.output)))
+    if (args.json) return json(item)
+    log.success(`Exported ${item.file}`)
   },
 })

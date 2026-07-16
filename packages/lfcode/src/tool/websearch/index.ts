@@ -62,7 +62,7 @@ export const WebSearchTool = Tool.define(
             sessionID: ctx.sessionID,
             query: params,
           }).pipe(
-            Effect.catchAll((failure) =>
+            Effect.catch((failure) =>
               Effect.succeed({
                 provider: failure.provider,
                 attemptedProviders: [failure.provider],

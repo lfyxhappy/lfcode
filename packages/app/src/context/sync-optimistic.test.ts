@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@lfcode-ai/sdk/v2/client"
+import { isInlineImageCacheUrl, resolveInlineImageUrl } from "@lfcode-ai/ui/inline-image-cache"
 import { applyOptimisticAdd, applyOptimisticRemove, mergeOptimisticPage } from "./sync"
 
 type Text = Extract<Part, { type: "text" }>
@@ -19,6 +20,37 @@ const textPart = (id: string, sessionID: string, messageID: string): Text => ({
   messageID,
   type: "text",
   text: id,
+})
+
+const imagePart = (id: string, sessionID: string, messageID: string): Extract<Part, { type: "file" }> => ({
+  id,
+  sessionID,
+  messageID,
+  type: "file",
+  mime: "image/png",
+  filename: "image.png",
+  url: "data:image/png;base64," + "A".repeat(400_000),
+})
+
+const toolPart = (id: string, sessionID: string, messageID: string): Extract<Part, { type: "tool" }> => ({
+  id,
+  sessionID,
+  messageID,
+  type: "tool",
+  callID: "call_1",
+  tool: "read",
+  state: {
+    status: "completed",
+    input: {},
+    output: "Image read successfully",
+    title: "Read image",
+    metadata: {},
+    time: {
+      start: 1,
+      end: 2,
+    },
+    attachments: [imagePart("prt_tool_img", sessionID, messageID)],
+  },
 })
 
 describe("sync optimistic reducers", () => {
@@ -54,6 +86,50 @@ describe("sync optimistic reducers", () => {
     expect(draft.message[sessionID]?.map((x) => x.id)).toEqual(["msg_2"])
     expect(draft.part.msg_1).toBeUndefined()
     expect(draft.part.msg_2).toHaveLength(1)
+  })
+
+  test("applyOptimisticAdd stashes oversized inline image payloads outside the store", () => {
+    const sessionID = "ses_1"
+    const draft = {
+      message: {} as Record<string, Message[] | undefined>,
+      part: {} as Record<string, Part[] | undefined>,
+    }
+
+    applyOptimisticAdd(draft, {
+      sessionID,
+      message: userMessage("msg_1", sessionID),
+      parts: [imagePart("prt_img", sessionID, "msg_1")],
+    })
+
+    const stored = draft.part.msg_1?.[0]
+    expect(stored?.type).toBe("file")
+    if (stored?.type === "file") {
+      expect(isInlineImageCacheUrl(stored.url)).toBe(true)
+      expect(resolveInlineImageUrl(stored)).toContain("data:image/png;base64,")
+    }
+  })
+
+  test("applyOptimisticAdd stashes oversized tool attachments outside the store", () => {
+    const sessionID = "ses_1"
+    const draft = {
+      message: {} as Record<string, Message[] | undefined>,
+      part: {} as Record<string, Part[] | undefined>,
+    }
+
+    applyOptimisticAdd(draft, {
+      sessionID,
+      message: userMessage("msg_1", sessionID),
+      parts: [toolPart("prt_tool", sessionID, "msg_1")],
+    })
+
+    const stored = draft.part.msg_1?.[0]
+    expect(stored?.type).toBe("tool")
+    if (stored?.type === "tool" && stored.state.status === "completed") {
+      const attachment = stored.state.attachments?.[0]
+      expect(attachment).toBeDefined()
+      expect(isInlineImageCacheUrl(attachment!.url)).toBe(true)
+      expect(resolveInlineImageUrl(attachment!)).toContain("data:image/png;base64,")
+    }
   })
 
   test("mergeOptimisticPage keeps pending messages in fetched timelines", () => {

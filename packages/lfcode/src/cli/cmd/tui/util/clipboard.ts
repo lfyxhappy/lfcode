@@ -3,6 +3,7 @@ import { lazy } from "../../../../util/lazy.js"
 import { tmpdir } from "os"
 import path from "path"
 import fs from "fs/promises"
+import { Shell } from "@/shell/shell"
 import * as Filesystem from "../../../../util/filesystem"
 import * as Process from "../../../../util/process"
 
@@ -77,9 +78,10 @@ export async function read(): Promise<Content | undefined> {
   // Windows/WSL: probe clipboard for images via PowerShell.
   // Bracketed paste can't carry image data so we read it directly.
   if (os === "win32" || release().includes("WSL")) {
+    const shell = os === "win32" ? Shell.resolvePowerShell() : "pwsh.exe"
     const script =
       "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"
-    const base64 = await Process.text(["powershell.exe", "-NonInteractive", "-NoProfile", "-command", script], {
+    const base64 = await Process.text([shell, "-NonInteractive", "-NoProfile", "-command", script], {
       nothrow: true,
     })
     if (base64.text) {
@@ -164,12 +166,13 @@ const getCopyMethod = lazy(async () => {
   }
 
   if (os === "win32") {
-    console.log("clipboard: using powershell")
+    const shell = Shell.resolvePowerShell()
+    console.log(`clipboard: using ${Shell.name(shell)}`)
     return async (text: string) => {
       // Pipe via stdin to avoid PowerShell string interpolation ($env:FOO, $(), etc.)
       const proc = Process.spawn(
         [
-          "powershell.exe",
+          shell,
           "-NonInteractive",
           "-NoProfile",
           "-Command",

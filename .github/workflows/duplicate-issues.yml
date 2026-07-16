@@ -18,6 +18,8 @@ jobs:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Install Lfcode
         run: curl -fsSL https://github.com/lfyxhappy/lfcode/releases/latest/download/install | bash
@@ -130,6 +132,8 @@ jobs:
           fetch-depth: 1
 
       - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - name: Install Lfcode
         run: curl -fsSL https://github.com/lfyxhappy/lfcode/releases/latest/download/install | bash

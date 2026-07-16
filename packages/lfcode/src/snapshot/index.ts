@@ -6,6 +6,7 @@ import z from "zod"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { InstanceState } from "@/effect"
 import { AppFileSystem } from "@/filesystem"
+import { resolveGitCommand } from "@/git/runtime"
 import { Hash } from "@lfcode-ai/shared/util/hash"
 import { Config } from "../config"
 import { Global } from "../global"
@@ -67,6 +68,7 @@ export const layer: Layer.Layer<
     const fs = yield* AppFileSystem.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const config = yield* Config.Service
+    const gitCommand = resolveGitCommand()
     const locks = new Map<string, Semaphore.Semaphore>()
 
     const lock = (key: string) => {
@@ -97,7 +99,7 @@ export const layer: Layer.Layer<
             cmd: string[],
             opts?: { cwd?: string; env?: Record<string, string>; stdin?: ChildProcess.CommandInput },
           ) {
-            const proc = ChildProcess.make("git", cmd, {
+            const proc = ChildProcess.make(gitCommand, cmd, {
               cwd: opts?.cwd,
               env: opts?.env,
               extendEnv: true,
@@ -180,8 +182,7 @@ export const layer: Layer.Layer<
         const locked = <A, E, R>(fx: Effect.Effect<A, E, R>) => lock(state.gitdir).withPermits(1)(fx)
 
         const enabled = Effect.fnUntraced(function* () {
-          if (state.vcs !== "git") return false
-          return (yield* config.get()).snapshot !== false
+          return false
         })
 
         const excludes = Effect.fnUntraced(function* () {
@@ -316,6 +317,7 @@ export const layer: Layer.Layer<
         })
 
         const patch = Effect.fnUntraced(function* (hash: string) {
+          if (!(yield* enabled())) return { hash, files: [] }
           return yield* locked(
             Effect.gen(function* () {
               yield* add()
@@ -349,6 +351,7 @@ export const layer: Layer.Layer<
         })
 
         const restore = Effect.fnUntraced(function* (snapshot: string) {
+          if (!(yield* enabled())) return
           return yield* locked(
             Effect.gen(function* () {
               log.info("restore", { commit: snapshot })
@@ -375,6 +378,7 @@ export const layer: Layer.Layer<
         })
 
         const revert = Effect.fnUntraced(function* (patches: Patch[]) {
+          if (!(yield* enabled())) return
           return yield* locked(
             Effect.gen(function* () {
               const ops: { hash: string; file: string; rel: string }[] = []
@@ -490,6 +494,7 @@ export const layer: Layer.Layer<
         })
 
         const diff = Effect.fnUntraced(function* (hash: string) {
+          if (!(yield* enabled())) return ""
           return yield* locked(
             Effect.gen(function* () {
               yield* add()
@@ -510,6 +515,7 @@ export const layer: Layer.Layer<
         })
 
         const diffFull = Effect.fnUntraced(function* (from: string, to: string) {
+          if (!(yield* enabled())) return []
           return yield* locked(
             Effect.gen(function* () {
               type Row = {
@@ -567,7 +573,7 @@ export const layer: Layer.Layer<
                   })
                   if (!refs.length) return new Map<string, { before: string; after: string }>()
 
-                  const proc = ChildProcess.make("git", [...cfg, ...args(["cat-file", "--batch"])], {
+                  const proc = ChildProcess.make(gitCommand, [...cfg, ...args(["cat-file", "--batch"])], {
                     cwd: state.directory,
                     extendEnv: true,
                     stdin: Stream.make(new TextEncoder().encode(refs.map((item) => item.ref).join("\n") + "\n")),

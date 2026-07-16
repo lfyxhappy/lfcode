@@ -13,23 +13,13 @@ import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Spinner } from "@lfcode-ai/ui/spinner"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { type Session } from "@lfcode-ai/sdk/v2/client"
+import type { State } from "@/context/global-sync/types"
 import { type LocalProject } from "@/context/layout"
 import { loadSessionsQuery, useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
-import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
+import { type InlineEditorComponent, NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
 import { sortedRootSessions, workspaceKey } from "./helpers"
 import { useQuery } from "@tanstack/solid-query"
-
-type InlineEditorComponent = (props: {
-  id: string
-  value: Accessor<string>
-  onSave: (next: string) => void
-  class?: string
-  displayClass?: string
-  editing?: boolean
-  stopPropagation?: boolean
-  openOnDblClick?: boolean
-}) => JSX.Element
 
 export type WorkspaceSidebarContext = {
   currentDir: Accessor<string>
@@ -38,7 +28,9 @@ export type WorkspaceSidebarContext = {
   sidebarHovering: Accessor<boolean>
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
+  renameSession: (session: Session, next: string) => Promise<void>
   archiveSession: (session: Session) => Promise<void>
+  showDeleteSessionDialog: (session: Session) => void
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
   editorOpen: (id: string) => boolean
@@ -128,7 +120,10 @@ const WorkspaceHeader = (props: {
         openOnDblClick={false}
       />
     </Show>
-    <div class="flex items-center justify-center shrink-0 overflow-hidden w-0 opacity-0 transition-all duration-200 group-hover/workspace:w-3.5 group-hover/workspace:opacity-100 group-focus-within/workspace:w-3.5 group-focus-within/workspace:opacity-100">
+    <div
+      data-component="workspace-chevron"
+      class="flex items-center justify-center shrink-0 overflow-hidden w-0 opacity-0 group-hover/workspace:w-3.5 group-hover/workspace:opacity-100 group-focus-within/workspace:w-3.5 group-focus-within/workspace:opacity-100"
+    >
       <Icon name={props.open() ? "chevron-down" : "chevron-right"} size="small" class="text-icon-base" />
     </div>
   </div>
@@ -236,6 +231,7 @@ const WorkspaceSessionList = (props: {
   slug: Accessor<string>
   mobile?: boolean
   ctx: WorkspaceSidebarContext
+  directoryStore: Pick<State, "agent" | "message" | "permission" | "session" | "session_status">
   showNew: Accessor<boolean>
   loading: Accessor<boolean>
   sessions: Accessor<Session[]>
@@ -255,22 +251,33 @@ const WorkspaceSessionList = (props: {
     <Show when={props.loading()}>
       <SessionSkeleton />
     </Show>
-    <For each={props.sessions()}>
-      {(session) => (
-        <SessionItem
-          session={session}
-          list={props.sessions()}
-          navList={props.ctx.navList}
-          slug={props.slug()}
-          mobile={props.mobile}
-          showChild
-          sidebarExpanded={props.ctx.sidebarExpanded}
-          clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
-          prefetchSession={props.ctx.prefetchSession}
-          archiveSession={props.ctx.archiveSession}
-        />
-      )}
-    </For>
+    <div class="flex flex-col w-full">
+      <For each={props.sessions()}>
+        {(session) => (
+          <div class="pb-1 last:pb-0">
+            <SessionItem
+              session={session}
+              list={props.sessions()}
+              directoryStore={props.directoryStore}
+              navList={props.ctx.navList}
+              slug={props.slug()}
+              mobile={props.mobile}
+              showChild
+              sidebarExpanded={props.ctx.sidebarExpanded}
+              sidebarHovering={props.ctx.sidebarHovering}
+              clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+              prefetchSession={props.ctx.prefetchSession}
+              renameSession={props.ctx.renameSession}
+              archiveSession={props.ctx.archiveSession}
+              showDeleteSessionDialog={props.ctx.showDeleteSessionDialog}
+              editorOpen={props.ctx.editorOpen}
+              openEditor={props.ctx.openEditor}
+              InlineEditor={props.ctx.InlineEditor}
+            />
+          </div>
+        )}
+      </For>
+    </div>
     <Show when={props.hasMore()}>
       <div class="relative w-full py-1">
         <Button
@@ -379,7 +386,7 @@ export const SortableWorkspace = (props: {
                 when={workspaceEditActive()}
                 fallback={
                   <Collapsible.Trigger
-                    class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md hover:bg-surface-raised-base-hover transition-[padding] duration-200 ${
+                    class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md hover:bg-surface-raised-base-hover transition-[padding] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)] ${
                       menu.open ? "pr-16" : "pr-2"
                     } group-hover/workspace:pr-16 group-focus-within/workspace:pr-16`}
                     data-action="workspace-toggle"
@@ -390,7 +397,7 @@ export const SortableWorkspace = (props: {
                 }
               >
                 <div
-                  class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md transition-[padding] duration-200 ${
+                  class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md transition-[padding] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)] ${
                     menu.open ? "pr-16" : "pr-2"
                   } group-hover/workspace:pr-16 group-focus-within/workspace:pr-16`}
                 >
@@ -425,6 +432,7 @@ export const SortableWorkspace = (props: {
             slug={slug}
             mobile={props.mobile}
             ctx={props.ctx}
+            directoryStore={workspaceStore}
             showNew={showNew}
             loading={() => query.isLoading && count() === 0}
             sessions={sessions}
@@ -470,6 +478,7 @@ export const LocalWorkspace = (props: {
         slug={slug}
         mobile={props.mobile}
         ctx={props.ctx}
+        directoryStore={workspace().store}
         showNew={() => false}
         loading={loading}
         sessions={sessions}

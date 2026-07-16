@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
+import type { PromptFeature } from "@/utils/prompt-features"
 import type { QuestionGuidance } from "@/utils/question-guidance"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
@@ -22,13 +23,24 @@ const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
 const sentPrompt: Array<{ directory: string; input: { system?: string } }> = []
-const sentPromptAsync: Array<{ directory: string; input: { system?: string } }> = []
-const queuedDrafts: Array<{ questionGuidance?: QuestionGuidance }> = []
+const sentPromptAsync: Array<{
+  directory: string
+  input: {
+    system?: string
+    delivery?: "steer"
+    parts?: Array<{ type: string; metadata?: Record<string, unknown> }>
+  }
+}> = []
+const queuedDrafts: Array<{ questionGuidance?: QuestionGuidance; promptFeatures?: PromptFeature[] }> = []
+const abortedSessions: string[] = []
+const reconcilerBusy: Array<{ directory: string; sessionID: string }> = []
+const reconcilerStopped: Array<{ directory: string; sessionID?: string }> = []
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
 let questionGuidance: QuestionGuidance = "normal"
+let promptFeatures: PromptFeature[] = []
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 
@@ -49,7 +61,7 @@ const clientFor = (directory: string) => {
         sentShell.push(directory)
         return { data: undefined }
       },
-      promptAsync: async (input: { system?: string }) => {
+      promptAsync: async (input: { system?: string; delivery?: "steer"; parts?: Array<{ type: string; metadata?: Record<string, unknown> }> }) => {
         sentPromptAsync.push({ directory, input })
         return { data: undefined }
       },
@@ -58,7 +70,10 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       command: async () => ({ data: undefined }),
-      abort: async () => ({ data: undefined }),
+      abort: async (input: { sessionID: string }) => {
+        abortedSessions.push(input.sessionID)
+        return { data: undefined }
+      },
     },
     worktree: {
       create: async () => ({ data: { directory: `${directory}/new` } }),
@@ -101,6 +116,9 @@ beforeAll(async () => {
       questionGuidance: {
         current: () => questionGuidance,
       },
+      promptFeatures: {
+        current: () => promptFeatures,
+      },
       session: {
         promote(directory: string, sessionID: string) {
           promoted.push({ directory, sessionID })
@@ -119,6 +137,16 @@ beforeAll(async () => {
 
   mock.module("@/context/prompt", () => ({
     usePrompt: () => ({
+      scope: () => ({
+        current: () => promptValue,
+        reset: () => undefined,
+        set: () => undefined,
+        context: {
+          add: () => undefined,
+          remove: () => undefined,
+          items: () => [],
+        },
+      }),
       current: () => promptValue,
       reset: () => undefined,
       set: () => undefined,
@@ -178,6 +206,19 @@ beforeAll(async () => {
 
   mock.module("@/context/global-sync", () => ({
     useGlobalSync: () => ({
+      sessionStatus: {
+        markBusy(directory: string, sessionID: string) {
+          reconcilerBusy.push({ directory, sessionID })
+        },
+        stop(directory: string, sessionID?: string) {
+          reconcilerStopped.push({ directory, sessionID })
+        },
+        refresh: () => undefined,
+        dispose: () => undefined,
+      },
+      todo: {
+        set: () => undefined,
+      },
       child: (directory: string) => {
         syncedDirectories.push(directory)
         storedSessions[directory] ??= []
@@ -227,10 +268,15 @@ beforeEach(() => {
   sentPrompt.length = 0
   sentPromptAsync.length = 0
   queuedDrafts.length = 0
+  abortedSessions.length = 0
+  reconcilerBusy.length = 0
+  reconcilerStopped.length = 0
   syncedDirectories.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
   questionGuidance = "normal"
+  promptFeatures = []
+  promptValue.splice(0, promptValue.length, { type: "text", content: "ls", start: 0, end: 2 })
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
@@ -242,7 +288,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "shell",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -279,7 +325,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => true,
       mode: () => "shell",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -309,7 +355,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -340,7 +386,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -361,14 +407,14 @@ describe("prompt submit worktree selection", () => {
     expect(optimisticSeeded).toEqual([true])
   })
 
-  test("sends the first prompt for a new session via prompt", async () => {
+  test("sends the first prompt for a new session via promptAsync", async () => {
     const submit = createPromptSubmit({
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -386,8 +432,8 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit(event)
     await Promise.resolve()
 
-    expect(sentPrompt.map((item) => item.directory)).toEqual(["/repo/worktree-a"])
-    expect(sentPromptAsync).toEqual([])
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync.map((item) => item.directory)).toEqual(["/repo/worktree-a"])
   })
 
   test("sends followups for existing sessions via promptAsync", async () => {
@@ -399,7 +445,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -426,7 +472,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -444,7 +490,7 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit(event)
     await Promise.resolve()
 
-    expect(sentPrompt[0]?.input.system).toBeUndefined()
+    expect(sentPromptAsync[0]?.input.system).toBeUndefined()
   })
 
   test("attaches low question guidance to prompts", async () => {
@@ -457,7 +503,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -486,7 +532,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -507,6 +553,7 @@ describe("prompt submit worktree selection", () => {
 
   test("keeps queued drafts pinned to the selected question guidance", async () => {
     questionGuidance = "high"
+    promptFeatures = ["browser-rendering"]
     params = { id: "session-1" }
 
     const submit = createPromptSubmit({
@@ -515,7 +562,7 @@ describe("prompt submit worktree selection", () => {
       commentCount: () => 0,
       autoAccept: () => false,
       mode: () => "normal",
-      working: () => false,
+      streaming: () => false,
       editor: () => undefined,
       queueScroll: () => undefined,
       promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
@@ -523,8 +570,9 @@ describe("prompt submit worktree selection", () => {
       resetHistoryNavigation: () => undefined,
       setMode: () => undefined,
       setPopover: () => undefined,
-      shouldQueue: () => true,
-      onQueue: (draft) => queuedDrafts.push({ questionGuidance: draft.questionGuidance }),
+      followupMode: () => "queue",
+      onQueue: (draft) =>
+        queuedDrafts.push({ questionGuidance: draft.questionGuidance, promptFeatures: draft.promptFeatures }),
       onSubmit: () => undefined,
     })
 
@@ -532,8 +580,283 @@ describe("prompt submit worktree selection", () => {
 
     await submit.handleSubmit(event)
 
-    expect(queuedDrafts).toEqual([{ questionGuidance: "high" }])
+    expect(queuedDrafts).toEqual([{ questionGuidance: "high", promptFeatures: ["browser-rendering"] }])
     expect(sentPrompt).toEqual([])
     expect(sentPromptAsync).toEqual([])
+  })
+
+  test("Ctrl+Enter temporarily inverts queue mode to steer", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      followupMode: () => "queue",
+      onQueue: () => queuedDrafts.push({}),
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event, { invertFollowupMode: true })
+    await Promise.resolve()
+
+    expect(queuedDrafts).toEqual([])
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync.map((item) => item.directory)).toEqual(["/repo/main"])
+    expect(sentPromptAsync[0]?.input.delivery).toBe("steer")
+  })
+
+  test("streaming main-input followups force steer even when queue is the configured mode", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      followupMode: () => "queue",
+      onQueue: () => queuedDrafts.push({}),
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(queuedDrafts).toEqual([])
+    expect(sentPromptAsync).toHaveLength(1)
+    expect(sentPromptAsync[0]?.input.delivery).toBe("steer")
+  })
+
+  test("steer followups send delivery=steer", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      followupMode: () => "steer",
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPromptAsync).toHaveLength(1)
+    expect(sentPromptAsync[0]?.input.delivery).toBe("steer")
+  })
+
+  test("marks optimistic busy sessions for status reconciliation", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(reconcilerBusy).toEqual([{ directory: "/repo/main", sessionID: "session-1" }])
+  })
+
+  test("Ctrl+Enter temporarily inverts steer mode to queue", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      followupMode: () => "steer",
+      onQueue: () => queuedDrafts.push({}),
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event, { invertFollowupMode: true })
+
+    expect(queuedDrafts).toEqual([{}])
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync).toEqual([])
+  })
+
+  test("attaches browser rendering guidance to prompts when enabled", async () => {
+    promptFeatures = ["browser-rendering"]
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync[0]?.input.system).toContain("Interactive browser rendering is enabled for this conversation.")
+    expect(sentPromptAsync).toHaveLength(1)
+  })
+
+  test("blank input aborts only while streaming", async () => {
+    params = { id: "session-1" }
+    promptValue.splice(0, promptValue.length, { type: "text", content: "   ", start: 0, end: 3 })
+
+    const streamingSubmit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+    const idleSubmit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await streamingSubmit.handleSubmit(event)
+    await idleSubmit.handleSubmit(event)
+
+    expect(abortedSessions).toEqual(["session-1"])
+    expect(sentPrompt).toEqual([])
+    expect(sentPromptAsync).toEqual([])
+  })
+
+  test("selected text without manual text still sends a prompt", async () => {
+    params = { id: "session-1" }
+    promptValue.splice(0, promptValue.length, {
+      type: "selected-text",
+      text: "selected snippet",
+      content: "",
+      start: 0,
+      end: 0,
+      messageID: "msg-source",
+    })
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      selectedTextCount: () => 1,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Promise.resolve()
+
+    expect(sentPromptAsync).toHaveLength(1)
+    expect(sentPromptAsync[0]?.input.parts?.[0]).toMatchObject({
+      type: "text",
+      metadata: {
+        lfcodeSelectedText: [{ text: "selected snippet", messageID: "msg-source" }],
+      },
+    })
   })
 })

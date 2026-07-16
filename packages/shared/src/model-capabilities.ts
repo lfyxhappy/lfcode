@@ -23,6 +23,7 @@ export type ModelCapabilityConfig = {
   temperature?: boolean
   native_web?: boolean
   attachment?: boolean
+  patch_editing?: boolean
   input?: Partial<CapabilityBooleans> | Modality[]
   output?: Partial<CapabilityBooleans> | Modality[]
   modalities?: {
@@ -37,6 +38,7 @@ export type NormalizedModelCapabilities = {
   temperature: boolean
   native_web: boolean
   attachment: boolean
+  patch_editing: boolean
   input: CapabilityBooleans
   output: CapabilityBooleans
 }
@@ -52,6 +54,7 @@ export const defaultModelCapabilities = (): NormalizedModelCapabilities => ({
   temperature: true,
   native_web: false,
   attachment: false,
+  patch_editing: false,
   input: {
     text: true,
     audio: false,
@@ -113,6 +116,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = true
+    capabilities.patch_editing = true
     capabilities.input.image = true
     capabilities.input.pdf = true
     return capabilities
@@ -123,6 +127,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = true
+    capabilities.patch_editing = true
     capabilities.input.image = true
     capabilities.input.audio = true
     capabilities.input.video = true
@@ -136,6 +141,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = !/\bo\d|gpt-[5-9]/.test(value)
     capabilities.attachment = true
+    capabilities.patch_editing = true
     capabilities.input.image = !/embedding|audio|tts|realtime/.test(value)
     capabilities.input.audio = /gpt-4o|gpt-4\.1|gpt-[5-9]|omni|audio|realtime/.test(value)
     capabilities.input.video = /gpt-[5-9]|omni|video/.test(value)
@@ -149,6 +155,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = /vision|vl/.test(value)
+    capabilities.patch_editing = true
     capabilities.input.image = capabilities.attachment
     capabilities.input.pdf = capabilities.attachment
     return capabilities
@@ -159,6 +166,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = !/vl|omni|coder.*thinking/.test(value) || /qwen3/.test(value)
     capabilities.temperature = true
     capabilities.attachment = /vl|omni|vision|audio/.test(value)
+    capabilities.patch_editing = capabilities.tool_call
     capabilities.input.image = /vl|omni|vision/.test(value)
     capabilities.input.audio = /omni|audio/.test(value)
     capabilities.input.video = /vl|omni|video/.test(value)
@@ -171,6 +179,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = /vision|grok-4/.test(value)
+    capabilities.patch_editing = true
     capabilities.input.image = capabilities.attachment
     capabilities.native_web = /search|web|live/.test(value)
     return capabilities
@@ -181,6 +190,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = /pixtral|vision/.test(value)
+    capabilities.patch_editing = true
     capabilities.input.image = capabilities.attachment
     capabilities.input.pdf = capabilities.attachment
     return capabilities
@@ -191,6 +201,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = /vision|vl/.test(value)
+    capabilities.patch_editing = true
     capabilities.input.image = capabilities.attachment
     capabilities.input.pdf = capabilities.attachment
     return capabilities
@@ -200,6 +211,7 @@ export function inferModelCapabilities(input: {
     capabilities.tool_call = true
     capabilities.temperature = true
     capabilities.attachment = /vision|scout|maverick/.test(value)
+    capabilities.patch_editing = true
     capabilities.input.image = capabilities.attachment
     return capabilities
   }
@@ -241,6 +253,7 @@ function mergeCapabilities(
   if (patch.temperature !== undefined) target.temperature = patch.temperature
   if (patch.native_web !== undefined) target.native_web = patch.native_web
   if (patch.attachment !== undefined) target.attachment = patch.attachment
+  if (patch.patch_editing !== undefined) target.patch_editing = patch.patch_editing
   if (patch.input) target.input = { ...target.input, ...patch.input }
   if (patch.output) target.output = { ...target.output, ...patch.output }
   return target
@@ -254,6 +267,7 @@ function applyConfig(target: NormalizedModelCapabilities, config?: ModelCapabili
   if (config.temperature !== undefined) target.temperature = config.temperature
   if (config.native_web !== undefined) target.native_web = config.native_web
   if (config.attachment !== undefined) target.attachment = config.attachment
+  if (config.patch_editing !== undefined) target.patch_editing = config.patch_editing
   if (config.text !== undefined) target.input.text = config.text
   if (config.audio !== undefined) target.input.audio = config.audio
   if (config.image !== undefined) target.input.image = config.image

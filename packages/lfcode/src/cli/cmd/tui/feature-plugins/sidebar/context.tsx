@@ -36,6 +36,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const tps = createMemo<number | null>(() => {
     const m = lastAssistant()
     if (!m) return null
+    const firstTokenAt = m.responseMetrics?.firstTokenAt
 
     if (isStreaming()) {
       tick() // reactivity dep so the readout updates between deltas
@@ -44,7 +45,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         .filter((p) => p.type === "text" || p.type === "reasoning")
         .map((p) => p.text)
         .join("")
-      return streamingTPS(combined, m.time.created, Date.now())
+      return streamingTPS(combined, m.time.created, firstTokenAt, Date.now())
     }
 
     const idleTarget = msg().findLast(
@@ -58,6 +59,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       idleTarget.tokens.output,
       idleTarget.tokens.reasoning,
       idleTarget.time.created,
+      idleTarget.responseMetrics?.firstTokenAt,
       idleTarget.time.completed,
     )
   })

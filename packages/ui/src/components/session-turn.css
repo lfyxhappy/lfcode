@@ -213,4 +213,5 @@
 
 [data-slot="session-turn-list"] {
   gap: 24px;
+  overflow-anchor: none;
 }

@@ -18,11 +18,11 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 export function diffs(value: unknown): Diff[] {
-  if (Array.isArray(value) && value.every(diff)) return value
-  if (Array.isArray(value)) return value.filter(diff)
-  if (diff(value)) return [value]
+  if (Array.isArray(value) && value.every(diff)) return merge(value)
+  if (Array.isArray(value)) return merge(value.filter(diff))
+  if (diff(value)) return merge([value])
   if (!object(value)) return []
-  return Object.values(value).filter(diff)
+  return merge(Object.values(value).filter(diff))
 }
 
 export function message(value: Message): Message {
@@ -46,4 +46,35 @@ export function message(value: Message): Message {
       diffs: next,
     },
   }
+}
+
+function merge(input: Diff[]) {
+  const out = new Map<string, Diff>()
+
+  for (const raw of input) {
+    const item = raw.patch === "" ? raw : { ...raw, patch: "" }
+    const prev = out.get(item.file)
+    if (!prev) {
+      out.set(item.file, item)
+      continue
+    }
+
+    out.set(item.file, {
+      ...item,
+      patch: "",
+      additions: prev.additions + item.additions,
+      deletions: prev.deletions + item.deletions,
+      ...(mergeStatus(prev, item) ? { status: mergeStatus(prev, item) } : {}),
+    })
+  }
+
+  return [...out.values()]
+}
+
+function mergeStatus(prev: Diff, next: Diff): Diff["status"] {
+  const statuses = [prev.status, next.status].filter((item) => !!item)
+  if (statuses.length === 0) return undefined
+  if (statuses.includes("added") && !statuses.includes("deleted")) return "added"
+  if (statuses.includes("deleted") && !statuses.includes("added")) return "deleted"
+  return "modified"
 }

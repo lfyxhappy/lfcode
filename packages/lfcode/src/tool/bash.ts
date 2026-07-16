@@ -599,6 +599,8 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
     id,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner
+      const fs = yield* AppFileSystem.Service
+      const plugin = yield* Plugin.Service
       const trunc = yield* Truncate.Service
 
       const run = Effect.fn("BashTool.run")(function* (
@@ -929,7 +931,11 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
                     params.background ??
                     (!params.interactive && params.timeout === undefined && shouldRunInBackground(params.command)),
                 }
-                const prepared = yield* prepareShellExecution(execution, ctx)
+                const prepared = yield* prepareShellExecution(execution, ctx).pipe(
+                  Effect.provideService(ChildProcessSpawner, spawner),
+                  Effect.provideService(AppFileSystem.Service, fs),
+                  Effect.provideService(Plugin.Service, plugin),
+                )
 
                 // Interactive mode: hand terminal to user for direct interaction
                 if (params.interactive) {

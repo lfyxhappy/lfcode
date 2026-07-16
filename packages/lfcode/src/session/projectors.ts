@@ -1,9 +1,10 @@
-import { NotFoundError, eq, and } from "../storage"
+import { NotFoundError, and, eq, sql } from "../storage"
 import { SyncEvent } from "@/sync"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { Log } from "../util"
+import { dropStoredPartBlob, isStoredBlobPart, storePartData } from "./part-blob"
 
 const log = Log.create({ service: "session.projector" })
 
@@ -11,6 +12,35 @@ function foreign(err: unknown) {
   if (typeof err !== "object" || err === null) return false
   if ("code" in err && err.code === "SQLITE_CONSTRAINT_FOREIGNKEY") return true
   return "message" in err && typeof err.message === "string" && err.message.includes("FOREIGN KEY constraint failed")
+}
+
+function hasBlobReference(
+  db: Parameters<Parameters<typeof SyncEvent.project>[1]>[0],
+  blobPath: string,
+  excludePartID?: string,
+) {
+  const refs = db
+    .select({ id: PartTable.id })
+    .from(PartTable)
+    .where(
+      and(
+        sql`json_extract(${PartTable.data}, '$.blob.path') = ${blobPath}`,
+        excludePartID ? sql`${PartTable.id} <> ${excludePartID}` : sql`1 = 1`,
+      ),
+    )
+    .limit(1)
+    .all()
+  return refs.length > 0
+}
+
+function dropStoredPartBlobIfUnreferenced(
+  db: Parameters<Parameters<typeof SyncEvent.project>[1]>[0],
+  part: unknown,
+  excludePartID?: string,
+) {
+  if (!isStoredBlobPart(part)) return
+  if (hasBlobReference(db, part.blob.path, excludePartID)) return
+  dropStoredPartBlob(part)
 }
 
 export type DeepPartial<T> = T extends object ? { [K in keyof T]?: DeepPartial<T[K]> | null } : T
@@ -53,8 +83,12 @@ export function toPartialRow(info: DeepPartial<Session.Info>) {
     summary_diffs: grab(info, "summary", (v) => grab(v, "diffs")),
     revert: grab(info, "revert"),
     permission: grab(info, "permission"),
+    goal: grab(info, "goal"),
+    interaction: grab(info, "interaction"),
+    compose_route: grab(info, "composeRoute"),
     time_created: grab(info, "time", (v) => grab(v, "created")),
     time_updated: grab(info, "time", (v) => grab(v, "updated")),
+    time_last_user: grab(info, "time", (v) => grab(v, "lastUser")),
     time_compacting: grab(info, "time", (v) => grab(v, "compacting")),
     time_archived: grab(info, "time", (v) => grab(v, "archived")),
   }
@@ -79,6 +113,10 @@ export default [
   }),
 
   SyncEvent.project(Session.Event.Deleted, (db, data) => {
+    const rows = db.select().from(PartTable).where(eq(PartTable.session_id, data.sessionID)).all()
+    for (const row of rows) {
+      dropStoredPartBlobIfUnreferenced(db, row.data, row.id)
+    }
     db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
   }),
 
@@ -104,19 +142,42 @@ export default [
   }),
 
   SyncEvent.project(MessageV2.Event.Removed, (db, data) => {
+    const rows = db
+      .select()
+      .from(PartTable)
+      .where(and(eq(PartTable.message_id, data.messageID), eq(PartTable.session_id, data.sessionID)))
+      .all()
+    for (const row of rows) {
+      dropStoredPartBlobIfUnreferenced(db, row.data, row.id)
+    }
     db.delete(MessageTable)
       .where(and(eq(MessageTable.id, data.messageID), eq(MessageTable.session_id, data.sessionID)))
       .run()
   }),
 
   SyncEvent.project(MessageV2.Event.PartRemoved, (db, data) => {
+    const row = db
+      .select()
+      .from(PartTable)
+      .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
+      .get()
+    if (row) dropStoredPartBlobIfUnreferenced(db, row.data, row.id)
     db.delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
       .run()
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
-    const { id, messageID, sessionID, ...rest } = data.part
+    const { id, messageID, sessionID, ...raw } = data.part
+    const rest = storePartData(raw)
+    const previous = db.select().from(PartTable).where(eq(PartTable.id, id)).get()
+    if (
+      previous &&
+      isStoredBlobPart(previous.data) &&
+      (!isStoredBlobPart(rest) || previous.data.blob.path !== rest.blob.path)
+    ) {
+      dropStoredPartBlobIfUnreferenced(db, previous.data, previous.id)
+    }
 
     try {
       db.insert(PartTable)

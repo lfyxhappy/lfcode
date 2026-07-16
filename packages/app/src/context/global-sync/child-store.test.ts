@@ -7,6 +7,27 @@ import { createChildStoreManager } from "./child-store"
 const child = () => createStore({} as State)
 
 describe("createChildStoreManager", () => {
+  test("existing does not create a store for unknown directories", () => {
+    const owner = createRoot((dispose) => {
+      const current = getOwner()
+      dispose()
+      return current
+    })
+    if (!owner) throw new Error("owner required")
+
+    const manager = createChildStoreManager({
+      owner,
+      isBooting: () => false,
+      isLoadingSessions: () => false,
+      onBootstrap() {},
+      onDispose() {},
+      translate: (key) => key,
+    })
+
+    expect(manager.existing("/missing")).toBeUndefined()
+    expect(Object.keys(manager.children)).toEqual([])
+  })
+
   test("does not evict the active directory during mark", () => {
     const owner = createRoot((dispose) => {
       const current = getOwner()

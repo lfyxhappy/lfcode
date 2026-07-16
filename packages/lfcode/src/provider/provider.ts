@@ -53,11 +53,8 @@ const BUILTIN_TIERS = new Set(["ultra", "standard", "lite"])
 const warnedContextDefaults = new Set<string>()
 
 export const DEFAULT_CHUNK_TIMEOUT = 480_000 // 8 minutes — bounds single-attempt SSE stall.
-// Tuned for mimo-v2.5-pro on MiMo Router whose cold-path TTFT after context
-// rebuild can dip to ~5 minutes silent. Reasoning models with multi-minute
-// thinking still emit partial chunks / heartbeats within this window. Override
-// per-provider via lfcode.json's `chunkTimeout` config for tighter or looser
-// bounds.
+// Bounds a silent streaming attempt while still allowing long reasoning turns.
+// Override per-provider via lfcode.json's `chunkTimeout` for a tighter limit.
 
 function shouldUseCopilotResponsesApi(modelID: string): boolean {
   const match = /^gpt-(\d+)/.exec(modelID)
@@ -126,19 +123,40 @@ export function selectLanguageModel(
   return (sdk.languageModel?.(model.api.id) ?? sdk.chat?.(model.api.id) ?? sdk.responses?.(model.api.id)) as LanguageModelV3
 }
 
-function wrapSSE(res: Response, ms: number, ctl: AbortController) {
+export function wrapSSE(res: Response, ms: number, ctl: AbortController, abort?: AbortSignal | null) {
   if (typeof ms !== "number" || ms <= 0) return res
   if (!res.body) return res
   if (!res.headers.get("content-type")?.includes("text/event-stream")) return res
 
   const reader = res.body.getReader()
+  let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+  let aborted = false
+  const abortReader = (reason?: unknown) => {
+    if (aborted) return
+    aborted = true
+    ctl.abort(reason)
+    void reader.cancel(reason).catch(() => {})
+    try {
+      streamController?.error(reason instanceof Error ? reason : new DOMException("Aborted", "AbortError"))
+    } catch {
+      // stream may already be closed/errored
+    }
+  }
+  const onAbort = abort ? () => abortReader(abort.reason) : undefined
+  if (abort?.aborted) abortReader(abort.reason)
+  if (abort && onAbort && !abort.aborted) {
+    abort.addEventListener("abort", onAbort, { once: true })
+  }
   const body = new ReadableStream<Uint8Array>({
+    start(ctrl) {
+      streamController = ctrl
+    },
     async pull(ctrl) {
+      if (aborted) return
       const part = await new Promise<Awaited<ReturnType<typeof reader.read>>>((resolve, reject) => {
         const id = setTimeout(() => {
           const err = new Error("SSE read timed out")
-          ctl.abort(err)
-          void reader.cancel(err)
+          abortReader(err)
           reject(err)
         }, ms)
 
@@ -154,15 +172,18 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
         )
       })
 
+      if (aborted) return
+
       if (part.done) {
         ctrl.close()
+        if (abort && onAbort) abort.removeEventListener("abort", onAbort)
         return
       }
 
       ctrl.enqueue(part.value)
     },
     async cancel(reason) {
-      ctl.abort(reason)
+      if (abort && onAbort) abort.removeEventListener("abort", onAbort)
       await reader.cancel(reason)
     },
   })
@@ -225,6 +246,43 @@ type CustomDep = {
 
 function useLanguageModel(sdk: any) {
   return sdk.responses === undefined && sdk.chat === undefined
+}
+
+const MODEL_VARIANT_PRESET_VALUES = {
+  standard: ["low", "medium", "high"],
+  extended: ["low", "medium", "high", "xhigh"],
+  deepseek: ["low", "medium", "high", "max"],
+} as const
+const MODEL_VARIANT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
+
+type ConfigModelVariant = {
+  request?: {
+    variant?: string | null
+    variantGroup?: "standard" | "extended" | "deepseek" | "custom" | null
+    variantOptions?: string[] | null
+  }
+  variant?: string | null
+  variantGroup?: "standard" | "extended" | "deepseek" | "custom" | null
+  variantOptions?: string[] | null
+}
+
+function configuredVariantKeys(model: ConfigModelVariant | undefined) {
+  const configuredGroup = model?.request?.variantGroup ?? model?.variantGroup
+  const configuredOptions = model?.request?.variantOptions ?? model?.variantOptions
+
+  if (configuredGroup === "custom") {
+    return MODEL_VARIANT_LEVELS.filter((value) => configuredOptions?.includes(value))
+  }
+
+  if (configuredGroup) {
+    return [...MODEL_VARIANT_PRESET_VALUES[configuredGroup]]
+  }
+
+  if (configuredOptions?.length) {
+    return MODEL_VARIANT_LEVELS.filter((value) => configuredOptions.includes(value))
+  }
+
+  return undefined
 }
 
 function custom(dep: CustomDep): Record<string, CustomLoader> {
@@ -483,7 +541,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://mimo.xiaomi.com/coder/",
+            "HTTP-Referer": "https://lfcode.ai/",
             "X-Title": "lfcode",
             "X-Source": "lfcode",
           },
@@ -494,7 +552,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://mimo.xiaomi.com/coder/",
+            "HTTP-Referer": "https://lfcode.ai/",
             "X-Title": "lfcode",
             "X-OpenRouter-Categories": "programming,programming-app,cli-agent",
           },
@@ -505,7 +563,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://mimo.xiaomi.com/coder/",
+            "HTTP-Referer": "https://lfcode.ai/",
             "X-Title": "lfcode",
           },
         },
@@ -515,7 +573,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "http-referer": "https://mimo.xiaomi.com/coder/",
+            "http-referer": "https://lfcode.ai/",
             "x-title": "lfcode",
           },
         },
@@ -613,7 +671,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://mimo.xiaomi.com/coder/",
+            "HTTP-Referer": "https://lfcode.ai/",
             "X-Title": "lfcode",
           },
         },
@@ -899,7 +957,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://mimo.xiaomi.com/coder/",
+            "HTTP-Referer": "https://lfcode.ai/",
             "X-Title": "lfcode",
           },
         },
@@ -934,6 +992,7 @@ const ProviderCapabilities = Schema.Struct({
   attachment: Schema.Boolean,
   toolcall: Schema.Boolean,
   native_web: Schema.optional(Schema.Boolean),
+  patch_editing: Schema.optional(Schema.Boolean),
   input: ProviderModalities,
   output: ProviderModalities,
   interleaved: ProviderInterleaved,
@@ -1078,6 +1137,7 @@ function runtimeCapabilities(input: {
     attachment: capabilities.attachment,
     toolcall: capabilities.tool_call,
     native_web: capabilities.native_web,
+    patch_editing: capabilities.patch_editing,
     input: capabilities.input,
     output: capabilities.output,
     interleaved: input.interleaved ?? false,
@@ -1092,6 +1152,7 @@ function modelCapabilityBase(model: Model | undefined): Partial<ReturnType<typeo
     attachment: model.capabilities.attachment,
     tool_call: model.capabilities.toolcall,
     native_web: model.capabilities.native_web ?? false,
+    patch_editing: model.capabilities.patch_editing ?? false,
     input: model.capabilities.input,
     output: model.capabilities.output,
   }
@@ -1380,7 +1441,7 @@ const layer: Layer.Layer<
           database[providerID] = parsed
         }
 
-        // load env (skipped in mimo-only mode so ANTHROPIC_API_KEY etc. don't auto-light other providers)
+        // Load provider credentials from the environment when explicitly enabled.
         if (!Flag.LFCODE_DISABLE_PROVIDER_ENV) {
           const envs = yield* env.all()
           for (const [id, provider] of Object.entries(database)) {
@@ -1535,6 +1596,17 @@ const layer: Layer.Layer<
                 (v) => omit(v, ["disabled"]),
               )
             }
+
+            const variantKeys = configuredVariantKeys(configProvider?.models?.[modelID] as ConfigModelVariant | undefined)
+            if (variantKeys) {
+              model.variants = Object.fromEntries(
+                variantKeys.flatMap((variantID) => {
+                  const variant = model.variants?.[variantID]
+                  if (!variant) return []
+                  return [[variantID, variant]]
+                }),
+              )
+            }
           }
 
           if (Object.keys(provider.models).length === 0) {
@@ -1656,7 +1728,7 @@ const layer: Layer.Layer<
           })
 
           if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+          return wrapSSE(res, chunkTimeout, chunkAbortCtl, combined)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
@@ -1845,11 +1917,6 @@ const layer: Layer.Layer<
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
-      }
-
-      const mimo = s.providers[ProviderID.make("mimo")]
-      if (mimo?.models[ModelID.make("mimo-auto")]) {
-        return { providerID: mimo.id, modelID: ModelID.make("mimo-auto") }
       }
 
       const provider = Object.values(s.providers).find((p) => !cfg.provider || Object.keys(cfg.provider).includes(p.id))

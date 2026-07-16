@@ -185,6 +185,7 @@ export function createChildStoreManager(input: {
             session: [],
             sessionTotal: 0,
             session_status: {},
+            session_goal: {},
             session_diff: {},
             todo: {},
             permission: {},
@@ -247,6 +248,18 @@ export function createChildStoreManager(input: {
     return childStore
   }
 
+  function existing(directory: string, options: ChildOptions = {}) {
+    directory = normalizeWorkspacePath(directory)
+    const childStore = children[directory]
+    if (!childStore) return
+    mark(directory)
+    const shouldBootstrap = options.bootstrap ?? true
+    if (shouldBootstrap && childStore[0].status === "loading") {
+      input.onBootstrap(directory)
+    }
+    return childStore
+  }
+
   function peek(directory: string, options: ChildOptions = {}) {
     directory = normalizeWorkspacePath(directory)
     const childStore = ensureChild(directory)
@@ -289,6 +302,7 @@ export function createChildStoreManager(input: {
     children,
     ensureChild,
     child,
+    existing,
     peek,
     projectMeta,
     projectIcon,

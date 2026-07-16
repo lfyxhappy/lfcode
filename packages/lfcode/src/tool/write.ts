@@ -14,6 +14,7 @@ import { Instance } from "../project/instance"
 import { SessionCwd } from "./session-cwd"
 import { trimDiff } from "./edit"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
+import * as PatchRecovery from "./patch-recovery"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -29,7 +30,7 @@ export const WriteTool = Tool.define(
       description: DESCRIPTION,
       parameters: z.object({
         content: z.string().describe("The content to write to the file"),
-        filePath: z.string().describe("The absolute path to the file to write (must be absolute, not relative)"),
+        filePath: z.string().describe("The absolute or relative path to the file to write."),
       }),
       execute: (params: { content: string; filePath: string }, ctx: Tool.Context) =>
         Effect.gen(function* () {
@@ -37,6 +38,12 @@ export const WriteTool = Tool.define(
             ? params.filePath
             : path.join(SessionCwd.get(ctx.sessionID), params.filePath)
           yield* assertWriteAllowed(ctx, filepath)
+
+          const recoveryContent = yield* fs.readFile(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          if (recoveryContent) {
+            const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filepath, recoveryContent)
+            if (recoveryError) throw new Error(`write recovery blocked: ${recoveryError}`)
+          }
 
           const exists = yield* fs.existsSafe(filepath)
           const contentOld = exists ? yield* fs.readFileString(filepath) : ""
@@ -57,6 +64,7 @@ export const WriteTool = Tool.define(
 
           let output = "Wrote file successfully."
           yield* lsp.touchFile(filepath, true)
+          PatchRecovery.clear(ctx.sessionID, ctx.messageID, filepath)
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilepath = AppFileSystem.normalizePath(filepath)
           let projectDiagnosticsCount = 0

@@ -482,3 +482,82 @@ test("uses npm package name when tui plugin id is omitted", async () => {
     delete process.env.LFCODE_PLUGIN_META_FILE
   }
 })
+
+test("exposes manifest metadata in tui plugin runtime status", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const mod = path.join(dir, "mods", "manifest-plugin")
+      const marker = path.join(dir, "manifest-runtime-called.txt")
+      await fs.mkdir(mod, { recursive: true })
+
+      await Bun.write(
+        path.join(mod, "package.json"),
+        JSON.stringify({
+          name: "manifest-plugin",
+          type: "module",
+          lfcode: {
+            apiVersion: "2",
+            id: "demo.manifest.runtime",
+            name: "Manifest Runtime Plugin",
+            trust: "official",
+            capabilities: ["tui.route", "theme"],
+            compatibility: {
+              lfcode: ">=0.0.0",
+            },
+            entrypoints: {
+              tui: "./tui.js",
+            },
+          },
+        }),
+      )
+      await Bun.write(
+        path.join(mod, "tui.js"),
+        `export default {
+  tui: async () => {
+    await Bun.write(${JSON.stringify(marker)}, "called")
+  },
+}
+`,
+      )
+
+      return { mod, marker, spec: "manifest-plugin@1.0.0" }
+    },
+  })
+
+  process.env.LFCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  const config: TuiConfig.Info = {
+    plugin: [tmp.extra.spec],
+    plugin_origins: [
+      {
+        spec: tmp.extra.spec,
+        scope: "local",
+        source: path.join(tmp.path, "tui.json"),
+      },
+    ],
+  }
+  const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
+  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
+  const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
+
+  try {
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("called")
+    expect(TuiPluginRuntime.list()).toContainEqual(
+      expect.objectContaining({
+        id: "demo.manifest.runtime",
+        name: "Manifest Runtime Plugin",
+        trust: "official",
+        apiVersion: "2",
+        lfcodeRange: ">=0.0.0",
+        capabilities: ["tui.route", "theme"],
+        active: true,
+      }),
+    )
+  } finally {
+    await TuiPluginRuntime.dispose()
+    install.mockRestore()
+    cwd.mockRestore()
+    wait.mockRestore()
+    delete process.env.LFCODE_PLUGIN_META_FILE
+  }
+})

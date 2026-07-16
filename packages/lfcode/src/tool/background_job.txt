@@ -1,0 +1,23 @@
+Inspect durable background jobs recorded by Lfcode.
+
+Use this tool to:
+- start a durable background shell job for the current session
+- wait for one background job to finish
+- list background jobs for the current session
+- inspect one durable background job by id
+- read durable log chunks for a background job
+- attempt to cancel a durable background job when Lfcode has a tracked pid on this host
+- reconcile stale `running` durable jobs whose tracked pid no longer exists
+
+Recommended usage:
+- `operation="start"` to launch a long-running shell command that should outlive this single tool call
+- `operation="wait"` to block until one job finishes, optionally with `timeout_ms`
+- `operation="list"` to see recent jobs
+- `operation="get"` to inspect one job's metadata and current status
+- `operation="logs"` to read ordered logs, optionally continuing with `after_seq`
+- `operation="reconcile"` to correct stale durable `running` entries after crashes or restarts
+
+Notes:
+- this tool only allows the current session
+- log output is paginated by sequence and can be resumed with `after_seq`
+- for `reconcile`, omit `job_id` to sweep all durable jobs still marked `running`

@@ -385,6 +385,7 @@ describe("tool.read truncation", () => {
       yield* put(path.join(dir, "image.png"), png)
 
       const result = yield* exec(dir, { filePath: path.join(dir, "image.png") })
+      expect(result.metadata.kind).toBe("image")
       expect(result.metadata.truncated).toBe(false)
       expect(result.attachments).toBeDefined()
       expect(result.attachments?.length).toBe(1)
@@ -460,24 +461,87 @@ describe("tool.read loaded instructions", () => {
 })
 
 describe("tool.read binary detection", () => {
-  it.live("rejects text extension files with null bytes", () =>
+  it.live("returns binary metadata for text extension files with null bytes", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped()
       const bytes = Buffer.from([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64])
       yield* put(path.join(dir, "null-byte.txt"), bytes)
 
-      const err = yield* fail(dir, { filePath: path.join(dir, "null-byte.txt") })
-      expect(err.message).toContain("Cannot read binary file")
+      const result = yield* exec(dir, { filePath: path.join(dir, "null-byte.txt") })
+      expect(String(result.metadata.kind)).toBe("binary")
+      expect(result.output).toContain("Binary file cannot be rendered as text")
     }),
   )
 
-  it.live("rejects known binary extensions", () =>
+  it.live("returns binary metadata for known binary extensions", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped()
       yield* put(path.join(dir, "module.wasm"), "not really wasm")
 
-      const err = yield* fail(dir, { filePath: path.join(dir, "module.wasm") })
-      expect(err.message).toContain("Cannot read binary file")
+      const result = yield* exec(dir, { filePath: path.join(dir, "module.wasm") })
+      expect(String(result.metadata.kind)).toBe("binary")
+      expect(result.output).toContain("<type>binary</type>")
+    }),
+  )
+
+  it.live("reads docx as downgraded document text", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const filepath = path.join(dir, "sample.docx")
+      const zip = yield* Effect.promise(() => import("@zip.js/zip.js"))
+      const writer = new zip.ZipWriter(new zip.BlobWriter("application/zip"))
+      yield* Effect.promise(() =>
+        writer.add(
+          "word/document.xml",
+          new zip.TextReader(
+            `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello docx</w:t></w:r></w:p></w:body></w:document>`,
+          ),
+        ),
+      )
+      const blob = yield* Effect.promise(() => writer.close())
+      const bytes = new Uint8Array(yield* Effect.promise(() => blob.arrayBuffer()))
+      yield* put(filepath, bytes)
+
+      const result = yield* exec(dir, { filePath: filepath })
+      expect(String(result.metadata.kind)).toBe("document")
+      expect(result.output).toContain("Hello docx")
+    }),
+  )
+
+  it.live("reads zip as downgraded archive listing", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const filepath = path.join(dir, "sample.zip")
+      const zip = yield* Effect.promise(() => import("@zip.js/zip.js"))
+      const writer = new zip.ZipWriter(new zip.BlobWriter("application/zip"))
+      yield* Effect.promise(() => writer.add("docs/readme.txt", new zip.TextReader("hello")))
+      yield* Effect.promise(() => writer.add("src/index.ts", new zip.TextReader("export {}")))
+      const blob = yield* Effect.promise(() => writer.close())
+      const bytes = new Uint8Array(yield* Effect.promise(() => blob.arrayBuffer()))
+      yield* put(filepath, bytes)
+
+      const result = yield* exec(dir, { filePath: filepath })
+      expect(String(result.metadata.kind)).toBe("archive")
+      expect(result.output).toContain("docs/readme.txt")
+      expect(result.output).toContain("src/index.ts")
+    }),
+  )
+})
+
+describe("tool.read version anchor", () => {
+  it.live("returns a stable version that changes when the file changes", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const filepath = path.join(dir, "versioned.txt")
+      yield* put(filepath, "alpha\n")
+
+      const first = yield* exec(dir, { filePath: filepath })
+      yield* put(filepath, "beta\n")
+      const second = yield* exec(dir, { filePath: filepath })
+
+      expect(first.metadata.version).toMatch(/^[a-f0-9]{64}$/)
+      expect(second.metadata.version).toMatch(/^[a-f0-9]{64}$/)
+      expect(first.metadata.version).not.toBe(second.metadata.version)
     }),
   )
 })

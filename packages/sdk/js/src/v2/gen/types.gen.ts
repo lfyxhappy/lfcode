@@ -4,6 +4,89 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+export type MaintenanceRun = {
+  id: string
+  dayKey: string
+  jobKind: "full" | "dream" | "distill"
+  triggerSource: "automatic" | "manual" | "scheduler"
+  status: "running" | "completed" | "failed"
+  dreamStatus: "idle" | "running" | "completed" | "failed" | "skipped"
+  distillStatus: "idle" | "running" | "completed" | "failed" | "skipped"
+  projectIDs: Array<string>
+  summary?: string
+  errorExcerpt?: string
+  candidateCount: number
+  dreamRecordCount: number
+  startedAt: number
+  finishedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type MaintenanceState = {
+  status: "running" | "failed" | "pending-review" | "healthy"
+  latest?: MaintenanceRun
+  pendingCandidates: number
+}
+
+export type MaintenanceSchedulerState = {
+  supported: boolean
+  registered: boolean
+  taskName: string
+  markerPath: string
+  lastRunTime?: string
+  lastResult?: string
+  error?: string
+}
+
+export type BadRequestError = {
+  data: unknown
+  errors: Array<{
+    [key: string]: unknown
+  }>
+  success: false
+}
+
+export type MaintenanceCandidate = {
+  id: string
+  runID: string
+  candidateKind:
+    | "skill_update"
+    | "skill_create"
+    | "command_update"
+    | "command_create"
+    | "agent_update"
+    | "agent_create"
+    | "skip"
+  targetKind: "skill" | "command" | "agent" | "none"
+  targetPath?: string
+  evidence: Array<string>
+  confidence: number
+  proposedSummary: string
+  proposedPatchPreview?: string
+  status: "new" | "approved" | "rejected" | "applied" | "stale"
+  appliedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
+export type MaintenanceCandidateEvent = {
+  id: string
+  candidateID: string
+  action: "approved" | "rejected" | "stale" | "applied" | "apply_failed"
+  detail?: {
+    [key: string]: unknown
+  }
+  createdAt: number
+}
+
 export type EventServerConnected = {
   type: "server.connected"
   properties: {
@@ -41,6 +124,14 @@ export type EventActorStatus = {
     turnCount: number
     lastTurnTime: number
     error?: string
+  }
+}
+
+export type EventActorRemoved = {
+  type: "actor.removed"
+  properties: {
+    sessionID: string
+    actorID: string
   }
 }
 
@@ -144,6 +235,8 @@ export type EventMetricsModelCall = {
     sessionID: string
     finish_reason: string
     ttft_ms?: number
+    submit_to_first_delta_ms?: number
+    pre_stream_ms?: number
     latency_ms: number
     cached_read_tokens: number
     model_id: string
@@ -325,6 +418,7 @@ export type Project = {
   time: {
     created: number
     updated: number
+    lastUser?: number
     initialized?: number
   }
   sandboxes: Array<string>
@@ -369,6 +463,13 @@ export type EventLspUpdated = {
   type: "lsp.updated"
   properties: {
     [key: string]: unknown
+  }
+}
+
+export type EventVcsBranchUpdated = {
+  type: "vcs.branch.updated"
+  properties: {
+    branch?: string
   }
 }
 
@@ -426,7 +527,7 @@ export type EventPermissionReplied = {
   }
 }
 
-export type SnapshotFileDiff = {
+export type VcsFileDiff = {
   file: string
   patch: string
   additions: number
@@ -438,7 +539,7 @@ export type EventSessionDiff = {
   type: "session.diff"
   properties: {
     sessionID: string
-    diff: Array<SnapshotFileDiff>
+    diff: Array<VcsFileDiff>
   }
 }
 
@@ -707,6 +808,57 @@ export type EventBashInteractiveReplied = {
   }
 }
 
+export type GoalStatus = "active" | "paused" | "complete" | "blocked" | "cleared"
+
+export type GoalVerdict = {
+  ok: boolean
+  impossible?: boolean
+  reason: string
+  attempt: number
+  messageID?: string
+  error?: boolean
+}
+
+export type GoalStats = {
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
+  elapsed: number
+  started: number
+  activeSince?: number
+  pausedAt?: number
+}
+
+export type GoalState = {
+  status: GoalStatus
+  objective: string
+  condition: string
+  react: number
+  blockedCount: number
+  blockedReason?: string
+  lastVerdict?: GoalVerdict
+  stats: GoalStats
+  time: {
+    created: number
+    updated: number
+  }
+}
+
+export type EventSessionGoal = {
+  type: "session.goal"
+  properties: {
+    sessionID: string
+    goal?: GoalState
+    lastVerdict?: GoalVerdict
+  }
+}
+
 export type Todo = {
   /**
    * Brief description of the task
@@ -740,6 +892,11 @@ export type SessionStatus =
       type: "busy"
       message?: string
     }
+  | {
+      type: "waiting"
+      mode: "interactive-html"
+      message?: string
+    }
 
 export type EventSessionStatus = {
   type: "session.status"
@@ -753,24 +910,6 @@ export type EventSessionIdle = {
   type: "session.idle"
   properties: {
     sessionID: string
-  }
-}
-
-export type EventSessionGoal = {
-  type: "session.goal"
-  properties: {
-    sessionID: string
-    goal?: {
-      condition: string
-    }
-    lastVerdict?: {
-      ok: boolean
-      impossible?: boolean
-      reason: string
-      attempt: number
-      messageID?: string
-      error?: boolean
-    }
   }
 }
 
@@ -803,13 +942,6 @@ export type EventCommandExecuted = {
     sessionID: string
     arguments: string
     messageID: string
-  }
-}
-
-export type EventVcsBranchUpdated = {
-  type: "vcs.branch.updated"
-  properties: {
-    branch?: string
   }
 }
 
@@ -934,7 +1066,7 @@ export type UserMessage = {
   summary?: {
     title?: string
     body?: string
-    diffs: Array<SnapshotFileDiff>
+    diffs: Array<VcsFileDiff>
   }
   agent: string
   model: {
@@ -1122,6 +1254,13 @@ export type FilePart = {
   mime: string
   filename?: string
   url: string
+  blob?: {
+    mode: "blob"
+    sha256: string
+    bytes: number
+    path: string
+    mime: string
+  }
   source?: FilePartSource
 }
 
@@ -1215,6 +1354,8 @@ export type StepFinishPart = {
     start: number
     end: number
     ttft: number | null
+    submit_to_first_delta?: number | null
+    pre_stream?: number | null
   }
   cost: number
   tokens: {
@@ -1347,6 +1488,48 @@ export type PermissionRule = {
 
 export type PermissionRuleset = Array<PermissionRule>
 
+export type SessionInteraction = {
+  mode: "interactive-html"
+  message?: string
+}
+
+export type ComposeRouteTaskType =
+  | "bug-fix"
+  | "small-feature"
+  | "refactor"
+  | "investigation"
+  | "design"
+  | "migration"
+  | "large-project"
+
+export type ComposeRouteDifficulty = "simple" | "moderate" | "complex" | "very-complex"
+
+export type ComposeRouteStrategy =
+  | "direct-execute"
+  | "research-then-execute"
+  | "design-then-execute"
+  | "full-orchestration"
+
+export type ComposeRouteExecutionShape = "single-shot" | "research-first" | "design-first" | "multi-workstream"
+
+export type ComposeRoute = {
+  sourceMessageID: string
+  summary: string
+  taskType: ComposeRouteTaskType
+  difficulty: ComposeRouteDifficulty
+  strategy: ComposeRouteStrategy
+  executionShape: ComposeRouteExecutionShape
+  requiresTaskBoard: boolean
+  requiresPlan: boolean
+  requiresReview: boolean
+  requiresVerify: boolean
+  reason: string
+  time: {
+    created: number
+    updated: number
+  }
+}
+
 export type Session = {
   id: string
   slug: string
@@ -1360,7 +1543,7 @@ export type Session = {
     additions: number
     deletions: number
     files: number
-    diffs?: Array<SnapshotFileDiff>
+    diffs?: Array<VcsFileDiff>
   }
   share?: {
     url: string
@@ -1370,14 +1553,17 @@ export type Session = {
   time: {
     created: number
     updated: number
+    lastUser?: number
     compacting?: number
     archived?: number
   }
   permission?: PermissionRuleset
+  goal?: GoalState
+  interaction?: SessionInteraction
+  composeRoute?: ComposeRoute
   revert?: {
     messageID: string
     partID?: string
-    snapshot?: string
     diff?: string
   }
 }
@@ -1489,7 +1675,7 @@ export type SyncEventSessionUpdated = {
         additions: number
         deletions: number
         files: number
-        diffs?: Array<SnapshotFileDiff>
+        diffs?: Array<VcsFileDiff>
       } | null
       share?: {
         url: string | null
@@ -1499,14 +1685,17 @@ export type SyncEventSessionUpdated = {
       time?: {
         created: number | null
         updated: number | null
+        lastUser: number | null
         compacting: number | null
         archived: number | null
       }
       permission: PermissionRuleset | null
+      goal: GoalState | null
+      interaction: SessionInteraction | null
+      composeRoute: ComposeRoute | null
       revert: {
         messageID: string
         partID?: string
-        snapshot?: string
         diff?: string
       } | null
     }
@@ -1534,6 +1723,7 @@ export type GlobalEvent = {
     | EventGlobalDisposed
     | EventActorRegistered
     | EventActorStatus
+    | EventActorRemoved
     | EventActorStuck
     | EventWriterCachePerf
     | EventInboxArrived
@@ -1561,6 +1751,7 @@ export type GlobalEvent = {
     | EventFileWatcherUpdated
     | EventLspClientDiagnostics
     | EventLspUpdated
+    | EventVcsBranchUpdated
     | EventInstallationUpdated
     | EventInstallationUpdateAvailable
     | EventMessagePartDelta
@@ -1578,15 +1769,14 @@ export type GlobalEvent = {
     | EventSessionCwd
     | EventBashInteractiveAsked
     | EventBashInteractiveReplied
+    | EventSessionGoal
     | EventTodoUpdated
     | EventSessionStatus
     | EventSessionIdle
-    | EventSessionGoal
     | EventSessionCompacted
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
     | EventCommandExecuted
-    | EventVcsBranchUpdated
     | EventWorktreeReady
     | EventWorktreeFailed
     | EventPtyCreated
@@ -1619,7 +1809,7 @@ export type GlobalEvent = {
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
 
 /**
- * Server configuration for mimo serve and web commands
+ * Server configuration for lfcode serve and web commands
  */
 export type ServerConfig = {
   /**
@@ -1660,6 +1850,7 @@ export type PermissionConfig =
       glob?: PermissionRuleConfig
       grep?: PermissionRuleConfig
       list?: PermissionRuleConfig
+      shell?: PermissionRuleConfig
       bash?: PermissionRuleConfig
       task?: PermissionRuleConfig
       actor?: PermissionRuleConfig
@@ -1804,6 +1995,7 @@ export type ProviderConfig = {
         tool_call?: boolean
         toolcall?: boolean
         native_web?: boolean
+        patch_editing?: boolean
         input?:
           | {
               text?: boolean
@@ -1870,6 +2062,11 @@ export type ProviderConfig = {
       headers?: {
         [key: string]: string
       }
+      request?: {
+        variant?: string
+        variantGroup?: "standard" | "extended" | "deepseek" | "custom"
+        variantOptions?: Array<string>
+      }
       /**
        * Variant-specific configuration
        */
@@ -1882,6 +2079,8 @@ export type ProviderConfig = {
           [key: string]: unknown | boolean | undefined
         }
       }
+      variantGroup?: "standard" | "extended" | "deepseek" | "custom"
+      variantOptions?: Array<string>
     }
   }
 }
@@ -1999,6 +2198,12 @@ export type Config = {
         },
       ]
   >
+  /**
+   * Enable or disable configured plugins by their canonical spec without removing their configuration
+   */
+  plugin_enabled?: {
+    [key: string]: boolean
+  }
   /**
    * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
    */
@@ -2139,6 +2344,19 @@ export type Config = {
       [key: string]: "json" | "shell"
     }
   }
+  /**
+   * Host-level desktop app-control configuration.
+   */
+  app_control?: {
+    /**
+     * Enable or disable model access to local desktop app-control tools. Default: false.
+     */
+    enabled?: boolean
+    /**
+     * Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, 'browser_control' additionally allows side-browser actions, and 'full_app_control' reserves broader future control.
+     */
+    permission?: "read_only" | "session_control" | "browser_control" | "full_app_control"
+  }
   enterprise?: {
     /**
      * Enterprise URL
@@ -2169,7 +2387,7 @@ export type Config = {
   }
   checkpoint?: {
     /**
-     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. Default: ["40%", "60%", "80%"].
+     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. No default thresholds are applied; direct compaction is the default hot path unless thresholds are explicitly configured.
      */
     thresholds?: Array<string>
     /**
@@ -2289,6 +2507,24 @@ export type Config = {
      */
     interval_days?: number
   }
+  maintenance?: {
+    /**
+     * Enable host-level Dream and Distill memory maintenance. Default: true.
+     */
+    enabled?: boolean
+    /**
+     * Allow the daily maintenance scheduler to claim automatic runs. Default: true.
+     */
+    scheduler_enabled?: boolean
+    /**
+     * Run Dream consolidation as part of maintenance. Default: true.
+     */
+    dream_enabled?: boolean
+    /**
+     * Run Distill candidate analysis as part of maintenance. Default: true.
+     */
+    distill_enabled?: boolean
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**
@@ -2352,12 +2588,133 @@ export type ConfigPatch = {
   [key: string]: unknown
 }
 
-export type BadRequestError = {
-  data: unknown
-  errors: Array<{
-    [key: string]: unknown
-  }>
-  success: false
+export type GlobalPersonalizationMemory = {
+  ccIndex: boolean
+  autoConsolidation: boolean
+}
+
+export type GlobalPersonalizationMaintenance = {
+  enabled: boolean
+  schedulerEnabled: boolean
+  dreamEnabled: boolean
+  distillEnabled: boolean
+}
+
+export type GlobalPersonalization = {
+  customInstructions: string
+  instructionFile: string
+  memory: GlobalPersonalizationMemory
+  maintenance: GlobalPersonalizationMaintenance
+  config: Config
+}
+
+export type GlobalPersonalizationSave = {
+  customInstructions: string
+  memory: GlobalPersonalizationMemory
+  maintenance: GlobalPersonalizationMaintenance
+}
+
+export type RuntimeManageItemId =
+  | "voice-recorder"
+  | "ffmpeg"
+  | "python-base"
+  | "python-managed"
+  | "cpp-compiler"
+  | "java-runtime"
+  | "java-sdk"
+  | "officecli"
+
+export type RuntimeManageGroup = "voice" | "code"
+
+export type RuntimeManageSource = "bundled" | "managed" | "system" | "missing"
+
+export type RuntimeManageScope = "required" | "recommended" | "optional"
+
+export type RuntimeManageTarget = {
+  id: string
+  label: string
+  source: RuntimeManageSource
+  active: boolean
+}
+
+export type RuntimeManageItemActions = {
+  install: boolean
+  repair: boolean
+  update?: boolean
+  activate: boolean
+  openPath: boolean
+  viewLogs: boolean
+}
+
+export type RuntimeManageItem = {
+  id: RuntimeManageItemId
+  group: RuntimeManageGroup
+  title: string
+  description: string
+  installed: boolean
+  version?: string
+  source: RuntimeManageSource
+  scope: RuntimeManageScope
+  usedBy: Array<string>
+  path?: string
+  detail?: string
+  targets: Array<RuntimeManageTarget>
+  actions: RuntimeManageItemActions
+}
+
+export type RuntimeManageState = {
+  refreshedAt: number
+  items: Array<RuntimeManageItem>
+}
+
+export type RuntimeManageMutationResult = {
+  message: string
+  state: RuntimeManageState
+}
+
+export type RuntimeOperationAction = "install" | "repair" | "update" | "activate"
+
+export type RuntimeOperationStatus = "success" | "failed"
+
+export type RuntimeOperationLog = {
+  timestamp: number
+  id: RuntimeManageItemId
+  action: RuntimeOperationAction
+  status: RuntimeOperationStatus
+  title: string
+  message: string
+  sourceLabel?: string
+}
+
+export type RuntimeOperationLogState = {
+  refreshedAt: number
+  entries: Array<RuntimeOperationLog>
+}
+
+export type GlobalAppControlPermission = "read_only" | "session_control" | "browser_control" | "full_app_control"
+
+export type GlobalAppControlService = {
+  discoveryFile: string
+  detected: boolean
+  host?: string
+  port?: number
+  pid?: number
+  version?: string
+  startedAt?: number
+}
+
+export type GlobalAppControl = {
+  enabled: boolean
+  permission: GlobalAppControlPermission
+  target: "app"
+  availableTargets: Array<"app">
+  service: GlobalAppControlService
+  config: Config
+}
+
+export type GlobalAppControlSave = {
+  enabled: boolean
+  permission: GlobalAppControlPermission
 }
 
 export type OAuth = {
@@ -2395,13 +2752,6 @@ export type Workspace = {
   projectID: string
 }
 
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
-  }
-}
-
 export type Model = {
   id: string
   providerID: string
@@ -2419,6 +2769,7 @@ export type Model = {
     attachment: boolean
     toolcall: boolean
     native_web?: boolean
+    patch_editing?: boolean
     input: {
       text: boolean
       audio: boolean
@@ -2549,7 +2900,7 @@ export type GlobalSession = {
     additions: number
     deletions: number
     files: number
-    diffs?: Array<SnapshotFileDiff>
+    diffs?: Array<VcsFileDiff>
   }
   share?: {
     url: string
@@ -2559,14 +2910,17 @@ export type GlobalSession = {
   time: {
     created: number
     updated: number
+    lastUser?: number
     compacting?: number
     archived?: number
   }
   permission?: PermissionRuleset
+  goal?: GoalState
+  interaction?: SessionInteraction
+  composeRoute?: ComposeRoute
   revert?: {
     messageID: string
     partID?: string
-    snapshot?: string
     diff?: string
   }
   project: ProjectSummary | null
@@ -2578,6 +2932,14 @@ export type McpResource = {
   description?: string
   mimeType?: string
   client: string
+}
+
+export type SnapshotFileDiff = {
+  file: string
+  patch: string
+  additions: number
+  deletions: number
+  status?: "added" | "deleted" | "modified"
 }
 
 export type ConflictError = {
@@ -2608,6 +2970,13 @@ export type FilePartInput = {
   mime: string
   filename?: string
   url: string
+  blob?: {
+    mode: "blob"
+    sha256: string
+    bytes: number
+    path: string
+    mime: string
+  }
   source?: FilePartSource
 }
 
@@ -2674,6 +3043,13 @@ export type ProviderAuthAuthorization = {
   instructions: string
 }
 
+export type LspStatus = {
+  id: string
+  name: string
+  root: string
+  status: "connected" | "error"
+}
+
 export type Symbol = {
   name: string
   kind: number
@@ -2692,8 +3068,10 @@ export type FileNode = {
 }
 
 export type FileContent = {
+  exists: boolean
   type: "text" | "binary"
   content: string
+  checksum: string
   diff?: string
   patch?: {
     oldFileName: string
@@ -2713,18 +3091,12 @@ export type FileContent = {
   mimeType?: string
 }
 
-export type File = {
-  path: string
-  added: number
-  removed: number
-  status: "added" | "deleted" | "modified"
-}
-
 export type Event =
   | EventServerConnected
   | EventGlobalDisposed
   | EventActorRegistered
   | EventActorStatus
+  | EventActorRemoved
   | EventActorStuck
   | EventWriterCachePerf
   | EventInboxArrived
@@ -2752,6 +3124,7 @@ export type Event =
   | EventFileWatcherUpdated
   | EventLspClientDiagnostics
   | EventLspUpdated
+  | EventVcsBranchUpdated
   | EventInstallationUpdated
   | EventInstallationUpdateAvailable
   | EventMessagePartDelta
@@ -2769,15 +3142,14 @@ export type Event =
   | EventSessionCwd
   | EventBashInteractiveAsked
   | EventBashInteractiveReplied
+  | EventSessionGoal
   | EventTodoUpdated
   | EventSessionStatus
   | EventSessionIdle
-  | EventSessionGoal
   | EventSessionCompacted
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
-  | EventVcsBranchUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventPtyCreated
@@ -2795,6 +3167,231 @@ export type Event =
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
+
+export type BackgroundJobSummary = {
+  id: string
+  sessionID: string
+  kind: string
+  source: string
+  title: string
+  status: "running" | "completed" | "failed" | "cancelled"
+  cwd: string
+  payload: {
+    [key: string]: unknown
+  }
+  env?: {
+    [key: string]: string
+  }
+  pid?: number
+  exitCode?: number
+  error?: string
+  sourceMessageID?: string
+  sourceToolCallID?: string
+  recovery?: {
+    [key: string]: unknown
+  }
+  metadata?: {
+    [key: string]: unknown
+  }
+  lastLogAt?: number
+  completedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type BackgroundJobLog = {
+  id: number
+  jobID: string
+  sessionID: string
+  seq: number
+  stream: "stdout" | "stderr" | "system"
+  text: string
+  at: number
+}
+
+export type BackgroundJobCancel = {
+  code: "already_terminal" | "unmanaged_running" | "cancelled" | "reconciled_missing_process"
+  changed: boolean
+  message: string
+  job: BackgroundJobSummary
+}
+
+export type BackgroundJobReconcile = {
+  code: "already_terminal" | "unmanaged_running" | "still_running" | "reconciled_missing_process"
+  changed: boolean
+  message: string
+  job: BackgroundJobSummary
+}
+
+export type PluginManifestSummary = {
+  id?: string
+  name?: string
+  version?: string
+  description?: string
+  category?: "tool" | "provider" | "integration" | "ui" | "theme" | "runtime" | "mixed"
+  trust?: string
+  apiVersion?: string
+  capabilities?: Array<string>
+  lfcodeRange?: string
+  runtimeDependencies?: Array<{
+    id: string
+    version?: string
+    required?: boolean
+  }>
+}
+
+export type PluginTargetStatus = {
+  status: "ready" | "missing" | "unresolved" | "error"
+  target?: string
+  entry?: string
+  message?: string
+}
+
+export type PluginRuntimeStatus = {
+  id: string
+  lifecycle: "active" | "disabled" | "degraded"
+  error?: string
+}
+
+export type PluginInspect = {
+  spec: string
+  scope: "global" | "local"
+  source: "file" | "npm" | "managed"
+  declaredIn: string
+  packageName?: string
+  enabled: boolean
+  manifest?: PluginManifestSummary
+  compatible: boolean
+  compatibilityMessage?: string
+  server: PluginTargetStatus
+  tui: PluginTargetStatus
+  runtime?: PluginRuntimeStatus
+}
+
+export type PluginLibraryRecord = {
+  id: string
+  name: string
+  version: string
+  description?: string
+  category: "tool" | "provider" | "integration" | "ui" | "theme" | "runtime" | "mixed"
+  capabilities: Array<string>
+  trust: "bundled" | "official" | "dev-local" | "external"
+  apiVersion: string
+  lfcodeRange?: string
+  entrypoints: Array<string>
+  runtimeDependencies: Array<{
+    id: string
+    version?: string
+    required?: boolean
+  }>
+  dependencies: Array<{
+    name: string
+    requested: string
+    version?: string
+    integrity?: string
+    optional: boolean
+  }>
+  source: {
+    type: "npm" | "directory" | "zip" | "generated" | "bundled" | "internal"
+    label: string
+    digest: string
+  }
+  files: {
+    count: number
+    bytes: number
+  }
+  operation: "install" | "replace" | "unchanged"
+  warnings: Array<string>
+  installedAt: number
+  enabled: boolean
+  spec: string
+}
+
+export type PluginLibraryReport = {
+  id: string
+  name: string
+  version: string
+  description?: string
+  category: "tool" | "provider" | "integration" | "ui" | "theme" | "runtime" | "mixed"
+  capabilities: Array<string>
+  trust: "bundled" | "official" | "dev-local" | "external"
+  apiVersion: string
+  lfcodeRange?: string
+  entrypoints: Array<string>
+  runtimeDependencies: Array<{
+    id: string
+    version?: string
+    required?: boolean
+  }>
+  dependencies: Array<{
+    name: string
+    requested: string
+    version?: string
+    integrity?: string
+    optional: boolean
+  }>
+  source: {
+    type: "npm" | "directory" | "zip" | "generated" | "bundled" | "internal"
+    label: string
+    digest: string
+  }
+  files: {
+    count: number
+    bytes: number
+  }
+  operation: "install" | "replace" | "unchanged"
+  warnings: Array<string>
+}
+
+export type PluginLibraryPreview = {
+  token: string
+  expiresAt: number
+  report: PluginLibraryReport
+}
+
+export type PluginLibraryPreviewInput = {
+  source: "npm" | "directory" | "zip"
+  path: string
+}
+
+export type PluginLibraryCommitInput = {
+  token: string
+}
+
+export type PluginLibraryToggleResult = {
+  spec: string
+  enabled: boolean
+}
+
+export type PluginLibraryToggleInput = {
+  spec: string
+  enabled: boolean
+}
+
+export type PluginLibraryUninstallResult = {
+  spec: string
+  uninstalled: true
+}
+
+export type PluginLibrarySpecInput = {
+  spec: string
+}
+
+export type PluginLibraryExportResult = {
+  file: string
+  bytes: number
+  files: number
+}
+
+export type PluginLibraryExportInput = {
+  spec: string
+  output: string
+}
+
+export type PluginToggle = {
+  spec: string
+  enabled: boolean
+}
 
 export type McpStatusConnected = {
   status: "connected"
@@ -2843,14 +3440,6 @@ export type VcsInfo = {
   default_branch?: string
 }
 
-export type VcsFileDiff = {
-  file: string
-  patch: string
-  additions: number
-  deletions: number
-  status?: "added" | "deleted" | "modified"
-}
-
 export type Command = {
   name: string
   description?: string
@@ -2886,18 +3475,230 @@ export type Agent = {
   toolAllowlist?: Array<string>
 }
 
-export type LspStatus = {
-  id: string
-  name: string
-  root: string
-  status: "connected" | "error"
-}
-
 export type FormatterStatus = {
   name: string
   extensions: Array<string>
   enabled: boolean
 }
+
+export type GlobalMaintenanceGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/maintenance"
+}
+
+export type GlobalMaintenanceGetResponses = {
+  /**
+   * Memory maintenance state
+   */
+  200: MaintenanceState
+}
+
+export type GlobalMaintenanceGetResponse = GlobalMaintenanceGetResponses[keyof GlobalMaintenanceGetResponses]
+
+export type GlobalMaintenanceRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: number
+  }
+  url: "/global/maintenance/runs"
+}
+
+export type GlobalMaintenanceRunsResponses = {
+  /**
+   * Maintenance runs
+   */
+  200: Array<MaintenanceRun>
+}
+
+export type GlobalMaintenanceRunsResponse = GlobalMaintenanceRunsResponses[keyof GlobalMaintenanceRunsResponses]
+
+export type GlobalMaintenanceSchedulerGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/maintenance/scheduler"
+}
+
+export type GlobalMaintenanceSchedulerGetResponses = {
+  /**
+   * Maintenance scheduler state
+   */
+  200: MaintenanceSchedulerState
+}
+
+export type GlobalMaintenanceSchedulerGetResponse =
+  GlobalMaintenanceSchedulerGetResponses[keyof GlobalMaintenanceSchedulerGetResponses]
+
+export type GlobalMaintenanceSchedulerUpdateData = {
+  body?: {
+    enabled: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/maintenance/scheduler"
+}
+
+export type GlobalMaintenanceSchedulerUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalMaintenanceSchedulerUpdateError =
+  GlobalMaintenanceSchedulerUpdateErrors[keyof GlobalMaintenanceSchedulerUpdateErrors]
+
+export type GlobalMaintenanceSchedulerUpdateResponses = {
+  /**
+   * Maintenance scheduler state
+   */
+  200: MaintenanceSchedulerState
+}
+
+export type GlobalMaintenanceSchedulerUpdateResponse =
+  GlobalMaintenanceSchedulerUpdateResponses[keyof GlobalMaintenanceSchedulerUpdateResponses]
+
+export type GlobalMaintenanceCandidatesData = {
+  body?: never
+  path?: never
+  query?: {
+    status?: "new" | "approved" | "rejected" | "applied" | "stale"
+    limit?: number
+  }
+  url: "/global/maintenance/candidates"
+}
+
+export type GlobalMaintenanceCandidatesResponses = {
+  /**
+   * Maintenance candidates
+   */
+  200: Array<MaintenanceCandidate>
+}
+
+export type GlobalMaintenanceCandidatesResponse =
+  GlobalMaintenanceCandidatesResponses[keyof GlobalMaintenanceCandidatesResponses]
+
+export type GlobalMaintenanceCandidateUpdateData = {
+  body?: {
+    status: "approved" | "rejected" | "stale"
+  }
+  path: {
+    candidateID: string
+  }
+  query?: never
+  url: "/global/maintenance/candidates/{candidateID}/status"
+}
+
+export type GlobalMaintenanceCandidateUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalMaintenanceCandidateUpdateError =
+  GlobalMaintenanceCandidateUpdateErrors[keyof GlobalMaintenanceCandidateUpdateErrors]
+
+export type GlobalMaintenanceCandidateUpdateResponses = {
+  /**
+   * Candidate status updated
+   */
+  200: MaintenanceCandidate
+}
+
+export type GlobalMaintenanceCandidateUpdateResponse =
+  GlobalMaintenanceCandidateUpdateResponses[keyof GlobalMaintenanceCandidateUpdateResponses]
+
+export type GlobalMaintenanceCandidateHistoryData = {
+  body?: never
+  path: {
+    candidateID: string
+  }
+  query?: never
+  url: "/global/maintenance/candidates/{candidateID}/history"
+}
+
+export type GlobalMaintenanceCandidateHistoryResponses = {
+  /**
+   * Candidate history
+   */
+  200: Array<MaintenanceCandidateEvent>
+}
+
+export type GlobalMaintenanceCandidateHistoryResponse =
+  GlobalMaintenanceCandidateHistoryResponses[keyof GlobalMaintenanceCandidateHistoryResponses]
+
+export type GlobalMaintenanceCandidateApplyData = {
+  body?: never
+  path: {
+    candidateID: string
+  }
+  query?: never
+  url: "/global/maintenance/candidates/{candidateID}/apply"
+}
+
+export type GlobalMaintenanceCandidateApplyErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalMaintenanceCandidateApplyError =
+  GlobalMaintenanceCandidateApplyErrors[keyof GlobalMaintenanceCandidateApplyErrors]
+
+export type GlobalMaintenanceCandidateApplyResponses = {
+  /**
+   * Applied maintenance candidate
+   */
+  200: MaintenanceCandidate
+}
+
+export type GlobalMaintenanceCandidateApplyResponse =
+  GlobalMaintenanceCandidateApplyResponses[keyof GlobalMaintenanceCandidateApplyResponses]
+
+export type GlobalMaintenanceRunData = {
+  body?: {
+    sessionID: string
+    jobKind?: "full" | "dream" | "distill"
+  }
+  path?: never
+  query?: never
+  url: "/global/maintenance/run"
+}
+
+export type GlobalMaintenanceRunErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalMaintenanceRunError = GlobalMaintenanceRunErrors[keyof GlobalMaintenanceRunErrors]
+
+export type GlobalMaintenanceRunResponses = {
+  /**
+   * Maintenance run
+   */
+  200: MaintenanceRun
+}
+
+export type GlobalMaintenanceRunResponse = GlobalMaintenanceRunResponses[keyof GlobalMaintenanceRunResponses]
 
 export type GlobalHealthData = {
   body?: never
@@ -2975,6 +3776,341 @@ export type GlobalConfigUpdateResponses = {
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
 
+export type GlobalPersonalizationGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/personalization"
+}
+
+export type GlobalPersonalizationGetResponses = {
+  /**
+   * Get global personalization info
+   */
+  200: GlobalPersonalization
+}
+
+export type GlobalPersonalizationGetResponse =
+  GlobalPersonalizationGetResponses[keyof GlobalPersonalizationGetResponses]
+
+export type GlobalPersonalizationSaveData = {
+  body?: GlobalPersonalizationSave
+  path?: never
+  query?: never
+  url: "/global/personalization"
+}
+
+export type GlobalPersonalizationSaveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalPersonalizationSaveError = GlobalPersonalizationSaveErrors[keyof GlobalPersonalizationSaveErrors]
+
+export type GlobalPersonalizationSaveResponses = {
+  /**
+   * Saved global personalization info
+   */
+  200: GlobalPersonalization
+}
+
+export type GlobalPersonalizationSaveResponse =
+  GlobalPersonalizationSaveResponses[keyof GlobalPersonalizationSaveResponses]
+
+export type GlobalRuntimeManageData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/runtime/manage"
+}
+
+export type GlobalRuntimeManageResponses = {
+  /**
+   * Runtime dependency status
+   */
+  200: RuntimeManageState
+}
+
+export type GlobalRuntimeManageResponse = GlobalRuntimeManageResponses[keyof GlobalRuntimeManageResponses]
+
+export type GlobalRuntimeInstallData = {
+  body?: {
+    id: RuntimeManageItemId
+  }
+  path?: never
+  query?: never
+  url: "/global/runtime/install"
+}
+
+export type GlobalRuntimeInstallErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalRuntimeInstallError = GlobalRuntimeInstallErrors[keyof GlobalRuntimeInstallErrors]
+
+export type GlobalRuntimeInstallResponses = {
+  /**
+   * Runtime installation result
+   */
+  200: RuntimeManageMutationResult
+}
+
+export type GlobalRuntimeInstallResponse = GlobalRuntimeInstallResponses[keyof GlobalRuntimeInstallResponses]
+
+export type GlobalRuntimeActivateData = {
+  body?: {
+    id: RuntimeManageItemId
+    target: string
+  }
+  path?: never
+  query?: never
+  url: "/global/runtime/activate"
+}
+
+export type GlobalRuntimeActivateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalRuntimeActivateError = GlobalRuntimeActivateErrors[keyof GlobalRuntimeActivateErrors]
+
+export type GlobalRuntimeActivateResponses = {
+  /**
+   * Runtime activation result
+   */
+  200: RuntimeManageMutationResult
+}
+
+export type GlobalRuntimeActivateResponse = GlobalRuntimeActivateResponses[keyof GlobalRuntimeActivateResponses]
+
+export type GlobalRuntimeUpdateData = {
+  body?: {
+    id: RuntimeManageItemId
+  }
+  path?: never
+  query?: never
+  url: "/global/runtime/update"
+}
+
+export type GlobalRuntimeUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalRuntimeUpdateError = GlobalRuntimeUpdateErrors[keyof GlobalRuntimeUpdateErrors]
+
+export type GlobalRuntimeUpdateResponses = {
+  /**
+   * Runtime update result
+   */
+  200: RuntimeManageMutationResult
+}
+
+export type GlobalRuntimeUpdateResponse = GlobalRuntimeUpdateResponses[keyof GlobalRuntimeUpdateResponses]
+
+export type GlobalRuntimeRepairData = {
+  body?: {
+    id: RuntimeManageItemId
+  }
+  path?: never
+  query?: never
+  url: "/global/runtime/repair"
+}
+
+export type GlobalRuntimeRepairErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalRuntimeRepairError = GlobalRuntimeRepairErrors[keyof GlobalRuntimeRepairErrors]
+
+export type GlobalRuntimeRepairResponses = {
+  /**
+   * Runtime repair result
+   */
+  200: RuntimeManageMutationResult
+}
+
+export type GlobalRuntimeRepairResponse = GlobalRuntimeRepairResponses[keyof GlobalRuntimeRepairResponses]
+
+export type GlobalRuntimeLogsData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: number
+    id?: RuntimeManageItemId
+  }
+  url: "/global/runtime/logs"
+}
+
+export type GlobalRuntimeLogsResponses = {
+  /**
+   * Recent runtime logs
+   */
+  200: RuntimeOperationLogState
+}
+
+export type GlobalRuntimeLogsResponse = GlobalRuntimeLogsResponses[keyof GlobalRuntimeLogsResponses]
+
+export type GlobalAppControlEventsData = {
+  body?: never
+  path?: never
+  query?: {
+    scope?: "main" | "renderer" | "server"
+    type?: string
+    limit?: number
+  }
+  url: "/global/app-control/events"
+}
+
+export type GlobalAppControlEventsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlEventsError = GlobalAppControlEventsErrors[keyof GlobalAppControlEventsErrors]
+
+export type GlobalAppControlEventsResponses = {
+  /**
+   * Recent desktop automation events
+   */
+  200: Array<{
+    id: number
+    scope: string
+    type: string
+    timestamp: number
+    data?: {
+      [key: string]: unknown
+    }
+  }>
+}
+
+export type GlobalAppControlEventsResponse = GlobalAppControlEventsResponses[keyof GlobalAppControlEventsResponses]
+
+export type GlobalAppControlDiagnosticsBundleData = {
+  body?: {
+    windowID?: number
+    eventLimit?: number
+    label?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/app-control/diagnostics-bundle"
+}
+
+export type GlobalAppControlDiagnosticsBundleErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlDiagnosticsBundleError =
+  GlobalAppControlDiagnosticsBundleErrors[keyof GlobalAppControlDiagnosticsBundleErrors]
+
+export type GlobalAppControlDiagnosticsBundleResponses = {
+  /**
+   * Desktop diagnostics bundle
+   */
+  200: {
+    state: unknown
+    events: unknown
+    capture: unknown
+  }
+}
+
+export type GlobalAppControlDiagnosticsBundleResponse =
+  GlobalAppControlDiagnosticsBundleResponses[keyof GlobalAppControlDiagnosticsBundleResponses]
+
+export type GlobalAppControlExportDiagnosticsBundleData = {
+  body?: {
+    path: string
+    windowID?: number
+    eventLimit?: number
+    label?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/app-control/diagnostics-bundle/export"
+}
+
+export type GlobalAppControlExportDiagnosticsBundleErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlExportDiagnosticsBundleError =
+  GlobalAppControlExportDiagnosticsBundleErrors[keyof GlobalAppControlExportDiagnosticsBundleErrors]
+
+export type GlobalAppControlExportDiagnosticsBundleResponses = {
+  /**
+   * Exported desktop diagnostics bundle
+   */
+  200: {
+    path: string
+    capturePath?: string
+  }
+}
+
+export type GlobalAppControlExportDiagnosticsBundleResponse =
+  GlobalAppControlExportDiagnosticsBundleResponses[keyof GlobalAppControlExportDiagnosticsBundleResponses]
+
+export type GlobalAppControlGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/app-control"
+}
+
+export type GlobalAppControlGetResponses = {
+  /**
+   * Get global app control info
+   */
+  200: GlobalAppControl
+}
+
+export type GlobalAppControlGetResponse = GlobalAppControlGetResponses[keyof GlobalAppControlGetResponses]
+
+export type GlobalAppControlSaveData = {
+  body?: GlobalAppControlSave
+  path?: never
+  query?: never
+  url: "/global/app-control"
+}
+
+export type GlobalAppControlSaveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlSaveError = GlobalAppControlSaveErrors[keyof GlobalAppControlSaveErrors]
+
+export type GlobalAppControlSaveResponses = {
+  /**
+   * Saved global app control info
+   */
+  200: GlobalAppControl
+}
+
+export type GlobalAppControlSaveResponse = GlobalAppControlSaveResponses[keyof GlobalAppControlSaveResponses]
+
 export type GlobalConfigRemoveCustomProviderData = {
   body?: never
   path: {
@@ -3003,6 +4139,38 @@ export type GlobalConfigRemoveCustomProviderResponses = {
 
 export type GlobalConfigRemoveCustomProviderResponse =
   GlobalConfigRemoveCustomProviderResponses[keyof GlobalConfigRemoveCustomProviderResponses]
+
+export type GlobalConfigUpsertCustomProviderData = {
+  body?: {
+    provider: ProviderConfig
+    key?: string
+  }
+  path: {
+    providerID: string
+  }
+  query?: never
+  url: "/global/config/custom-provider/{providerID}"
+}
+
+export type GlobalConfigUpsertCustomProviderErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalConfigUpsertCustomProviderError =
+  GlobalConfigUpsertCustomProviderErrors[keyof GlobalConfigUpsertCustomProviderErrors]
+
+export type GlobalConfigUpsertCustomProviderResponses = {
+  /**
+   * Successfully saved custom provider
+   */
+  200: Config
+}
+
+export type GlobalConfigUpsertCustomProviderResponse =
+  GlobalConfigUpsertCustomProviderResponses[keyof GlobalConfigUpsertCustomProviderResponses]
 
 export type GlobalDisposeData = {
   body?: never
@@ -4635,6 +5803,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    delivery?: "default" | "steer"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -4850,6 +6019,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    delivery?: "default" | "steer"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -4898,6 +6068,13 @@ export type SessionCommandData = {
       mime: string
       filename?: string
       url: string
+      blob?: {
+        mode: "blob"
+        sha256: string
+        bytes: number
+        path: string
+        mime: string
+      }
       source?: FilePartSource
     }>
   }
@@ -5160,6 +6337,41 @@ export type SessionActorsResponses = {
    */
   200: unknown
 }
+
+export type SessionDeleteActorData = {
+  body?: never
+  path: {
+    sessionID: string
+    actorID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/actors/{actorID}"
+}
+
+export type SessionDeleteActorErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionDeleteActorError = SessionDeleteActorErrors[keyof SessionDeleteActorErrors]
+
+export type SessionDeleteActorResponses = {
+  /**
+   * Successfully deleted actor
+   */
+  200: boolean
+}
+
+export type SessionDeleteActorResponse = SessionDeleteActorResponses[keyof SessionDeleteActorResponses]
 
 export type PermissionReplyData = {
   body?: {
@@ -5518,6 +6730,159 @@ export type ProviderAuthResponses = {
 
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
 
+export type ProviderModelDetectData = {
+  body?: never
+  path: {
+    /**
+     * Provider ID
+     */
+    providerID: string
+    /**
+     * Model ID
+     */
+    modelID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/{providerID}/models/{modelID}/detect"
+}
+
+export type ProviderModelDetectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProviderModelDetectError = ProviderModelDetectErrors[keyof ProviderModelDetectErrors]
+
+export type ProviderModelDetectResponses = {
+  /**
+   * Detected model capabilities
+   */
+  200: {
+    detected: {
+      id?: string
+      name?: string
+      family?: string
+      release_date?: string
+      protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
+      attachment?: boolean
+      reasoning?: boolean
+      temperature?: boolean
+      tool_call?: boolean
+      capabilities?: {
+        text?: boolean
+        audio?: boolean
+        image?: boolean
+        video?: boolean
+        pdf?: boolean
+        attachment?: boolean
+        reasoning?: boolean
+        temperature?: boolean
+        tool_call?: boolean
+        toolcall?: boolean
+        native_web?: boolean
+        patch_editing?: boolean
+        input?:
+          | {
+              text?: boolean
+              audio?: boolean
+              image?: boolean
+              video?: boolean
+              pdf?: boolean
+            }
+          | Array<"text" | "audio" | "image" | "video" | "pdf">
+        output?:
+          | {
+              text?: boolean
+              audio?: boolean
+              image?: boolean
+              video?: boolean
+              pdf?: boolean
+            }
+          | Array<"text" | "audio" | "image" | "video" | "pdf">
+        modalities?: {
+          input?: Array<"text" | "audio" | "image" | "video" | "pdf">
+          output?: Array<"text" | "audio" | "image" | "video" | "pdf">
+        }
+      }
+      interleaved?:
+        | true
+        | {
+            field: "reasoning_content" | "reasoning_details"
+          }
+      cost?: {
+        input: number
+        output: number
+        cache_read?: number
+        cache_write?: number
+        context_over_200k?: {
+          input: number
+          output: number
+          cache_read?: number
+          cache_write?: number
+        }
+      }
+      limit?: {
+        context: number
+        input?: number
+        output: number
+      }
+      modalities?: {
+        input: Array<"text" | "audio" | "image" | "video" | "pdf">
+        output: Array<"text" | "audio" | "image" | "video" | "pdf">
+      }
+      experimental?: boolean
+      status?: "alpha" | "beta" | "deprecated"
+      /**
+       * Prompt-cache breakpoint TTL for Anthropic/OpenRouter. '1h' keeps the cached prefix alive for one hour (2x write cost) instead of the 5m default. Ignored by providers whose SDK doesn't support a cache TTL.
+       */
+      cachePromptTTL?: "5m" | "1h"
+      provider?: {
+        npm?: string
+        api?: string
+        protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
+      }
+      options?: {
+        [key: string]: unknown
+      }
+      headers?: {
+        [key: string]: string
+      }
+      request?: {
+        variant?: string
+        variantGroup?: "standard" | "extended" | "deepseek" | "custom"
+        variantOptions?: Array<string>
+      }
+      /**
+       * Variant-specific configuration
+       */
+      variants?: {
+        [key: string]: {
+          /**
+           * Disable this variant for the model
+           */
+          disabled?: boolean
+          [key: string]: unknown | boolean | undefined
+        }
+      }
+      variantGroup?: "standard" | "extended" | "deepseek" | "custom"
+      variantOptions?: Array<string>
+    }
+    saved: boolean
+    warnings: Array<string>
+  }
+}
+
+export type ProviderModelDetectResponse = ProviderModelDetectResponses[keyof ProviderModelDetectResponses]
+
 export type ProviderOauthAuthorizeData = {
   body?: {
     /**
@@ -5702,6 +7067,268 @@ export type SyncHistoryListResponses = {
 
 export type SyncHistoryListResponse = SyncHistoryListResponses[keyof SyncHistoryListResponses]
 
+export type CppPrepareTerminalRunData = {
+  body?: {
+    path: string
+    args?: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/cpp/prepare-terminal-run"
+}
+
+export type CppPrepareTerminalRunResponses = {
+  /**
+   * Prepared terminal run payload
+   */
+  200: {
+    command: string
+    cwd: string
+    sourcePath: string
+    outputPath: string
+    terminalTitle: string
+  }
+}
+
+export type CppPrepareTerminalRunResponse = CppPrepareTerminalRunResponses[keyof CppPrepareTerminalRunResponses]
+
+export type LspStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp"
+}
+
+export type LspStatusResponses = {
+  /**
+   * LSP server status
+   */
+  200: Array<LspStatus>
+}
+
+export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
+
+export type LspQueryData = {
+  body?:
+    | {
+        kind: "diagnostics"
+        path: string
+        text: string
+      }
+    | {
+        kind: "documentSymbol"
+        path: string
+        text: string
+      }
+    | {
+        kind: "hover"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "completion"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+        triggerCharacter?: string
+        maxItems?: number
+      }
+    | {
+        kind: "signatureHelp"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+        triggerCharacter?: string
+      }
+    | {
+        kind: "prepareRename"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "rename"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+        newName: string
+      }
+    | {
+        kind: "formatting"
+        path: string
+        text: string
+        options: {
+          tabSize: number
+          insertSpaces: boolean
+          trimTrailingWhitespace?: boolean
+          insertFinalNewline?: boolean
+          trimFinalNewlines?: boolean
+        }
+      }
+    | {
+        kind: "rangeFormatting"
+        path: string
+        text: string
+        range: {
+          start: {
+            line: number
+            character: number
+          }
+          end: {
+            line: number
+            character: number
+          }
+        }
+        options: {
+          tabSize: number
+          insertSpaces: boolean
+          trimTrailingWhitespace?: boolean
+          insertFinalNewline?: boolean
+          trimFinalNewlines?: boolean
+        }
+      }
+    | {
+        kind: "codeAction"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+        range: {
+          start: {
+            line: number
+            character: number
+          }
+          end: {
+            line: number
+            character: number
+          }
+        }
+        diagnostics?: Array<unknown>
+        only?: string
+      }
+    | {
+        kind: "executeCommand"
+        path: string
+        text: string
+        command: string
+        arguments?: Array<unknown>
+      }
+    | {
+        kind: "declaration"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "definition"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "typeDefinition"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "references"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "implementation"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "documentHighlights"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "incomingCalls"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+    | {
+        kind: "outgoingCalls"
+        path: string
+        text: string
+        position: {
+          line: number
+          character: number
+        }
+      }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/query"
+}
+
+export type LspQueryResponses = {
+  /**
+   * LSP query result
+   */
+  200: {
+    supported: boolean
+    result?: unknown
+  }
+}
+
+export type LspQueryResponse = LspQueryResponses[keyof LspQueryResponses]
+
 export type FindTextData = {
   body?: never
   path?: never
@@ -5808,6 +7435,7 @@ export type FileReadData = {
     directory?: string
     workspace?: string
     path: string
+    with_diff?: "true" | "false"
   }
   url: "/file/content"
 }
@@ -5821,24 +7449,29 @@ export type FileReadResponses = {
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
 
-export type FileStatusData = {
-  body?: never
+export type FileWriteData = {
+  body?: {
+    path: string
+    content: string
+    expectedChecksum?: string
+    createParents?: boolean
+  }
   path?: never
   query?: {
     directory?: string
     workspace?: string
   }
-  url: "/file/status"
+  url: "/file/content"
 }
 
-export type FileStatusResponses = {
+export type FileWriteResponses = {
   /**
-   * File status
+   * Updated file content
    */
-  200: Array<File>
+  200: FileContent
 }
 
-export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
 
 export type EventSubscribeData = {
   body?: never
@@ -6186,6 +7819,325 @@ export type SkillsCreateResponses = {
 }
 
 export type SkillsCreateResponse = SkillsCreateResponses[keyof SkillsCreateResponses]
+
+export type BackgroundJobListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    sessionID?: string
+    status?: "running" | "completed" | "failed" | "cancelled"
+  }
+  url: "/background-job"
+}
+
+export type BackgroundJobListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type BackgroundJobListError = BackgroundJobListErrors[keyof BackgroundJobListErrors]
+
+export type BackgroundJobListResponses = {
+  /**
+   * Background job summaries
+   */
+  200: Array<BackgroundJobSummary>
+}
+
+export type BackgroundJobListResponse = BackgroundJobListResponses[keyof BackgroundJobListResponses]
+
+export type BackgroundJobGetData = {
+  body?: never
+  path: {
+    jobID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/background-job/{jobID}"
+}
+
+export type BackgroundJobGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type BackgroundJobGetError = BackgroundJobGetErrors[keyof BackgroundJobGetErrors]
+
+export type BackgroundJobGetResponses = {
+  /**
+   * Background job summary
+   */
+  200: BackgroundJobSummary
+}
+
+export type BackgroundJobGetResponse = BackgroundJobGetResponses[keyof BackgroundJobGetResponses]
+
+export type BackgroundJobLogsData = {
+  body?: never
+  path: {
+    jobID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    afterSeq?: number
+  }
+  url: "/background-job/{jobID}/log"
+}
+
+export type BackgroundJobLogsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type BackgroundJobLogsError = BackgroundJobLogsErrors[keyof BackgroundJobLogsErrors]
+
+export type BackgroundJobLogsResponses = {
+  /**
+   * Background job logs
+   */
+  200: Array<BackgroundJobLog>
+}
+
+export type BackgroundJobLogsResponse = BackgroundJobLogsResponses[keyof BackgroundJobLogsResponses]
+
+export type BackgroundJobCancelData = {
+  body?: never
+  path: {
+    jobID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/background-job/{jobID}/cancel"
+}
+
+export type BackgroundJobCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type BackgroundJobCancelError = BackgroundJobCancelErrors[keyof BackgroundJobCancelErrors]
+
+export type BackgroundJobCancelResponses = {
+  /**
+   * Background job cancel result
+   */
+  200: BackgroundJobCancel
+}
+
+export type BackgroundJobCancelResponse = BackgroundJobCancelResponses[keyof BackgroundJobCancelResponses]
+
+export type BackgroundJobReconcileData = {
+  body?: never
+  path: {
+    jobID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/background-job/{jobID}/reconcile"
+}
+
+export type BackgroundJobReconcileErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type BackgroundJobReconcileError = BackgroundJobReconcileErrors[keyof BackgroundJobReconcileErrors]
+
+export type BackgroundJobReconcileResponses = {
+  /**
+   * Background job reconcile result
+   */
+  200: BackgroundJobReconcile
+}
+
+export type BackgroundJobReconcileResponse = BackgroundJobReconcileResponses[keyof BackgroundJobReconcileResponses]
+
+export type PluginListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin"
+}
+
+export type PluginListResponses = {
+  /**
+   * Plugin inspect list
+   */
+  200: Array<PluginInspect>
+}
+
+export type PluginListResponse = PluginListResponses[keyof PluginListResponses]
+
+export type PluginLibraryListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library"
+}
+
+export type PluginLibraryListResponses = {
+  /**
+   * Managed plugin list
+   */
+  200: Array<PluginLibraryRecord>
+}
+
+export type PluginLibraryListResponse = PluginLibraryListResponses[keyof PluginLibraryListResponses]
+
+export type PluginLibraryPreviewData = {
+  body: PluginLibraryPreviewInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library/preview"
+}
+
+export type PluginLibraryPreviewResponses = {
+  /**
+   * Plugin import preview
+   */
+  200: PluginLibraryPreview
+}
+
+export type PluginLibraryPreviewResponse = PluginLibraryPreviewResponses[keyof PluginLibraryPreviewResponses]
+
+export type PluginLibraryCommitData = {
+  body: PluginLibraryCommitInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library/commit"
+}
+
+export type PluginLibraryCommitResponses = {
+  /**
+   * Installed plugin
+   */
+  200: PluginLibraryRecord
+}
+
+export type PluginLibraryCommitResponse = PluginLibraryCommitResponses[keyof PluginLibraryCommitResponses]
+
+export type PluginLibraryToggleData = {
+  body: PluginLibraryToggleInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library/toggle"
+}
+
+export type PluginLibraryToggleResponses = {
+  /**
+   * Managed plugin state
+   */
+  200: PluginLibraryToggleResult
+}
+
+export type PluginLibraryToggleResponse = PluginLibraryToggleResponses[keyof PluginLibraryToggleResponses]
+
+export type PluginLibraryUninstallData = {
+  body: PluginLibrarySpecInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library/uninstall"
+}
+
+export type PluginLibraryUninstallResponses = {
+  /**
+   * Uninstall result
+   */
+  200: PluginLibraryUninstallResult
+}
+
+export type PluginLibraryUninstallResponse = PluginLibraryUninstallResponses[keyof PluginLibraryUninstallResponses]
+
+export type PluginLibraryExportData = {
+  body: PluginLibraryExportInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/library/export"
+}
+
+export type PluginLibraryExportResponses = {
+  /**
+   * Export result
+   */
+  200: PluginLibraryExportResult
+}
+
+export type PluginLibraryExportResponse = PluginLibraryExportResponses[keyof PluginLibraryExportResponses]
+
+export type PluginToggleData = {
+  body?: PluginToggle
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/toggle"
+}
+
+export type PluginToggleResponses = {
+  /**
+   * Plugin toggle completed
+   */
+  200: PluginToggle
+}
+
+export type PluginToggleResponse = PluginToggleResponses[keyof PluginToggleResponses]
 
 export type McpManageListData = {
   body?: never
@@ -6681,7 +8633,13 @@ export type UsageGetData = {
     range?: "today" | "7d" | "30d" | "all"
     provider?: string
     model?: string
+    project?: string
+    session?: string
+    status?: "completed" | "error" | "aborted"
+    agent_kind?: "main" | "subagent"
     source?: "lfcode"
+    submit_to_first_delta?: number
+    pre_stream?: number
     search?: string
     limit?: number
     cursor?: number
@@ -6754,6 +8712,8 @@ export type UsageGetResponses = {
       cost: number
       duration: number | null
       ttft: number | null
+      submitToFirstDelta: number | null
+      preStream: number | null
       status: "completed" | "error" | "aborted"
       source: "lfcode"
     }>
@@ -7178,26 +9138,6 @@ export type VcsGetResponses = {
 
 export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
 
-export type VcsDiffData = {
-  body?: never
-  path?: never
-  query: {
-    directory?: string
-    workspace?: string
-    mode: "git" | "branch"
-  }
-  url: "/vcs/diff"
-}
-
-export type VcsDiffResponses = {
-  /**
-   * VCS diff
-   */
-  200: Array<VcsFileDiff>
-}
-
-export type VcsDiffResponse = VcsDiffResponses[keyof VcsDiffResponses]
-
 export type CommandListData = {
   body?: never
   path?: never
@@ -7255,30 +9195,12 @@ export type AppSkillsResponses = {
     description: string
     location: string
     content: string
+    triggers?: Array<string>
     hidden?: boolean
   }>
 }
 
 export type AppSkillsResponse = AppSkillsResponses[keyof AppSkillsResponses]
-
-export type LspStatusData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/lsp"
-}
-
-export type LspStatusResponses = {
-  /**
-   * LSP server status
-   */
-  200: Array<LspStatus>
-}
-
-export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
 
 export type FormatterStatusData = {
   body?: never

@@ -1,0 +1,1 @@
+Inspect archive and office-document contents without treating them as opaque binary files. Use this for zip/docx/xlsx/pptx style files when you need an entry listing, a quick summary, or extracted text instead of a full generic read.

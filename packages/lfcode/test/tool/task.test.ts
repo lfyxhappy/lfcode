@@ -9,6 +9,7 @@ import { MessageID, SessionID } from "../../src/session/schema"
 import { TaskRegistry } from "../../src/task/registry"
 import { Truncate } from "../../src/tool"
 import { TaskTool } from "../../src/tool/task"
+import { transformedToolSchema } from "../../src/tool/registry"
 import { shellWrap } from "../../src/tool/shell-wrap"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -142,6 +143,61 @@ describe("task tool", () => {
           tool.execute({ operation: { action: "progress", id: t.id } } as any, ctx(sess.id)),
         )
         expect(exit._tag).toBe("Failure")
+      }),
+    ),
+  )
+
+  it.live("create ignores a model-supplied id because the registry allocates it", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const sess = yield* session.create({ title: "Test" })
+        const info = yield* TaskTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute(
+          { operation: { action: "create", id: "T99", summary: "Generated id" } } as any,
+          ctx(sess.id),
+        )
+        expect(result.metadata.id).toBe("T1")
+        expect(result.output).toContain("Created T1")
+      }),
+    ),
+  )
+
+  it.live("create still rejects missing summary after id normalization", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const sess = yield* session.create({ title: "Test" })
+        const info = yield* TaskTool
+        const tool = yield* info.init()
+        const exit = yield* Effect.exit(
+          tool.execute({ operation: { action: "create", id: "T99" } } as any, ctx(sess.id)),
+        )
+        expect(exit._tag).toBe("Failure")
+        if (exit._tag === "Failure") {
+          expect(String(exit.cause)).toContain("summary")
+          expect(String(exit.cause)).toContain("task id is generated")
+        }
+      }),
+    ),
+  )
+
+  it.live("emits a flat nested operation schema for openai-compatible models", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const info = yield* TaskTool
+        const tool = yield* info.init()
+        const schema = transformedToolSchema(
+          { providerID: "jws", api: { id: "grok-4.5", npm: "@ai-sdk/openai-compatible" } } as any,
+          tool.parameters,
+        ) as any
+        expect(schema.properties.operation.type).toBe("object")
+        expect(schema.properties.operation.anyOf).toBeUndefined()
+        expect(schema.properties.operation.oneOf).toBeUndefined()
+        expect(schema.properties.operation.required).toEqual(["action"])
+        expect(schema.properties.operation.properties.action.enum).toContain("create")
+        expect(schema.properties.operation.properties.action.enum).toContain("done")
       }),
     ),
   )

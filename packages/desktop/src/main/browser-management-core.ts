@@ -19,6 +19,16 @@ export function matchSavedBrowserLoginsByOrigin(logins: SavedBrowserLoginRecord[
   return logins.filter((item) => item.origin === origin)
 }
 
+export function browserAutofillOriginMatches(senderURL: string, claimedOrigin: string) {
+  try {
+    const url = new URL(senderURL)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false
+    return url.origin === claimedOrigin
+  } catch {
+    return false
+  }
+}
+
 export function upsertSavedBrowserLoginRecords(
   current: SavedBrowserLoginRecord[],
   input: SavedBrowserLoginUpsert,

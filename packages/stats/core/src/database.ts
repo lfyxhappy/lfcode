@@ -40,7 +40,7 @@ export type Drizzle = ReturnType<typeof makeDrizzle>
 export class DrizzleClient extends Context.Service<DrizzleClient, Drizzle>()("@lfcode/stats/DrizzleClient") {
   static readonly layer: Layer.Layer<DrizzleClient, never, DatabaseConfig> = Layer.effect(
     DrizzleClient,
-    Effect.map(DatabaseConfig, makeDrizzle),
+    Effect.map(DatabaseConfig.asEffect(), makeDrizzle),
   )
 }
 

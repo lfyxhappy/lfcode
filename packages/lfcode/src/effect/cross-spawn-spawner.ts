@@ -97,7 +97,7 @@ type ExitSignal = Deferred.Deferred<readonly [code: number | null, signal: NodeJ
 export const make = Effect.gen(function* () {
   const rawFs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const access = (target: string) => Effect.suspend(() => rawFs.access(target) as never)
+  const access = (target: string) => Effect.suspend(() => rawFs.access(target))
 
   const cwd = Effect.fnUntraced(function* (opts: ChildProcess.CommandOptions) {
     if (Predicate.isUndefined(opts.cwd)) return undefined

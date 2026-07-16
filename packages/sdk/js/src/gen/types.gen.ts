@@ -464,6 +464,11 @@ export type SessionStatus =
       type: "busy"
       message?: string
     }
+  | {
+      type: "waiting"
+      mode: "interactive-html"
+      message?: string
+    }
 
 export type EventSessionStatus = {
   type: "session.status"

@@ -1,5 +1,6 @@
 import path from "path"
 import * as Process from "./process"
+import { Shell } from "@/shell/shell"
 
 export async function extractZip(zipPath: string, destDir: string) {
   if (process.platform === "win32") {
@@ -7,7 +8,7 @@ export async function extractZip(zipPath: string, destDir: string) {
     const winDestDir = path.resolve(destDir)
     // $global:ProgressPreference suppresses PowerShell's blue progress bar popup
     const cmd = `$global:ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '${winZipPath}' -DestinationPath '${winDestDir}' -Force`
-    await Process.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd])
+    await Process.run([Shell.resolvePowerShell(), "-NoProfile", "-NonInteractive", "-Command", cmd])
     return
   }
 

@@ -1,10 +1,11 @@
 import { useParams } from "@solidjs/router"
 import { createMemo } from "solid-js"
 import { useLayout } from "@/context/layout"
+import { createSessionStorageKey } from "@/utils/session-key"
 
 export const useSessionKey = () => {
   const params = useParams()
-  const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
+  const sessionKey = createMemo(() => createSessionStorageKey(params.dir, params.id))
   return { params, sessionKey }
 }
 

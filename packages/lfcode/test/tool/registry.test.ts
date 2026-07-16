@@ -43,6 +43,22 @@ describe("tool.registry", () => {
         const registry = yield* ToolRegistry.Service
         const ids = yield* registry.ids()
         expect(ids).toContain("hello")
+        const agents = yield* Agent.Service
+        const general = yield* agents.get("general")
+        if (!general) throw new Error("no general agent")
+        const visible = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: general,
+        })
+        expect(visible.find((item) => item.id === "search_tool")).toBeDefined()
+        expect(visible.find((item) => item.id === "use_tool")).toBeDefined()
+        expect(visible.find((item) => item.id === "hello")).toBeUndefined()
+        expect(visible.find((item) => item.id === "read")?.metadata).toMatchObject({
+          kind: "file",
+          namespace: "file",
+          readOnly: true,
+        })
       }),
     ),
   )
@@ -159,7 +175,53 @@ describe("tool.registry", () => {
         const ids = yield* registry.ids()
         expect(ids).not.toContain("todowrite")
         expect(ids).not.toContain("todo")
+        expect(ids).not.toContain("multiedit")
         expect(ids).toContain("task")
+        expect(ids).toContain("cpp")
+        expect(ids).toContain("runtime_manage")
+        expect(ids).toContain("file_info")
+        expect(ids).toContain("search")
+        expect(ids).toContain("tree")
+        expect(ids).toContain("archive_inspect")
+        expect(ids).toContain("replace_range")
+        expect(ids).toContain("symbol_edit")
+        expect(ids).toContain("edit_history")
+      }),
+    ),
+  )
+
+  it.live("all models expose the same patch-first public file tools", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const general = yield* agents.get("general")
+        if (!general) throw new Error("no general agent")
+
+        const patchTools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: general,
+          capabilities: { patch_editing: true },
+        })
+        const legacyTools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: general,
+          capabilities: { patch_editing: false },
+        })
+
+        for (const tools of [patchTools, legacyTools]) {
+          expect(tools.find((tool) => tool.id === "apply_patch")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "replace_range")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "symbol_edit")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "edit_history")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "search")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "write")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "edit")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "glob")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "grep")).toBeUndefined()
+        }
       }),
     ),
   )

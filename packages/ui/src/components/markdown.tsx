@@ -1,21 +1,29 @@
 import { useMarked } from "../context/marked"
 import { useI18n } from "../context/i18n"
 import { useFileReferenceContext, type FileReferenceApp } from "../context/file-reference"
-import DOMPurify from "dompurify"
 import morphdom from "morphdom"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { ComponentProps, createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, splitProps } from "solid-js"
 import { isServer } from "solid-js/web"
 import { stream } from "./markdown-stream"
 import {
+  getPlainTextPathMatch,
   inferFileReferenceKind,
   isLocalFileHref,
   isPathLike,
   looksLikeCommand,
   stripTrailingPathPunctuation,
 } from "./file-reference-path"
-import { DropdownMenu } from "./dropdown-menu"
+import { getFileReferenceEventElement } from "./markdown-file-reference"
+import { ContextMenu } from "./context-menu"
 import { AppIcon } from "./app-icon"
+import { sanitizeMarkdownHtml } from "./markdown-sanitize"
+import {
+  type HtmlComponentContext,
+  type HtmlComponentEventDetail,
+  replaceHtmlComponentFences,
+  setupHtmlComponents,
+} from "./markdown-html-component"
 
 type Entry = {
   hash: string
@@ -38,34 +46,9 @@ type FileReferenceOptions = {
 const max = 200
 const cache = new Map<string, Entry>()
 
-if (typeof window !== "undefined" && DOMPurify.isSupported) {
-  DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
-    if (!(node instanceof HTMLAnchorElement)) return
-    if (node.target !== "_blank") return
-
-    const rel = node.getAttribute("rel") ?? ""
-    const set = new Set(rel.split(/\s+/).filter(Boolean))
-    set.add("noopener")
-    set.add("noreferrer")
-    node.setAttribute("rel", Array.from(set).join(" "))
-  })
-}
-
-const config = {
-  USE_PROFILES: { html: true, mathMl: true },
-  SANITIZE_NAMED_PROPS: true,
-  FORBID_TAGS: ["style"],
-  FORBID_CONTENTS: ["style", "script"],
-}
-
 const iconPaths = {
   copy: '<path d="M6.2513 6.24935V2.91602H17.0846V13.7493H13.7513M13.7513 6.24935V17.0827H2.91797V6.24935H13.7513Z" stroke="currentColor" stroke-linecap="round"/>',
   check: '<path d="M5 11.9657L8.37838 14.7529L15 5.83398" stroke="currentColor" stroke-linecap="square"/>',
-}
-
-function sanitize(html: string) {
-  if (!DOMPurify.isSupported) return ""
-  return DOMPurify.sanitize(html, config)
 }
 
 function escape(text: string) {
@@ -85,6 +68,8 @@ type CopyLabels = {
   copy: string
   copied: string
 }
+
+export type { HtmlComponentContext, HtmlComponentEventDetail } from "./markdown-html-component"
 
 const urlPattern = /^https?:\/\/[^\s<>()`"']+$/
 
@@ -247,24 +232,30 @@ function decoratePlainTextPaths(root: HTMLDivElement, options: FileReferenceOpti
     if (walker.currentNode instanceof Text) targets.push(walker.currentNode)
   }
 
-  const pattern =
-    /(?:[A-Za-z]:[\\/][^\s<>"'`]+|(?:\.{1,2}[\\/]|\/)[^\s<>"'`]+|[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+)/gu
   for (const node of targets) {
     const text = node.textContent ?? ""
-    let match: RegExpExecArray | null
     let last = 0
     const fragment = document.createDocumentFragment()
     let changed = false
 
-    while ((match = pattern.exec(text))) {
-      const raw = match[0]
-      const value = stripTrailingPathPunctuation(raw)
-      if (!value || !isPathLike(value) || looksLikeCommand(value)) continue
+    while (last < text.length) {
+      const match = getPlainTextPathMatch(text, last)
+      if (!match) {
+        if (last < text.length) fragment.append(text.slice(last))
+        break
+      }
+
+      const value = match.value
+      if (!value || !isPathLike(value) || looksLikeCommand(value)) {
+        last = match.end
+        continue
+      }
+
       const resolved = options.resolveRelativePath?.(value) ?? value
       if (!resolved) continue
 
       changed = true
-      if (match.index > last) fragment.append(text.slice(last, match.index))
+      if (match.start > last) fragment.append(text.slice(last, match.start))
 
       const link = document.createElement("a")
       link.href = "#"
@@ -274,19 +265,18 @@ function decoratePlainTextPaths(root: HTMLDivElement, options: FileReferenceOpti
       link.setAttribute("data-display", value)
       link.textContent = value
       fragment.append(link)
-      last = match.index + raw.length
+      last = match.end
     }
 
     if (!changed) continue
-    if (last < text.length) fragment.append(text.slice(last))
     node.parentNode?.replaceChild(fragment, node)
   }
 }
 
 function setupFileReferenceActions(root: HTMLDivElement, options: FileReferenceOptions) {
   const click = (event: MouseEvent) => {
-    const element = event.target instanceof Element ? event.target.closest('[data-kind="file-ref"]') : null
-    if (!(element instanceof HTMLElement)) return
+    const element = getFileReferenceEventElement(event.target)
+    if (!element) return
     const path = element.dataset.path
     if (!path) return
     const kind = inferFileReferenceKind(element.dataset.display ?? path)
@@ -385,16 +375,27 @@ export function Markdown(
     cacheKey?: string
     streaming?: boolean
     fileReferences?: FileReferenceOptions
+    htmlComponents?: {
+      context?: HtmlComponentContext
+      onEvent?: (detail: HtmlComponentEventDetail) => void
+    }
     class?: string
     classList?: Record<string, boolean>
   },
 ) {
-  const [local, others] = splitProps(props, ["text", "cacheKey", "streaming", "fileReferences", "class", "classList"])
+  const [local, others] = splitProps(props, [
+    "text",
+    "cacheKey",
+    "streaming",
+    "fileReferences",
+    "htmlComponents",
+    "class",
+    "classList",
+  ])
   const marked = useMarked()
   const i18n = useI18n()
   const context = useFileReferenceContext()
   const [root, setRoot] = createSignal<HTMLDivElement>()
-  const [menuAnchor, setMenuAnchor] = createSignal<HTMLSpanElement>()
   const [menu, setMenu] = createSignal<ContextState>({ open: false })
   const effectiveFileReferences = createMemo<FileReferenceOptions | undefined>(() => {
     if (local.fileReferences) return local.fileReferences
@@ -436,8 +437,8 @@ export function Markdown(
             }
           }
 
-          const next = await Promise.resolve(marked.parse(block.src))
-          const safe = sanitize(next)
+          const next = await Promise.resolve(marked.parse(replaceHtmlComponentFences(block.src)))
+          const safe = sanitizeMarkdownHtml(next)
           if (key && hash) touch(key, { hash, html: safe })
           return safe
         }),
@@ -450,6 +451,7 @@ export function Markdown(
 
   let copyCleanup: (() => void) | undefined
   let fileReferenceCleanup: (() => void) | undefined
+  let htmlComponentCleanup: (() => void) | undefined
 
   createEffect(() => {
     const container = root()
@@ -497,78 +499,120 @@ export function Markdown(
       fileReferenceCleanup = undefined
     }
     if (effectiveFileReferences()?.enabled) fileReferenceCleanup = setupFileReferenceActions(container, effectiveFileReferences()!)
-  })
-
-  createEffect(() => {
-    const container = root()
-    const options = effectiveFileReferences()
-    if (!container || !options?.enabled || !options.allowContextMenu) return
-
-    const handleContextMenu = (event: MouseEvent) => {
-      const element = event.target instanceof Element ? event.target.closest('[data-kind="file-ref"]') : null
-      if (!(element instanceof HTMLElement)) return
-      const path = element.dataset.path
-      if (!path) return
-      event.preventDefault()
-      event.stopPropagation()
-      const anchor = menuAnchor()
-      if (!anchor) return
-      anchor.style.position = "fixed"
-      anchor.style.left = `${event.clientX}px`
-      anchor.style.top = `${event.clientY}px`
-      anchor.style.width = "1px"
-      anchor.style.height = "1px"
-      setMenu({
-        open: true,
-        path,
-        display: element.dataset.display,
-        kind: inferFileReferenceKind(element.dataset.display ?? path),
-      })
+    if (htmlComponentCleanup) {
+      htmlComponentCleanup()
+      htmlComponentCleanup = undefined
     }
-
-    container.addEventListener("contextmenu", handleContextMenu)
-    onCleanup(() => container.removeEventListener("contextmenu", handleContextMenu))
+    htmlComponentCleanup = setupHtmlComponents(container, {
+      labels: {
+        copy: i18n.t("ui.message.copy"),
+        copied: i18n.t("ui.message.copied"),
+        refresh: i18n.t("ui.htmlComponent.refresh"),
+        shrink: i18n.t("ui.htmlComponent.shrink"),
+        grow: i18n.t("ui.htmlComponent.grow"),
+        fit: i18n.t("ui.htmlComponent.fit"),
+        expand: i18n.t("ui.htmlComponent.expand"),
+        collapse: i18n.t("ui.htmlComponent.collapse"),
+        loading: i18n.t("ui.htmlComponent.loading"),
+        error: i18n.t("ui.htmlComponent.error"),
+      },
+      context: local.htmlComponents?.context,
+      onEvent: local.htmlComponents?.onEvent,
+    })
   })
+
+  const handleFileReferenceContextMenu = (event: MouseEvent) => {
+    const options = effectiveFileReferences()
+    if (!options?.enabled || !options.allowContextMenu) return
+    const element = getFileReferenceEventElement(event.target)
+    if (!element) {
+      setMenu({ open: false })
+      return
+    }
+    const path = element.dataset.path
+    if (!path) {
+      setMenu({ open: false })
+      return
+    }
+    // The Kobalte trigger opens later in the same contextmenu event. Populate
+    // the controlled content state first so the initial menu is never empty.
+    setMenu({
+      open: true,
+      path,
+      display: element.dataset.display,
+      kind: inferFileReferenceKind(element.dataset.display ?? path),
+    })
+  }
 
   onCleanup(() => {
     if (copyCleanup) copyCleanup()
     if (fileReferenceCleanup) fileReferenceCleanup()
+    if (htmlComponentCleanup) htmlComponentCleanup()
   })
 
   return (
     <>
-      <div
-        data-component="markdown"
-        classList={{
-          ...local.classList,
-          [local.class ?? ""]: !!local.class,
-        }}
-        ref={setRoot}
-        {...others}
-      />
-      <Show when={effectiveFileReferences()?.enabled && effectiveFileReferences()?.allowContextMenu}>
-        <DropdownMenu open={menu().open} onOpenChange={(open) => setMenu((prev) => ({ ...prev, open }))}>
-          <DropdownMenu.Trigger
-            as="span"
-            ref={setMenuAnchor}
-            style={{ position: "fixed", left: "-10000px", top: "-10000px", width: "1px", height: "1px" }}
+      <Show
+        when={effectiveFileReferences()?.enabled && effectiveFileReferences()?.allowContextMenu}
+        fallback={
+          <div
+            data-component="markdown"
+            classList={{
+              ...local.classList,
+              [local.class ?? ""]: !!local.class,
+            }}
+            ref={setRoot}
+            {...others}
           />
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content anchorRef={menuAnchor}>
+        }
+      >
+        <ContextMenu
+          onOpenChange={(open) =>
+            setMenu((prev) => ({
+              ...prev,
+              open,
+              ...(open ? {} : { path: undefined, display: undefined, kind: undefined }),
+            }))
+          }
+        >
+          <ContextMenu.Trigger as="div">
+            <div
+              data-component="markdown"
+              classList={{
+                ...local.classList,
+                [local.class ?? ""]: !!local.class,
+              }}
+              ref={setRoot}
+              on:contextmenu={handleFileReferenceContextMenu}
+              {...others}
+            />
+          </ContextMenu.Trigger>
+          <ContextMenu.Portal>
+            <ContextMenu.Content>
+              <Show when={menu().path && effectiveFileReferences()?.onPreviewPath}>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onPreviewPath?.(menu().path!)}>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.open")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
+              </Show>
+              <Show when={menu().path && effectiveFileReferences()?.onReviewPath}>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onReviewPath?.(menu().path!)}>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.reviewDiff")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
+              </Show>
               <Show when={menu().path && effectiveFileReferences()?.onOpenDefaultApp}>
-                <DropdownMenu.Item onSelect={() => effectiveFileReferences()?.onOpenDefaultApp?.(menu().path!)}>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onOpenDefaultApp?.(menu().path!)}>
                   <Show when={effectiveFileReferences()?.openWithApps?.[0]?.icon}>
                     <div class="flex size-5 shrink-0 items-center justify-center [&_[data-component=app-icon]]:size-5">
                       <AppIcon id={effectiveFileReferences()?.openWithApps?.[0]?.icon!} />
                     </div>
                   </Show>
-                  <DropdownMenu.ItemLabel>{i18n.t("ui.fileReference.openDefaultApp")}</DropdownMenu.ItemLabel>
-                </DropdownMenu.Item>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.openDefaultApp")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
               </Show>
               <Show when={menu().kind === "file" && menu().path && effectiveFileReferences()?.onOpenFolder}>
-                <DropdownMenu.Item onSelect={() => effectiveFileReferences()?.onOpenFolder?.(menu().path!)}>
-                  <DropdownMenu.ItemLabel>{i18n.t("ui.fileReference.openFolder")}</DropdownMenu.ItemLabel>
-                </DropdownMenu.Item>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onOpenFolder?.(menu().path!)}>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.openFolder")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
               </Show>
               <Show
                 when={
@@ -577,32 +621,32 @@ export function Markdown(
                   effectiveFileReferences()?.onOpenWith
                 }
               >
-                <DropdownMenu.Sub>
-                  <DropdownMenu.SubTrigger>{i18n.t("ui.fileReference.openWith")}</DropdownMenu.SubTrigger>
-                  <DropdownMenu.SubContent>
+                <ContextMenu.Sub>
+                  <ContextMenu.SubTrigger>{i18n.t("ui.fileReference.openWith")}</ContextMenu.SubTrigger>
+                  <ContextMenu.SubContent>
                     <For each={effectiveFileReferences()?.openWithApps ?? []}>
                       {(app) => (
-                        <DropdownMenu.Item onSelect={() => effectiveFileReferences()?.onOpenWith?.(menu().path!, app.openWith)}>
+                        <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onOpenWith?.(menu().path!, app.openWith)}>
                           <Show when={app.icon}>
                             <div class="flex size-5 shrink-0 items-center justify-center [&_[data-component=app-icon]]:size-5">
                               <AppIcon id={app.icon!} />
                             </div>
                           </Show>
-                          <DropdownMenu.ItemLabel>{app.label}</DropdownMenu.ItemLabel>
-                        </DropdownMenu.Item>
+                          <ContextMenu.ItemLabel>{app.label}</ContextMenu.ItemLabel>
+                        </ContextMenu.Item>
                       )}
                     </For>
-                  </DropdownMenu.SubContent>
-                </DropdownMenu.Sub>
+                  </ContextMenu.SubContent>
+                </ContextMenu.Sub>
               </Show>
               <Show when={menu().path && effectiveFileReferences()?.onCopyPath}>
-                <DropdownMenu.Item onSelect={() => effectiveFileReferences()?.onCopyPath?.(menu().path!)}>
-                  <DropdownMenu.ItemLabel>{i18n.t("ui.fileReference.copyPath")}</DropdownMenu.ItemLabel>
-                </DropdownMenu.Item>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onCopyPath?.(menu().path!)}>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.copyPath")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
               </Show>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu>
+            </ContextMenu.Content>
+          </ContextMenu.Portal>
+        </ContextMenu>
       </Show>
     </>
   )

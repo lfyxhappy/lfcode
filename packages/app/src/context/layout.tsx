@@ -8,12 +8,30 @@ import { useServer } from "./server"
 import { usePlatform } from "./platform"
 import { Project } from "@lfcode-ai/sdk/v2"
 import { Persist, persisted, removePersisted } from "@/utils/persist"
-import { decode64 } from "@/utils/base64"
 import { same } from "@/utils/same"
+import {
+  decodeSessionStorageDirectory,
+  normalizeSessionDirSlug,
+  normalizeSessionStorageKey,
+} from "@/utils/session-key"
 import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
-import { browserTab, DEFAULT_BROWSER_URL, isBrowserTab, normalizeBrowserURL } from "@/pages/session/helpers"
-import { workspaceKey } from "@/pages/layout/helpers"
+import {
+  browserTab,
+  DEFAULT_BROWSER_URL,
+  isBrowserTab,
+  isSideChatTab,
+  normalizeBrowserURL,
+  sideChatTab,
+  sideChatTabID,
+} from "@/pages/session/helpers"
+import { pinnedSessionKey, projectActivityTime, workspaceKey } from "@/pages/layout/helpers"
+import type { SessionViewportStateV3 } from "@/pages/session/scroll-snapshot"
+import {
+  migrateViewportStateV3,
+  normalizeSessionViewStateV4,
+  type SessionViewStateV4,
+} from "@/pages/session/session-view-state"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
@@ -58,9 +76,12 @@ type DetachedPanelRecord = {
 
 type SessionView = {
   scroll: Record<string, SessionScroll>
+  viewportSnapshot?: SessionViewportStateV3
+  sessionState?: SessionViewStateV4
+  turnStart?: number
+  reviewEnabled?: boolean
+  summaryCard?: boolean
   reviewOpen?: string[]
-  pendingMessage?: string
-  pendingMessageAt?: number
   browser?: Record<
     string,
     {
@@ -78,6 +99,17 @@ type SessionView = {
 }
 
 type BrowserViewState = NonNullable<SessionView["browser"]>[string]
+type SessionViewMigrationInput = {
+  scroll?: unknown
+  viewportSnapshot?: unknown
+  sessionState?: unknown
+  turnStart?: unknown
+  reviewEnabled?: unknown
+  summaryCard?: unknown
+  reviewOpen?: unknown
+  sideChat?: unknown
+  browser?: unknown
+}
 
 type TabHandoff = {
   dir: string
@@ -89,18 +121,23 @@ export type LocalProject = Partial<Project> & { worktree: string; expanded: bool
 
 export type ReviewDiffStyle = "unified" | "split"
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const sessionTabsScore = (tabs: SessionTabs) => tabs.all.length + (tabs.active ? 1 : 0)
+
 export function ensureSessionKey(key: string, touch: (key: string) => void, seed: (key: string) => void) {
-  touch(key)
-  seed(key)
-  return key
+  const normalized = normalizeSessionStorageKey(key)
+  touch(normalized)
+  seed(normalized)
+  return normalized
 }
 
-export function createSessionKeyReader(sessionKey: string | Accessor<string>, ensure: (key: string) => void) {
+export function createSessionKeyReader(sessionKey: string | Accessor<string>, ensure: (key: string) => string) {
   const key = typeof sessionKey === "function" ? sessionKey : () => sessionKey
   return () => {
     const value = key()
-    ensure(value)
-    return value
+    return ensure(value)
   }
 }
 
@@ -132,6 +169,44 @@ function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): 
   if (tab === "context") return { all: [tab, ...all.filter((x) => x !== tab)], active: tab }
   if (!all.includes(tab)) return { all: [...all, tab], active: tab }
   return { all, active: tab }
+}
+
+function nextSessionTabsForInsert(current: SessionTabs | undefined, tab: string): SessionTabs {
+  const all = current?.all ?? []
+  if (tab === "review") return { all: all.filter((x) => x !== "review"), active: current?.active }
+  if (all.includes(tab)) return { all, active: current?.active }
+  return { all: [...all, tab], active: current?.active }
+}
+
+function getLegacySideChatSessionID(view: unknown, tab: string) {
+  const remap = (tab: string) => {
+    const id = sideChatTabID(tab)
+    if (!id) return tab
+    const sideChat = isRecord(view) && isRecord(view.sideChat) ? view.sideChat : undefined
+    const tabs = sideChat && isRecord(sideChat.tabs) ? sideChat.tabs : undefined
+    const rawTab = tabs && isRecord(tabs[id]) ? tabs[id] : undefined
+    const sessionID = rawTab && typeof rawTab.sessionID === "string" ? rawTab.sessionID : undefined
+    if (sessionID) return sideChatTab(sessionID)
+    if (id.startsWith("ses_")) return tab
+    return undefined
+  }
+  return remap(tab)
+}
+
+function remapStoredSideChatTabs(tabs: SessionTabs, view: unknown) {
+  const all = Array.from(
+    new Set(
+      tabs.all.flatMap((tab) => {
+        const next = getLegacySideChatSessionID(view, tab)
+        return next ? [next] : []
+      }),
+    ),
+  )
+  const active = tabs.active ? getLegacySideChatSessionID(view, tabs.active) : undefined
+  return {
+    all,
+    active: active && all.includes(active) ? active : all[0],
+  } satisfies SessionTabs
 }
 
 export function createBrowserState(url: string, title?: string, current?: BrowserViewState): BrowserViewState {
@@ -253,7 +328,7 @@ export function syncBrowserViewState(
 const sessionPath = (key: string) => {
   const dir = key.split("/")[0]
   if (!dir) return
-  const root = decode64(dir)
+  const root = decodeSessionStorageDirectory(dir)
   if (!root) return
   return createPathHelpers(() => root)
 }
@@ -267,7 +342,7 @@ const normalizeSessionTab = (path: ReturnType<typeof createPathHelpers> | undefi
 const normalizeSessionTabList = (path: ReturnType<typeof createPathHelpers> | undefined, all: string[]) => {
   const seen = new Set<string>()
   return all.flatMap((tab) => {
-    const value = normalizeSessionTab(path, tab)
+    const value = isBrowserTab(tab) || isSideChatTab(tab) ? tab : normalizeSessionTab(path, tab)
     if (seen.has(value)) return []
     seen.add(value)
     return [value]
@@ -276,9 +351,199 @@ const normalizeSessionTabList = (path: ReturnType<typeof createPathHelpers> | un
 
 const normalizeStoredSessionTabs = (key: string, tabs: SessionTabs) => {
   const path = sessionPath(key)
+  const all = normalizeSessionTabList(path, tabs.all)
+  const active = tabs.active
+    ? isBrowserTab(tabs.active) || isSideChatTab(tabs.active)
+      ? tabs.active
+      : normalizeSessionTab(path, tabs.active)
+    : undefined
   return {
-    all: normalizeSessionTabList(path, tabs.all),
-    active: tabs.active ? normalizeSessionTab(path, tabs.active) : tabs.active,
+    all,
+    active: active && all.includes(active) ? active : all[0],
+  }
+}
+
+const mergeStoredSessionTabs = (current: SessionTabs | undefined, next: SessionTabs) => {
+  if (!current) return next
+
+  const primary = sessionTabsScore(next) > sessionTabsScore(current) ? next : current
+  const secondary = primary === next ? current : next
+  const all = Array.from(new Set([...primary.all, ...secondary.all]))
+  const active =
+    (primary.active && all.includes(primary.active) ? primary.active : undefined) ??
+    (secondary.active && all.includes(secondary.active) ? secondary.active : undefined) ??
+    all[0]
+
+  return { all, active }
+}
+
+const mergeStoredSessionView = (current: SessionView | undefined, next: SessionView) => {
+  if (!current) return next
+
+  const primary = next
+  const secondary = current
+  const reviewEnabled = primary.reviewEnabled ?? secondary.reviewEnabled
+  const summaryCard = primary.summaryCard ?? secondary.summaryCard
+  const reviewOpen = primary.reviewOpen ?? secondary.reviewOpen
+  const browser = primary.browser || secondary.browser ? { ...(secondary.browser ?? {}), ...(primary.browser ?? {}) } : undefined
+
+  return {
+    scroll: { ...secondary.scroll, ...primary.scroll },
+    viewportSnapshot: primary.viewportSnapshot ?? secondary.viewportSnapshot,
+    sessionState: primary.sessionState ?? secondary.sessionState,
+    turnStart: primary.turnStart ?? secondary.turnStart,
+    reviewEnabled,
+    summaryCard,
+    reviewOpen: reviewOpen ? Array.from(new Set(reviewOpen)) : undefined,
+    browser,
+  } satisfies SessionView
+}
+
+function normalizeViewportSnapshot(value: unknown) {
+  if (!isRecord(value)) return undefined
+  if (value.version !== 3) return undefined
+  if (typeof value.assistantRevision !== "string") return undefined
+  if (typeof value.historyTurnStart !== "number" || !Number.isFinite(value.historyTurnStart) || value.historyTurnStart < 0) return undefined
+  if (typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt)) return undefined
+  if (value.mode === "bottom") {
+    return {
+      version: 3,
+      mode: "bottom",
+      assistantRevision: value.assistantRevision,
+      historyTurnStart: Math.trunc(value.historyTurnStart),
+      updatedAt: value.updatedAt,
+    } satisfies SessionViewportStateV3
+  }
+  if (value.mode !== "anchor") return undefined
+  if (typeof value.anchorBlockId !== "string" || !value.anchorBlockId) return undefined
+  if (typeof value.anchorTurnId !== "string" || !value.anchorTurnId) return undefined
+  if (typeof value.anchorOffsetPx !== "number" || !Number.isFinite(value.anchorOffsetPx)) return undefined
+  return {
+    version: 3,
+    mode: "anchor",
+    assistantRevision: value.assistantRevision,
+    historyTurnStart: Math.trunc(value.historyTurnStart),
+    anchorBlockId: value.anchorBlockId,
+    anchorTurnId: value.anchorTurnId,
+    anchorOffsetPx: value.anchorOffsetPx,
+    updatedAt: value.updatedAt,
+  } satisfies SessionViewportStateV3
+}
+
+function matchesViewportSnapshot(value: unknown, snapshot: SessionViewportStateV3 | undefined) {
+  if (!snapshot || !isRecord(value)) return value === snapshot
+  if (value.version !== snapshot.version || value.mode !== snapshot.mode) return false
+  if (value.assistantRevision !== snapshot.assistantRevision) return false
+  if (value.historyTurnStart !== snapshot.historyTurnStart) return false
+  if (value.updatedAt !== snapshot.updatedAt) return false
+  if (snapshot.mode === "bottom") return true
+  return (
+    value.anchorBlockId === snapshot.anchorBlockId &&
+    value.anchorTurnId === snapshot.anchorTurnId &&
+    value.anchorOffsetPx === snapshot.anchorOffsetPx
+  )
+}
+
+export function normalizeStoredSessionView(value: unknown) {
+  if (!isRecord(value)) return
+
+  let changed = false
+  const view = value as SessionViewMigrationInput
+  const viewportSnapshot = (() => {
+    if (view.viewportSnapshot === undefined) return undefined
+    const normalized = normalizeViewportSnapshot(view.viewportSnapshot)
+    if (!normalized) {
+      changed = true
+      return undefined
+    }
+    if (!matchesViewportSnapshot(view.viewportSnapshot, normalized)) changed = true
+    return normalized
+  })()
+  const sessionState = (() => {
+    if (view.sessionState !== undefined) {
+      const normalized = normalizeSessionViewStateV4(view.sessionState)
+      if (!normalized) changed = true
+      return normalized
+    }
+    const migrated = migrateViewportStateV3(viewportSnapshot)
+    if (migrated) changed = true
+    return migrated
+  })()
+  const browser = (() => {
+    if (view.browser === undefined) return undefined
+    if (!isRecord(view.browser)) {
+      changed = true
+      return undefined
+    }
+
+    const normalized = Object.fromEntries(
+      Object.entries(view.browser).flatMap(([tabID, state]) => {
+        const next = normalizeBrowserViewState(state)
+        if (!next) {
+          changed = true
+          return []
+        }
+        if (next !== state) changed = true
+        return [[tabID, next] satisfies [string, BrowserViewState]]
+      }),
+    )
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined
+  })()
+
+  const scroll = isRecord(view.scroll)
+    ? Object.fromEntries(
+        Object.entries(view.scroll).flatMap(([tabID, pos]) => {
+          // V2 owns the timeline position. Keep scroll state for other tabs only.
+          if (tabID === "session") {
+            changed = true
+            return []
+          }
+          if (!isRecord(pos)) {
+            changed = true
+            return []
+          }
+          if (typeof pos.x !== "number" || typeof pos.y !== "number") {
+            changed = true
+            return []
+          }
+          return [[tabID, { x: pos.x, y: pos.y } satisfies SessionScroll]]
+        }),
+      )
+    : {}
+  if (!isRecord(view.scroll)) changed = true
+  const turnStart =
+    typeof view.turnStart === "number" && Number.isFinite(view.turnStart) && view.turnStart >= 0
+      ? Math.trunc(view.turnStart)
+      : undefined
+  if (view.turnStart !== undefined && turnStart === undefined) changed = true
+
+  const reviewOpen = Array.isArray(view.reviewOpen)
+    ? Array.from(new Set(view.reviewOpen.filter((item): item is string => typeof item === "string")))
+    : undefined
+  if (view.reviewOpen !== undefined && !Array.isArray(view.reviewOpen)) changed = true
+  const reviewEnabled = typeof view.reviewEnabled === "boolean" ? view.reviewEnabled : undefined
+  if (view.reviewEnabled !== undefined && typeof view.reviewEnabled !== "boolean") changed = true
+  const summaryCard = typeof view.summaryCard === "boolean" ? view.summaryCard : undefined
+  if (view.summaryCard !== undefined && typeof view.summaryCard !== "boolean") changed = true
+  if (view.sideChat !== undefined) changed = true
+
+  if ((view as Record<string, unknown>).timelineMessageID !== undefined) changed = true
+  if ((view as Record<string, unknown>).pendingMessage !== undefined) changed = true
+  if ((view as Record<string, unknown>).pendingMessageAt !== undefined) changed = true
+
+  return {
+    changed,
+    view: {
+      scroll,
+      viewportSnapshot,
+      sessionState,
+      turnStart,
+      reviewEnabled,
+      summaryCard,
+      reviewOpen,
+      browser,
+    } as SessionView,
   }
 }
 
@@ -289,9 +554,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const globalSync = useGlobalSync()
     const server = useServer()
     const platform = usePlatform()
-
-    const isRecord = (value: unknown): value is Record<string, unknown> =>
-      typeof value === "object" && value !== null && !Array.isArray(value)
 
     const migrate = (value: unknown) => {
       if (!isRecord(value)) return value
@@ -324,12 +586,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
       const migratedReview = (() => {
         if (!isRecord(review)) return review
-        if (typeof review.panelOpened === "boolean") return review
-
-        const opened = isRecord(fileTree) && typeof fileTree.opened === "boolean" ? fileTree.opened : true
+        if (review.defaultClosedApplied === true && typeof review.panelOpened === "boolean") return review
         return {
           ...review,
-          panelOpened: opened,
+          panelOpened: false,
+          defaultClosedApplied: true,
         }
       })()
 
@@ -338,21 +599,36 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         if (!isRecord(sessionTabs)) return sessionTabs
 
         let changed = false
-        const next = Object.fromEntries(
-          Object.entries(sessionTabs).map(([key, tabs]) => {
-            if (!isRecord(tabs) || !Array.isArray(tabs.all)) return [key, tabs]
+        const next: Record<string, SessionTabs | unknown> = {}
 
-            const current = {
-              all: tabs.all.filter((tab): tab is string => typeof tab === "string"),
-              active: typeof tabs.active === "string" ? tabs.active : undefined,
-            }
-            const normalized = normalizeStoredSessionTabs(key, current)
-            if (current.all.length !== tabs.all.length) changed = true
-            if (!same(current.all, normalized.all) || current.active !== normalized.active) changed = true
-            if (tabs.active !== undefined && typeof tabs.active !== "string") changed = true
-            return [key, normalized]
-          }),
-        )
+        for (const [key, tabs] of Object.entries(sessionTabs)) {
+          const normalizedKey = normalizeSessionStorageKey(key)
+          if (normalizedKey !== key) changed = true
+          if (!isRecord(tabs) || !Array.isArray(tabs.all)) {
+            if (!(normalizedKey in next)) next[normalizedKey] = tabs
+            if (normalizedKey in next && normalizedKey !== key) changed = true
+            continue
+          }
+
+          const current = {
+            all: tabs.all.filter((tab): tab is string => typeof tab === "string"),
+            active: typeof tabs.active === "string" ? tabs.active : undefined,
+          }
+          const normalized = normalizeStoredSessionTabs(normalizedKey, current)
+          if (current.all.length !== tabs.all.length) changed = true
+          if (!same(current.all, normalized.all) || current.active !== normalized.active) changed = true
+          if (tabs.active !== undefined && typeof tabs.active !== "string") changed = true
+
+          const existing = next[normalizedKey]
+          if (!existing || !isRecord(existing) || !Array.isArray(existing.all)) {
+            if (existing) changed = true
+            next[normalizedKey] = normalized
+            continue
+          }
+
+          changed = true
+          next[normalizedKey] = mergeStoredSessionTabs(existing as SessionTabs, normalized)
+        }
 
         if (!changed) return sessionTabs
         return next
@@ -363,37 +639,104 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         if (!isRecord(sessionView)) return sessionView
 
         let changed = false
-        const next = Object.fromEntries(
-          Object.entries(sessionView).map(([key, view]) => {
-            if (!isRecord(view)) return [key, view]
-            if (!isRecord(view.browser)) return [key, view]
+        const next: Record<string, SessionView | unknown> = {}
 
-            const browser = Object.fromEntries(
-              Object.entries(view.browser).flatMap(([tabID, tab]) => {
-                const normalized = normalizeBrowserViewState(tab)
-                if (!normalized) {
-                  changed = true
-                  return []
-                }
-                if (normalized !== tab) changed = true
-                return [[tabID, normalized]]
-              }),
-            )
+        for (const [key, view] of Object.entries(sessionView)) {
+          const normalizedKey = normalizeSessionStorageKey(key)
+          if (normalizedKey !== key) changed = true
+          const normalizedView = normalizeStoredSessionView(view)
+          if (!normalizedView) {
+            if (!(normalizedKey in next)) next[normalizedKey] = view
+            if (normalizedKey in next && normalizedKey !== key) changed = true
+            continue
+          }
+          if (normalizedView.changed) changed = true
+          const existing = next[normalizedKey]
+          if (!existing || !isRecord(existing) || !isRecord((existing as SessionView).scroll)) {
+            if (existing) changed = true
+            next[normalizedKey] = normalizedView.view
+            continue
+          }
 
-            return [key, { ...view, browser }]
-          }),
-        )
+          changed = true
+          next[normalizedKey] = mergeStoredSessionView(existing as SessionView, normalizedView.view)
+        }
 
         if (!changed) return sessionView
         return next
       })()
 
+      const reconciledSessionTabs = (() => {
+        if (!isRecord(migratedSessionTabs) || !isRecord(migratedSessionView)) return migratedSessionTabs
+
+        let changed = false
+        const next: Record<string, SessionTabs | unknown> = {}
+
+        for (const [key, tabs] of Object.entries(migratedSessionTabs)) {
+          if (!isRecord(tabs) || !Array.isArray(tabs.all)) {
+            next[key] = tabs
+            continue
+          }
+
+          const current = {
+            all: tabs.all.filter((tab): tab is string => typeof tab === "string"),
+            active: typeof tabs.active === "string" ? tabs.active : undefined,
+          }
+          const rawView = isRecord(sessionView)
+            ? sessionView[key] ?? sessionView[normalizeSessionStorageKey(key)]
+            : undefined
+          const normalized = remapStoredSideChatTabs(current, rawView)
+          if (!same(current.all, normalized.all) || current.active !== normalized.active) changed = true
+          next[key] = normalized
+        }
+
+        if (!changed) return migratedSessionTabs
+        return next
+      })()
+
+      const pinnedProjects = Array.isArray(value.pinnedProjects)
+        ? Array.from(
+            new Set(
+              value.pinnedProjects.flatMap((item) => {
+                if (typeof item !== "string") return []
+                return [workspaceKey(item)]
+              }),
+            ),
+          )
+        : []
+      const migratedPinnedProjects =
+        Array.isArray(value.pinnedProjects) &&
+        value.pinnedProjects.length === pinnedProjects.length &&
+        value.pinnedProjects.every((item, index) => typeof item === "string" && workspaceKey(item) === pinnedProjects[index])
+          ? value.pinnedProjects
+          : pinnedProjects
+
+      const pinnedSessions = (() => {
+        if (!isRecord(value.pinnedSessions)) return {}
+        return Object.fromEntries(
+          Object.entries(value.pinnedSessions).flatMap(([key, pinned]) => {
+            if (!pinned) return []
+            const [directory, sessionID] = key.split("\n")
+            if (!directory || !sessionID) return []
+            return [[pinnedSessionKey(directory, sessionID), true]]
+          }),
+        )
+      })()
+      const migratedPinnedSessions =
+        isRecord(value.pinnedSessions) &&
+        same(Object.keys(value.pinnedSessions), Object.keys(pinnedSessions)) &&
+        Object.values(value.pinnedSessions).every(Boolean)
+          ? value.pinnedSessions
+          : pinnedSessions
+
       if (
         migratedSidebar === sidebar &&
         migratedReview === review &&
         migratedFileTree === fileTree &&
-        migratedSessionTabs === sessionTabs &&
-        migratedSessionView === sessionView
+        reconciledSessionTabs === sessionTabs &&
+        migratedSessionView === sessionView &&
+        migratedPinnedProjects === value.pinnedProjects &&
+        migratedPinnedSessions === value.pinnedSessions
       ) {
         return value
       }
@@ -403,8 +746,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         sidebar: migratedSidebar,
         review: migratedReview,
         fileTree: migratedFileTree,
-        sessionTabs: migratedSessionTabs,
+        sessionTabs: reconciledSessionTabs,
         sessionView: migratedSessionView,
+        pinnedProjects: migratedPinnedProjects,
+        pinnedSessions: migratedPinnedSessions,
       }
     }
 
@@ -422,7 +767,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       return store.sessionView[sessionKey]?.browser ?? {}
     }
 
-    const target = Persist.global("layout", ["layout.v6"])
+    const target = Persist.global("layout.v13", ["layout", "layout.v7", "layout.v8", "layout.v9", "layout.v10", "layout.v11", "layout.v12"])
     const [store, setStore, _, ready] = persisted(
       { ...target, migrate },
       createStore({
@@ -438,7 +783,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         review: {
           diffStyle: "split" as ReviewDiffStyle,
-          panelOpened: true,
+          panelOpened: false,
+          defaultClosedApplied: true,
         },
         fileTree: {
           opened: false,
@@ -453,6 +799,8 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         sessionTabs: {} as Record<string, SessionTabs>,
         sessionView: {} as Record<string, SessionView>,
+        pinnedProjects: [] as string[],
+        pinnedSessions: {} as Record<string, true>,
         detachedPanels: [] as DetachedPanelRecord[],
         handoff: {
           tabs: undefined as TabHandoff | undefined,
@@ -461,7 +809,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     )
 
     const MAX_SESSION_KEYS = 50
-    const PENDING_MESSAGE_TTL_MS = 2 * 60 * 1000
     const usage = {
       active: undefined as string | undefined,
       pruned: false,
@@ -517,6 +864,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         usage.used.delete(key)
       }
     }
+
+    const projectPinKey = (directory: string) => workspaceKey(directory)
+    const sessionPin = (directory: string, sessionID: string) => pinnedSessionKey(directory, sessionID)
 
     function touch(sessionKey: string) {
       usage.active = sessionKey
@@ -679,6 +1029,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const enriched = createMemo(() => server.projects.list().map(enrich))
     const list = createMemo(() => {
       const projects = enriched()
+        .map((project, index) => ({ project, index }))
+        .sort((a, b) => {
+          const diff = projectActivityTime(b.project) - projectActivityTime(a.project)
+          if (diff) return diff
+          return a.index - b.index
+        })
+        .map((item) => item.project)
       return projects.map((project) => {
         const color = project.icon?.color ?? colors[project.worktree]
         if (!color) return project
@@ -741,34 +1098,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }
     })
 
-    let sessionFrame: number | undefined
-    let sessionTimer: number | undefined
-
-    onMount(() => {
-      sessionFrame = requestAnimationFrame(() => {
-        sessionFrame = undefined
-        sessionTimer = window.setTimeout(() => {
-          sessionTimer = undefined
-          void Promise.all(
-            Array.from(new Set(server.projects.list().map((project) => workspaceKey(project.worktree)))).map((root) =>
-              globalSync.project.loadSessions(root),
-            ),
-          )
-        }, 0)
-      })
-    })
-
-    onCleanup(() => {
-      if (sessionFrame !== undefined) cancelAnimationFrame(sessionFrame)
-      if (sessionTimer !== undefined) window.clearTimeout(sessionTimer)
-    })
-
     return {
       ready,
       handoff: {
         tabs: createMemo(() => store.handoff?.tabs),
         setTabs(dir: string, id: string) {
-          setStore("handoff", "tabs", { dir, id, at: Date.now() })
+          setStore("handoff", "tabs", { dir: normalizeSessionDirSlug(dir), id, at: Date.now() })
         },
         clearTabs() {
           if (!store.handoff?.tabs) return
@@ -777,10 +1112,26 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       },
       projects: {
         list,
+        isPinned(directory: string) {
+          return store.pinnedProjects.includes(projectPinKey(directory))
+        },
+        setPinned(directory: string, value: boolean) {
+          const key = projectPinKey(directory)
+          const exists = store.pinnedProjects.includes(key)
+          if (value) {
+            if (exists) return
+            setStore("pinnedProjects", (current) => [key, ...current.filter((item) => item !== key)])
+            return
+          }
+          if (!exists) return
+          setStore("pinnedProjects", (current) => current.filter((item) => item !== key))
+        },
+        togglePinned(directory: string) {
+          this.setPinned(directory, !this.isPinned(directory))
+        },
         open(directory: string) {
           const root = rootFor(directory)
           if (server.projects.list().find((x) => workspaceKey(x.worktree) === workspaceKey(root))) return
-          void globalSync.project.loadSessions(root)
           server.projects.open(root)
         },
         close(directory: string) {
@@ -794,6 +1145,36 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
         move(directory: string, toIndex: number) {
           server.projects.move(directory, toIndex)
+        },
+      },
+      sessions: {
+        view: createMemo(() => Object.keys(store.sessionView)),
+        tabs: createMemo(() => Object.keys(store.sessionTabs)),
+        isPinned(directory: string, sessionID: string) {
+          return store.pinnedSessions[sessionPin(directory, sessionID)] === true
+        },
+        setPinned(directory: string, sessionID: string, value: boolean) {
+          const key = sessionPin(directory, sessionID)
+          if (value) {
+            if (store.pinnedSessions[key]) return
+            setStore("pinnedSessions", key, true)
+            return
+          }
+          if (!store.pinnedSessions[key]) return
+          setStore(
+            "pinnedSessions",
+            produce((draft) => {
+              delete draft[key]
+            }),
+          )
+        },
+        togglePinned(directory: string, sessionID: string) {
+          this.setPinned(directory, sessionID, !this.isPinned(directory, sessionID))
+        },
+        stamp() {
+          return Object.keys(store.pinnedSessions)
+            .sort()
+            .join("|")
         },
       },
       sidebar: {
@@ -832,7 +1213,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         diffStyle: createMemo(() => store.review?.diffStyle ?? "split"),
         setDiffStyle(diffStyle: ReviewDiffStyle) {
           if (!store.review) {
-            setStore("review", { diffStyle, panelOpened: true })
+            setStore("review", { diffStyle, panelOpened: false, defaultClosedApplied: true })
             return
           }
           setStore("review", "diffStyle", diffStyle)
@@ -900,49 +1281,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           setStore("mobileSidebar", "opened", (x) => !x)
         },
       },
-      pendingMessage: {
-        set(sessionKey: string, messageID: string) {
-          const at = Date.now()
-          touch(sessionKey)
-          const current = store.sessionView[sessionKey]
-          if (!current) {
-            setStore("sessionView", sessionKey, {
-              scroll: {},
-              pendingMessage: messageID,
-              pendingMessageAt: at,
-            })
-            prune(usage.active ?? sessionKey)
-            return
-          }
-
-          setStore(
-            "sessionView",
-            sessionKey,
-            produce((draft) => {
-              draft.pendingMessage = messageID
-              draft.pendingMessageAt = at
-            }),
-          )
-        },
-        consume(sessionKey: string) {
-          const current = store.sessionView[sessionKey]
-          const message = current?.pendingMessage
-          const at = current?.pendingMessageAt
-          if (!message || !at) return
-
-          setStore(
-            "sessionView",
-            sessionKey,
-            produce((draft) => {
-              delete draft.pendingMessage
-              delete draft.pendingMessageAt
-            }),
-          )
-
-          if (Date.now() - at > PENDING_MESSAGE_TTL_MS) return
-          return message
-        },
-      },
       browser: {
         open(sessionKey: string, tabID: string, url: string, title?: string) {
           const current = browserState(sessionKey)[tabID]
@@ -986,7 +1324,9 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         const key = createSessionKeyReader(sessionKey, ensureKey)
         const s = createMemo(() => store.sessionView[key()] ?? { scroll: {} })
         const terminalOpened = createMemo(() => store.terminal?.opened ?? false)
-        const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? true)
+        const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? false)
+        const reviewEnabled = createMemo(() => store.sessionView[key()]?.reviewEnabled ?? false)
+        const summaryCardOpened = createMemo(() => store.sessionView[key()]?.summaryCard ?? true)
 
         function setTerminalOpened(next: boolean) {
           const current = store.terminal
@@ -1003,11 +1343,11 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         function setReviewPanelOpened(next: boolean) {
           const current = store.review
           if (!current) {
-            setStore("review", { diffStyle: "split" as ReviewDiffStyle, panelOpened: next })
+            setStore("review", { diffStyle: "split" as ReviewDiffStyle, panelOpened: next, defaultClosedApplied: true })
             return
           }
 
-          const value = current.panelOpened ?? true
+          const value = current.panelOpened ?? false
           if (value === next) return
           setStore("review", "panelOpened", next)
         }
@@ -1016,8 +1356,97 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           scroll(tab: string) {
             return scroll.scroll(key(), tab)
           },
-          setScroll(tab: string, pos: SessionScroll) {
-            scroll.setScroll(key(), tab, pos)
+          setScroll(tab: string, pos: SessionScroll, flush = false) {
+            const session = key()
+            scroll.setScroll(session, tab, pos)
+            if (flush) scroll.flush(session)
+          },
+          viewportSnapshot: createMemo(() => store.sessionView[key()]?.viewportSnapshot),
+          sessionState: createMemo(() => store.sessionView[key()]?.sessionState),
+          turnStart: createMemo(() => store.sessionView[key()]?.turnStart),
+          reviewEnabled,
+          setReviewEnabled(next: boolean) {
+            const session = key()
+            const current = store.sessionView[session]
+            if (!current) {
+              setStore("sessionView", session, {
+                scroll: {},
+                reviewEnabled: next,
+              })
+              return
+            }
+            const value = current.reviewEnabled ?? false
+            if (value === next) return
+            setStore("sessionView", session, "reviewEnabled", next)
+          },
+          summaryCard: {
+            opened: summaryCardOpened,
+            open() {
+              const session = key()
+              const current = store.sessionView[session]
+              if (!current) {
+                setStore("sessionView", session, { scroll: {}, summaryCard: true })
+                return
+              }
+              if (current.summaryCard ?? true) return
+              setStore("sessionView", session, "summaryCard", true)
+            },
+            close() {
+              const session = key()
+              const current = store.sessionView[session]
+              if (!current) {
+                setStore("sessionView", session, { scroll: {}, summaryCard: false })
+                return
+              }
+              if (!(current.summaryCard ?? true)) return
+              setStore("sessionView", session, "summaryCard", false)
+            },
+            toggle() {
+              const session = key()
+              const current = store.sessionView[session]
+              const next = !(current?.summaryCard ?? true)
+              if (!current) {
+                setStore("sessionView", session, { scroll: {}, summaryCard: next })
+                return
+              }
+              setStore("sessionView", session, "summaryCard", next)
+            },
+          },
+          setViewportSnapshot(snapshot: SessionViewportStateV3 | undefined) {
+            const session = key()
+            if (!store.sessionView[session]) {
+              setStore("sessionView", session, {
+                scroll: {},
+                viewportSnapshot: snapshot,
+              })
+              return
+            }
+            setStore("sessionView", session, "viewportSnapshot", snapshot)
+          },
+          setSessionState(state: SessionViewStateV4 | undefined) {
+            const session = key()
+            if (!store.sessionView[session]) {
+              setStore("sessionView", session, {
+                scroll: {},
+                sessionState: state,
+              })
+              return
+            }
+            setStore("sessionView", session, "sessionState", state)
+          },
+          setTurnStart(next: number | undefined) {
+            const session = key()
+            const value =
+              typeof next === "number" && Number.isFinite(next) && next >= 0 ? Math.trunc(next) : undefined
+            if (!store.sessionView[session]) {
+              setStore("sessionView", session, {
+                scroll: {},
+                turnStart: value,
+              })
+              return
+            }
+            if (store.sessionView[session]?.turnStart === value) return
+            setStore("sessionView", session, "turnStart", value)
           },
           terminal: {
             opened: terminalOpened,
@@ -1048,7 +1477,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             get(tabID: string) {
               return store.sessionView[key()]?.browser?.[tabID]
             },
-            open(tabID: string, url: string, title?: string) {
+            open(tabID: string, url: string, title?: string, options?: { activate?: boolean }) {
               const session = key()
               browserState(session)
               const current = store.sessionView[session]?.browser?.[tabID]
@@ -1056,7 +1485,14 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
               if (!next) return
               const tab = browserTab(tabID)
               const currentTabs = store.sessionTabs[session]
-              const nextTabs = currentTabs?.all.includes(tab) ? currentTabs : nextSessionTabsForOpen(currentTabs, tab)
+              const nextTabs =
+                currentTabs?.all.includes(tab)
+                  ? options?.activate === false && currentTabs
+                    ? { ...currentTabs }
+                    : currentTabs
+                  : options?.activate === false
+                    ? nextSessionTabsForInsert(currentTabs, tab)
+                    : nextSessionTabsForOpen(currentTabs, tab)
               setStore("sessionTabs", session, nextTabs)
               setStore("sessionView", session, "browser", tabID, createBrowserState(next, title, current))
             },

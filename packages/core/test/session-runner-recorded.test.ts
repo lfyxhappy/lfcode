@@ -90,7 +90,7 @@ const runner = SessionRunnerLLM.defaultLayer.pipe(
 const coordinator = SessionRunCoordinator.layer.pipe(Layer.provide(runner))
 const execution = Layer.effect(
   SessionExecution.Service,
-  SessionRunCoordinator.Service.pipe(
+  SessionRunCoordinator.Service.asEffect().pipe(
     Effect.map((coordinator) =>
       SessionExecution.Service.of({
         resume: coordinator.run,

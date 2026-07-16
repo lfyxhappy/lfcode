@@ -66,7 +66,23 @@ function upgradeBundledCommands(text: string) {
   if (!mcp) {
     return applyEdits(
       updated,
-      modify(updated, ["mcp"], { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig }, {
+      modify(
+        updated,
+        ["mcp"],
+        { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig },
+        {
+          formattingOptions: {
+            insertSpaces: true,
+            tabSize: 2,
+          },
+        },
+      ),
+    )
+  }
+  if ("codegraph" in mcp) {
+    updated = applyEdits(
+      updated,
+      modify(updated, ["mcp"], Object.fromEntries(Object.entries(mcp).filter(([key]) => key !== "codegraph")), {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -75,7 +91,7 @@ function upgradeBundledCommands(text: string) {
     )
   }
   const playwright = mcp.playwright
-  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright)) {
+  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright) || isStaleBundledPlaywrightRemoteConfig(playwright)) {
     updated = applyEdits(
       updated,
       modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
@@ -128,6 +144,23 @@ function isLegacyPlaywrightConfig(value: unknown) {
 
 function isPlaywrightCdpConfig(value: unknown) {
   return isRecord(value) && value.type === "local" && value.enabled === true && isExactCommand(value.command, playwrightCdpCommand)
+}
+
+function isStaleBundledPlaywrightRemoteConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (value.type !== "remote") return false
+  if (value.enabled !== true) return false
+  if (typeof value.url !== "string" || !isLoopbackPlaywrightRemoteUrl(value.url)) return false
+  if (!isRecord(value.headers)) return false
+  if (Object.keys(value.headers).length !== 1) return false
+  return typeof value.headers.authorization === "string"
+}
+
+function isLoopbackPlaywrightRemoteUrl(value: string) {
+  return (
+    (value.startsWith("http://127.0.0.1:") || value.startsWith("http://localhost:")) &&
+    value.endsWith("/global/mcp/playwright")
+  )
 }
 
 function isBrokenWindowsComputerUseCommand(value: unknown) {

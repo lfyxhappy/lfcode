@@ -2,12 +2,12 @@ import { Global } from "../../../global"
 import { bootstrap } from "../../bootstrap"
 import { cmd } from "../cmd"
 import { ConfigCommand } from "./config"
+import { BackgroundJobCommand } from "./background-job"
 import { FileCommand } from "./file"
 import { LSPCommand } from "./lsp"
 import { RipgrepCommand } from "./ripgrep"
 import { ScrapCommand } from "./scrap"
 import { SkillCommand } from "./skill"
-import { SnapshotCommand } from "./snapshot"
 import { AgentCommand } from "./agent"
 
 export const DebugCommand = cmd({
@@ -15,13 +15,13 @@ export const DebugCommand = cmd({
   describe: "debugging and troubleshooting tools",
   builder: (yargs) =>
     yargs
+      .command(BackgroundJobCommand)
       .command(ConfigCommand)
       .command(LSPCommand)
       .command(RipgrepCommand)
       .command(FileCommand)
       .command(ScrapCommand)
       .command(SkillCommand)
-      .command(SnapshotCommand)
       .command(AgentCommand)
       .command(PathsCommand)
       .command({

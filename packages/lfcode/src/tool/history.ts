@@ -23,11 +23,13 @@ const KIND = z.enum([
 const AROUND_MAX_BYTES = 20 * 1024
 
 const parameters = z.object({
-  operation: z.enum(["search", "around"]).describe("search: FTS BM25; around: pull message context"),
+  operation: z.enum(["search", "around", "session"]).describe("search: FTS BM25; around: pull message context; session: read raw session history"),
   // search params
   query: z.string().optional().describe("FTS query (BM25 over text/tool bodies). Required for operation=search."),
   scope: z.enum(["project", "global"]).optional().describe("Default project."),
   session_id: z.string().optional(),
+  agent_scope: z.enum(["main", "all"]).optional().describe("For session: whether to include only main slice or all actors."),
+  include_boundaries: z.boolean().optional().describe("For session: include checkpoint/compaction boundary rows."),
   kind: z.array(KIND).optional(),
   tool_name: z.string().optional().describe("Filter to a specific tool (e.g. Bash, Read)"),
   time_after: z.number().optional().describe("Unix ms"),
@@ -39,13 +41,21 @@ const parameters = z.object({
   after: z.number().optional().describe("Default 5"),
 })
 
+type HistoryMetadata = {
+  count: number
+  session_found?: boolean
+  checkpoint_found?: boolean
+  truncated?: boolean
+  outputRef?: string
+}
+
 export const HistoryTool = Tool.define(
   "history",
   Effect.gen(function* () {
     const history = yield* History.Service
     const truncate = yield* Truncate.Service
     const agents = yield* Agent.Service
-    return {
+    const definition: Tool.DefWithoutID<typeof parameters, HistoryMetadata> = {
       description: DESCRIPTION,
       parameters,
       execute: (args: z.infer<typeof parameters>, ctx) =>
@@ -87,6 +97,55 @@ export const HistoryTool = Tool.define(
               title: `History search: ${hits.length} match${hits.length === 1 ? "" : "es"}`,
               output: lines.join("\n"),
               metadata: { count: hits.length },
+            }
+          }
+
+          if (args.operation === "session") {
+            if (!args.session_id) {
+              return {
+                title: "History session: missing session_id",
+                output: "operation=session requires a `session_id` argument.",
+                metadata: { count: 0, session_found: false, checkpoint_found: false },
+              }
+            }
+            const snapshot = yield* history.session({
+              session_id: args.session_id,
+              agent_scope: args.agent_scope,
+              limit: args.limit,
+              include_boundaries: args.include_boundaries,
+            })
+            if (!snapshot.session_found) {
+              return {
+                title: "History session: session not found",
+                output: `No session with id ${args.session_id}.`,
+                metadata: { count: 0, session_found: false, checkpoint_found: false },
+              }
+            }
+            const lines = [
+              `Session ${snapshot.session_id}:`,
+              `- session_found: ${snapshot.session_found}`,
+              `- checkpoint_found: ${snapshot.checkpoint_found}`,
+              `- messages: ${snapshot.messages.length}`,
+              "",
+            ]
+            for (const m of snapshot.messages) {
+              lines.push(`### ${m.message_id} (${m.role})`)
+              lines.push(`Time: ${new Date(m.time_created).toISOString()}`)
+              for (const p of m.parts) {
+                const head = p.tool_name ? `${p.role} · ${p.type} (${p.tool_name})` : `${p.role} · ${p.type}`
+                lines.push(`  ${head}:`)
+                lines.push(p.text.split("\n").map((l) => `    ${l}`).join("\n"))
+              }
+              lines.push("")
+            }
+            return {
+              title: `History session: ${snapshot.messages.length} messages`,
+              output: lines.join("\n"),
+              metadata: {
+                count: snapshot.messages.length,
+                session_found: snapshot.session_found,
+                checkpoint_found: snapshot.checkpoint_found,
+              },
             }
           }
 
@@ -137,10 +196,11 @@ export const HistoryTool = Tool.define(
             metadata: {
               count: around.messages.length,
               truncated: truncated.truncated,
-              ...(truncated.truncated && { outputPath: truncated.outputPath }),
+              ...(truncated.truncated && { outputRef: truncated.outputRef }),
             },
           }
         }),
     }
+    return definition
   }),
 )

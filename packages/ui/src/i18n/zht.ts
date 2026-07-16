@@ -22,6 +22,9 @@ export const dict = {
   "ui.sessionReview.largeDiff.title": "差異過大，無法渲染",
   "ui.sessionReview.largeDiff.meta": "限制：{{limit}} 行變更。目前：{{current}} 行變更。",
   "ui.sessionReview.largeDiff.renderAnyway": "仍然渲染",
+  "ui.sessionReview.openDiff": "在 Monaco diff 中查看",
+  "ui.sessionReview.renderMode.native": "原生",
+  "ui.sessionReview.renderMode.monaco": "Monaco",
   "ui.fileMedia.kind.image": "圖片",
   "ui.fileMedia.kind.audio": "音訊",
   "ui.fileMedia.state.removed": "{{kind}}已移除",
@@ -54,6 +57,8 @@ export const dict = {
   "ui.fileReference.openWith": "選擇開啟方式",
   "ui.fileReference.copyPath": "複製路徑",
   "ui.fileReference.reviewDiff": "查看差異",
+  "ui.codeDiff.loading": "正在載入差異編輯器...",
+  "ui.codeDiff.unavailable": "差異預覽不可用。",
 
   "ui.sessionTurn.retry.retrying": "重試中",
   "ui.sessionTurn.retry.inSeconds": "{{seconds}} 秒後",
@@ -75,6 +80,9 @@ export const dict = {
   "ui.sessionTurn.status.thinkingWithTopic": "思考 - {{topic}}",
   "ui.sessionTurn.status.gatheringThoughts": "正在整理思緒",
   "ui.sessionTurn.status.consideringNextSteps": "正在考慮下一步",
+  "ui.sessionTurn.compaction.compacting": "自動壓縮中",
+  "ui.sessionTurn.compaction.completed": "上下文已自動壓縮",
+  "ui.sessionTurn.compaction.failed": "自動壓縮失敗，已回退完整上下文",
 
   "ui.messagePart.questions.dismissed": "問題已略過",
   "ui.messagePart.compaction": "工作階段已壓縮",

@@ -154,7 +154,7 @@ const callProvider = (input: {
   sessionID: string
   query: LegacyWebSearchInput
 }) => {
-  const timeout = `${Math.min(input.query.timeout ?? 20, 20)} seconds`
+  const timeout = Duration.seconds(Math.min(input.query.timeout ?? 20, 20))
   const effect = input.provider === "exa"
     ? callMcp({
         http: input.http,

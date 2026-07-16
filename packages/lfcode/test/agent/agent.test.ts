@@ -105,7 +105,7 @@ test("explore agent asks for external directories and allows Truncate.GLOB", asy
   })
 })
 
-test("general agent denies todo tools", async () => {
+test("general agent inherits the default todo tool permission", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
@@ -114,7 +114,7 @@ test("general agent denies todo tools", async () => {
       expect(general).toBeDefined()
       expect(general?.mode).toBe("subagent")
       expect(general?.hidden).toBeUndefined()
-      expect(evalPerm(general, "todowrite")).toBe("deny")
+      expect(evalPerm(general, "todowrite")).toBe("allow")
     },
   })
 })
@@ -839,7 +839,7 @@ test("title/summary/checkpoint-writer are mode=subagent + hidden (spawnable filt
 // Regression for ses_19d1aa927: the fork agent (checkpoint-writer) inherits
 // compose's tool list verbatim (Task 2.6 removed toolAllowlist). This test
 // confirms the patch-swap in registry.ts fires correctly per model family.
-itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claude", () =>
+itTool.live("compose's tool list stays patch-first across provider families", () =>
   provideTmpdirInstance((dir) =>
     Effect.gen(function* () {
       const agents = yield* Agent.Service
@@ -857,6 +857,7 @@ itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claud
       expect(gptIDs).toContain("apply_patch")
       expect(gptIDs).not.toContain("edit")
       expect(gptIDs).not.toContain("write")
+      expect(gptIDs).toContain("search")
 
       const claudeTools = yield* registry.tools({
         modelID: ModelID.make("claude-opus-4-7"),
@@ -864,9 +865,10 @@ itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claud
         agent: compose!,
       })
       const claudeIDs = claudeTools.map((t) => t.id)
-      expect(claudeIDs).toContain("edit")
-      expect(claudeIDs).toContain("write")
-      expect(claudeIDs).not.toContain("apply_patch")
+      expect(claudeIDs).toContain("apply_patch")
+      expect(claudeIDs).toContain("search")
+      expect(claudeIDs).not.toContain("edit")
+      expect(claudeIDs).not.toContain("write")
     }),
   ),
 )

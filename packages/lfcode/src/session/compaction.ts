@@ -11,9 +11,11 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config"
+import { LLM } from "./llm"
 import { NotFoundError } from "@/storage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, Context } from "effect"
+import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect"
 import { isOverflow as overflow, usable } from "./overflow"
 import { makeRuntime } from "@/effect/run-service"
@@ -36,6 +38,19 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+
+function compactableMessages(messages: MessageV2.WithParts[]) {
+  return messages.map((msg) => ({
+    info: msg.info,
+    parts: msg.parts.filter((part) => {
+      if (part.type === "tool") return false
+      if (part.type === "reasoning") return false
+      if (part.type === "step-start") return false
+      if (part.type === "file" && MessageV2.isMedia(part.mime)) return false
+      return true
+    }),
+  }))
+}
 type Turn = {
   start: number
   end: number
@@ -89,6 +104,12 @@ export interface Interface {
     overflow?: boolean
     agentID?: string
   }) => Effect.Effect<void>
+  readonly summarizeText: (input: {
+    sessionID: SessionID
+    messages: MessageV2.WithParts[]
+    model: { providerID: ProviderID; modelID: ModelID }
+    parentID?: MessageID
+  }) => Effect.Effect<string, unknown>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/SessionCompaction") {}
@@ -103,6 +124,7 @@ export const layer: Layer.Layer<
   | Plugin.Service
   | SessionProcessor.Service
   | Provider.Service
+  | LLM.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -113,6 +135,7 @@ export const layer: Layer.Layer<
     const plugin = yield* Plugin.Service
     const processors = yield* SessionProcessor.Service
     const provider = yield* Provider.Service
+    const llm = yield* LLM.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: MessageV2.Assistant["tokens"]
@@ -233,56 +256,80 @@ export const layer: Layer.Layer<
       overflow?: boolean
       agentID?: string
     }) {
-      const parent = input.messages.findLast((m) => m.info.id === input.parentID)
-      if (!parent || parent.info.role !== "user") {
-        throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
-      }
-      const userMessage = parent.info
-      const compactionPart = parent.parts.find((part): part is MessageV2.CompactionPart => part.type === "compaction")
+      const clearCompacting =
+        (input.agentID ?? "main") === "main"
+          ? session.setCompacting({ sessionID: input.sessionID, time: null })
+          : Effect.void
 
-      let messages = input.messages
-      let replay:
-        | {
-            info: MessageV2.User
-            parts: MessageV2.Part[]
+      return yield* Effect.gen(function* () {
+        const parent = input.messages.findLast((m) => m.info.id === input.parentID)
+        if (!parent || parent.info.role !== "user") {
+          throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
+        }
+        const userMessage = parent.info
+        const compactionPart = parent.parts.find((part): part is MessageV2.CompactionPart => part.type === "compaction")
+
+        let messages = input.messages
+        let replay:
+          | {
+              info: MessageV2.User
+              parts: MessageV2.Part[]
+            }
+          | undefined
+        if (input.overflow) {
+          const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
+          for (let i = idx - 1; i >= 0; i--) {
+            const msg = input.messages[i]
+            if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction")) {
+              replay = { info: msg.info, parts: msg.parts }
+              messages = input.messages.slice(0, i)
+              break
+            }
           }
-        | undefined
-      if (input.overflow) {
-        const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
-        for (let i = idx - 1; i >= 0; i--) {
-          const msg = input.messages[i]
-          if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction")) {
-            replay = { info: msg.info, parts: msg.parts }
-            messages = input.messages.slice(0, i)
-            break
+          const hasContent =
+            replay && messages.some((m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction"))
+          if (!hasContent) {
+            replay = undefined
+            messages = input.messages
           }
         }
-        const hasContent =
-          replay && messages.some((m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction"))
-        if (!hasContent) {
-          replay = undefined
-          messages = input.messages
-        }
-      }
 
-      const agent = yield* agents.get("compaction")
-      const model = agent.model
-        ? yield* provider.getModel(agent.model.providerID, agent.model.modelID)
-        : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
-      const cfg = yield* config.get()
-      const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
-      const selected = yield* select({
-        messages: history,
-        cfg,
-        model,
-      })
-      // Allow plugins to inject context or replace compaction prompt.
-      const compacting = yield* plugin.trigger(
-        "experimental.session.compacting",
-        { sessionID: input.sessionID },
-        { context: [], prompt: undefined },
-      )
-      const defaultPrompt = `When constructing the summary, try to stick to this template:
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "resolve-model",
+          parentID: input.parentID,
+          auto: input.auto,
+          overflow: input.overflow === true,
+          agentID: input.agentID ?? "main",
+        })
+        const agent = yield* agents.get("compaction")
+        const modelRef = agent.model ?? userMessage.model
+        const model = yield* provider.getModel(modelRef.providerID, modelRef.modelID)
+        const cfg = yield* config.get()
+        const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "select-history",
+          historyCount: history.length,
+        })
+        const selected = yield* select({
+          messages: history,
+          cfg,
+          model,
+        })
+        // Allow plugins to inject context or replace compaction prompt.
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "plugin-compacting",
+          selectedHeadCount: selected.head.length,
+          tailStartID: selected.tail_start_id,
+        })
+        const compacting = yield* plugin.trigger(
+          "experimental.session.compacting",
+          { sessionID: input.sessionID },
+          { context: [], prompt: undefined },
+        )
+        const defaultPrompt = `When constructing the summary, try to stick to this template:
 ---
 ## Goal
 
@@ -306,117 +353,146 @@ export const layer: Layer.Layer<
 [Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
 ---`
 
-      const prompt = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
-      const msgs = structuredClone(selected.head)
-      yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-      const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, { stripMedia: true })
-      const ctx = yield* InstanceState.context
-      const msg: MessageV2.Assistant = {
-        id: MessageID.ascending(),
-        role: "assistant",
-        parentID: input.parentID,
-        sessionID: input.sessionID,
-        agentID: input.agentID ?? undefined,
-        mode: "compaction",
-        agent: "compaction",
-        variant: userMessage.model.variant,
-        summary: true,
-        path: {
-          cwd: ctx.directory,
-          root: ctx.worktree,
-        },
-        cost: 0,
-        tokens: {
-          output: 0,
-          input: 0,
-          reasoning: 0,
-          cache: { read: 0, write: 0 },
-        },
-        modelID: model.id,
-        providerID: model.providerID,
-        time: {
-          created: Date.now(),
-        },
-      }
-      yield* session.updateMessage(msg)
-      const processor = yield* processors.create({
-        assistantMessage: msg,
-        sessionID: input.sessionID,
-        model,
-      })
-      const result = yield* processor.process({
-        user: userMessage,
-        agent,
-        sessionID: input.sessionID,
-        tools: {},
-        system: [],
-        messages: [
-          ...modelMessages,
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }],
-          },
-        ],
-        model,
-      })
-
-      if (result === "overflow") {
-        processor.message.error = new MessageV2.ContextOverflowError({
-          message: replay
-            ? "Conversation history too large to compact - exceeds model context limit"
-            : "Session too large to compact - context exceeds model limit even after stripping media",
-        }).toObject()
-        processor.message.finish = "error"
-        yield* session.updateMessage(processor.message)
-        return "stop"
-      }
-
-      if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
-        yield* session.updatePart({
-          ...compactionPart,
-          tail_start_id: selected.tail_start_id,
+        const prompt = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
+        const msgs = structuredClone(selected.head)
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "transform-messages",
+          messageCount: msgs.length,
         })
-      }
+        yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "to-model-messages",
+          transformedCount: msgs.length,
+        })
+        const modelMessages = yield* Effect.catch(
+          MessageV2.toModelMessagesEffect(msgs, model, {
+            stripMedia: true,
+            compactToolResults: true,
+          }),
+          () =>
+            MessageV2.toModelMessagesEffect(compactableMessages(msgs), model, {
+              stripMedia: true,
+              compactToolResults: true,
+            }),
+        )
+        log.info("process phase", {
+          sessionID: input.sessionID,
+          phase: "create-summary-message",
+          modelMessageCount: modelMessages.length,
+        })
+        const ctx = yield* InstanceState.context
+        const msg: MessageV2.Assistant = {
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: input.parentID,
+          sessionID: input.sessionID,
+          agentID: input.agentID ?? undefined,
+          mode: "compaction",
+          agent: "compaction",
+          variant: userMessage.model.variant,
+          summary: true,
+          path: {
+            cwd: ctx.directory,
+            root: ctx.worktree,
+          },
+          cost: 0,
+          tokens: {
+            output: 0,
+            input: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+          modelID: model.id,
+          providerID: model.providerID,
+          time: {
+            created: Date.now(),
+          },
+        }
+        yield* session.updateMessage(msg)
+        const processor = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: input.sessionID,
+          model,
+        })
+        const result = yield* processor.process({
+          user: userMessage,
+          agent,
+          sessionID: input.sessionID,
+          tools: {},
+          system: [],
+          messages: [
+            ...modelMessages,
+            {
+              role: "user",
+              content: [{ type: "text", text: prompt }],
+            },
+          ],
+          model,
+        })
 
-      if (result === "continue" && input.auto) {
-        if (replay) {
-          const original = replay.info
-          const replayMsg = yield* session.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: input.sessionID,
-            agentID: input.agentID ?? undefined,
-            time: { created: Date.now() },
-            agent: original.agent,
-            model: original.model,
-            format: original.format,
-            tools: original.tools,
-            system: original.system,
-          })
-          for (const part of replay.parts) {
-            if (part.type === "compaction") continue
-            const replayPart =
-              part.type === "file" && MessageV2.isMedia(part.mime)
-                ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
-                : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
-          }
+        if (result === "overflow") {
+          processor.message.error = new MessageV2.ContextOverflowError({
+            message: replay
+              ? "Conversation history too large to compact - exceeds model context limit"
+              : "Session too large to compact - context exceeds model limit even after stripping media",
+          }).toObject()
+          processor.message.finish = "error"
+          yield* session.updateMessage(processor.message)
+          return "stop"
         }
 
-        if (!replay) {
-          const info = yield* provider.getProvider(userMessage.model.providerID)
-          if (
-            (yield* plugin.trigger(
+        if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
+          yield* session.updatePart({
+            ...compactionPart,
+            tail_start_id: selected.tail_start_id,
+          })
+        }
+
+        if (result === "continue" && input.auto) {
+          if (replay) {
+            const original = replay.info
+            const replayMsg = yield* session.updateMessage({
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: input.sessionID,
+              agentID: input.agentID ?? undefined,
+              time: { created: Date.now() },
+              agent: original.agent,
+              model: original.model,
+              format: original.format,
+              tools: original.tools,
+              system: original.system,
+            })
+            for (const part of replay.parts) {
+              if (part.type === "compaction") continue
+              const replayPart =
+                part.type === "file" && MessageV2.isMedia(part.mime)
+                  ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
+                  : part
+              yield* session.updatePart({
+                ...replayPart,
+                id: PartID.ascending(),
+                messageID: replayMsg.id,
+                sessionID: input.sessionID,
+              })
+            }
+          }
+
+          if (!replay) {
+            log.info("process phase", {
+              sessionID: input.sessionID,
+              phase: "autocontinue-check",
+            })
+            const info = yield* provider.getProvider(userMessage.model.providerID)
+            const continueModel = yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
+            const autoContinue = yield* plugin.trigger(
               "experimental.compaction.autocontinue",
               {
                 sessionID: input.sessionID,
                 agent: userMessage.agent,
-                model: yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID),
+                model: continueModel,
                 provider: {
                   source: info.source,
                   info,
@@ -426,44 +502,131 @@ export const layer: Layer.Layer<
                 overflow: input.overflow === true,
               },
               { enabled: true },
-            )).enabled
-          ) {
-            const continueMsg = yield* session.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: input.sessionID,
-              agentID: input.agentID ?? undefined,
-              time: { created: Date.now() },
-              agent: userMessage.agent,
-              model: userMessage.model,
-            })
-            const text =
-              (input.overflow
-                ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
-                : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
-              },
-            })
+            )
+            if (
+              autoContinue.enabled
+            ) {
+              const continueMsg = yield* session.updateMessage({
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID: input.sessionID,
+                agentID: input.agentID ?? undefined,
+                time: { created: Date.now() },
+                agent: userMessage.agent,
+                model: userMessage.model,
+              })
+              const text =
+                (input.overflow
+                  ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
+                  : "") +
+                "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                messageID: continueMsg.id,
+                sessionID: input.sessionID,
+                type: "text",
+                // Internal marker for auto-compaction followups so provider plugins
+                // can distinguish them from manual post-compaction user prompts.
+                // This is not a stable plugin contract and may change or disappear.
+                metadata: { compaction_continue: true },
+                synthetic: true,
+                text,
+                time: {
+                  start: Date.now(),
+                  end: Date.now(),
+                },
+              })
+            }
           }
         }
-      }
 
-      if (processor.message.error) return "stop"
-      if (result === "continue") yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
+        if (processor.message.error) return "stop"
+        if (result === "continue") yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
+        return result
+      }).pipe(Effect.ensuring(clearCompacting))
+    })
+
+    const summarizeText = Effect.fn("SessionCompaction.summarizeText")(function* (input: {
+      sessionID: SessionID
+      messages: MessageV2.WithParts[]
+      model: { providerID: ProviderID; modelID: ModelID }
+      parentID?: MessageID
+    }) {
+      const agent = yield* agents.get("compaction")
+      const model = yield* provider.getModel(input.model.providerID, input.model.modelID)
+      const cfg = yield* config.get()
+      const selected = yield* select({
+        messages: input.messages,
+        cfg,
+        model,
+      })
+      const compacting = yield* plugin.trigger(
+        "experimental.session.compacting",
+        { sessionID: input.sessionID },
+        { context: [], prompt: undefined },
+      )
+      const prompt =
+        compacting.prompt ??
+        [
+          "Summarize the main chat as reusable background for a side chat. Focus on the active goal, decisions, important constraints, current state, and relevant files. Do not answer the user directly.",
+          ...compacting.context,
+        ].join("\n\n")
+      const msgs = structuredClone(selected.head)
+      yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+      const modelMessages = yield* Effect.catch(
+        MessageV2.toModelMessagesEffect(msgs, model, {
+          stripMedia: true,
+          compactToolResults: true,
+        }),
+        () =>
+          MessageV2.toModelMessagesEffect(compactableMessages(msgs), model, {
+            stripMedia: true,
+            compactToolResults: true,
+          }),
+      )
+      const parent = input.parentID
+        ? input.messages.findLast((message) => message.info.id === input.parentID && message.info.role === "user")
+        : input.messages.findLast((message) => message.info.role === "user")
+      const userMessage: MessageV2.User = parent?.info.role === "user"
+        ? parent.info
+        : {
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: input.sessionID,
+            time: { created: Date.now() },
+            agent: agent.name,
+            model: {
+              providerID: input.model.providerID,
+              modelID: input.model.modelID,
+            },
+          }
+      let text = ""
+      yield* llm
+        .stream({
+          user: userMessage,
+          agent,
+          sessionID: input.sessionID,
+          tools: {},
+          system: [],
+          messages: [
+            ...modelMessages,
+            {
+              role: "user",
+              content: [{ type: "text", text: prompt }],
+            },
+          ],
+          model,
+          toolChoice: "none",
+        })
+        .pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              if (event.type === "text-delta") text += event.text
+            }),
+          ),
+        )
+      const result = text.trim()
+      if (!result) throw new Error("Side chat context summary was empty")
       return result
     })
 
@@ -495,6 +658,8 @@ export const layer: Layer.Layer<
         auto: input.auto,
         overflow: input.overflow,
       })
+      if ((input.agentID ?? "main") !== "main") return
+      yield* session.setCompacting({ sessionID: input.sessionID, time: msg.time.created })
     })
 
     return Service.of({
@@ -502,6 +667,7 @@ export const layer: Layer.Layer<
       prune,
       process: processCompaction,
       create,
+      summarizeText,
     })
   }),
 )
@@ -513,6 +679,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(SessionProcessor.defaultLayer),
     Layer.provide(Agent.defaultLayer),
     Layer.provide(Plugin.defaultLayer),
+    Layer.provide(LLM.defaultLayer),
     Layer.provide(Bus.layer),
     Layer.provide(Config.defaultLayer),
   ),

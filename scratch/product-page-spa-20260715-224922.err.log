@@ -1,0 +1,20 @@
+X [ERROR] Could not resolve "../packages/console/app/node_modules/@solidjs/start/config"
+
+    ../../../scratch/product-page-spa.vite.config.ts:2:27:
+      2 │ ...art } from "../packages/console/app/node_modules/@solidjs/start/...
+        ╵               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[31mfailed to load config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\product-page-spa.vite.config.ts[39m
+[31merror when starting dev server:
+Error: Build failed with 1 error:
+../../../scratch/product-page-spa.vite.config.ts:2:27: ERROR: Could not resolve "../packages/console/app/node_modules/@solidjs/start/config"
+    at failureErrorWithLog (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:1467:15)
+    at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:926:25
+    at runOnEndCallbacks (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:1307:45)
+    at buildResponseToResult (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:924:7)
+    at C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:951:16
+    at responseCallbacks.<computed> (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:603:9)
+    at handleIncomingPacket (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:658:12)
+    at Socket.readFromStdout (C:\算法\小应用\知识库\10_Projects\Lfcode\node_modules\.bun\esbuild@0.25.12\node_modules\esbuild\lib\main.js:581:7)
+    at Socket.emit (node:events:508:28)
+    at addChunk (node:internal/streams/readable:563:12)[39m

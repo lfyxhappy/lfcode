@@ -1,6 +1,7 @@
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { resolveGitCommand } from "./runtime"
 
 const cfg = [
   "--no-optional-locks",
@@ -55,6 +56,7 @@ export interface Result {
 export interface Options {
   readonly cwd: string
   readonly env?: Record<string, string>
+  readonly stdin?: ChildProcess.CommandInput
 }
 
 export interface Interface {
@@ -66,7 +68,6 @@ export interface Interface {
   readonly mergeBase: (cwd: string, base: string, head?: string) => Effect.Effect<string | undefined>
   readonly show: (cwd: string, ref: string, file: string, prefix?: string) => Effect.Effect<string>
   readonly status: (cwd: string) => Effect.Effect<Item[]>
-  readonly diff: (cwd: string, ref: string) => Effect.Effect<Item[]>
   readonly stats: (cwd: string, ref: string) => Effect.Effect<Stat[]>
 }
 
@@ -84,14 +85,15 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const gitCommand = resolveGitCommand()
 
     const run = Effect.fn("Git.run")(
       function* (args: string[], opts: Options) {
-        const proc = ChildProcess.make("git", [...cfg, ...args], {
+        const proc = ChildProcess.make(gitCommand, [...cfg, ...args], {
           cwd: opts.cwd,
           env: opts.env,
           extendEnv: true,
-          stdin: "ignore",
+          stdin: opts.stdin ?? "ignore",
           stdout: "pipe",
           stderr: "pipe",
         })
@@ -205,18 +207,6 @@ export const layer = Layer.effect(
       })
     })
 
-    const diff = Effect.fn("Git.diff")(function* (cwd: string, ref: string) {
-      const list = nuls(
-        yield* text(["diff", "--no-ext-diff", "--no-renames", "--name-status", "-z", ref, "--", "."], { cwd }),
-      )
-      return list.flatMap((code, idx) => {
-        if (idx % 2 !== 0) return []
-        const file = list[idx + 1]
-        if (!code || !file) return []
-        return [{ file, code, status: kind(code) } satisfies Item]
-      })
-    })
-
     const stats = Effect.fn("Git.stats")(function* (cwd: string, ref: string) {
       return nuls(
         yield* text(["diff", "--no-ext-diff", "--no-renames", "--numstat", "-z", ref, "--", "."], { cwd }),
@@ -249,7 +239,6 @@ export const layer = Layer.effect(
       mergeBase,
       show,
       status,
-      diff,
       stats,
     })
   }),

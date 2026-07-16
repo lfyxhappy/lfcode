@@ -1,6 +1,6 @@
 // packages/lfcode/src/cli/cmd/run-completion.ts
 
-export type StatusInfo = { type: "idle" | "busy" | "retry"; [k: string]: unknown }
+export type StatusInfo = { type: "idle" | "busy" | "retry" | "waiting"; [k: string]: unknown }
 
 /** Returns current status of the tracked session, or undefined if absent (= idle). */
 export type StatusQuery = () => Promise<StatusInfo | undefined>
@@ -33,12 +33,12 @@ export function createCompletionTracker(opts: CreateOpts): CompletionTracker {
     )
   }
 
-  const isIdleStatusForSession = (e: unknown): boolean => {
+  const isSettledStatusForSession = (e: unknown): boolean => {
     const ev = e as { type?: string; properties?: { sessionID?: string; status?: { type?: string } } } | null
     return !!ev
       && ev.type === "session.status"
       && ev.properties?.sessionID === opts.sessionID
-      && ev.properties?.status?.type === "idle"
+      && (ev.properties?.status?.type === "idle" || ev.properties?.status?.type === "waiting")
   }
 
   const poll = async () => {
@@ -50,7 +50,7 @@ export function createCompletionTracker(opts: CreateOpts): CompletionTracker {
       return // transient failure; next tick will retry
     }
     if (done || !started) return
-    if (!info || info.type === "idle") finish()
+    if (!info || info.type === "idle" || info.type === "waiting") finish()
   }
 
   const intervalMs = opts.intervalMs ?? 750
@@ -68,7 +68,7 @@ export function createCompletionTracker(opts: CreateOpts): CompletionTracker {
     onEvent(event) {
       if (done) return
       if (matchesSession(event)) started = true
-      if (isIdleStatusForSession(event)) finish()
+      if (isSettledStatusForSession(event)) finish()
     },
     get done() { return done },
     completion,

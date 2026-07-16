@@ -150,6 +150,9 @@ export const Flag = {
   get LFCODE_PLUGIN_META_FILE() {
     return process.env["LFCODE_PLUGIN_META_FILE"]
   },
+  get LFCODE_PLUGIN_LIBRARY_DIR() {
+    return process.env["LFCODE_PLUGIN_LIBRARY_DIR"]
+  },
   get LFCODE_CLIENT() {
     return process.env["LFCODE_CLIENT"] ?? "cli"
   },

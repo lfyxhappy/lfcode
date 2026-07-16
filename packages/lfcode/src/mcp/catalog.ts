@@ -154,21 +154,30 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/McpCatalog") {}
 
-function managedRoot(directory: string) {
+function globalManagedRoot() {
+  return path.join(Global.Path.config, MANAGED_DIR_NAME)
+}
+
+function projectManagedRoot(directory: string) {
   return path.join(directory, ".lfcode", MANAGED_DIR_NAME)
 }
 
-function managedPath(directory: string, name: string) {
-  return path.join(managedRoot(directory), name)
+function managedRoot(directory: string, target: "project" | "global" | undefined) {
+  if (target === "project") return projectManagedRoot(directory)
+  return globalManagedRoot()
 }
 
-function manifestPath(directory: string, name: string) {
-  return path.join(managedPath(directory, name), MANIFEST_FILE)
+function managedPath(directory: string, name: string, target: "project" | "global" | undefined) {
+  return path.join(managedRoot(directory, target), name)
+}
+
+function manifestPath(directory: string, name: string, target: "project" | "global" | undefined) {
+  return path.join(managedPath(directory, name, target), MANIFEST_FILE)
 }
 
 function configTarget(target: "project" | "global" | undefined) {
-  if (target === "global") return "global"
-  return "project"
+  if (target === "project") return "project"
+  return "global"
 }
 
 function bundledInfo(name: string): { title: string; adapter: InstallAdapter; config: ConfigMCP.Info } | undefined {
@@ -325,26 +334,80 @@ export const layer = Layer.effect(
       return fetched
     })
 
-    const readManifest = Effect.fn("McpCatalog.readManifest")(function* (directory: string, name: string) {
-      const file = manifestPath(directory, name)
+    const readManifestAt = Effect.fn("McpCatalog.readManifestAt")(function* (
+      directory: string,
+      name: string,
+      target: "project" | "global" | undefined,
+    ) {
+      const file = manifestPath(directory, name, target)
       if (!(yield* fsys.existsSafe(file))) return undefined
       const raw = yield* fsys.readFileString(file).pipe(Effect.orDie)
       return ManagedMcpManifest.parse(JSON.parse(raw))
     })
 
-    const writeManifest = Effect.fn("McpCatalog.writeManifest")(function* (directory: string, name: string, manifest: ManagedMcpManifest) {
-      const file = manifestPath(directory, name)
+    const readManifest = Effect.fn("McpCatalog.readManifest")(function* (directory: string, name: string) {
+      return (
+        (yield* readManifestAt(directory, name, "global")) ??
+        (yield* readManifestAt(directory, name, "project"))
+      )
+    })
+
+    const writeManifest = Effect.fn("McpCatalog.writeManifest")(function* (
+      directory: string,
+      name: string,
+      manifest: ManagedMcpManifest,
+      target: "project" | "global" | undefined,
+    ) {
+      const file = manifestPath(directory, name, target)
       yield* fsys.writeWithDirs(file, JSON.stringify(manifest, null, 2))
+    })
+
+    const migrateLegacyManagedConfig = Effect.fn("McpCatalog.migrateLegacyManagedConfig")(function* () {
+      const directory = yield* InstanceState.directory
+      const legacyRoot = projectManagedRoot(directory)
+      if (!(yield* fsys.existsSafe(legacyRoot))) return
+
+      const entries = yield* fsys.readDirectoryEntries(legacyRoot).pipe(Effect.catch(() => Effect.succeed([])))
+      const current = yield* config.get()
+      const projectConfigFile = path.join(directory, ".lfcode", "lfcode.jsonc")
+
+      for (const entry of entries) {
+        if (entry.type !== "directory") continue
+        const manifest = yield* readManifestAt(directory, entry.name, "project")
+        if (!manifest) continue
+
+        const name = manifest.configName || manifest.serverName
+        const item = current.mcp?.[name]
+        const origin = current.mcp_origins?.[name]
+
+        if (item && origin?.source === projectConfigFile) {
+          yield* config.upsertMcp(name, item, { target: "global" })
+          yield* config.removeMcp(name)
+        }
+
+        yield* writeManifest(
+          directory,
+          name,
+          {
+            ...manifest,
+            configTarget: Global.Path.config,
+          },
+          "global",
+        )
+        yield* fsys.remove(managedPath(directory, entry.name, "project"), { recursive: true }).pipe(Effect.catch(() => Effect.void))
+      }
     })
 
     const removeManagedFiles: Interface["removeManagedFiles"] = Effect.fn("McpCatalog.removeManagedFiles")(function* (name: string) {
       const directory = yield* InstanceState.directory
-      const target = managedPath(directory, name)
-      if (!(yield* fsys.existsSafe(target))) return
-      yield* fsys.remove(target, { recursive: true }).pipe(Effect.catch(() => Effect.void))
+      for (const target of [managedPath(directory, name, "global"), managedPath(directory, name, "project")]) {
+        if (!(yield* fsys.existsSafe(target))) continue
+        yield* fsys.remove(target, { recursive: true }).pipe(Effect.catch(() => Effect.void))
+      }
     })
 
     const manage: Interface["manage"] = Effect.fn("McpCatalog.manage")(function* () {
+      yield* migrateLegacyManagedConfig().pipe(Effect.orDie)
       const current = yield* config.get()
       const statuses = yield* mcp.status()
       const directory = yield* InstanceState.directory
@@ -404,6 +467,7 @@ export const layer = Layer.effect(
 
     const install: Interface["install"] = (input) =>
       Effect.fn("McpCatalog.install")(function* () {
+        yield* migrateLegacyManagedConfig().pipe(Effect.orDie)
         const directory = yield* InstanceState.directory
         const catalogItems = yield* catalog()
         const item = catalogItems.find((entry: McpCatalogItem) => entry.id === input.id)
@@ -432,9 +496,9 @@ export const layer = Layer.effect(
 
         if (!nextConfig) return yield* Effect.die(new Error(`Missing install config for ${input.id}`))
 
-        const updated = yield* config.upsertMcp(item.serverName, nextConfig, { target: configTarget(input.target) })
-        const configFile =
-          input.target === "global" ? Global.Path.config : path.join(directory, ".lfcode", "lfcode.jsonc")
+        const target = configTarget(input.target)
+        const updated = yield* config.upsertMcp(item.serverName, nextConfig, { target })
+        const configFile = target === "global" ? Global.Path.config : path.join(directory, ".lfcode", "lfcode.jsonc")
         yield* writeManifest(directory, item.serverName, {
           id: item.id,
           serverName: item.serverName,
@@ -449,7 +513,7 @@ export const layer = Layer.effect(
             url: nextConfig.type === "remote" ? nextConfig.url : undefined,
             version: server.server.version,
           },
-        })
+        }, target)
         const status = (yield* mcp.status())[item.serverName] ?? { status: "disabled" as const }
         return {
           name: item.serverName,

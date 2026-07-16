@@ -10,6 +10,8 @@ type Model = {
   name?: string
   limit: {
     context: number
+    input?: number
+    output?: number
   }
 }
 
@@ -20,6 +22,7 @@ type Context = {
   providerLabel: string
   modelLabel: string
   limit: number | undefined
+  usableLimit: number | undefined
   input: number
   output: number
   reasoning: number
@@ -36,6 +39,20 @@ type Metrics = {
 
 const tokenTotal = (msg: AssistantMessage) => {
   return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+}
+
+const OUTPUT_CAP = 20_000
+const COMPACTION_BUFFER = 20_000
+
+function usableLimit(model: Model | undefined) {
+  const context = model?.limit.context
+  if (!context) return undefined
+  const maxOutput = model.limit.output ?? 0
+  const outputReserve = Math.min(maxOutput, OUTPUT_CAP)
+  const reserved = Math.min(COMPACTION_BUFFER, maxOutput)
+  const inputLimit = model.limit.input
+  if (inputLimit) return Math.max(0, inputLimit - outputReserve - reserved)
+  return Math.max(0, context - outputReserve - reserved)
 }
 
 const lastAssistantWithTokens = (messages: Message[]) => {
@@ -56,6 +73,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Metrics =>
   const model = provider?.models[message.modelID]
   const limit = model?.limit.context
   const total = tokenTotal(message)
+  const usable = usableLimit(model)
 
   return {
     totalCost,
@@ -66,13 +84,14 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Metrics =>
       providerLabel: provider?.name ?? message.providerID,
       modelLabel: model?.name ?? message.modelID,
       limit,
+      usableLimit: usable,
       input: message.tokens.input,
       output: message.tokens.output,
       reasoning: message.tokens.reasoning,
       cacheRead: message.tokens.cache.read,
       cacheWrite: message.tokens.cache.write,
       total,
-      usage: limit ? Math.round((total / limit) * 100) : null,
+      usage: usable ? Math.round((total / usable) * 100) : null,
     },
   }
 }

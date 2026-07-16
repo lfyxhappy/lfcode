@@ -53,6 +53,12 @@ const meta = (cursor: number) => {
 
 const pty = lazy(() => import("#pty"))
 
+function describePtyError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return String(error)
+}
+
 export const Info = z
   .object({
     id: PtyID.zod,
@@ -197,14 +203,37 @@ export const layer = Layer.effect(
       }
       log.info("creating session", { id, cmd: command, args, cwd })
 
-      const { spawn } = yield* Effect.promise(() => pty())
-      const proc = yield* Effect.sync(() =>
-        spawn(command, args, {
-          name: "xterm-256color",
-          cwd,
-          env,
-        }),
-      )
+      const { spawn } = yield* Effect.tryPromise({
+        try: () => pty(),
+        catch: (error) => {
+          log.error("failed to load pty runtime", {
+            id,
+            cmd: command,
+            args,
+            cwd,
+            error: describePtyError(error),
+          })
+          return error
+        },
+      }).pipe(Effect.orDie)
+      const proc = yield* Effect.try({
+        try: () =>
+          spawn(command, args, {
+            name: "xterm-256color",
+            cwd,
+            env,
+          }),
+        catch: (error) => {
+          log.error("failed to spawn pty session", {
+            id,
+            cmd: command,
+            args,
+            cwd,
+            error: describePtyError(error),
+          })
+          return error
+        },
+      }).pipe(Effect.orDie)
 
       const info = {
         id,

@@ -4,10 +4,11 @@ tool — use it to track every multi-step piece of work: what you're doing
 now, what's queued, what's blocked, what's done.
 
 JSON calls always wrap the action in an `operation` object — see examples below.
+For `create`, the tool generates the task ID. Do not send `operation.id`; IDs are only used when operating on an existing task.
 
 ## Operations
 
-- create:     register a new task. `summary` required. optional: `parent_id`.
+- create:     register a new task. `summary` required. optional: `parent_id`. The tool generates the new task ID; never include `operation.id`.
 - list:       enumerate tasks. defaults to open+in_progress+blocked, excluding archived.
               optional: `status` filter, `include_terminal`, `include_archived`.
 - get:        fetch one task by id.
@@ -36,6 +37,8 @@ Terminal states clean up automatically after `checkpoint.task_archive_days` (def
 {"operation":{"action":"rename","id":"T1","summary":"Updated title"}}
 
 ## Discipline
+
+- If a task call is rejected, fix the reported field and send a new operation; do not replay the same JSON.
 
 - Only mark `done` when the work is FULLY accomplished. If tests fail, the
   implementation is partial, or you hit an unresolved error, keep it

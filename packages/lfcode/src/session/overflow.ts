@@ -1,9 +1,10 @@
 import type { Config } from "@/config"
 import type { Provider } from "@/provider"
-import { ProviderTransform } from "@/provider"
+import * as ProviderTransform from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
+const AUTO_COMPACT_RATIO = 0.8
 
 // Cap the output reservation so models with large output windows (e.g. 32K, 64K)
 // don't strangle the usable input window. 20K covers >99.99% of compaction
@@ -19,7 +20,7 @@ export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
   const outputReserve = Math.min(ProviderTransform.maxOutputTokens(input.model), OUTPUT_CAP)
 
   return input.model.limit.input
-    ? Math.max(0, input.model.limit.input - reserved)
+    ? Math.max(0, input.model.limit.input - outputReserve - reserved)
     : Math.max(0, context - outputReserve - reserved)
 }
 
@@ -30,6 +31,22 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
   return count >= usable(input)
+}
+
+export function shouldAutoCompact(input: {
+  cfg: Config.Info
+  tokens: MessageV2.Assistant["tokens"]
+  model: Provider.Model
+}) {
+  if (input.cfg.compaction?.auto === false) return false
+  if (input.model.limit.context === 0) return false
+
+  const limit = usable(input)
+  if (limit === 0) return false
+
+  const count =
+    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+  return count >= Math.floor(limit * AUTO_COMPACT_RATIO)
 }
 
 export function pressureLevel(input: {

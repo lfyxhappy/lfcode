@@ -163,8 +163,13 @@ describe("voice", () => {
       const { transcribeAudio } = await import("../../../src/cli/cmd/tui/util/voice")
       const result = await transcribeAudio({
         audio: new Int16Array(100),
-        apiKey: "test-key",
-        baseUrl: "http://127.0.0.1:1", // unreachable port
+        transport: {
+          apiKey: "test-key",
+          baseUrl: "http://127.0.0.1:1", // unreachable port
+          headers: {},
+          modelID: "test-model",
+          providerID: "test-provider",
+        },
       })
       expect(result).toBeNull()
     })

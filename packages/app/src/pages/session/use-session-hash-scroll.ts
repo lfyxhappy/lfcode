@@ -1,36 +1,32 @@
-import type { UserMessage } from "@lfcode-ai/sdk/v2"
+import type { Message as MessageType, UserMessage } from "@lfcode-ai/sdk/v2"
 import { useLocation, useNavigate } from "@solidjs/router"
-import { createEffect, createMemo, onCleanup, onMount } from "solid-js"
+import { createEffect, createMemo, on, onCleanup, onMount } from "solid-js"
 import { messageIdFromHash } from "./message-id-from-hash"
+import { messageHashTargetId } from "./session-hash-target"
 
 export const useSessionHashScroll = (input: {
-  sessionKey: () => string
   sessionID: () => string | undefined
   messagesReady: () => boolean
+  streaming?: () => boolean
+  messages: () => MessageType[]
   visibleUserMessages: () => UserMessage[]
-  historyMore: () => boolean
-  historyLoading: () => boolean
-  loadMore: (sessionID: string) => Promise<void>
   turnStart: () => number
   currentMessageId: () => string | undefined
-  pendingMessage: () => string | undefined
-  setPendingMessage: (value: string | undefined) => void
   setActiveMessage: (message: UserMessage | undefined) => void
   setTurnStart: (value: number) => void
   autoScroll: { pause: () => void; forceScrollToBottom: () => void }
   scroller: () => HTMLDivElement | undefined
   anchor: (id: string) => string
-  scheduleScrollState: (el: HTMLDivElement) => void
-  consumePendingMessage: (key: string) => string | undefined
 }) => {
+  const messages = createMemo(() => input.messages())
   const visibleUserMessages = createMemo(() => input.visibleUserMessages())
-  const messageById = createMemo(() => new Map(visibleUserMessages().map((m) => [m.id, m])))
+  const messageById = createMemo(() => new Map(messages().map((m) => [m.id, m])))
+  const userMessageById = createMemo(() => new Map(visibleUserMessages().map((m) => [m.id, m])))
   const messageIndex = createMemo(() => new Map(visibleUserMessages().map((m, i) => [m.id, i])))
-  let pendingKey = ""
-  let clearing = false
 
   const location = useLocation()
   const navigate = useNavigate()
+  let lastAppliedHashKey = ""
 
   const frames = new Set<number>()
   const queue = (fn: () => void) => {
@@ -47,17 +43,13 @@ export const useSessionHashScroll = (input: {
 
   const clearMessageHash = () => {
     cancel()
-    input.consumePendingMessage(input.sessionKey())
-    if (input.pendingMessage()) input.setPendingMessage(undefined)
     if (!location.hash) return
-    clearing = true
     navigate(location.pathname + location.search, { replace: true })
   }
 
   const updateHash = (id: string) => {
     const hash = `#${input.anchor(id)}`
     if (location.hash === hash) return
-    clearing = false
     navigate(location.pathname + location.search + hash, {
       replace: true,
     })
@@ -77,7 +69,10 @@ export const useSessionHashScroll = (input: {
   }
 
   const seek = (id: string, behavior: ScrollBehavior, left = 4): boolean => {
-    const el = document.getElementById(input.anchor(id))
+    const root = input.scroller()
+    const el = [...(root?.querySelectorAll<HTMLElement>("[data-message-id]") ?? [])].find(
+      (element) => element.dataset.messageId === id,
+    )
     if (el) return scrollToElement(el, behavior)
     if (left <= 0) return false
     queue(() => {
@@ -86,11 +81,19 @@ export const useSessionHashScroll = (input: {
     return false
   }
 
-  const scrollToMessage = (message: UserMessage, behavior: ScrollBehavior = "smooth") => {
+  const scrollToMessage = (
+    message: MessageType,
+    behavior: ScrollBehavior = "smooth",
+    options?: { updateHash?: boolean },
+  ) => {
     cancel()
-    if (input.currentMessageId() !== message.id) input.setActiveMessage(message)
+    const owner = message.role === "user" ? message : message.parentID ? userMessageById().get(message.parentID) : undefined
+    const hashTargetId = messageHashTargetId(message)
+    const shouldUpdateHash = options?.updateHash !== false
+    if (owner && input.currentMessageId() !== owner.id) input.setActiveMessage(owner)
 
-    const index = messageIndex().get(message.id) ?? -1
+    const turnAnchorId = message.role === "user" ? message.id : message.parentID
+    const index = turnAnchorId ? (messageIndex().get(turnAnchorId) ?? -1) : -1
     if (index !== -1 && index < input.turnStart()) {
       input.setTurnStart(index)
 
@@ -98,26 +101,21 @@ export const useSessionHashScroll = (input: {
         seek(message.id, behavior)
       })
 
-      updateHash(message.id)
+      if (shouldUpdateHash) updateHash(hashTargetId)
       return
     }
 
     if (seek(message.id, behavior)) {
-      updateHash(message.id)
+      if (shouldUpdateHash) updateHash(hashTargetId)
       return
     }
 
-    updateHash(message.id)
+    if (shouldUpdateHash) updateHash(hashTargetId)
   }
 
   const applyHash = (behavior: ScrollBehavior) => {
     const hash = location.hash.slice(1)
-    if (!hash) {
-      input.autoScroll.forceScrollToBottom()
-      const el = input.scroller()
-      if (el) input.scheduleScrollState(el)
-      return
-    }
+    if (!hash) return
 
     const messageId = messageIdFromHash(hash)
     if (messageId) {
@@ -130,7 +128,8 @@ export const useSessionHashScroll = (input: {
       return
     }
 
-    const target = document.getElementById(hash)
+    const root = input.scroller()
+    const target = [...(root?.querySelectorAll<HTMLElement>("[id]") ?? [])].find((element) => element.id === hash)
     if (target) {
       input.autoScroll.pause()
       scrollToElement(target, behavior)
@@ -138,66 +137,23 @@ export const useSessionHashScroll = (input: {
     }
 
     input.autoScroll.forceScrollToBottom()
-    const el = input.scroller()
-    if (el) input.scheduleScrollState(el)
   }
 
-  createEffect(() => {
-    const hash = location.hash
-    if (!hash) clearing = false
-    if (!input.sessionID() || !input.messagesReady()) return
-    cancel()
-    queue(() => applyHash("auto"))
-  })
-
-  createEffect(() => {
-    if (!input.sessionID() || !input.messagesReady()) return
-
-    visibleUserMessages()
-    input.turnStart()
-
-    let targetId = input.pendingMessage()
-    if (!targetId) {
-      const key = input.sessionKey()
-      if (pendingKey !== key) {
-        pendingKey = key
-        const next = input.consumePendingMessage(key)
-        if (next) {
-          input.setPendingMessage(next)
-          targetId = next
-        }
-      }
-    }
-
-    if (!targetId && !clearing) targetId = messageIdFromHash(location.hash)
-    if (!targetId) return
-
-    const pending = input.pendingMessage() === targetId
-    const msg = messageById().get(targetId)
-    if (!msg) return
-
-    if (pending) input.setPendingMessage(undefined)
-    if (input.currentMessageId() === targetId && !pending) return
-
-    input.autoScroll.pause()
-    cancel()
-    queue(() => scrollToMessage(msg, "auto"))
-  })
-
-  createEffect(() => {
-    const sessionID = input.sessionID()
-    if (!sessionID || !input.messagesReady()) return
-
-    visibleUserMessages()
-
-    let targetId = input.pendingMessage()
-    if (!targetId && !clearing) targetId = messageIdFromHash(location.hash)
-    if (!targetId) return
-    if (messageById().has(targetId)) return
-    if (!input.historyMore() || input.historyLoading()) return
-
-    void input.loadMore(sessionID)
-  })
+  createEffect(
+    on(
+      () => [location.hash, input.sessionID(), input.messagesReady()] as const,
+      ([hash, sessionID, ready]) => {
+        if (!sessionID || !ready) return
+        if (input.streaming?.() && hash) return
+        const nextKey = `${sessionID}:${hash}`
+        if (lastAppliedHashKey === nextKey) return
+        lastAppliedHashKey = nextKey
+        cancel()
+        applyHash("auto")
+      },
+      { defer: true },
+    ),
+  )
 
   onMount(() => {
     if (typeof window !== "undefined" && "scrollRestoration" in window.history) {

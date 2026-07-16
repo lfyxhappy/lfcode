@@ -11,7 +11,7 @@ import copyBrandAssetsDark from "../asset/lander/brand-assets-dark.svg"
 // Replace these with your actual SVG files for copying
 import copyLogoSvgLight from "../asset/lander/lfcode-logo-light.svg"
 import copyLogoSvgDark from "../asset/lander/lfcode-logo-dark.svg"
-import copyWordmarkSvgLight from "../asset/lander/lfcode-wordmark-light.svg"
+import copyWordmarkSvgLight from "../asset/brand/lfcode-wordmark-light.svg"
 import copyWordmarkSvgDark from "../asset/lander/lfcode-wordmark-dark.svg"
 import { A, useNavigate } from "@solidjs/router"
 import { createMemo, Match, Show, Switch } from "solid-js"

@@ -10,6 +10,7 @@ import fuzzysort from "fuzzysort"
 import ignore from "ignore"
 import path from "path"
 import z from "zod"
+import { sampledChecksum } from "@lfcode-ai/shared/util/encode"
 import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { Log } from "../util"
@@ -44,8 +45,10 @@ export type Node = z.infer<typeof Node>
 
 export const Content = z
   .object({
+    exists: z.boolean(),
     type: z.enum(["text", "binary"]),
     content: z.string(),
+    checksum: z.string(),
     diff: z.string().optional(),
     patch: z
       .object({
@@ -83,6 +86,103 @@ export const Event = {
 }
 
 const log = Log.create({ service: "file" })
+
+function contentChecksum(content: string) {
+  return sampledChecksum(content) ?? "0"
+}
+
+function decodeTextBytes(bytes: Uint8Array) {
+  if (bytes.length === 0) {
+    return {
+      content: "",
+      encoding: "utf-8",
+    } as const
+  }
+
+  const utf8Bom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+  if (utf8Bom) {
+    return {
+      content: new TextDecoder("utf-8").decode(bytes.subarray(3)),
+      encoding: "utf-8",
+    } as const
+  }
+
+  const utf16LeBom = bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe
+  if (utf16LeBom) {
+    return {
+      content: new TextDecoder("utf-16le").decode(bytes.subarray(2)),
+      encoding: "utf-16le",
+    } as const
+  }
+
+  const utf16BeBom = bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff
+  if (utf16BeBom) {
+    return {
+      content: new TextDecoder("utf-16be").decode(bytes.subarray(2)),
+      encoding: "utf-16be",
+    } as const
+  }
+
+  const tryDecode = (encoding: string, fatal = true) => {
+    try {
+      return new TextDecoder(encoding, { fatal }).decode(bytes)
+    } catch {
+      return
+    }
+  }
+
+  const utf8 = tryDecode("utf-8")
+  if (utf8 !== undefined) {
+    return {
+      content: utf8,
+      encoding: "utf-8",
+    } as const
+  }
+
+  const zeroRatio = (parity: 0 | 1) => {
+    let total = 0
+    let zero = 0
+    for (let index = parity; index < bytes.length; index += 2) {
+      total += 1
+      if (bytes[index] === 0) zero += 1
+    }
+    return total === 0 ? 0 : zero / total
+  }
+
+  const evenZeros = zeroRatio(0)
+  const oddZeros = zeroRatio(1)
+  if (oddZeros >= 0.35) {
+    const utf16le = tryDecode("utf-16le", false)
+    if (utf16le !== undefined) {
+      return {
+        content: utf16le,
+        encoding: "utf-16le",
+      } as const
+    }
+  }
+  if (evenZeros >= 0.35) {
+    const utf16be = tryDecode("utf-16be", false)
+    if (utf16be !== undefined) {
+      return {
+        content: utf16be,
+        encoding: "utf-16be",
+      } as const
+    }
+  }
+
+  const gb18030 = tryDecode("gb18030", false)
+  if (gb18030 !== undefined) {
+    return {
+      content: gb18030,
+      encoding: "gb18030",
+    } as const
+  }
+
+  return {
+    content: new TextDecoder("utf-8").decode(bytes),
+    encoding: "utf-8",
+  } as const
+}
 
 const binary = new Set([
   "exe",
@@ -383,7 +483,13 @@ interface State {
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Info[]>
-  readonly read: (file: string) => Effect.Effect<Content>
+  readonly read: (file: string, options?: { withDiff?: boolean }) => Effect.Effect<Content>
+  readonly write: (input: {
+    path: string
+    content: string
+    expectedChecksum?: string
+    createParents?: boolean
+  }) => Effect.Effect<Content>
   readonly list: (dir?: string) => Effect.Effect<Node[]>
   readonly search: (input: {
     query: string
@@ -484,78 +590,48 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       if (ctx.project.vcs !== "git") return []
 
-      const diffOutput = yield* gitText([
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--numstat",
-        "HEAD",
-      ])
+      const items = yield* git.status(ctx.directory)
+      const stats = yield* (yield* git.hasHead(ctx.directory))
+        ? git.stats(ctx.directory, "HEAD").pipe(
+            Effect.map((list) => new Map(list.map((item) => [item.file, item] as const))),
+          )
+        : Effect.succeed(new Map<string, Git.Stat>())
 
-      const changed: Info[] = []
+      const changed = yield* Effect.forEach(items, (item) =>
+        Effect.gen(function* () {
+          const stat = stats.get(item.file)
+          if (item.status === "added") {
+            if (stat) {
+              return {
+                path: item.file,
+                added: stat.additions,
+                removed: stat.deletions,
+                status: item.status,
+              } satisfies Info
+            }
 
-      if (diffOutput.trim()) {
-        for (const line of diffOutput.trim().split("\n")) {
-          const [added, removed, file] = line.split("\t")
-          changed.push({
-            path: file,
-            added: added === "-" ? 0 : parseInt(added, 10),
-            removed: removed === "-" ? 0 : parseInt(removed, 10),
-            status: "modified",
-          })
-        }
-      }
+            const content = yield* appFs
+              .readFileString(path.join(ctx.directory, item.file))
+              .pipe(Effect.catch(() => Effect.succeed<string | undefined>(undefined)))
+            if (content === undefined) return
+            return {
+              path: item.file,
+              added: content.split("\n").length,
+              removed: 0,
+              status: item.status,
+            } satisfies Info
+          }
 
-      const untrackedOutput = yield* gitText([
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.quotepath=false",
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-      ])
+          return {
+            path: item.file,
+            added: stat?.additions ?? 0,
+            removed: stat?.deletions ?? 0,
+            status: item.status,
+          } satisfies Info
+        }),
+      )
 
-      if (untrackedOutput.trim()) {
-        for (const file of untrackedOutput.trim().split("\n")) {
-          const content = yield* appFs
-            .readFileString(path.join(ctx.directory, file))
-            .pipe(Effect.catch(() => Effect.succeed<string | undefined>(undefined)))
-          if (content === undefined) continue
-          changed.push({
-            path: file,
-            added: content.split("\n").length,
-            removed: 0,
-            status: "added",
-          })
-        }
-      }
-
-      const deletedOutput = yield* gitText([
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--name-only",
-        "--diff-filter=D",
-        "HEAD",
-      ])
-
-      if (deletedOutput.trim()) {
-        for (const file of deletedOutput.trim().split("\n")) {
-          changed.push({
-            path: file,
-            added: 0,
-            removed: 0,
-            status: "deleted",
-          })
-        }
-      }
-
-      return changed.map((item) => {
+      return changed.filter((item): item is Info => Boolean(item)).map((item) => {
         const full = path.isAbsolute(item.path) ? item.path : path.join(ctx.directory, item.path)
         return {
           ...item,
@@ -564,7 +640,10 @@ export const layer = Layer.effect(
       })
     })
 
-    const read: Interface["read"] = Effect.fn("File.read")(function* (file: string) {
+    const read: Interface["read"] = Effect.fn("File.read")(function* (
+      file: string,
+      options?: { withDiff?: boolean },
+    ) {
       using _ = log.time("read", { file })
       const ctx = yield* InstanceState.context
       const full = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
@@ -578,60 +657,76 @@ export const layer = Layer.effect(
         const exists = yield* appFs.existsSafe(full)
         if (exists) {
           const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+          const content = Buffer.from(bytes).toString("base64")
           return {
+            exists: true,
             type: "text" as const,
-            content: Buffer.from(bytes).toString("base64"),
+            content,
+            checksum: contentChecksum(content),
             mimeType: getImageMimeType(file),
             encoding: "base64" as const,
           }
         }
-        return { type: "text" as const, content: "" }
+        return { exists: false, type: "text" as const, content: "", checksum: contentChecksum("") }
       }
 
       if (ext(file) === "docx") {
         const exists = yield* appFs.existsSafe(full)
-        if (!exists) return { type: "text" as const, content: "" }
+        if (!exists) return { exists: false, type: "text" as const, content: "", checksum: contentChecksum("") }
 
         const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
         const content = yield* Effect.promise(() => extractDocxText(bytes)).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (content !== undefined) {
           return {
+            exists: true,
             type: "text" as const,
             content,
+            checksum: contentChecksum(content),
             mimeType: docxMimeType,
           }
         }
-        return { type: "binary" as const, content: "", mimeType: docxMimeType }
+        return { exists: true, type: "binary" as const, content: "", checksum: contentChecksum(""), mimeType: docxMimeType }
       }
 
       const knownText = isTextByExtension(file) || isTextByName(file)
 
-      if (isBinaryByExtension(file) && !knownText) return { type: "binary" as const, content: "" }
+      if (isBinaryByExtension(file) && !knownText) {
+        return {
+          exists: yield* appFs.existsSafe(full),
+          type: "binary" as const,
+          content: "",
+          checksum: contentChecksum(""),
+        }
+      }
 
       const exists = yield* appFs.existsSafe(full)
-      if (!exists) return { type: "text" as const, content: "" }
+      if (!exists) return { exists: false, type: "text" as const, content: "", checksum: contentChecksum("") }
 
       const mimeType = AppFileSystem.mimeType(full)
       const encode = knownText ? false : shouldEncode(mimeType)
 
-      if (encode && !isImage(mimeType)) return { type: "binary" as const, content: "", mimeType }
+      if (encode && !isImage(mimeType)) {
+        return { exists: true, type: "binary" as const, content: "", checksum: contentChecksum(""), mimeType }
+      }
 
       if (encode) {
         const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+        const content = Buffer.from(bytes).toString("base64")
         return {
+          exists: true,
           type: "text" as const,
-          content: Buffer.from(bytes).toString("base64"),
+          content,
+          checksum: contentChecksum(content),
           mimeType,
           encoding: "base64" as const,
         }
       }
 
-      const content = yield* appFs.readFileString(full).pipe(
-        Effect.map((s) => s.trim()),
-        Effect.catch(() => Effect.succeed("")),
-      )
+      const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+      const decoded = decodeTextBytes(bytes)
+      const content = decoded.content
 
-      if (ctx.project.vcs === "git" && projectRelative) {
+      if (options?.withDiff && ctx.project.vcs === "git" && projectRelative) {
         let diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--", projectRelative])
         if (!diff.trim()) {
           diff = yield* gitText(["-c", "core.fsmonitor=false", "diff", "--staged", "--", projectRelative])
@@ -642,12 +737,54 @@ export const layer = Layer.effect(
             context: Infinity,
             ignoreWhitespace: true,
           })
-          return { type: "text" as const, content, patch, diff: formatPatch(patch) }
+          return { exists: true, type: "text" as const, content, checksum: contentChecksum(content), patch, diff: formatPatch(patch) }
         }
-        return { type: "text" as const, content }
+        return { exists: true, type: "text" as const, content, checksum: contentChecksum(content) }
       }
 
-      return { type: "text" as const, content }
+      return { exists: true, type: "text" as const, content, checksum: contentChecksum(content) }
+    })
+
+    const write: Interface["write"] = Effect.fn("File.write")(function* (input: {
+      path: string
+      content: string
+      expectedChecksum?: string
+      createParents?: boolean
+    }) {
+      using _ = log.time("write", { file: input.path })
+      const ctx = yield* InstanceState.context
+      const full = AppFileSystem.normalizePath(
+        path.isAbsolute(input.path) ? input.path : path.join(ctx.directory, input.path),
+      )
+
+      if (!path.isAbsolute(input.path) && !Instance.containsPath(full, ctx)) {
+        throw new Error("Access denied: path escapes project directory")
+      }
+
+      const exists = yield* appFs.existsSafe(full)
+      if (input.expectedChecksum !== undefined) {
+        const current = exists
+          ? yield* appFs.readFileString(full).pipe(Effect.catch(() => Effect.succeed("")))
+          : ""
+        const currentChecksum = contentChecksum(current)
+        if (currentChecksum !== input.expectedChecksum) {
+          throw new Error(
+            `Checksum mismatch for ${input.path}. Expected ${input.expectedChecksum}, received ${currentChecksum}.`,
+          )
+        }
+      }
+
+      if (input.createParents) {
+        yield* appFs.makeDirectory(path.dirname(full), { recursive: true }).pipe(Effect.orDie)
+      }
+
+      yield* appFs.writeFileString(full, input.content).pipe(Effect.orDie)
+      return {
+        exists: true,
+        type: "text" as const,
+        content: input.content,
+        checksum: contentChecksum(input.content),
+      }
     })
 
     const list = Effect.fn("File.list")(function* (dir?: string) {
@@ -724,7 +861,7 @@ export const layer = Layer.effect(
     })
 
     log.info("init")
-    return Service.of({ init, status, read, list, search })
+    return Service.of({ init, status, read, write, list, search })
   }),
 )
 

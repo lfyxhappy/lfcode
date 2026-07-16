@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
-import { Filesystem } from "../../src/util"
 
 const withShell = async (shell: string | undefined, fn: () => void | Promise<void>) => {
   const prev = process.env.SHELL
@@ -14,6 +15,26 @@ const withShell = async (shell: string | undefined, fn: () => void | Promise<voi
   } finally {
     if (prev === undefined) delete process.env.SHELL
     else process.env.SHELL = prev
+    Shell.acceptable.reset()
+    Shell.preferred.reset()
+  }
+}
+
+const withBundledPwsh = async (fn: (pwshPath: string) => void | Promise<void>) => {
+  const prev = process.env.LFCODE_PWSH_PATH
+  const root = path.join(tmpdir(), `lfcode-shell-test-${process.pid}-${Date.now()}`)
+  const pwshPath = path.join(root, "pwsh", "pwsh.exe")
+  mkdirSync(path.dirname(pwshPath), { recursive: true })
+  await Bun.write(pwshPath, "")
+  process.env.LFCODE_PWSH_PATH = pwshPath
+  Shell.acceptable.reset()
+  Shell.preferred.reset()
+  try {
+    await fn(pwshPath)
+  } finally {
+    if (prev === undefined) delete process.env.LFCODE_PWSH_PATH
+    else process.env.LFCODE_PWSH_PATH = prev
+    rmSync(root, { recursive: true, force: true })
     Shell.acceptable.reset()
     Shell.preferred.reset()
   }
@@ -42,31 +63,60 @@ describe("shell", () => {
   if (process.platform === "win32") {
     test("rejects blacklisted shells case-insensitively", async () => {
       await withShell("NU.EXE", async () => {
-        expect(Shell.name(Shell.acceptable())).not.toBe("nu")
+        expect(Shell.name(Shell.acceptable())).toBe("pwsh")
       })
     })
 
-    test("normalizes Git Bash shell paths from env", async () => {
+    test("ignores Git Bash shell paths from env and keeps pwsh", async () => {
       const shell = "/cygdrive/c/Program Files/Git/bin/bash.exe"
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe") || "pwsh.exe"
       await withShell(shell, async () => {
-        expect(Shell.preferred()).toBe(Filesystem.windowsPath(shell))
+        expect(Shell.preferred()).toBe(pwsh)
+        expect(Shell.acceptable()).toBe(pwsh)
       })
     })
 
-    test("resolves /usr/bin/bash from env to Git Bash", async () => {
-      const bash = Shell.gitbash()
-      if (!bash) return
+    test("ignores /usr/bin/bash from env and keeps pwsh", async () => {
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe") || "pwsh.exe"
       await withShell("/usr/bin/bash", async () => {
-        expect(Shell.acceptable()).toBe(bash)
-        expect(Shell.preferred()).toBe(bash)
+        expect(Shell.acceptable()).toBe(pwsh)
+        expect(Shell.preferred()).toBe(pwsh)
       })
     })
 
     test("resolves bare PowerShell shells", async () => {
-      const shell = Bun.which("pwsh") || Bun.which("powershell")
-      if (!shell) return
-      await withShell(path.win32.basename(shell), async () => {
-        expect(Shell.preferred()).toBe(shell)
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe")
+      await withShell("powershell.exe", async () => {
+        expect(Shell.preferred()).toBe(pwsh || "pwsh.exe")
+      })
+    })
+
+    test("resolves PowerShell with shared priority order", () => {
+      const resolved = Shell.resolvePowerShell()
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe")
+      expect(resolved).toBe(pwsh || "pwsh.exe")
+    })
+
+    test("prefers bundled pwsh path when provided by the app runtime", async () => {
+      await withBundledPwsh(async (pwshPath) => {
+        expect(Shell.resolvePowerShell()).toBe(pwshPath)
+        expect(Shell.preferred()).toBe(pwshPath)
+        expect(Shell.acceptable()).toBe(pwshPath)
+      })
+    })
+
+    test("normalizes explicit PowerShell names through shared resolver", () => {
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe")
+      expect(Shell.resolvePowerShell("powershell.exe")).toBe(pwsh || "pwsh.exe")
+      if (!pwsh) return
+      expect(Shell.resolvePowerShell(path.win32.basename(pwsh))).toBe(pwsh)
+    })
+
+    test("ignores explicit bash.exe env and keeps pwsh", async () => {
+      const pwsh = Bun.which("pwsh") || Bun.which("pwsh.exe") || "pwsh.exe"
+      await withShell("bash.exe", async () => {
+        expect(Shell.preferred()).toBe(pwsh)
+        expect(Shell.acceptable()).toBe(pwsh)
       })
     })
   }

@@ -235,4 +235,53 @@ describe("skill", () => {
       { git: true },
     ),
   )
+
+  it.live("discovers bundled Lfcode runtime installer skill", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          process.env.LFCODE_DISABLE_LFCODE_SKILLS = "false"
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              process.env.LFCODE_DISABLE_LFCODE_SKILLS = "true"
+            }),
+          )
+
+          const skill = yield* Skill.Service
+          const item = (yield* skill.all()).find((x) => x.name === "runtime-installer")
+          expect(item).toBeDefined()
+          expect(item!.description).toContain("install, repair, initialize, or fix")
+          expect(item!.description).toContain("Python, pip, C++, Java")
+          expect(item!.content).toContain("First call `runtime_manage` with `action=\"list\"`")
+          expect(item!.content).toContain("Prefer `runtime_manage` over ad-hoc shell installers")
+          expect(item!.content).toContain("voice-recorder")
+          expect(item!.location).toContain(path.join("lfcode-skills"))
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live("discovers bundled Lfcode plugin author skill", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          process.env.LFCODE_DISABLE_LFCODE_SKILLS = "false"
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              process.env.LFCODE_DISABLE_LFCODE_SKILLS = "true"
+            }),
+          )
+
+          const skill = yield* Skill.Service
+          const item = (yield* skill.all()).find((x) => x.name === "lfcode-plugin-author")
+          expect(item).toBeDefined()
+          expect(item!.description).toContain("explicit user confirmation")
+          expect(item!.content).toContain("Call `plugin_author` with `preview`")
+          expect(item!.content).toContain("pass the returned token to `plugin_manage`")
+          expect(item!.content).toContain("Do not bypass preview tokens")
+          expect(item!.location).toContain(path.join("lfcode-skills"))
+        }),
+      { git: true },
+    ),
+  )
 })

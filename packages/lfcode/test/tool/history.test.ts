@@ -141,4 +141,162 @@ describe("HistoryTool", () => {
       }),
     ),
   )
+
+  it.live("operation=session returns raw history and boundary flags", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({ id: "p" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any)
+            .run()
+          db.insert(SessionTable)
+            .values({
+              id: "ses_hist" as any,
+              project_id: "p" as any,
+              slug: "x",
+              directory: "/tmp",
+              title: "t",
+              version: "1",
+              last_checkpoint_message_id: "m1" as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: "m1" as any,
+              session_id: "ses_hist" as any,
+              agent_id: "main",
+              data: { role: "user" } as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "p0" as any,
+              message_id: "m1" as any,
+              session_id: "ses_hist" as any,
+              data: {
+                type: "checkpoint",
+                checkpointDir: "/tmp/checkpoints",
+                checkpointNumber: 1,
+                coveredUpTo: "m0",
+              } as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "p1" as any,
+              message_id: "m1" as any,
+              session_id: "ses_hist" as any,
+              data: { type: "text", text: "checkpoint body" } as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: "m2" as any,
+              session_id: "ses_hist" as any,
+              agent_id: "main",
+              data: { role: "assistant" } as any,
+              time_created: now + 1,
+              time_updated: now + 1,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "p2" as any,
+              message_id: "m2" as any,
+              session_id: "ses_hist" as any,
+              data: { type: "text", text: "assistant reply" } as any,
+              time_created: now + 1,
+              time_updated: now + 1,
+            })
+            .run()
+        })
+        const info = yield* HistoryTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute(
+          { operation: "session", session_id: "ses_hist", include_boundaries: false },
+          ctx as any,
+        )
+        expect(result.metadata.session_found).toBe(true)
+        expect(result.metadata.checkpoint_found).toBe(true)
+        expect(result.metadata.count).toBe(1)
+        expect(result.output).toContain("ses_hist")
+        expect(result.output).toContain("assistant reply")
+        expect(result.output).not.toContain("checkpoint body")
+        expect(result.output).not.toContain("checkpointDir")
+      }),
+    ),
+  )
+
+  it.live("operation=session reports missing sessions cleanly", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const info = yield* HistoryTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute({ operation: "session", session_id: "missing" }, ctx as any)
+        expect(result.metadata.session_found).toBe(false)
+        expect(result.metadata.checkpoint_found).toBe(false)
+        expect(result.output).toContain("No session with id missing")
+      }),
+    ),
+  )
+
+  it.live("operation=session returns raw history even when no checkpoint exists", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({ id: "p2" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any)
+            .run()
+          db.insert(SessionTable)
+            .values({
+              id: "ses_raw" as any,
+              project_id: "p2" as any,
+              slug: "x",
+              directory: "/tmp",
+              title: "t",
+              version: "1",
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: "m_raw" as any,
+              session_id: "ses_raw" as any,
+              agent_id: "main",
+              data: { role: "user" } as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "p_raw" as any,
+              message_id: "m_raw" as any,
+              session_id: "ses_raw" as any,
+              data: { type: "text", text: "plain raw history" } as any,
+              time_created: now,
+              time_updated: now,
+            })
+            .run()
+        })
+        const info = yield* HistoryTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute({ operation: "session", session_id: "ses_raw" }, ctx as any)
+        expect(result.metadata.session_found).toBe(true)
+        expect(result.metadata.checkpoint_found).toBe(false)
+        expect(result.output).toContain("plain raw history")
+      }),
+    ),
+  )
 })

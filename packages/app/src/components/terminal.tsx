@@ -319,14 +319,8 @@ export const Terminal = (props: TerminalProps) => {
     const t = term
     if (!t) return
     t.focus()
-    t.textarea?.focus()
-    setTimeout(() => t.textarea?.focus(), 0)
   }
   const handlePointerDown = () => {
-    const activeElement = document.activeElement
-    if (activeElement instanceof HTMLElement && activeElement !== container && !container.contains(activeElement)) {
-      activeElement.blur()
-    }
     focusTerminal()
   }
 
@@ -631,6 +625,7 @@ export const Terminal = (props: TerminalProps) => {
       ref={container}
       data-component="terminal"
       data-prevent-autofocus
+      data-editable-surface="terminal"
       tabIndex={-1}
       style={{ "background-color": terminalColors().background }}
       classList={{

@@ -59,14 +59,17 @@ import {
   createOpenReviewFile,
   createSessionTabs,
   createSizing,
-  focusTerminalById,
   normalizeBrowserRequestURL,
   isSideChatTab,
   sideChatTab,
   sideChatTabID,
-  shouldFocusTerminalOnKeyDown,
 } from "@/pages/session/helpers"
 import { getSessionHandoff, SESSION_HANDOFF_EVENT, setSessionHandoff } from "@/pages/session/handoff"
+import {
+  deepActiveElement,
+  eventBelongsToEditableSurface,
+  shouldRoutePrintableKeyToComposer,
+} from "@/pages/session/editable-surface"
 import { SessionTimelineSurface } from "@/pages/session/session-timeline-surface"
 import { buildHtmlComponentFollowupDraft } from "@/pages/session/html-component-followup"
 import { BrowserKeepaliveHost } from "@/pages/session/browser-keepalive-host"
@@ -852,46 +855,9 @@ export default function Page() {
     saveLabel: language.t("common.save"),
   }))
 
-  const isEditableTarget = (target: EventTarget | null | undefined) => {
-    if (!(target instanceof HTMLElement)) return false
-    return /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName) || target.isContentEditable
-  }
-
-  const deepActiveElement = () => {
-    let current: Element | null = document.activeElement
-    while (current instanceof HTMLElement && current.shadowRoot?.activeElement) {
-      current = current.shadowRoot.activeElement
-    }
-    return current instanceof HTMLElement ? current : undefined
-  }
-
   const handleKeyDown = (event: KeyboardEvent) => {
-    const path = event.composedPath()
-    const target = path.find((item): item is HTMLElement => item instanceof HTMLElement)
     const activeElement = deepActiveElement()
-
-    const protectedTarget = path.some(
-      (item) => item instanceof HTMLElement && item.closest("[data-prevent-autofocus]") !== null,
-    )
-    if (protectedTarget || isEditableTarget(target)) return
-
-    if (activeElement) {
-      const isProtected = activeElement.closest("[data-prevent-autofocus]")
-      const isInput = isEditableTarget(activeElement)
-      if (isProtected || isInput) return
-    }
-    if (dialog.active) return
-
-    if (activeElement === inputRef) {
-      if (event.key === "Escape") inputRef?.blur()
-      return
-    }
-
-    // Prefer the open terminal over the composer when it can take focus
-    if (view().terminal.opened()) {
-      const id = terminal.active()
-      if (id && shouldFocusTerminalOnKeyDown(event) && focusTerminalById(id)) return
-    }
+    if (eventBelongsToEditableSurface(event, activeElement)) return
 
     // Only treat explicit scroll keys as potential "user scroll" gestures.
     if (event.key === "PageUp" || event.key === "PageDown" || event.key === "Home" || event.key === "End") {
@@ -899,10 +865,9 @@ export default function Page() {
       return
     }
 
-    if (event.key.length === 1 && event.key !== "Unidentified" && !(event.ctrlKey || event.metaKey)) {
-      if (composer.blocked() || isChildSession()) return
-      inputRef?.focus()
-    }
+    if (!shouldRoutePrintableKeyToComposer({ event, activeElement, dialogActive: !!dialog.active })) return
+    if (composer.blocked() || isChildSession()) return
+    inputRef?.focus()
   }
 
   createEffect(
@@ -1969,12 +1934,15 @@ export default function Page() {
       token,
       found: true,
       visible: !!(element.offsetParent || element.getClientRects().length > 0),
+      focused: element === document.activeElement || element.contains(document.activeElement),
       text: element.textContent ?? "",
       value,
       draftText: promptValue,
       selectedTextCount: selectedTexts.length,
       selectedTexts,
       dataset,
+      title: element.title || undefined,
+      ariaLabel: element.getAttribute("aria-label") ?? undefined,
       rect: visibleRect(element),
       tagName: element.tagName,
     }
@@ -1985,8 +1953,16 @@ export default function Page() {
       const button = document.querySelector('[data-action="settings-toggle"]')
       return button instanceof HTMLElement ? button : undefined
     }
-    if (input.token === "settings.tab.editor") {
-      const button = document.querySelector('[data-action="settings-tab-editor"]')
+    if (input.token === "settings.dialog") {
+      const dialog = document.querySelector(".settings-dialog")
+      return dialog instanceof HTMLElement ? dialog : undefined
+    }
+    if (input.token === "settings.tab.editor" || input.token === "settings.tab.plugins") {
+      const button = document.querySelector(`[data-action="${input.token.replaceAll(".", "-")}"]`)
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "session.summary.toggle") {
+      const button = document.querySelector('[data-action="session-summary-toggle"]')
       return button instanceof HTMLElement ? button : undefined
     }
     if (input.token === "composer.main.input") {
@@ -2018,6 +1994,10 @@ export default function Page() {
     if (input.token === "filetab.active.mode.edit") return activeCppToolbarButton("edit")
     if (input.token === "filetab.active.mode.preview") return activeCppToolbarButton("preview")
     if (input.token === "filetab.active.mode.save") return activeCppToolbarButton("save")
+    if (input.token === "filetab.active.command-menu") {
+      const button = activeFileTabPanel()?.querySelector('[data-automation-id="code-editor-more-actions"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
     const root = messageCodeBlockRoot(input.blockKey)
     if (input.token === "messageblock.root") return root
     if (input.token === "messageblock.editor") {
@@ -2079,7 +2059,24 @@ export default function Page() {
       }
       throw new Error(`UI token was not found: ${input.token}`)
     }
-    if (node instanceof HTMLButtonElement || node instanceof HTMLAnchorElement || node instanceof HTMLDivElement) {
+    if (input.token === "filetab.active.command-menu") {
+      node.focus()
+      node.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }))
+      node.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter" }))
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    if (input.token === "composer.main.input" || input.token === "sidechat.active.input") {
+      const editable = node.matches('[contenteditable="true"]') ? node : node.querySelector('[contenteditable="true"]')
+      if (!(editable instanceof HTMLElement)) throw new Error(`Editable input was not found: ${input.token}`)
+      editable.focus()
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
+    if (node instanceof HTMLButtonElement || node instanceof HTMLAnchorElement) {
+      node.focus()
+      node.click()
+    } else if (node instanceof HTMLDivElement) {
       node.click()
     } else {
       node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
@@ -3730,7 +3727,7 @@ export default function Page() {
     on(
       () => params.id,
       (id) => {
-        if (!id) requestAnimationFrame(() => inputRef?.focus())
+        if (!id) inputRef?.focus()
       },
     ),
   )
@@ -3763,7 +3760,7 @@ export default function Page() {
   let sessionDropRoot: HTMLDivElement | undefined
 
   return (
-    <div class="relative bg-background-base size-full overflow-hidden flex flex-col">
+    <div class="relative bg-background-base size-full overflow-hidden flex flex-col" data-session-canvas>
       <SessionHeader />
       <div
         class="relative flex-1 min-h-0 flex"

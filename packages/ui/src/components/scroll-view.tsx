@@ -1,4 +1,4 @@
-import { onMount, splitProps, type ComponentProps, Show, mergeProps } from "solid-js"
+import { onCleanup, onMount, splitProps, type ComponentProps, Show, mergeProps } from "solid-js"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { createStore } from "solid-js/store"
 import { useI18n } from "../context/i18n"
@@ -6,6 +6,7 @@ import { useI18n } from "../context/i18n"
 export interface ScrollViewProps extends ComponentProps<"div"> {
   viewportRef?: (el: HTMLDivElement) => void
   orientation?: "vertical" | "horizontal" // currently only vertical is fully implemented for thumb
+  onUserScrollIntent?: () => void
 }
 
 export const scrollKey = (event: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">) => {
@@ -32,7 +33,7 @@ export function ScrollView(props: ScrollViewProps) {
   const merged = mergeProps({ orientation: "vertical" }, props)
   const [local, events, rest] = splitProps(
     merged,
-    ["class", "children", "viewportRef", "orientation", "style"],
+    ["class", "children", "viewportRef", "orientation", "style", "onUserScrollIntent"],
     [
       "onScroll",
       "onWheel",
@@ -49,6 +50,7 @@ export function ScrollView(props: ScrollViewProps) {
   let rootRef!: HTMLDivElement
   let viewportRef!: HTMLDivElement
   let thumbRef!: HTMLDivElement
+  let thumbFrame: number | undefined
 
   const [state, setState] = createStore({
     isHovered: false,
@@ -63,16 +65,15 @@ export function ScrollView(props: ScrollViewProps) {
   const thumbTop = () => state.thumbTop
   const showThumb = () => state.showThumb
 
-  const updateThumb = () => {
+  const updateThumbNow = () => {
     if (!viewportRef) return
     const { scrollTop, scrollHeight, clientHeight } = viewportRef
 
     if (scrollHeight <= clientHeight || scrollHeight === 0) {
-      setState("showThumb", false)
+      if (state.showThumb) setState("showThumb", false)
       return
     }
 
-    setState("showThumb", true)
     const trackPadding = 8
     const trackHeight = clientHeight - trackPadding * 2
 
@@ -89,8 +90,20 @@ export function ScrollView(props: ScrollViewProps) {
     // Ensure thumb stays within bounds (shouldn't be necessary due to math above, but good for safety)
     const boundedTop = trackPadding + Math.max(0, Math.min(top, maxThumbTop))
 
-    setState("thumbHeight", height)
-    setState("thumbTop", boundedTop)
+    if (state.showThumb === true && state.thumbHeight === height && state.thumbTop === boundedTop) return
+    setState({
+      showThumb: true,
+      thumbHeight: height,
+      thumbTop: boundedTop,
+    })
+  }
+
+  const updateThumb = () => {
+    if (thumbFrame !== undefined) return
+    thumbFrame = requestAnimationFrame(() => {
+      thumbFrame = undefined
+      updateThumbNow()
+    })
   }
 
   onMount(() => {
@@ -100,7 +113,7 @@ export function ScrollView(props: ScrollViewProps) {
 
     createResizeObserver([viewportRef, viewportRef.firstElementChild], updateThumb)
 
-    updateThumb()
+    updateThumbNow()
   })
 
   let startY = 0
@@ -109,6 +122,7 @@ export function ScrollView(props: ScrollViewProps) {
   const onThumbPointerDown = (e: PointerEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    local.onUserScrollIntent?.()
     setState("isDragging", true)
     startY = e.clientY
     startScrollTop = viewportRef.scrollTop
@@ -150,6 +164,7 @@ export function ScrollView(props: ScrollViewProps) {
 
     const next = scrollKey(e)
     if (!next) return
+    local.onUserScrollIntent?.()
 
     const scrollAmount = viewportRef.clientHeight * 0.8
     const lineAmount = 40
@@ -181,6 +196,10 @@ export function ScrollView(props: ScrollViewProps) {
         break
     }
   }
+
+  onCleanup(() => {
+    if (thumbFrame !== undefined) cancelAnimationFrame(thumbFrame)
+  })
 
   return (
     <div

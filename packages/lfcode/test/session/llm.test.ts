@@ -4,7 +4,7 @@ import { tool, type ModelMessage } from "ai"
 import { Cause, Effect, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
-import { LLM } from "../../src/session/llm"
+import { gateProviderStreamChunks, LLM } from "../../src/session/llm"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider"
 import { ProviderTransform } from "../../src/provider"
@@ -30,6 +30,17 @@ const llm = makeRuntime(LLM.Service, LLM.defaultLayer)
 
 async function drain(input: LLM.StreamInput) {
   return llm.runPromise((svc) => svc.stream(input).pipe(Stream.runDrain))
+}
+
+async function collect(input: LLM.StreamInput) {
+  return llm.runPromise((svc) =>
+    svc.stream(input).pipe(
+      Stream.runFold(() => [] as LLM.Event[], (events, event) => {
+        events.push(event)
+        return events
+      }),
+    ),
+  )
 }
 
 describe("session.llm.hasToolCalls", () => {
@@ -116,6 +127,29 @@ describe("session.llm.hasToolCalls", () => {
       },
     ] as ModelMessage[]
     expect(LLM.hasToolCalls(messages)).toBe(true)
+  })
+})
+
+describe("session.llm.gateProviderStreamChunks", () => {
+  test("stops yielding provider chunks after abort", async () => {
+    const abort = new AbortController()
+    const gate = deferred<void>()
+
+    async function* source() {
+      yield "first"
+      await gate.promise
+      yield "late"
+    }
+
+    const iter = gateProviderStreamChunks(source(), abort.signal)[Symbol.asyncIterator]()
+    const first = await iter.next()
+    expect(first).toEqual({ done: false, value: "first" })
+
+    abort.abort()
+    gate.resolve()
+
+    const second = await iter.next()
+    expect(second.done).toBe(true)
   })
 })
 
@@ -557,6 +591,165 @@ describe("session.llm.stream", () => {
         const capture = await request
         const tools = capture.body.tools as Array<{ function?: { name?: string } }> | undefined
         expect(tools?.some((item) => item.function?.name === "question")).toBe(true)
+      },
+    })
+  })
+
+  test("emits a synthetic start prefix before provider chunks", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Hello"), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "lfcode.json"),
+          JSON.stringify({
+            $schema: "https://lfcode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
+        const sessionID = SessionID.make("session-test-start-prefix")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("user-start-prefix"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const events = await collect({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        expect(events[0]?.type).toBe("start")
+        expect(events[1]?.type).toBe("start-step")
+        expect(events.some((event) => event.type === "text-delta")).toBe(true)
+        expect(events.some((event) => event.type === "finish-step")).toBe(true)
+        await request
+      },
+    })
+  })
+
+  test("surfaces transient 503 without hidden SDK retries", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const first = waitRequest(
+      "/chat/completions",
+      new Response(JSON.stringify({ error: { message: "overloaded" } }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    const second = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Recovered"), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "lfcode.json"),
+          JSON.stringify({
+            $schema: "https://lfcode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
+        const sessionID = SessionID.make("session-test-visible-retry")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("user-visible-retry"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const events = await collect({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        await first
+        expect(events[0]?.type).toBe("start")
+        expect(events[1]?.type).toBe("start-step")
+        expect(events.some((event) => event.type === "error")).toBe(true)
+        expect(events.some((event) => event.type === "text-delta")).toBe(false)
+        expect(state.queue).toHaveLength(1)
+        void second
       },
     })
   })

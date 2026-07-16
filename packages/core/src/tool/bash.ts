@@ -10,6 +10,7 @@ import { LocationMutation } from "../location-mutation"
 import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
+import { which } from "../util/which"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 
@@ -48,7 +49,16 @@ const Output = Schema.Struct({
 
 type Output = typeof Output.Type
 
-const defaultShell = () => (process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh")
+const defaultShell = () => (process.platform === "win32" ? (which("pwsh.exe") ?? which("pwsh") ?? "pwsh.exe") : "/bin/sh")
+
+const normalizeShell = (input?: string) => {
+  if (process.platform !== "win32") return input ?? defaultShell()
+  if (!input) return defaultShell()
+  const name = path.win32.parse(input.replaceAll("/", "\\")).name.toLowerCase()
+  if (name === "pwsh") return input
+  if (name === "powershell") return defaultShell()
+  return defaultShell()
+}
 
 const compactOutput = (stdout: string, stderr: string) => {
   const output = stdout && stderr ? `${stdout}\n\nstderr:\n${stderr}` : stderr ? `stderr:\n${stderr}` : stdout
@@ -116,7 +126,7 @@ export const layer = Layer.effectDiscard(
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses /bin/sh on POSIX and pwsh on Windows.`,
           input: Input,
           output: Output,
           toModelOutput: ({ output }) => [{ type: "text", text: modelOutput(output) }],
@@ -153,9 +163,9 @@ export const layer = Layer.effectDiscard(
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
 
               const entries = yield* config.entries()
-              const shell =
-                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
-                  .shell ?? defaultShell()
+              const shell = normalizeShell(
+                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : []))).shell,
+              )
               const command = ChildProcess.make(input.command, [], {
                 cwd: target.canonical,
                 shell,

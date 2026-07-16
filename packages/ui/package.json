@@ -6,6 +6,10 @@
   "exports": {
     "./package.json": "./package.json",
     "./*": "./src/components/*.tsx",
+    "./message-code-blocks": "./src/components/message-code-blocks.ts",
+    "./file-reference-path": "./src/components/file-reference-path.ts",
+    "./code-diff-shared": "./src/components/code-diff-shared.ts",
+    "./monaco-kernel": "./src/components/monaco-kernel.ts",
     "./i18n/*": "./src/i18n/*.ts",
     "./pierre": "./src/pierre/index.ts",
     "./pierre/*": "./src/pierre/*.ts",
@@ -65,6 +69,7 @@
     "motion": "12.34.5",
     "motion-dom": "12.34.3",
     "motion-utils": "12.29.2",
+    "monaco-editor": "0.55.1",
     "remeda": "catalog:",
     "remend": "catalog:",
     "shiki": "catalog:",

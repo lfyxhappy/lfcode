@@ -211,4 +211,61 @@ describe("Worktree", () => {
       ),
     )
   })
+
+  describe("reset edge cases", () => {
+    it.live("resets a dirty regular worktree without requiring submodule commands", () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const svc = yield* Worktree.Service
+            const info = yield* svc.makeWorktreeInfo("reset-regular")
+            yield* svc.createFromInfo(info)
+
+            yield* Effect.promise(() => Bun.write(path.join(info.directory, "dirty.txt"), "dirty"))
+            const ok = yield* svc.reset({ directory: info.directory })
+
+            expect(ok).toBe(true)
+            expect(
+              yield* Effect.promise(() =>
+                fs
+                  .stat(path.join(info.directory, "dirty.txt"))
+                  .then(() => true)
+                  .catch(() => false),
+              ),
+            ).toBe(false)
+
+            yield* svc.remove({ directory: info.directory })
+          }),
+        { git: true },
+      ),
+    )
+
+    it.live("rejects resetting the primary workspace", () =>
+      provideTmpdirInstance(
+        (dir) =>
+          Effect.gen(function* () {
+            const svc = yield* Worktree.Service
+            const exit = yield* Effect.exit(svc.reset({ directory: dir }))
+
+            expect(Exit.isFailure(exit)).toBe(true)
+            if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.ResetFailedError)
+          }),
+        { git: true },
+      ),
+    )
+
+    it.live("rejects resetting an unknown worktree", () =>
+      provideTmpdirInstance(
+        (dir) =>
+          Effect.gen(function* () {
+            const svc = yield* Worktree.Service
+            const exit = yield* Effect.exit(svc.reset({ directory: path.join(dir, "missing-worktree") }))
+
+            expect(Exit.isFailure(exit)).toBe(true)
+            if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Worktree.ResetFailedError)
+          }),
+        { git: true },
+      ),
+    )
+  })
 })

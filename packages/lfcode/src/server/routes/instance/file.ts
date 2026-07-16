@@ -102,9 +102,11 @@ export const FileRoutes = lazy(() =>
           query: z.string(),
         }),
       ),
-      async (c) => {
-        return c.json([])
-      },
+      async (c) =>
+        jsonRequest("FileRoutes.findSymbol", c, function* () {
+          const lsp = yield* LSP.Service
+          return yield* lsp.workspaceSymbol(c.req.valid("query").query)
+        }),
     )
     .get(
       "/file",
@@ -156,35 +158,52 @@ export const FileRoutes = lazy(() =>
         "query",
         z.object({
           path: z.string(),
+          with_diff: z.enum(["true", "false"]).optional(),
         }),
       ),
       async (c) =>
         jsonRequest("FileRoutes.read", c, function* () {
           const svc = yield* File.Service
-          return yield* svc.read(c.req.valid("query").path)
+          const query = c.req.valid("query")
+          return yield* svc.read(query.path, { withDiff: query.with_diff === "true" })
         }),
     )
-    .get(
-      "/file/status",
+    .post(
+      "/file/content",
       describeRoute({
-        summary: "Get file status",
-        description: "Get the git status of all files in the project.",
-        operationId: "file.status",
+        summary: "Write file",
+        description: "Write text content to a specified file, optionally enforcing an expected checksum.",
+        operationId: "file.write",
         responses: {
           200: {
-            description: "File status",
+            description: "Updated file content",
             content: {
               "application/json": {
-                schema: resolver(File.Info.array()),
+                schema: resolver(File.Content),
               },
             },
           },
         },
       }),
-      async (c) =>
-        jsonRequest("FileRoutes.status", c, function* () {
-          const svc = yield* File.Service
-          return yield* svc.status()
+      validator(
+        "json",
+        z.object({
+          path: z.string(),
+          content: z.string(),
+          expectedChecksum: z.string().optional(),
+          createParents: z.boolean().optional(),
         }),
-    ),
+      ),
+      async (c) =>
+        jsonRequest("FileRoutes.write", c, function* () {
+          const svc = yield* File.Service
+          const body = c.req.valid("json")
+          return yield* svc.write({
+            path: body.path,
+            content: body.content,
+            expectedChecksum: body.expectedChecksum,
+            createParents: body.createParents,
+          })
+        }),
+    )
 )

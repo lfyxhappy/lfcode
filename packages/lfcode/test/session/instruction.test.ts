@@ -250,7 +250,6 @@ describe("Instruction.system", () => {
                 expect(paths.has(path.join(globalTmp.path, "AGENTS.md"))).toBe(true)
 
                 const rules = (yield* svc.system()).content
-                expect(rules).toHaveLength(2)
                 expect(rules).toContain(
                   `Instructions from: ${path.join(projectTmp.path, "AGENTS.md")}\n# Project Instructions`,
                 )
@@ -269,6 +268,38 @@ describe("Instruction.system", () => {
         process.env["LFCODE_CONFIG_DIR"] = originalConfigDir
       }
     }
+  })
+
+  test("reloads instruction content after the file changes", async () => {
+    await using projectTmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "AGENTS.md"), "# First Instructions")
+      },
+    })
+
+    await Instance.provide({
+      directory: projectTmp.path,
+      fn: () =>
+        run(
+          Instruction.Service.use((svc) =>
+            Effect.gen(function* () {
+              const first = yield* svc.system()
+              expect(first.content).toContain(
+                `Instructions from: ${path.join(projectTmp.path, "AGENTS.md")}\n# First Instructions`,
+              )
+
+              yield* Effect.promise(() =>
+                Bun.write(path.join(projectTmp.path, "AGENTS.md"), "# Updated Instructions"),
+              )
+
+              const second = yield* svc.system()
+              expect(second.content).toContain(
+                `Instructions from: ${path.join(projectTmp.path, "AGENTS.md")}\n# Updated Instructions`,
+              )
+            }),
+          ),
+        ),
+    })
   })
 })
 

@@ -8,7 +8,7 @@ import { useSync } from "@/context/sync"
 
 const Body = lazy(() => import("./status-popover-body").then((x) => ({ default: x.StatusPopoverBody })))
 
-export function StatusPopover() {
+export function StatusPopover(props: { directory?: string; sessionID?: string }) {
   const language = useLanguage()
   const server = useServer()
   const sync = useSync()
@@ -18,10 +18,13 @@ export function StatusPopover() {
     if (server.healthy() === false) return "critical"
     if (!sync.data.mcp_ready) return "idle"
     const mcp = Object.values(sync.data.mcp ?? {})
-    if (mcp.some((item) => item.status === "failed" || item.status === "needs_client_registration")) {
+    const connected = mcp.filter((item) => item.status === "connected").length
+    const failed = mcp.filter((item) => item.status === "failed" || item.status === "needs_client_registration").length
+    if (failed > 0 && connected === 0) {
       return "critical"
     }
     if (mcp.some((item) => item.status === "pending" || item.status === "needs_auth")) return "warning"
+    if (failed > 0) return "warning"
     return "success"
   })
 
@@ -63,7 +66,7 @@ export function StatusPopover() {
             <div class="w-[360px] h-14 rounded-xl bg-background-strong shadow-[var(--shadow-lg-border-base)]" />
           }
         >
-          <Body shown={shown} />
+          <Body shown={shown} directory={props.directory} sessionID={props.sessionID} />
         </Suspense>
       </Show>
     </Popover>

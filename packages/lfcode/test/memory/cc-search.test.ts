@@ -41,16 +41,16 @@ async function setupCcFile(ccBase: string, slug: string, name: string, body: str
 const noLazyReconcile = { checkpoint: { memory_reconcile_on_search: false } }
 
 describe("memory.search with cc scope", () => {
-  it.live("ranks CC and mimo hits in one result list", () =>
+  it.live("ranks CC and lfcode hits in one result list", () =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
           const memory = yield* Memory.Service
-          const mimoRoot = yield* memory.root()
-          yield* Effect.promise(() => fs.rm(mimoRoot, { recursive: true, force: true }))
-          yield* Effect.promise(() => fs.mkdir(path.join(mimoRoot, "global"), { recursive: true }))
+          const lfcodeRoot = yield* memory.root()
+          yield* Effect.promise(() => fs.rm(lfcodeRoot, { recursive: true, force: true }))
+          yield* Effect.promise(() => fs.mkdir(path.join(lfcodeRoot, "global"), { recursive: true }))
           yield* Effect.promise(() =>
-            fs.writeFile(path.join(mimoRoot, "global", "m.md"), "distinctivetoken from mimo"),
+            fs.writeFile(path.join(lfcodeRoot, "global", "m.md"), "distinctivetoken from lfcode"),
           )
 
           const ccBase = yield* Effect.promise(() => tmpCcBase())
@@ -67,11 +67,13 @@ distinctivetoken from CC`,
             ),
           )
 
-          yield* Effect.promise(() => reconcileMemory({ mimo: mimoRoot, cc: ccBase }))
+          yield* Effect.promise(() => reconcileMemory({ lfcode: lfcodeRoot, cc: ccBase }))
 
-          const results = yield* memory.search({ query: "distinctivetoken" })
-          expect(results.length).toBe(2)
-          const scopes = results.map((r) => r.scope).sort()
+          const result = yield* memory.search({ query: "distinctivetoken" })
+          expect(result.status).toBe("ok")
+          if (result.status !== "ok") throw new Error(`expected memory hits, got ${result.status}`)
+          expect(result.results.length).toBe(2)
+          const scopes = result.results.map((row) => row.scope).sort()
           expect(scopes).toEqual(["cc", "global"])
         }),
       { config: noLazyReconcile },
@@ -83,10 +85,10 @@ distinctivetoken from CC`,
       () =>
         Effect.gen(function* () {
           const memory = yield* Memory.Service
-          const mimoRoot = yield* memory.root()
-          yield* Effect.promise(() => fs.rm(mimoRoot, { recursive: true, force: true }))
-          yield* Effect.promise(() => fs.mkdir(path.join(mimoRoot, "global"), { recursive: true }))
-          yield* Effect.promise(() => fs.writeFile(path.join(mimoRoot, "global", "m.md"), "tokenz"))
+          const lfcodeRoot = yield* memory.root()
+          yield* Effect.promise(() => fs.rm(lfcodeRoot, { recursive: true, force: true }))
+          yield* Effect.promise(() => fs.mkdir(path.join(lfcodeRoot, "global"), { recursive: true }))
+          yield* Effect.promise(() => fs.writeFile(path.join(lfcodeRoot, "global", "m.md"), "tokenz"))
 
           const ccBase = yield* Effect.promise(() => tmpCcBase())
           yield* Effect.promise(() =>
@@ -97,15 +99,19 @@ metadata:
 tokenz`),
           )
 
-          yield* Effect.promise(() => reconcileMemory({ mimo: mimoRoot, cc: ccBase }))
+          yield* Effect.promise(() => reconcileMemory({ lfcode: lfcodeRoot, cc: ccBase }))
 
           const ccOnly = yield* memory.search({ query: "tokenz", scope: "cc" })
-          expect(ccOnly.length).toBe(1)
-          expect(ccOnly[0].scope).toBe("cc")
+          expect(ccOnly.status).toBe("ok")
+          if (ccOnly.status !== "ok") throw new Error(`expected CC hit, got ${ccOnly.status}`)
+          expect(ccOnly.results.length).toBe(1)
+          expect(ccOnly.results[0].scope).toBe("cc")
 
           const globalOnly = yield* memory.search({ query: "tokenz", scope: "global" })
-          expect(globalOnly.length).toBe(1)
-          expect(globalOnly[0].scope).toBe("global")
+          expect(globalOnly.status).toBe("ok")
+          if (globalOnly.status !== "ok") throw new Error(`expected global hit, got ${globalOnly.status}`)
+          expect(globalOnly.results.length).toBe(1)
+          expect(globalOnly.results[0].scope).toBe("global")
         }),
       { config: noLazyReconcile },
     ),
@@ -116,8 +122,9 @@ tokenz`),
       () =>
         Effect.gen(function* () {
           const memory = yield* Memory.Service
-          const mimoRoot = yield* memory.root()
-          yield* Effect.promise(() => fs.rm(mimoRoot, { recursive: true, force: true }))
+          const lfcodeRoot = yield* memory.root()
+          yield* Effect.promise(() => fs.rm(lfcodeRoot, { recursive: true, force: true }))
+          yield* Effect.promise(() => fs.mkdir(lfcodeRoot, { recursive: true }))
 
           const ccBase = yield* Effect.promise(() => tmpCcBase())
           yield* Effect.promise(() =>
@@ -135,15 +142,19 @@ metadata:
 sharedterm b`),
           )
 
-          yield* Effect.promise(() => reconcileMemory({ mimo: mimoRoot, cc: ccBase }))
+          yield* Effect.promise(() => reconcileMemory({ lfcode: lfcodeRoot, cc: ccBase }))
 
           const fb = yield* memory.search({ query: "sharedterm", type: "feedback" })
-          expect(fb.length).toBe(1)
-          expect(fb[0].type).toBe("feedback")
+          expect(fb.status).toBe("ok")
+          if (fb.status !== "ok") throw new Error(`expected feedback hit, got ${fb.status}`)
+          expect(fb.results.length).toBe(1)
+          expect(fb.results[0].type).toBe("feedback")
 
           const pj = yield* memory.search({ query: "sharedterm", type: "project" })
-          expect(pj.length).toBe(1)
-          expect(pj[0].type).toBe("project")
+          expect(pj.status).toBe("ok")
+          if (pj.status !== "ok") throw new Error(`expected project hit, got ${pj.status}`)
+          expect(pj.results.length).toBe(1)
+          expect(pj.results[0].type).toBe("project")
         }),
       { config: noLazyReconcile },
     ),

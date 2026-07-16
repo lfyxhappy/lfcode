@@ -9,8 +9,8 @@ const __dirname = path.dirname(__filename)
 const dir = path.resolve(__dirname, "..")
 
 process.chdir(dir)
-
 await import("./generate.ts")
+import { Script } from "../../script/src/index"
 
 const rootPkg = await Bun.file(path.join(dir, "../../package.json")).json()
 const channel = process.env.LFCODE_CHANNEL ?? "stable"

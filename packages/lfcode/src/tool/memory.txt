@@ -4,6 +4,14 @@ persisted previously: project memory, session checkpoints, task
 narratives (under sessions/<sid>/tasks/), project notes, global
 preferences.
 
+Default search prioritizes durable memory first (project/global memory,
+then structured session checkpoints/tasks, then loose scratch notes).
+If you explicitly need session history first, pass scope/type filters.
+
+Use memory on demand, not as a mandatory first step. For ordinary
+implementation or debugging in the current turn, do the work directly
+unless you specifically need prior durable context.
+
 Memory layout: <data>/memory/<scope>/<scope_id>/<key>.md
 Scopes: global | projects | sessions | cc (opt-in, see below)
 
@@ -35,21 +43,25 @@ byte-for-byte and the result only approximates it, query the history
 tool — the original message holds it verbatim. Don't reconstruct or
 guess the exact value from a paraphrase.
 
-WHEN SEARCH RETURNS 0 (escalate, do not give up):
-1. Retry with fewer / rarer terms (see guidelines above).
+WHEN SEARCH RETURNS 0:
+1. Retry once with fewer / rarer terms (see guidelines above).
 2. For a literal string the tokenizer splits (URL, port, path) — Grep
    the memory dir directly; FTS can't match the punctuation form.
 3. For verbatim recall a summary may have glossed over — use the
    history tool (raw conversation messages).
-Widen scope progressively: session → project → global → history.
+Do not spam many near-duplicate retries if the first focused retry also misses.
 
 Actions:
 - search: OR-joined BM25 query, optional scope/scope_id/type filters
+- write_project_record: Dream consolidator only. Writes a complete verified
+  `MEMORY.md` or `MEMORY-<topic>.md` record through the typed store first, then
+  refreshes its Markdown compatibility projection. Never use direct file edits
+  for durable memory.
 
 After search returns paths, use Read on the most relevant ones to
-load full content (snippets are truncated). Use Glob on
-`<data>/memory/**/*.md` to inspect the tree if you need to find files
-by name pattern instead of body.
+load full content (snippets are truncated). Use `search(kind="path")`
+or `tree` on `<data>/memory` if you need to find files by name pattern
+instead of body.
 
 CC SCOPE:
 When memory.cc_index is enabled in config, Claude Code memory at

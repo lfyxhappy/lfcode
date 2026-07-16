@@ -77,7 +77,7 @@ describe("Git", () => {
     })
   })
 
-  test("diff(), stats(), and mergeBase() parse tracked changes", async () => {
+  test("stats() and mergeBase() parse tracked changes", async () => {
     await using tmp = await tmpdir({ git: true })
     await $`git branch -M main`.cwd(tmp.path).quiet()
     await fs.writeFile(path.join(tmp.path, weird), "before\n", "utf-8")
@@ -87,21 +87,12 @@ describe("Git", () => {
     await fs.writeFile(path.join(tmp.path, weird), "after\n", "utf-8")
 
     await withGit(async (rt) => {
-      const [base, diff, stats] = await Promise.all([
+      const [base, stats] = await Promise.all([
         rt.runPromise(Git.Service.use((git) => git.mergeBase(tmp.path, "main"))),
-        rt.runPromise(Git.Service.use((git) => git.diff(tmp.path, "HEAD"))),
         rt.runPromise(Git.Service.use((git) => git.stats(tmp.path, "HEAD"))),
       ])
 
       expect(base).toBeTruthy()
-      expect(diff).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            file: weird,
-            status: "modified",
-          }),
-        ]),
-      )
       expect(stats).toEqual(
         expect.arrayContaining([
           expect.objectContaining({

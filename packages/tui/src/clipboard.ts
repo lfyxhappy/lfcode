@@ -6,6 +6,12 @@ import { promisify } from "node:util"
 
 const exec = promisify(execFile)
 
+function resolvePowerShell(has?: (name: string) => boolean) {
+  if (has?.("pwsh.exe")) return "pwsh.exe"
+  if (has?.("pwsh")) return "pwsh"
+  return "pwsh.exe"
+}
+
 function command(command: string, args: string[] = [], input?: string) {
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn(command, args, { stdio: [input === undefined ? "ignore" : "pipe", "pipe", "ignore"] })
@@ -53,7 +59,7 @@ export async function read() {
   if (platform() === "win32" || release().includes("WSL")) {
     const script =
       "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"
-    const image = await command("powershell.exe", ["-NonInteractive", "-NoProfile", "-command", script]).catch(() =>
+    const image = await command(resolvePowerShell(), ["-NonInteractive", "-NoProfile", "-command", script]).catch(() =>
       Buffer.alloc(0),
     )
     if (image.length) return { data: image.toString().trim(), mime: "image/png" }
@@ -82,9 +88,9 @@ export function copyCommand(
   if (os === "linux" && wayland && has("wl-copy")) return ["wl-copy"]
   if (os === "linux" && has("xclip")) return ["xclip", "-selection", "clipboard"]
   if (os === "linux" && has("xsel")) return ["xsel", "--clipboard", "--input"]
-  if (os === "win32" && has("powershell.exe")) {
+  if (os === "win32" && (has("pwsh.exe") || has("pwsh"))) {
     return [
-      "powershell.exe",
+      resolvePowerShell(has),
       "-NonInteractive",
       "-NoProfile",
       "-Command",

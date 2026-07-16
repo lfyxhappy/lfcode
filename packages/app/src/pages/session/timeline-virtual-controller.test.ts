@@ -111,6 +111,78 @@ describe("TimelineVirtualController", () => {
     expect(el.scrollTop).toBe(220)
   })
 
+  test("restores a mounted block anchor without a virtualizer", async () => {
+    const el = root()
+    anchor(el, { blockID: "block-1", turnID: "turn-1", top: 300 })
+    controller = new TimelineVirtualController({
+      active: () => ({ key: "dir/session", sessionID: "session", assistantRevision: "stable", streaming: false }),
+      ready: () => true,
+      root: () => el,
+      virtualizer: () => undefined,
+      state: () => state(),
+      persist: () => {},
+      turnStart: () => 0,
+      setTurnStart: () => {},
+      resetHistoryToRecent: () => {},
+      prepareAnchorWindow: () => false,
+      historyMore: () => false,
+      historyLoading: () => false,
+      loadHistory: async () => {},
+      turnIDs: () => ["turn-1"],
+      findAnchor: () => undefined,
+      anchorElement: (root, id) => root.querySelector<HTMLElement>(`[data-viewport-anchor="${id}"]`) ?? undefined,
+      turnElement: (root, id) => root.querySelector<HTMLElement>(`[data-viewport-turn="${id}"]`) ?? undefined,
+      pauseAutoScroll: () => {},
+      scrollToBottom: () => {
+        el.scrollTop = 800
+      },
+    })
+    controller.setRoot(el)
+    controller.activate()
+    await waitFrames(5)
+
+    expect(el.scrollTop).toBe(220)
+    expect(controller.inspect()).toMatchObject({ phase: "committed", resolved: { mode: "anchor" } })
+  })
+
+  test("restores bottom without a virtualizer", async () => {
+    const el = root()
+    controller = new TimelineVirtualController({
+      active: () => ({ key: "dir/session", sessionID: "session", assistantRevision: "stable", streaming: false }),
+      ready: () => true,
+      root: () => el,
+      virtualizer: () => undefined,
+      state: () => ({
+        version: 4,
+        viewport: { version: 4, mode: "bottom", assistantRevision: "stable", historyTurnStart: 0, updatedAt: 1 },
+        history: { turnStart: 0 },
+        updatedAt: 1,
+      }),
+      persist: () => {},
+      turnStart: () => 0,
+      setTurnStart: () => {},
+      resetHistoryToRecent: () => {},
+      prepareAnchorWindow: () => false,
+      historyMore: () => false,
+      historyLoading: () => false,
+      loadHistory: async () => {},
+      turnIDs: () => ["turn-1"],
+      findAnchor: () => undefined,
+      anchorElement: () => undefined,
+      turnElement: () => undefined,
+      pauseAutoScroll: () => {},
+      scrollToBottom: () => {
+        el.scrollTop = 800
+      },
+    })
+    controller.setRoot(el)
+    controller.activate()
+    await waitFrames(5)
+
+    expect(el.scrollTop).toBe(800)
+    expect(controller.inspect()).toMatchObject({ phase: "committed", resolved: { mode: "bottom" } })
+  })
+
   test("missing anchor resolves to bottom and never restores top", async () => {
     const el = root()
     const virtualizer = { scrollToIndex: () => {} } as unknown as VirtualizerHandle
@@ -264,7 +336,11 @@ describe("TimelineVirtualController", () => {
     controller.activate()
     await waitFrames(4)
 
-    expect(persisted?.viewport).toMatchObject({ mode: "anchor", anchorRenderBlockID: "block-1", anchorTurnID: "turn-1" })
+    expect(persisted?.viewport).toMatchObject({
+      mode: "anchor",
+      anchorRenderBlockID: "block-1",
+      anchorTurnID: "turn-1",
+    })
     expect(controller.inspect()).toMatchObject({
       phase: "committed",
       saved: { mode: "anchor", blockID: "block-1", turnID: "turn-1" },

@@ -54,7 +54,7 @@ export namespace RipgrepBinary {
         const dir = yield* fs.makeTempDirectoryScoped({ directory: Global.Path.bin, prefix: "ripgrep-" })
 
         if (config.extension === "zip") {
-          const shell = (yield* Effect.sync(() => which("powershell.exe") ?? which("pwsh.exe"))) ?? "powershell.exe"
+          const shell = (yield* Effect.sync(() => which("pwsh.exe") ?? which("pwsh"))) ?? "pwsh.exe"
           const result = yield* run(shell, [
             "-NoProfile",
             "-NonInteractive",

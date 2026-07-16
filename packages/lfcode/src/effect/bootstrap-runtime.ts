@@ -7,7 +7,6 @@ import { Format } from "@/format"
 import { ShareNext } from "@/share"
 import { File } from "@/file"
 import { Vcs } from "@/project"
-import { Snapshot } from "@/snapshot"
 import { Bus } from "@/bus"
 import { Config } from "@/config"
 import { Memory } from "@/memory"
@@ -24,7 +23,6 @@ export const BootstrapLayer = Layer.mergeAll(
   File.defaultLayer,
   FileWatcher.defaultLayer,
   Vcs.defaultLayer,
-  Snapshot.defaultLayer,
   Bus.defaultLayer,
   Memory.defaultLayer,
   History.defaultLayer,

@@ -1,5 +1,5 @@
 import { and, Database, desc, eq, gte, inArray, lte, sql } from "@/storage"
-import type { Transaction } from "@/storage/db"
+import type { TxOrDb } from "@/storage/db"
 import { ulid } from "ulid"
 import { MaintenanceCandidateEventTable, MaintenanceCandidateTable, MaintenanceLockTable, MaintenanceRunTable } from "./maintenance.sql"
 import { MemoryRecordTable } from "@/memory/record.sql"
@@ -299,7 +299,7 @@ export function listCandidates(input?: { statuses?: MaintenanceCandidateStatus[]
   }).map(toCandidate)
 }
 
-export function updateCandidateStatus(input: { id: string; status: Exclude<MaintenanceCandidateStatus, "applied"> }) {
+export function updateCandidateStatus(input: { id: string; status: "approved" | "rejected" | "stale" }) {
   const now = Date.now()
   return Database.transaction(
     (db) => {
@@ -435,7 +435,7 @@ function asCandidateEventAction(value: string): MaintenanceCandidateEvent["actio
 }
 
 function insertCandidateEvent(
-  db: Transaction,
+  db: TxOrDb,
   input: { candidateID: string; action: MaintenanceCandidateEvent["action"]; detail?: Record<string, unknown>; time: number },
 ) {
   db

@@ -12,20 +12,18 @@ import type {
 import { z } from "zod"
 import { matchesActor } from "./matcher"
 import { Config } from "../config"
+import { ConfigPlugin } from "../config/plugin"
 import { Bus } from "../bus"
 import { BusEvent } from "../bus/bus-event"
 import { Log } from "../util"
 import { createLfcodeClient } from "@lfcode-ai/sdk"
 import { Flag } from "../flag/flag"
 import { CodexAuthPlugin } from "./codex"
-import { MimoAuthPlugin, AnthropicProxyPlugin } from "./mimo"
-import { MimoFreeAuthPlugin } from "./mimo-free"
+import { AnthropicProxyPlugin } from "./anthropic-proxy"
 import { Session } from "../session"
 import type { SessionID } from "../session/schema"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
-import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
-import { PoeAuthPlugin } from "opencode-poe-auth"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
 import { CheckpointSplitoverPlugin } from "./checkpoint-splitover"
 import { SubagentProgressCheckerPlugin } from "./subagent-progress-checker"
@@ -34,7 +32,7 @@ import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
-import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
+import { parsePluginSpecifier, pluginSource, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdaptor } from "@/control-plane/adaptors"
 import type { WorkspaceAdaptor } from "@/control-plane/types"
 
@@ -83,9 +81,18 @@ type HookEntry = {
   hookIDFor: (eventName: string) => string
 }
 
+export type RuntimeStatus = {
+  id: string
+  spec: string
+  source: "internal" | "file" | "npm" | "managed"
+  lifecycle: "active" | "disabled" | "degraded"
+  error?: string
+}
+
 type State = {
   hooks: Hooks[]
   hooksWithMeta: HookEntry[]
+  status: RuntimeStatus[]
 }
 
 export type ActorStopAggregatedDecision = ActorStopOutput & {
@@ -109,6 +116,8 @@ export interface Interface {
     output: Output,
   ) => Effect.Effect<Output>
   readonly list: () => Effect.Effect<Hooks[]>
+  readonly status: () => Effect.Effect<RuntimeStatus[]>
+  readonly reload: () => Effect.Effect<void>
   readonly init: () => Effect.Effect<void>
   readonly triggerActorPreStop: (
     input: ActorPreStopInput,
@@ -122,16 +131,9 @@ export class Service extends Context.Service<Service, Interface>()("@lfcode/Plug
 
 // Built-in plugins that are directly imported (not installed from npm)
 const INTERNAL_PLUGINS: PluginInstance[] = [
-  MimoFreeAuthPlugin,
-  MimoAuthPlugin,
   AnthropicProxyPlugin,
   CodexAuthPlugin,
   CopilotAuthPlugin,
-  // gitlab/poe auth are external npm packages typed against the published
-  // upstream plugin package, which carries a duplicate (nominal) copy of the
-  // SDK client; cast through unknown to the workspace Plugin type.
-  GitlabAuthPlugin as unknown as PluginInstance,
-  PoeAuthPlugin as unknown as PluginInstance,
   CloudflareWorkersAuthPlugin,
   CloudflareAIGatewayAuthPlugin,
   CheckpointSplitoverPlugin,
@@ -169,11 +171,10 @@ async function applyPlugin(
   input: PluginInput,
   hooks: Hooks[],
   hooksWithMeta: HookEntry[],
-) {
+): Promise<RuntimeStatus[]> {
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
-    await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    const pluginName = readPluginId(plugin.id, load.spec) ?? load.pkg?.pkg ?? load.spec
+    const pluginName = await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
     const hookObj = await (plugin as PluginModule).server(input, load.options)
     hooks.push(hookObj)
     hooksWithMeta.push({
@@ -181,9 +182,17 @@ async function applyPlugin(
       pluginName,
       hookIDFor: (event: string) => `${pluginName}#${event}`,
     })
-    return
+    return [
+      {
+        id: pluginName,
+        spec: load.spec,
+        source: load.source,
+        lifecycle: "active",
+      },
+    ]
   }
 
+  const status: RuntimeStatus[] = []
   for (const server of getLegacyPlugins(load.mod)) {
     const fnName = (server as { name?: string }).name
     const pluginName = fnName && fnName !== "default" && fnName !== ""
@@ -196,7 +205,14 @@ async function applyPlugin(
       pluginName,
       hookIDFor: (event: string) => `${pluginName}#${event}`,
     })
+    status.push({
+      id: pluginName,
+      spec: load.spec,
+      source: load.source,
+      lifecycle: "active",
+    })
   }
+  return status
 }
 
 export const layer = Layer.effect(
@@ -209,6 +225,7 @@ export const layer = Layer.effect(
       Effect.fn("Plugin.state")(function* (ctx) {
         const hooks: Hooks[] = []
         const hooksWithMeta: HookEntry[] = []
+        const status: RuntimeStatus[] = []
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
@@ -247,9 +264,11 @@ export const layer = Layer.effect(
 
         for (const plugin of INTERNAL_PLUGINS) {
           log.info("loading internal plugin", { name: plugin.name })
+          let failure: string | undefined
           const init = yield* Effect.tryPromise({
             try: () => plugin(input),
             catch: (err) => {
+              failure = errorMessage(err)
               log.error("failed to load internal plugin", { name: plugin.name, error: err })
             },
           }).pipe(Effect.option)
@@ -260,10 +279,28 @@ export const layer = Layer.effect(
               pluginName: plugin.name,
               hookIDFor: (event: string) => `${plugin.name}#${event}`,
             })
+            status.push({ id: plugin.name, spec: plugin.name, source: "internal", lifecycle: "active" })
+            continue
           }
+          status.push({
+            id: plugin.name,
+            spec: plugin.name,
+            source: "internal",
+            lifecycle: "degraded",
+            ...(failure ? { error: failure } : {}),
+          })
         }
 
-        const plugins = Flag.LFCODE_PURE ? [] : (cfg.plugin_origins ?? [])
+        const configured = cfg.plugin_origins ?? []
+        const disabled = new Set(
+          configured
+            .filter((origin) => cfg.plugin_enabled?.[ConfigPlugin.pluginSpecifier(origin.spec)] === false)
+            .map((origin) => ConfigPlugin.pluginSpecifier(origin.spec)),
+        )
+        for (const spec of disabled) {
+          status.push({ id: spec, spec, source: pluginSource(spec), lifecycle: "disabled" })
+        }
+        const plugins = Flag.LFCODE_PURE ? [] : configured.filter((origin) => !disabled.has(ConfigPlugin.pluginSpecifier(origin.spec)))
         if (Flag.LFCODE_PURE && cfg.plugin_origins?.length) {
           log.info("skipping external plugins in pure mode", { count: cfg.plugin_origins.length })
         }
@@ -279,11 +316,25 @@ export const layer = Layer.effect(
               },
               missing(candidate, _retry, message) {
                 log.warn("plugin has no server entrypoint", { path: candidate.plan.spec, message })
+                status.push({
+                  id: candidate.plan.spec,
+                  spec: candidate.plan.spec,
+                  source: pluginSource(candidate.plan.spec),
+                  lifecycle: "degraded",
+                  error: message,
+                })
               },
               error(candidate, _retry, stage, error, resolved) {
                 const spec = candidate.plan.spec
                 const cause = error instanceof Error ? (error.cause ?? error) : error
                 const message = stage === "load" ? errorMessage(error) : errorMessage(cause)
+                status.push({
+                  id: spec,
+                  spec,
+                  source: pluginSource(spec),
+                  lifecycle: "degraded",
+                  error: message,
+                })
 
                 if (stage === "install") {
                   const parsed = parsePluginSpecifier(spec)
@@ -320,9 +371,17 @@ export const layer = Layer.effect(
             catch: (err) => {
               const message = errorMessage(err)
               log.error("failed to load plugin", { path: load.spec, error: message })
-              return message
+              status.push({
+                id: load.spec,
+                spec: load.spec,
+                source: load.source,
+                lifecycle: "degraded",
+                error: message,
+              })
+              return []
             },
           }).pipe(
+            Effect.tap((items) => Effect.sync(() => status.push(...items))),
             Effect.catch(() => {
               // TODO: make proper events for this
               // bus.publish(Session.Event.Error, {
@@ -357,7 +416,7 @@ export const layer = Layer.effect(
           Effect.forkScoped,
         )
 
-        return { hooks, hooksWithMeta }
+        return { hooks, hooksWithMeta, status }
       }),
     )
 
@@ -489,11 +548,21 @@ export const layer = Layer.effect(
       return s.hooks
     })
 
+    const status = Effect.fn("Plugin.status")(function* () {
+      if (!(yield* InstanceState.has(state))) return []
+      return (yield* InstanceState.get(state)).status.map((item) => ({ ...item }))
+    })
+
+    const reload = Effect.fn("Plugin.reload")(function* () {
+      yield* InstanceState.invalidate(state)
+      yield* InstanceState.get(state)
+    })
+
     const init = Effect.fn("Plugin.init")(function* () {
       yield* InstanceState.get(state)
     })
 
-    return Service.of({ trigger, list, init, triggerActorPreStop, triggerActorPostStop })
+    return Service.of({ trigger, list, status, reload, init, triggerActorPreStop, triggerActorPostStop })
   }),
 )
 

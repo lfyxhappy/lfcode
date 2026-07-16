@@ -6,7 +6,7 @@
 
 ## 状态
 
-解决中
+已解决
 
 ## 问题
 
@@ -73,6 +73,7 @@
 - 2026-07-14 定向测试：`packages/ui/src/components/icon-button.test.ts` 2/2 通过，验证 `aria-label` 回退为 `title`，并验证显式 `title` 保持优先。
 - 2026-07-14 本地化测试：`packages/app/src/i18n/session-header.test.ts` 1/1 通过，覆盖英文、简体中文和繁体中文摘要提示。
 - 2026-07-14 包级检查：`packages/ui` 与 `packages/app` 的 `bun run typecheck` 均通过。
+- 2026-07-14 安装版查询：同步后的 `C:\算法\小应用\Lfcode\Lfcode.exe` 中，摘要按钮 `title` 与 `aria-label` 均为“切换固定摘要”，设置入口 `title` 与 `aria-label` 均可读取，renderer error 查询为空。
 
 ## 验收标准
 
@@ -85,4 +86,4 @@
 
 - 2026-07-14：`IconButton` 统一将已有 `aria-label` 回退为原生 `title`，同时保留调用方显式 `title` 的优先级；因此服务器、项目、消息、文件标签、删除和清空搜索等已具备可访问名称的图标按钮会获得鼠标悬浮提示。
 - 2026-07-14：会话顶部摘要按钮使用 `session.header.summary.toggle`，并补齐英文、简体中文和繁体中文文案，不再硬编码英文提示。
-- 当前代码和包级验证已完成；安装版尚未在本轮总打包、同步和重启后执行真实悬浮验收，因此状态暂留为 `解决中`。
+- 2026-07-14：已完成 fast package、同步和重启；安装版属性与错误事件验证通过。按用户确认的收口口径，本 issue 标记为 `已解决`；真实鼠标悬浮保留为可选观察项，后续若复现则新建 issue。

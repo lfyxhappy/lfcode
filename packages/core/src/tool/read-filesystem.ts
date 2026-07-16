@@ -6,6 +6,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
 import { AbsolutePath, PositiveInt, RelativePath } from "../schema"
+import { makeTextDecoder } from "../process"
 
 export const MAX_READ_LINES = 2_000
 export const MAX_READ_BYTES = 50 * 1024
@@ -197,7 +198,7 @@ export const read = Effect.fn("ReadTool.read")(function* (
       const encoding = detectedEncoding ?? "gb18030"
       const paged = info.size > MAX_READ_BYTES || page.offset !== undefined || page.limit !== undefined
       if (!paged) {
-        const decoder = new TextDecoder(encoding)
+        const decoder = makeTextDecoder(encoding)
         const text = [yield* Effect.sync(() => decoder.decode(first, { stream: true }))]
         while (true) {
           const chunk = yield* file.readAlloc(64 * 1024).pipe(Effect.orDie)
@@ -217,7 +218,7 @@ export const read = Effect.fn("ReadTool.read")(function* (
       const offset = page.offset ?? 1
       const limit = Math.min(page.limit ?? MAX_READ_LINES, MAX_READ_LINES)
       const lines: string[] = []
-      const decoder = new TextDecoder(encoding)
+      const decoder = makeTextDecoder(encoding)
       let pending = ""
       let discard = false
       let line = 1

@@ -18,6 +18,14 @@ export type LocalPTY = {
   cursor?: number
 }
 
+export type CreateTerminalInput = {
+  command?: string
+  args?: string[]
+  cwd?: string
+  title?: string
+  env?: Record<string, string>
+}
+
 const WORKSPACE_KEY = "__workspace__"
 const MAX_TERMINAL_SESSIONS = 20
 
@@ -35,6 +43,12 @@ function num(value: unknown) {
 
 function numberFromTitle(title: string) {
   return titleNumber(title, MAX_TERMINAL_SESSIONS)
+}
+
+function describeTerminalError(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Unknown terminal creation error"
 }
 
 function pty(value: unknown): LocalPTY | undefined {
@@ -239,6 +253,37 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
     })
   }
 
+  const createTerminal = async (input?: CreateTerminalInput) => {
+    const fallbackNumber = pickNextTerminalNumber()
+    const created = await sdk.client.pty.create({
+      command: input?.command,
+      args: input?.args,
+      cwd: input?.cwd,
+      title: input?.title,
+      env: input?.env,
+    }).catch((error: unknown) => {
+      const message = describeTerminalError(error)
+      console.error("Failed to create terminal", {
+        error,
+        command: input?.command,
+        args: input?.args,
+        cwd: input?.cwd,
+        title: input?.title,
+      })
+      throw new Error(message)
+    })
+    const id = created?.data?.id
+    if (!id) return
+    const title = created.data?.title ?? input?.title ?? defaultTitle(fallbackNumber)
+    setStore("all", store.all.length, {
+      id,
+      title,
+      titleNumber: numberFromTitle(title) ?? fallbackNumber,
+    })
+    setStore("active", id)
+    return id
+  }
+
   return {
     ready,
     all: createMemo(() => store.all),
@@ -249,25 +294,13 @@ function createWorkspaceTerminalSession(sdk: ReturnType<typeof useSDK>, dir: str
         setStore("all", [])
       })
     },
+    async create(input?: CreateTerminalInput) {
+      return createTerminal(input)
+    },
     new() {
-      const nextNumber = pickNextTerminalNumber()
-
-      sdk.client.pty
-        .create({ title: defaultTitle(nextNumber) })
-        .then((pty: { data?: { id?: string; title?: string } }) => {
-          const id = pty.data?.id
-          if (!id) return
-          const newTerminal = {
-            id,
-            title: pty.data?.title ?? defaultTitle(nextNumber),
-            titleNumber: nextNumber,
-          }
-          setStore("all", store.all.length, newTerminal)
-          setStore("active", id)
-        })
-        .catch((error: unknown) => {
-          console.error("Failed to create terminal", error)
-        })
+      void createTerminal({ title: defaultTitle(pickNextTerminalNumber()) }).catch((error: unknown) => {
+        console.error("Failed to create default terminal", error)
+      })
     },
     update(pty: Partial<LocalPTY> & { id: string }) {
       update(sdk.client, pty)
@@ -421,6 +454,7 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       ready: () => workspace().ready(),
       all: () => workspace().all(),
       active: () => workspace().active(),
+      create: (input?: CreateTerminalInput) => workspace().create(input),
       new: () => workspace().new(),
       update: (pty: Partial<LocalPTY> & { id: string }) => workspace().update(pty),
       trim: (id: string) => workspace().trim(id),

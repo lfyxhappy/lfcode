@@ -12,7 +12,6 @@ import { Ripgrep } from "@/file/ripgrep"
 import { File } from "@/file"
 import { FileWatcher } from "@/file/watcher"
 import { Storage } from "@/storage"
-import { Snapshot } from "@/snapshot"
 import { Plugin } from "@/plugin"
 import { Provider } from "@/provider"
 import { ProviderAuth } from "@/provider"
@@ -59,6 +58,7 @@ import { WorkflowRuntime } from "@/workflow/runtime"
 import { History } from "@/history"
 import { Memory } from "@/memory"
 import * as BashInteractive from "@/tool/bash-interactive"
+import { defaultLayer as ShellBackgroundRuntimeLayer } from "@/background-job/runtime"
 import { memoMap } from "./memo-map"
 
 // Wrapped in Layer.suspend so the cross-module `.defaultLayer` reads defer to
@@ -76,7 +76,6 @@ export const AppLayer = Layer.suspend(() =>
     File.defaultLayer,
     FileWatcher.defaultLayer,
     Storage.defaultLayer,
-    Snapshot.defaultLayer,
     Plugin.defaultLayer,
     Provider.defaultLayer,
     ProviderAuth.defaultLayer,
@@ -121,6 +120,7 @@ export const AppLayer = Layer.suspend(() =>
     WorkflowRuntime.defaultLayer,
     Memory.defaultLayer,
     History.defaultLayer,
+    ShellBackgroundRuntimeLayer,
   ).pipe(Layer.provideMerge(Observability.layer), Layer.provideMerge(BashInteractive.defaultLayer)),
 )
 

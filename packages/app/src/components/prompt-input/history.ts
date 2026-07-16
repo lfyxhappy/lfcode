@@ -4,6 +4,10 @@ import type { SelectedLineRange } from "@/context/file"
 const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 
 export const MAX_HISTORY = 100
+const MAX_HISTORY_TEXT_LENGTH = 4_000
+const MAX_HISTORY_COMMENT_LENGTH = 2_000
+const MAX_HISTORY_PREVIEW_LENGTH = 1_000
+const MAX_HISTORY_IMAGE_DATA_URL_LENGTH = 128_000
 
 export type PromptHistoryComment = {
   id: string
@@ -32,10 +36,28 @@ export function canNavigateHistoryAtCursor(direction: "up" | "down", text: strin
 }
 
 export function clonePromptParts(prompt: Prompt): Prompt {
-  return prompt.map((part) => {
+  return prompt.flatMap((part) => {
     if (part.type === "text") return { ...part }
-    if (part.type === "image") return { ...part }
+    if (part.type === "image") {
+      if (part.dataUrl.length > MAX_HISTORY_IMAGE_DATA_URL_LENGTH) return []
+      return { ...part }
+    }
     if (part.type === "agent") return { ...part }
+    if (part.type === "web-reference") {
+      return {
+        ...part,
+        text: truncateHistoryText(part.text, MAX_HISTORY_TEXT_LENGTH),
+      }
+    }
+    if (part.type === "selected-text") {
+      const text = truncateHistoryText(part.text, MAX_HISTORY_TEXT_LENGTH)
+      return {
+        ...part,
+        text,
+        content: truncateHistoryText(part.content, MAX_HISTORY_TEXT_LENGTH),
+        selection: part.selection ? { ...part.selection } : undefined,
+      }
+    }
     return {
       ...part,
       selection: part.selection ? { ...part.selection } : undefined,
@@ -55,6 +77,8 @@ function cloneSelection(selection: SelectedLineRange): SelectedLineRange {
 export function clonePromptHistoryComments(comments: PromptHistoryComment[]) {
   return comments.map((comment) => ({
     ...comment,
+    comment: truncateHistoryText(comment.comment, MAX_HISTORY_COMMENT_LENGTH),
+    preview: comment.preview ? truncateHistoryText(comment.preview, MAX_HISTORY_PREVIEW_LENGTH) : undefined,
     selection: cloneSelection(comment.selection),
   }))
 }
@@ -70,6 +94,15 @@ export function normalizePromptHistoryEntry(entry: PromptHistoryStoredEntry): Pr
     prompt: clonePromptParts(entry.prompt),
     comments: clonePromptHistoryComments(entry.comments),
   }
+}
+
+export function compactPromptHistoryEntries(entries: PromptHistoryStoredEntry[], max = MAX_HISTORY) {
+  const normalized = entries.slice(0, max).map(normalizePromptHistoryEntry)
+  if (normalized.length !== entries.length) return normalized
+  for (let i = 0; i < normalized.length; i++) {
+    if (JSON.stringify(entries[i]) !== JSON.stringify(normalized[i])) return normalized
+  }
+  return entries
 }
 
 export function promptLength(prompt: Prompt) {
@@ -135,6 +168,30 @@ function isPromptEqual(promptA: PromptHistoryStoredEntry, promptB: PromptHistory
           a.endChar === b.endChar)
       if (!sameSelection) return false
     }
+    if (partA.type === "selected-text") {
+      if (partA.text !== (partB.type === "selected-text" ? partB.text : "")) return false
+      if (partA.messageID !== (partB.type === "selected-text" ? partB.messageID : undefined)) return false
+      const a = partA.selection
+      const b = partB.type === "selected-text" ? partB.selection : undefined
+      const sameSelection =
+        (!a && !b) ||
+        (!!a &&
+          !!b &&
+          a.startLine === b.startLine &&
+          a.startChar === b.startChar &&
+          a.endLine === b.endLine &&
+          a.endChar === b.endChar)
+      if (!sameSelection) return false
+    }
+    if (partA.type === "web-reference") {
+      if (partB.type !== "web-reference") return false
+      if (partA.label !== partB.label) return false
+      if (partA.text !== partB.text) return false
+      if (partA.url !== partB.url) return false
+      if (partA.title !== partB.title) return false
+      if (partA.selector !== partB.selector) return false
+      if (partA.mode !== partB.mode) return false
+    }
     if (partA.type === "agent" && partA.name !== (partB.type === "agent" ? partB.name : "")) return false
     if (partA.type === "image" && partA.id !== (partB.type === "image" ? partB.id : "")) return false
   }
@@ -145,6 +202,11 @@ function isPromptEqual(promptA: PromptHistoryStoredEntry, promptB: PromptHistory
     if (!commentA || !commentB || !isCommentEqual(commentA, commentB)) return false
   }
   return true
+}
+
+function truncateHistoryText(value: string, limit: number) {
+  if (value.length <= limit) return value
+  return value.slice(0, limit)
 }
 
 type HistoryNavInput = {

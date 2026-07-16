@@ -13,6 +13,7 @@ import { DialogSelectServer } from "@/components/dialog-select-server"
 import { useServer } from "@/context/server"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { projectActivityTime } from "./layout/helpers"
 
 export default function Home() {
   const sync = useGlobalSync()
@@ -26,7 +27,7 @@ export default function Home() {
   const recent = createMemo(() => {
     return sync.data.project
       .slice()
-      .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))
+      .sort((a, b) => projectActivityTime(b) - projectActivityTime(a))
       .slice(0, 5)
   })
 

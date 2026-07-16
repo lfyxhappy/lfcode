@@ -41,11 +41,11 @@ const PLAYWRIGHT_CDP_ENDPOINT = "http://127.0.0.1:9222"
 const PLAYWRIGHT_CDP_WAIT_TIMEOUT = 10_000
 const PLAYWRIGHT_BROWSER_TOOL_GUIDANCE = [
   "Lfcode Playwright target rule:",
-  "Before the first Playwright browser action in a session, load the `playwright-browser` skill when the skill tool is available.",
   "Use Playwright browser tools on the embedded side browser webview, not the Electron Lfcode application shell.",
-  "A hidden or collapsed side browser target still counts as open; reuse it and create a new side browser tab only when no embedded browser target exists.",
-  "Do not navigate or replace the main Lfcode window; external pages belong in the side browser panel.",
-  "If the current tab is the Lfcode app shell, retarget the embedded side browser before navigating.",
+  "Reuse an existing embedded side browser target when one is already open.",
+  "Do not navigate or replace the main Lfcode window with external pages; use the side browser panel instead.",
+  "Use whatever observe, act, and wait loop best fits the page.",
+  "If the page fails or looks inconsistent, inspect browser_screenshot, browser_get_console, and browser_get_network.",
 ].join("\n")
 
 export const Resource = z
@@ -364,6 +364,7 @@ export const layer = Layer.effect(
       key: string,
       mcp: ConfigMCP.Info & { type: "remote" },
     ) {
+      const cwd = yield* InstanceState.directory
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
       let authProvider: McpOAuthProvider | undefined
@@ -387,19 +388,26 @@ export const layer = Layer.effect(
         )
       }
 
+      const requestHeaders = {
+        ...(mcp.headers ?? {}),
+        ...(mcp.url.includes("/global/mcp/playwright")
+          ? { "x-lfcode-directory": encodeURIComponent(cwd) }
+          : {}),
+      }
+
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
           transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: Object.keys(requestHeaders).length > 0 ? { headers: requestHeaders } : undefined,
           }),
         },
         {
           name: "SSE",
           transport: new SSEClientTransport(new URL(mcp.url), {
             authProvider,
-            requestInit: mcp.headers ? { headers: mcp.headers } : undefined,
+            requestInit: Object.keys(requestHeaders).length > 0 ? { headers: requestHeaders } : undefined,
           }),
         },
       ]

@@ -11,6 +11,7 @@ const SIGKILL_TIMEOUT_MS = 200
 const BLACKLIST = new Set(["fish", "nu"])
 const LOGIN = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"])
 const POSIX = new Set(["bash", "dash", "ksh", "sh", "zsh"])
+const BUNDLED_PWSH_ENV = "LFCODE_PWSH_PATH"
 
 export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
   const pid = proc.pid
@@ -53,19 +54,49 @@ function full(file: string) {
   return which(shell) || shell
 }
 
+function pwsh() {
+  if (process.platform !== "win32") return which("pwsh") || "pwsh"
+  const bundled = bundledPwsh()
+  if (bundled) return bundled
+  return which("pwsh.exe") || which("pwsh") || "pwsh.exe"
+}
+
+function bundledPwsh() {
+  if (process.platform !== "win32") return
+  const resourcesPath = "resourcesPath" in process && typeof process.resourcesPath === "string" ? process.resourcesPath : undefined
+  const candidates = [
+    process.env[BUNDLED_PWSH_ENV],
+    resourcesPath ? path.join(resourcesPath, "pwsh", "pwsh.exe") : undefined,
+    path.join(path.dirname(process.execPath), "pwsh", "pwsh.exe"),
+    path.join(path.dirname(process.execPath), "..", "pwsh", "pwsh.exe"),
+  ]
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    const resolved = Filesystem.windowsPath(candidate)
+    if (Filesystem.stat(resolved)?.isFile()) return resolved
+  }
+}
+
+function powershell(file?: string) {
+  if (process.platform !== "win32") return pwsh()
+  if (file) {
+    const shell = full(file)
+    if (name(shell) === "pwsh") return shell
+    if (name(shell) === "powershell") return pwsh()
+  }
+  return pwsh()
+}
+
 function pick() {
-  const pwsh = which("pwsh.exe")
-  if (pwsh) return pwsh
-  const powershell = which("powershell.exe")
-  if (powershell) return powershell
+  return powershell()
 }
 
 function select(file: string | undefined, opts?: { acceptable?: boolean }) {
-  if (file && (!opts?.acceptable || !BLACKLIST.has(name(file)))) return full(file)
   if (process.platform === "win32") {
     const shell = pick()
     if (shell) return shell
   }
+  if (file && (!opts?.acceptable || !BLACKLIST.has(name(file)))) return full(file)
   return fallback()
 }
 
@@ -80,9 +111,7 @@ export function gitbash() {
 
 function fallback() {
   if (process.platform === "win32") {
-    const file = gitbash()
-    if (file) return file
-    return process.env.COMSPEC || "cmd.exe"
+    return pwsh()
   }
   if (process.platform === "darwin") return "/bin/zsh"
   const bash = which("bash")
@@ -101,6 +130,10 @@ export function login(file: string) {
 
 export function posix(file: string) {
   return POSIX.has(name(file))
+}
+
+export function resolvePowerShell(file?: string) {
+  return powershell(file)
 }
 
 export const preferred = lazy(() => select(process.env.SHELL))

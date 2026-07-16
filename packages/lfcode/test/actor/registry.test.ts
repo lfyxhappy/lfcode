@@ -137,6 +137,62 @@ describe("ActorRegistry", () => {
     })
   })
 
+  describe("remove", () => {
+    test("removes an actor from the registry", async () => {
+      await using tmp = await tmpdir({ git: true })
+      await withRegistry(tmp.path, async (rt) => {
+        const session = await rt.runPromise(Session.Service.use((svc) => svc.create()))
+        const actorID = SessionID.descending()
+        await rt.runPromise(
+          ActorRegistry.Service.use((svc) =>
+            svc.register({
+              sessionID: session.id,
+              actorID,
+              mode: "subagent",
+              agent: "explore",
+              description: "Remove me",
+              contextMode: "none",
+              background: false,
+              lifecycle: "ephemeral",
+            }),
+          ),
+        )
+
+        await rt.runPromise(ActorRegistry.Service.use((svc) => svc.remove(session.id, actorID)))
+
+        const found = await rt.runPromise(ActorRegistry.Service.use((svc) => svc.get(session.id, actorID)))
+        expect(found).toBeUndefined()
+      })
+    })
+
+    test("removes an actor from listBySession", async () => {
+      await using tmp = await tmpdir({ git: true })
+      await withRegistry(tmp.path, async (rt) => {
+        const session = await rt.runPromise(Session.Service.use((svc) => svc.create()))
+        const actorID = SessionID.descending()
+        await rt.runPromise(
+          ActorRegistry.Service.use((svc) =>
+            svc.register({
+              sessionID: session.id,
+              actorID,
+              mode: "subagent",
+              agent: "explore",
+              description: "Remove me too",
+              contextMode: "none",
+              background: false,
+              lifecycle: "ephemeral",
+            }),
+          ),
+        )
+
+        await rt.runPromise(ActorRegistry.Service.use((svc) => svc.remove(session.id, actorID)))
+
+        const actors = await rt.runPromise(ActorRegistry.Service.use((svc) => svc.listBySession(session.id)))
+        expect(actors.map((actor) => actor.actorID)).not.toContain(actorID)
+      })
+    })
+  })
+
   describe("updateStatus", () => {
     test("updates task status to running", async () => {
       await using tmp = await tmpdir({ git: true })

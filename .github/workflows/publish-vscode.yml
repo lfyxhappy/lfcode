@@ -20,12 +20,14 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile
 
       - run: git fetch --force --tags
       - run: bun install -g @vscode/vsce
 
       - name: Install extension dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
         working-directory: ./sdks/vscode
 
       - name: Publish

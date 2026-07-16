@@ -28,6 +28,7 @@ export function shellWrap<P extends z.ZodType, M extends Tool.Metadata>(
     id: def.id,
     description: shell.description,
     parameters: shellInputSchema,
+    metadata: Tool.definitionMetadata(def),
     execute: (args: ShellInput, ctx) =>
       Effect.gen(function* () {
         // Guard: a model in shell mode may emit a JSON-shape call (e.g.

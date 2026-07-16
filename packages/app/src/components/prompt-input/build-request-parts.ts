@@ -2,11 +2,37 @@ import { getFilename } from "@lfcode-ai/shared/util/path"
 import { type AgentPartInput, type FilePartInput, type Part, type TextPartInput } from "@lfcode-ai/sdk/v2/client"
 import type { FileSelection } from "@/context/file"
 import { encodeFilePath } from "@/context/file/path"
-import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
+import type {
+  AgentPart,
+  FileAttachmentPart,
+  ImageAttachmentPart,
+  Prompt,
+  SelectedTextAttachmentPart,
+  WebReferenceAttachmentPart,
+} from "@/context/prompt"
 import { Identifier } from "@/utils/id"
 import { createCommentMetadata, formatCommentNote } from "@/utils/comment-note"
 
 type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id: string }
+
+type SelectedTextMetadata = {
+  text: string
+  messageID?: string
+  selection?: FileSelection
+  start: number
+  end: number
+}
+
+type WebReferenceMetadata = {
+  label: string
+  text: string
+  url: string
+  title?: string
+  selector?: string
+  mode: "selection" | "element"
+  start: number
+  end: number
+}
 
 type ContextFile = {
   key: string
@@ -51,6 +77,21 @@ const parseCommentMentions = (comment: string) => {
 
 const isFileAttachment = (part: Prompt[number]): part is FileAttachmentPart => part.type === "file"
 const isAgentAttachment = (part: Prompt[number]): part is AgentPart => part.type === "agent"
+const isSelectedTextAttachment = (part: Prompt[number]): part is SelectedTextAttachmentPart => part.type === "selected-text"
+const isWebReferenceAttachment = (part: Prompt[number]): part is WebReferenceAttachmentPart => part.type === "web-reference"
+
+function formatWebReferenceNote(reference: WebReferenceMetadata) {
+  const lines = [
+    reference.mode === "element" ? "[Web element reference]" : "[Web reference]",
+    `Label: ${reference.label}`,
+    reference.title ? `Title: ${reference.title}` : undefined,
+    `URL: ${reference.url}`,
+    reference.selector ? `Selector: ${reference.selector}` : undefined,
+    "Excerpt:",
+    reference.text,
+  ]
+  return lines.filter((line) => line && line.trim().length > 0).join("\n")
+}
 
 const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID: string): Part => {
   if (part.type === "text") {
@@ -89,13 +130,12 @@ const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID:
 }
 
 export function buildRequestParts(input: BuildRequestPartsInput) {
-  const requestParts: PromptRequestPart[] = [
-    {
-      id: Identifier.ascending("part"),
-      type: "text",
-      text: input.text,
-    },
-  ]
+  const textPart: PromptRequestPart = {
+    id: Identifier.ascending("part"),
+    type: "text",
+    text: input.text,
+  }
+  const requestParts: PromptRequestPart[] = [textPart]
 
   const files = input.prompt.filter(isFileAttachment).map((attachment) => {
     const path = absolute(input.sessionDirectory, attachment.path)
@@ -126,6 +166,57 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
         value: attachment.content,
         start: attachment.start,
         end: attachment.end,
+      },
+    } satisfies PromptRequestPart
+  })
+
+  const selectedTexts = input.prompt
+    .filter(isSelectedTextAttachment)
+    .map(
+      (attachment): SelectedTextMetadata => ({
+        text: attachment.text,
+        messageID: attachment.messageID,
+        selection: attachment.selection,
+        start: attachment.start,
+        end: attachment.end,
+      }),
+    )
+
+  const webReferences = input.prompt
+    .filter(isWebReferenceAttachment)
+    .map(
+      (attachment): WebReferenceMetadata => ({
+        label: attachment.label,
+        text: attachment.text,
+        url: attachment.url,
+        title: attachment.title,
+        selector: attachment.selector,
+        mode: attachment.mode,
+        start: attachment.start,
+        end: attachment.end,
+      }),
+    )
+
+  if (selectedTexts.length > 0) {
+    requestParts[0] =
+      requestParts[0].type === "text"
+        ? {
+            ...requestParts[0],
+            metadata: {
+              lfcodeSelectedText: selectedTexts,
+            },
+          }
+        : requestParts[0]
+  }
+
+  const webReferenceParts = webReferences.map((reference) => {
+    return {
+      id: Identifier.ascending("part"),
+      type: "text",
+      text: formatWebReferenceNote(reference),
+      synthetic: true,
+      metadata: {
+        lfcodeWebReference: reference,
       },
     } satisfies PromptRequestPart
   })
@@ -192,7 +283,7 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
     } satisfies PromptRequestPart
   })
 
-  requestParts.push(...files, ...context, ...agents, ...images)
+  requestParts.push(...files, ...context, ...agents, ...webReferenceParts, ...images)
 
   return {
     requestParts,

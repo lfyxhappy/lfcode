@@ -1,2 +1,11 @@
 sst-env.d.ts
 packages/desktop/src/bindings.ts
+packages/desktop/.bundled-git/
+packages/desktop/out/
+
+# Repository path-pointer files are resolved/copied by their owning build pipelines.
+packages/app/public/site.webmanifest
+packages/console/app/public/site.webmanifest
+packages/docs/openapi.json
+packages/enterprise/public/site.webmanifest
+packages/web/public/site.webmanifest

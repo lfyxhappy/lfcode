@@ -195,7 +195,7 @@ export function initialize(value: SystemContext): Effect.Effect<Generation, Init
   return observe(value).pipe(
     Effect.flatMap((entries) => {
       const unavailable = entries.flatMap((entry) => (entry._tag === "Unavailable" ? [entry.key] : []))
-      if (unavailable.length > 0) return new InitializationBlocked({ keys: unavailable })
+      if (unavailable.length > 0) return Effect.fail(new InitializationBlocked({ keys: unavailable }))
       return Effect.succeed(initializeObservation(entries))
     }),
   )

@@ -34,8 +34,9 @@ import { Locale } from "@/util"
 import { formatDuration } from "@/util/format"
 import { createColors, createFrames } from "../../ui/spinner.ts"
 import { useDialog } from "@tui/ui/dialog"
-import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
+import { DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
@@ -226,19 +227,25 @@ export function Prompt(props: PromptProps) {
       return
     }
     if (state === "finishing") return
-    // Start streaming
-    const xiaomi = sync.data.provider.find((p) => p.id === "xiaomi")
-    if (!xiaomi?.key) {
+    const selectedModel = local.model.current()
+    const provider = selectedModel ? sync.data.provider.find((item) => item.id === selectedModel.providerID) : undefined
+    const transport = Voice.resolveTransport({
+      provider,
+      model: selectedModel ? provider?.models[selectedModel.modelID] : undefined,
+    })
+    if (!transport) {
       toast.show({ message: t("tui.voice.error.no_auth"), variant: "error" })
       return
     }
     if (!Voice.isAvailable()) {
+      const installed = await promptInstallVoiceRecorder()
+      if (installed) {
+        await voiceToggle()
+        return
+      }
       toast.show({ message: t("tui.voice.error.no_recorder"), variant: "error" })
       return
     }
-    const apiKey = xiaomi.key
-    const baseUrl = (xiaomi.options?.baseURL as string) || "https://api.xiaomimimo.com/v1"
-
     const av: NonNullable<typeof activeVoice> = {
       handle: undefined!,
       pending: 0,
@@ -269,8 +276,7 @@ export function Prompt(props: PromptProps) {
 
               const ctrl = await Voice.processVoiceControl({
                 audio: segment.audio,
-                apiKey,
-                baseUrl,
+                transport,
                 currentText,
                 currentAgent,
                 availableAgents,
@@ -299,8 +305,7 @@ export function Prompt(props: PromptProps) {
         } else {
           Voice.transcribeAudio({
             audio: segment.audio,
-            apiKey,
-            baseUrl,
+            transport,
           }).then((text) => {
             if (text) {
               if (voiceSendEnabled() && Voice.SEND_RE.test(text.replace(/[\s。.!！？?，,]+$/g, "").trim())) {
@@ -331,12 +336,47 @@ export function Prompt(props: PromptProps) {
       },
     })
     if (!handle) {
+      const installed = await promptInstallVoiceRecorder()
+      if (installed) {
+        await voiceToggle()
+        return
+      }
       toast.show({ message: t("tui.voice.error.no_recorder"), variant: "error" })
       return
     }
     av.handle = handle
     activeVoice = av
     setVoiceState("listening")
+  }
+
+  async function promptInstallVoiceRecorder() {
+    if (process.platform !== "win32") return false
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      t("tui.voice.install.title"),
+      t("tui.voice.install.message"),
+      t("tui.voice.install.confirm"),
+    )
+    if (!confirmed) return false
+    toast.show({ message: t("tui.voice.install.installing"), variant: "info" })
+    try {
+      const result = await sdk.client.global.runtime.install({ id: "voice-recorder" })
+      Voice.refreshRecorderAvailability()
+      const message =
+        typeof result.data === "object" && result.data && "message" in result.data && typeof result.data.message === "string"
+          ? result.data.message
+          : t("tui.voice.install.success")
+      toast.show({ message, variant: "success", duration: 4000 })
+      return Voice.isAvailable()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.show({
+        message: `${t("tui.voice.install.failed")} ${message}`.trim(),
+        variant: "error",
+        duration: 5000,
+      })
+      return false
+    }
   }
 
   const list = createMemo(() => props.placeholders?.normal ?? [])

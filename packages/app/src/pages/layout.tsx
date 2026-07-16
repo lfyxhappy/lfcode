@@ -22,6 +22,7 @@ import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import { decode64 } from "@/utils/base64"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Button } from "@lfcode-ai/ui/button"
+import { Icon } from "@lfcode-ai/ui/icon"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
@@ -49,15 +50,22 @@ import {
 } from "@/context/global-sync/session-prefetch"
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
-import { Binary } from "@lfcode-ai/shared/util/binary"
 import { retry } from "@lfcode-ai/shared/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
 import { BROWSER_LOGINS_UPDATED_EVENT } from "@/utils/browser-events"
 import { setNavigate } from "@/utils/notification-click"
+import { sessionTitle } from "@/utils/session-title"
 import { Worktree as WorktreeState } from "@/utils/worktree"
+import { createSessionStorageKey, normalizeSessionStorageKey } from "@/utils/session-key"
+import {
+  BROWSER_REQUEST_OPEN_EVENT,
+  createBrowserRequestID,
+  createBrowserTabID,
+  normalizeBrowserRequestURL,
+  normalizeBrowserURL,
+} from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
-import { BROWSER_REQUEST_OPEN_EVENT, normalizeBrowserRequestURL, normalizeBrowserURL } from "@/pages/session/helpers"
 
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@lfcode-ai/ui/theme/context"
@@ -69,16 +77,26 @@ import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import {
   displayName,
+  descendantSessionIDs,
   effectiveWorkspaceOrder,
   errorMessage,
   latestRootSession,
+  orderedWorkspaceDirs,
+  projectActivityTime,
+  projectRootForDirectory,
+  sidebarSessionRemovalTarget,
+  storedWorkspaceLabel,
+  storedWorkspaceName,
   sortedRootSessions,
+  sortedProjects,
   startupProjectRoot,
+  visibleWorkspaceSessionDirs,
   workspaceKey,
 } from "./layout/helpers"
 import {
   collectNewSessionDeepLinks,
   collectOpenProjectDeepLinks,
+  collectOpenSessionDeepLinks,
   deepLinkEvent,
   drainPendingDeepLinks,
 } from "./layout/deep-links"
@@ -89,10 +107,19 @@ import {
   WorkspaceDragOverlay,
   type WorkspaceSidebarContext,
 } from "./layout/sidebar-workspace"
-import { ProjectDragOverlay, SortableProject, type ProjectSidebarContext } from "./layout/sidebar-project"
+import { ProjectSection } from "./layout/sidebar-project"
+import type { ProjectSidebarContext } from "./layout/sidebar-project-context"
 import { SidebarContent } from "./layout/sidebar-shell"
+import { DebugBar } from "@/components/debug-bar"
 
 export default function Layout(props: ParentProps) {
+  const consumedBrowserRequestIDs = (() => {
+    const root = window as typeof window & {
+      __LFCODE_BROWSER_REQUESTS__?: Map<string, number>
+    }
+    root.__LFCODE_BROWSER_REQUESTS__ ??= new Map<string, number>()
+    return root.__LFCODE_BROWSER_REQUESTS__
+  })()
   const [store, setStore, , ready] = persisted(
     Persist.global("layout.page", ["layout.page.v1"]),
     createStore({
@@ -103,6 +130,7 @@ export default function Layout(props: ParentProps) {
       workspaceName: {} as Record<string, string>,
       workspaceBranchName: {} as Record<string, Record<string, string>>,
       workspaceExpanded: {} as Record<string, boolean>,
+      projectExpanded: {} as Record<string, boolean>,
       gettingStartedDismissed: false,
     }),
   )
@@ -154,17 +182,19 @@ export default function Layout(props: ParentProps) {
   }
   const colorSchemeLabel = (scheme: ColorScheme) => language.t(colorSchemeKey[scheme])
   const currentDir = createMemo(() => route().dir)
+  const activeSessionKey = createMemo(() => {
+    const directory = currentDir()
+    if (!directory || !params.id) return
+    return createSessionStorageKey(base64Encode(directory), params.id)
+  })
 
   const [state, setState] = createStore({
     autoselect: !initialDirectory,
     busyWorkspaces: {} as Record<string, boolean>,
-    hoverProject: undefined as string | undefined,
     scrollSessionKey: undefined as string | undefined,
     nav: undefined as HTMLElement | undefined,
     sortNow: Date.now(),
     sizing: false,
-    peek: undefined as string | undefined,
-    peeked: false,
   })
 
   const editor = createInlineEditorController()
@@ -194,16 +224,6 @@ export default function Layout(props: ParentProps) {
     60_000 - (Date.now() % 60_000),
   )
 
-  const aim = createAim({
-    enabled: () => !layout.sidebar.opened(),
-    active: () => state.hoverProject,
-    el: () => state.nav?.querySelector<HTMLElement>("[data-component='sidebar-rail']") ?? state.nav,
-    onActivate: (directory) => {
-      globalSync.child(directory)
-      setState("hoverProject", directory)
-    },
-  })
-
   onCleanup(() => {
     dialogDead = true
     dialogRun += 1
@@ -211,8 +231,6 @@ export default function Layout(props: ParentProps) {
     clearTimeout(sortNowTimeout)
     if (sortNowInterval) clearInterval(sortNowInterval)
     if (sizet !== undefined) clearTimeout(sizet)
-    if (peekt !== undefined) clearTimeout(peekt)
-    aim.reset()
   })
 
   onMount(() => {
@@ -229,76 +247,11 @@ export default function Layout(props: ParentProps) {
     makeEventListener(document, "visibilitychange", hide)
   })
 
-  const sidebarHovering = createMemo(() => !layout.sidebar.opened() && state.hoverProject !== undefined)
-  const sidebarExpanded = createMemo(() => layout.sidebar.opened() || sidebarHovering())
-  const setHoverProject = (value: string | undefined) => {
-    setState("hoverProject", value)
-    if (value !== undefined) return
-    aim.reset()
-  }
-  const clearHoverProjectSoon = () => queueMicrotask(() => setHoverProject(undefined))
-
-  const disarm = () => {
-    if (navLeave.current === undefined) return
-    clearTimeout(navLeave.current)
-    navLeave.current = undefined
-  }
-
-  const reset = () => {
-    disarm()
-    setHoverProject(undefined)
-  }
-
-  const arm = () => {
-    if (layout.sidebar.opened()) return
-    if (state.hoverProject === undefined) return
-    disarm()
-    navLeave.current = window.setTimeout(() => {
-      navLeave.current = undefined
-      setHoverProject(undefined)
-    }, 300)
-  }
-
-  let peekt: number | undefined
-
-  const hoverProjectData = createMemo(() => {
-    const id = state.hoverProject
-    if (!id) return
-    return layout.projects.list().find((project) => project.worktree === id)
-  })
-
-  const peekProject = createMemo(() => {
-    const id = state.peek
-    if (!id) return
-    return layout.projects.list().find((project) => project.worktree === id)
-  })
-
-  createEffect(() => {
-    const p = hoverProjectData()
-    if (p) {
-      if (peekt !== undefined) {
-        clearTimeout(peekt)
-        peekt = undefined
-      }
-      setState("peek", p.worktree)
-      setState("peeked", true)
-      return
-    }
-
-    setState("peeked", false)
-    if (state.peek === undefined) return
-    if (peekt !== undefined) clearTimeout(peekt)
-    peekt = window.setTimeout(() => {
-      peekt = undefined
-      setState("peek", undefined)
-    }, 180)
-  })
-
-  createEffect(() => {
-    if (!layout.sidebar.opened()) return
-    setHoverProject(undefined)
-  })
-
+  const sidebarHovering = createMemo(() => false)
+  const sidebarExpanded = createMemo(() => layout.sidebar.opened())
+  const clearHoverProjectSoon = () => {}
+  const hoverProjectData = createMemo(() => undefined as LocalProject | undefined)
+  const reset = () => {}
   createEffect(() => {
     if (!state.autoselect) return
     const dir = params.dir
@@ -315,13 +268,24 @@ export default function Layout(props: ParentProps) {
   const InlineEditor = editor.InlineEditor
 
   const clearSidebarHoverState = () => {
-    if (layout.sidebar.opened()) return
-    reset()
+    return
+  }
+
+  const normalizeNavigationHref = (href: string) => {
+    const idx = href.indexOf("#message-")
+    return idx >= 0 ? href.slice(0, idx) : href
+  }
+
+  const sessionKeyFromWindowHash = () => {
+    const hash = typeof window === "undefined" ? "" : window.location.hash.slice(1)
+    const matched = hash.match(/^\/([^/]+)\/session\/([^/?#]+)/)
+    if (!matched) return
+    return createSessionStorageKey(matched[1], matched[2])
   }
 
   const navigateWithSidebarReset = (href: string) => {
     clearSidebarHoverState()
-    navigate(href)
+    navigate(normalizeNavigationHref(href))
     layout.mobileSidebar.hide()
   }
 
@@ -579,7 +543,7 @@ export default function Layout(props: ParentProps) {
     element.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }
 
-  const currentProject = createMemo(() => {
+  function currentProject() {
     const directory = currentDir()
     if (!directory) return
     const key = workspaceKey(directory)
@@ -601,7 +565,7 @@ export default function Layout(props: ParentProps) {
     if (!root) return
 
     return projects.find((p) => p.worktree === root)
-  })
+  }
 
   const [autoselecting] = createResource(async () => {
     await ready.promise
@@ -612,16 +576,13 @@ export default function Layout(props: ParentProps) {
     const last = server.projects.last()
     const next = startupProjectRoot(last, list)
     if (!next) return
-    await openProject(next, true)
+    layout.projects.open(next)
+    server.projects.touch(next)
+    navigateWithSidebarReset(`/${base64Encode(next)}/session`)
   })
 
   const workspaceName = (directory: string, projectId?: string, branch?: string) => {
-    const key = workspaceKey(directory)
-    const direct = store.workspaceName[key] ?? store.workspaceName[directory]
-    if (direct) return direct
-    if (!projectId) return
-    if (!branch) return
-    return store.workspaceBranchName[projectId]?.[branch]
+    return storedWorkspaceName(store, directory, projectId, branch)
   }
 
   const setWorkspaceName = (directory: string, next: string, projectId?: string, branch?: string) => {
@@ -636,7 +597,7 @@ export default function Layout(props: ParentProps) {
   }
 
   const workspaceLabel = (directory: string, branch?: string, projectId?: string) =>
-    workspaceName(directory, projectId, branch) ?? branch ?? getFilename(directory)
+    storedWorkspaceLabel(store, directory, branch, projectId)
 
   const workspaceSetting = createMemo(() => {
     const project = currentProject()
@@ -646,15 +607,12 @@ export default function Layout(props: ParentProps) {
   })
 
   const visibleSessionDirs = createMemo(() => {
-    const project = currentProject()
-    if (!project) return [] as string[]
-    if (!workspaceSetting()) return [project.worktree]
-
-    const activeDir = currentDir()
-    return workspaceIds(project).filter((directory) => {
-      const expanded = store.workspaceExpanded[directory] ?? directory === project.worktree
-      const active = workspaceKey(directory) === workspaceKey(activeDir)
-      return expanded || active
+    return visibleWorkspaceSessionDirs({
+      project: currentProject(),
+      workspacesEnabled: workspaceSetting(),
+      currentDir: currentDir(),
+      orderedDirs: workspaceIds(currentProject()),
+      expanded: store.workspaceExpanded,
     })
   })
 
@@ -682,8 +640,13 @@ export default function Layout(props: ParentProps) {
 
     const result: Session[] = []
     for (const dir of dirs) {
-      const [dirStore] = globalSync.child(dir, { bootstrap: true })
-      const dirSessions = sortedRootSessions(dirStore, now)
+      const existing = globalSync.existing(dir, { bootstrap: false })
+      if (!existing) continue
+      const [dirStore] = existing
+      const dirSessions = sortedRootSessions(dirStore, now, {
+        pinned: (session) => layout.sessions.isPinned(session.directory, session.id),
+        pinStamp: layout.sessions.stamp(),
+      })
       result.push(...dirSessions)
     }
     return result
@@ -696,14 +659,17 @@ export default function Layout(props: ParentProps) {
     running: number
   }
 
-  const prefetchChunk = 200
-  const prefetchConcurrency = 2
-  const prefetchPendingLimit = 10
-  const span = 4
+  // Keep sidebar warming intentionally narrow. These are cancellable hints,
+  // never a prerequisite for opening the selected conversation.
+  const sessionPrefetchEnabled = true
+  const prefetchChunk = 24
+  const prefetchConcurrency = 1
+  const prefetchPendingLimit = 4
+  const span = 1
   const prefetchToken = { value: 0 }
   const prefetchQueues = new Map<string, PrefetchQueue>()
 
-  const PREFETCH_MAX_SESSIONS_PER_DIR = 10
+  const PREFETCH_MAX_SESSIONS_PER_DIR = 6
   const prefetchedByDir = new Map<string, Set<string>>()
 
   const lruFor = (directory: string) => {
@@ -781,16 +747,19 @@ export default function Layout(props: ParentProps) {
   }
 
   async function prefetchMessages(directory: string, sessionID: string, token: number) {
+    if (!sessionPrefetchEnabled) return
     const [store, setStore] = globalSync.child(directory, { bootstrap: false })
 
     return runSessionPrefetch({
       directory,
       sessionID,
-      task: (rev) =>
-        retry(() => globalSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk, agent_id: "*" }))
+      task: ({ revision, signal }) =>
+        globalSDK.client.session
+          .messages({ directory, sessionID, limit: prefetchChunk, agent_id: "*" }, { signal })
           .then((messages) => {
+            if (signal.aborted) return
             if (prefetchToken.value !== token) return
-            if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
+            if (!isSessionPrefetchCurrent(directory, sessionID, revision)) return
 
             const items = (messages.data ?? []).filter((x) => !!x?.info?.id)
             const next = items.map((x) => x.info).filter((m): m is Message => !!m?.id)
@@ -818,7 +787,8 @@ export default function Layout(props: ParentProps) {
               sorted,
             )
 
-            if (!isSessionPrefetchCurrent(directory, sessionID, rev)) return
+            if (signal.aborted) return
+            if (!isSessionPrefetchCurrent(directory, sessionID, revision)) return
 
             batch(() => {
               if (stale.length > 0) {
@@ -850,6 +820,7 @@ export default function Layout(props: ParentProps) {
   }
 
   const pumpPrefetch = (directory: string) => {
+    if (!sessionPrefetchEnabled) return
     const q = queueFor(directory)
     if (q.running >= prefetchConcurrency) return
 
@@ -870,6 +841,7 @@ export default function Layout(props: ParentProps) {
   }
 
   const prefetchSession = (session: Session, priority: "high" | "low" = "low") => {
+    if (!sessionPrefetchEnabled) return
     const directory = session.directory
     if (!directory) return
 
@@ -924,6 +896,7 @@ export default function Layout(props: ParentProps) {
   }
 
   createEffect(() => {
+    if (!sessionPrefetchEnabled) return
     const sessions = currentSessions()
     if (sessions.length === 0) return
 
@@ -1006,30 +979,100 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  async function renameSession(session: Session, next: string) {
+    const title = next.trim()
+    const current = sessionTitle(session.title)
+    if (!title || title === current) return
+
+    await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        title,
+      })
+      .then(() => {
+        const [, setStore] = globalSync.child(session.directory)
+        setStore(
+          produce((draft) => {
+            const index = draft.session.findIndex((item) => item.id === session.id)
+            if (index !== -1) draft.session[index].title = title
+          }),
+        )
+      })
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+      })
+  }
+
   async function archiveSession(session: Session) {
     const [store, setStore] = globalSync.child(session.directory)
-    const sessions = store.session ?? []
-    const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
-
-    await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
+    const removed = descendantSessionIDs(store.session, session.id)
+    const roots = sortedRootSessions(store, Date.now(), {
+      pinned: (item) => layout.sessions.isPinned(item.directory, item.id),
+      pinStamp: layout.sessions.stamp(),
     })
+    const rootIndex = roots.findIndex((item) => item.id === session.id)
+    const nextRootSessionID = rootIndex === -1 ? undefined : (roots[rootIndex + 1] ?? roots[rootIndex - 1])?.id
+    const archivedAt = Date.now()
+
+    await Promise.all(
+      Array.from(removed).map((sessionID) =>
+        globalSDK.client.session.update({
+          directory: session.directory,
+          sessionID,
+          time: { archived: archivedAt },
+        }),
+      ),
+    )
+      .then(() => {
+        setStore(
+          produce((draft) => {
+            draft.session = draft.session.filter((item) => !removed.has(item.id))
+          }),
+        )
+        navigateAfterSidebarSessionRemoval(session, removed, nextRootSessionID)
+      })
+      .catch((err) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+      })
+  }
+
+  async function deleteSession(session: Session) {
+    const [store, setStore] = globalSync.child(session.directory)
+    const removed = descendantSessionIDs(store.session, session.id)
+    const roots = sortedRootSessions(store, Date.now(), {
+      pinned: (item) => layout.sessions.isPinned(item.directory, item.id),
+      pinStamp: layout.sessions.stamp(),
+    })
+    const rootIndex = roots.findIndex((item) => item.id === session.id)
+    const nextRootSessionID = rootIndex === -1 ? undefined : (roots[rootIndex + 1] ?? roots[rootIndex - 1])?.id
+
+    const result = await globalSDK.client.session
+      .delete({ directory: session.directory, sessionID: session.id })
+      .then((x) => x.data)
+      .catch((err) => {
+        showToast({
+          title: language.t("session.delete.failed.title"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+        return false
+      })
+
+    if (!result) return false
+
     setStore(
       produce((draft) => {
-        const match = Binary.search(draft.session, session.id, (s) => s.id)
-        if (match.found) draft.session.splice(match.index, 1)
+        draft.session = draft.session.filter((item) => !removed.has(item.id))
       }),
     )
-    if (session.id === params.id) {
-      if (nextSession) {
-        navigate(`/${params.dir}/session/${nextSession.id}`)
-      } else {
-        navigate(`/${params.dir}/session`)
-      }
-    }
+    navigateAfterSidebarSessionRemoval(session, removed, nextRootSessionID)
+    return true
   }
 
   command.register("layout", () => {
@@ -1243,26 +1286,14 @@ export default function Layout(props: ParentProps) {
   }
 
   function projectRoot(directory: string) {
-    const key = workspaceKey(directory)
-    const project = layout.projects
-      .list()
-      .find(
-        (item) =>
-          workspaceKey(item.worktree) === key || item.sandboxes?.some((sandbox) => workspaceKey(sandbox) === key),
-      )
-    if (project) return project.worktree
-
-    const known = Object.entries(store.workspaceOrder).find(
-      ([root, dirs]) => workspaceKey(root) === key || dirs.some((item) => workspaceKey(item) === key),
-    )
-    if (known) return known[0]
-
     const [child] = globalSync.child(directory, { bootstrap: false })
-    const id = child.project
-    if (!id) return directory
-
-    const meta = globalSync.data.project.find((item) => item.id === id)
-    return meta?.worktree ?? directory
+    return projectRootForDirectory({
+      directory,
+      projects: layout.projects.list(),
+      workspaceOrder: store.workspaceOrder,
+      childProjectID: child.project,
+      projectMeta: globalSync.data.project,
+    })
   }
 
   function activeProjectRoot(directory: string) {
@@ -1316,29 +1347,46 @@ export default function Layout(props: ParentProps) {
       dirs = effectiveWorkspaceOrder(root, [root, ...listed], store.workspaceOrder[root])
       return canOpen(target)
     }
-    const openSession = async (target: { directory: string; id: string }) => {
+    const navigateSession = (target: { directory: string; id: string }) => {
+      setStore("lastProjectSession", root, { directory: target.directory, id: target.id, at: Date.now() })
+      navigateWithSidebarReset(`/${base64Encode(target.directory)}/session/${target.id}`)
+      return true
+    }
+    const openLoadedSession = (target: { directory: string; id: string }) => {
       if (!canOpen(target.directory)) return false
       const [data] = globalSync.child(target.directory, { bootstrap: false })
       if (data.session.some((item) => item.id === target.id)) {
-        setStore("lastProjectSession", root, { directory: target.directory, id: target.id, at: Date.now() })
-        navigateWithSidebarReset(`/${base64Encode(target.directory)}/session/${target.id}`)
-        return true
+        return navigateSession(target)
       }
+      return false
+    }
+    const openRememberedSession = async (target: { directory: string; id: string }) => {
+      if (openLoadedSession(target)) return true
       const resolved = await globalSDK.client.session
         .get({ sessionID: target.id })
         .then((x) => x.data)
         .catch(() => undefined)
       if (!resolved?.directory) return false
       if (!canOpen(resolved.directory)) return false
-      setStore("lastProjectSession", root, { directory: resolved.directory, id: resolved.id, at: Date.now() })
-      navigateWithSidebarReset(`/${base64Encode(resolved.directory)}/session/${resolved.id}`)
-      return true
+      return navigateSession(resolved)
     }
+    const openListedSession = (target: Session | undefined) => {
+      if (!target?.directory) return false
+      if (!canOpen(target.directory)) return false
+      return navigateSession(target)
+    }
+    const listLatestRoot = async (item: string) => ({
+      path: { directory: item },
+      session: await globalSDK.client.session
+        .list({ directory: item, roots: true, limit: 1 })
+        .then((x) => x.data ?? [])
+        .catch(() => []),
+    })
 
     const projectSession = store.lastProjectSession[root]
     if (projectSession?.id) {
       await refreshDirs(projectSession.directory)
-      const opened = await openSession(projectSession)
+      const opened = await openRememberedSession(projectSession)
       if (opened) return
       clearLastProjectSession(root)
     }
@@ -1347,23 +1395,12 @@ export default function Layout(props: ParentProps) {
       dirs.map((item) => globalSync.child(item, { bootstrap: false })[0]),
       Date.now(),
     )
-    if (latest && (await openSession(latest))) {
+    if (openListedSession(latest)) {
       return
     }
 
-    const fetched = latestRootSession(
-      await Promise.all(
-        dirs.map(async (item) => ({
-          path: { directory: item },
-          session: await globalSDK.client.session
-            .list({ directory: item })
-            .then((x) => x.data ?? [])
-            .catch(() => []),
-        })),
-      ),
-      Date.now(),
-    )
-    if (fetched && (await openSession(fetched))) {
+    const fetched = latestRootSession(await Promise.all(dirs.map(listLatestRoot)), Date.now())
+    if (openListedSession(fetched)) {
       return
     }
 
@@ -1373,6 +1410,19 @@ export default function Layout(props: ParentProps) {
   function navigateToSession(session: Session | undefined) {
     if (!session) return
     navigateWithSidebarReset(`/${base64Encode(session.directory)}/session/${session.id}`)
+  }
+
+  function navigateAfterSidebarSessionRemoval(session: Session, removed: Set<string>, nextRootSessionID?: string) {
+    const target = sidebarSessionRemovalTarget({
+      session,
+      removed,
+      activeID: params.id,
+      nextRootSessionID,
+    })
+    if (!target) return
+    const slug = base64Encode(target.directory)
+    const href = target.sessionID ? `/${slug}/session/${target.sessionID}` : `/${slug}/session`
+    navigateWithSidebarReset(href)
   }
 
   function openProject(directory: string, navigate = true) {
@@ -1441,9 +1491,26 @@ export default function Layout(props: ParentProps) {
       const href = link.prompt ? `/${slug}/session?prompt=${encodeURIComponent(link.prompt)}` : `/${slug}/session`
       navigateWithSidebarReset(href)
     }
+
+    for (const link of collectOpenSessionDeepLinks(urls)) {
+      void openProject(link.directory, false)
+      navigateWithSidebarReset(`/${base64Encode(link.directory)}/session/${link.sessionID}`)
+    }
   }
 
   onMount(() => {
+    const rememberBrowserRequest = (requestID?: string) => {
+      if (!requestID) return false
+      const now = Date.now()
+      for (const [key, at] of consumedBrowserRequestIDs) {
+        if (now - at <= 10_000) continue
+        consumedBrowserRequestIDs.delete(key)
+      }
+      if (consumedBrowserRequestIDs.has(requestID)) return true
+      consumedBrowserRequestIDs.set(requestID, now)
+      return false
+    }
+
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ urls: string[] }>).detail
       const urls = detail?.urls ?? []
@@ -1452,11 +1519,41 @@ export default function Layout(props: ParentProps) {
     }
 
     const browserHandler = (event: Event) => {
+      if (event.defaultPrevented) return
       if (platform.platform !== "desktop") return
-      const detail = (event as CustomEvent<{ url?: string }>).detail
+      const detail = (
+        event as CustomEvent<{
+          url?: string
+          sessionKey?: string
+          sessionID?: string
+          reason?: "human" | "tool"
+          requestID?: string
+        }>
+      ).detail
       if (detail?.url && /^\/[^/]/.test(detail.url)) return
       const url = normalizeBrowserRequestURL(detail?.url)
       if (!url) return
+      if (detail?.sessionKey) {
+        const targetSessionKey = normalizeSessionStorageKey(detail.sessionKey)
+        if (targetSessionKey === activeSessionKey()) return
+        if (targetSessionKey === sessionKeyFromWindowHash()) {
+          const tabID = createBrowserTabID()
+          batch(() => {
+            layout.view(targetSessionKey).browser.open(tabID, url)
+            layout.view(targetSessionKey).reviewPanel.open()
+            layout.tabs(targetSessionKey).setActive(`browser://${tabID}`)
+          })
+          event.preventDefault()
+          return
+        }
+        if (rememberBrowserRequest(detail?.requestID)) {
+          event.preventDefault()
+          return
+        }
+        layout.browser.open(targetSessionKey, createBrowserTabID(), url)
+        event.preventDefault()
+        return
+      }
 
       const sessionRoute = /^\/[^/]+\/session(?:\/[^/]+)?$/.test(location.pathname)
       if (sessionRoute) return
@@ -1465,7 +1562,7 @@ export default function Layout(props: ParentProps) {
       const recentProject = globalSync.data.project
         .filter((item) => item.worktree !== "/")
         .slice()
-        .sort((a, b) => (b.time.updated ?? b.time.created) - (a.time.updated ?? a.time.created))[0]?.worktree
+        .sort((a, b) => projectActivityTime(b) - projectActivityTime(a))[0]?.worktree
       const fallbackDirectory =
         activeDirectory ??
         currentProject()?.worktree ??
@@ -1473,6 +1570,10 @@ export default function Layout(props: ParentProps) {
         layout.projects.list()[0]?.worktree ??
         recentProject
       if (!fallbackDirectory) return
+      if (rememberBrowserRequest(detail?.requestID)) {
+        event.preventDefault()
+        return
+      }
 
       void openBrowserInProject(url, fallbackDirectory).then((handled) => {
         if (handled) event.preventDefault()
@@ -1498,7 +1599,7 @@ export default function Layout(props: ParentProps) {
   }
 
   const renameWorkspace = (directory: string, next: string, projectId?: string, branch?: string) => {
-    const current = workspaceName(directory, projectId, branch) ?? branch ?? getFilename(directory)
+    const current = storedWorkspaceLabel(store, directory, branch, projectId)
     if (current === next) return
     setWorkspaceName(directory, next, projectId, branch)
   }
@@ -1579,6 +1680,84 @@ export default function Layout(props: ParentProps) {
     layout.sidebar.toggleWorkspaces(project.worktree)
   }
 
+  const projectEditorID = (project: LocalProject) => `project:${project.id ?? workspaceKey(project.worktree)}`
+
+  const startProjectRename = (project: LocalProject) => {
+    layout.sidebar.open()
+    setStore("projectExpanded", workspaceKey(project.worktree), true)
+    openEditor(projectEditorID(project), displayName(project))
+  }
+
+  const canOpenProjectPath = () => platform.platform === "desktop" && !!platform.openPath && server.isLocal() === true
+
+  const openProjectInExplorer = (project: LocalProject) => {
+    if (!canOpenProjectPath()) return
+    void platform.openPath?.(project.worktree)
+  }
+
+  const clearProjectNotifications = (project: LocalProject) => {
+    workspaceIds(project)
+      .filter((directory) => notification.project.unseenCount(directory) > 0)
+      .forEach((directory) => notification.project.markViewed(directory))
+  }
+
+  const archiveProjectSessions = async (project: LocalProject) => {
+    const archivedAt = Date.now()
+    const directories = workspaceIds(project)
+    let activeArchived = false
+
+    for (const directory of directories) {
+      const sessions = await globalSDK.client.session.list({ directory }).then(
+        (result) => result.data ?? [],
+        () => [] as Session[],
+      )
+      if (sessions.length === 0) continue
+
+      const roots = sortedRootSessions({ path: { directory }, session: sessions }, archivedAt)
+      const removed = roots.reduce((set, session) => {
+        for (const id of descendantSessionIDs(sessions, session.id)) set.add(id)
+        return set
+      }, new Set<string>())
+      if (removed.size === 0) continue
+
+      const archived = await Promise.all(
+        Array.from(removed).map((sessionID) =>
+          globalSDK.client.session.update({
+            directory,
+            sessionID,
+            time: { archived: archivedAt },
+          }),
+        ),
+      ).then(
+        () => true,
+        (err) => {
+          showToast({
+            title: language.t("common.requestFailed"),
+            description: errorMessage(err, language.t("common.requestFailed")),
+          })
+          return false
+        },
+      )
+      if (!archived) return
+
+      const existing = globalSync.existing(directory, { bootstrap: false })
+      if (existing) {
+        const [, setStore] = existing
+        setStore(
+          produce((draft) => {
+            draft.session = draft.session.filter((item) => !removed.has(item.id))
+          }),
+        )
+      }
+      if (workspaceKey(currentDir()) === workspaceKey(directory) && params.id && removed.has(params.id)) {
+        activeArchived = true
+      }
+    }
+
+    if (!activeArchived) return
+    navigateWithSidebarReset(`/${base64Encode(project.worktree)}/session`)
+  }
+
   const showEditProjectDialog = (project: LocalProject) => {
     const run = ++dialogRun
     void import("@/components/dialog-edit-project").then((x) => {
@@ -1629,6 +1808,17 @@ export default function Layout(props: ParentProps) {
     }
 
     setBusy(directory, true)
+    const sessions: Session[] = await globalSDK.client.session
+      .list({ directory })
+      .then((x) => x.data ?? [])
+      .catch(() => [])
+    clearWorkspaceTerminals(
+      directory,
+      sessions.map((s) => s.id),
+      platform,
+    )
+    await globalSDK.client.instance.dispose({ directory }).catch(() => undefined)
+    if (shouldLeave) await waitForWorkspaceRelease()
 
     const result = await globalSDK.client.worktree
       .remove({ directory: root, worktreeRemoveInput: { directory } })
@@ -1676,6 +1866,15 @@ export default function Layout(props: ParentProps) {
       navigateWithSidebarReset(`/${base64Encode(root)}/session`)
     }
   }
+
+  const waitForWorkspaceRelease = () =>
+    new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.setTimeout(resolve, 150)
+        })
+      })
+    })
 
   const resetWorkspace = async (root: string, directory: string) => {
     if (directory === root) return
@@ -1755,6 +1954,35 @@ export default function Layout(props: ParentProps) {
     })
   }
 
+  function DialogDeleteSession(props: { session: Session }) {
+    const name = createMemo(() => sessionTitle(props.session.title) || language.t("command.session.new"))
+    const handleDelete = async () => {
+      const deleted = await deleteSession(props.session)
+      if (!deleted) return
+      dialog.close()
+    }
+
+    return (
+      <Dialog title={language.t("session.delete.title")} fit>
+        <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
+          <div class="flex flex-col gap-1">
+            <span class="text-14-regular text-text-strong">
+              {language.t("session.delete.confirm", { name: name() })}
+            </span>
+          </div>
+          <div class="flex justify-end gap-2">
+            <Button variant="ghost" size="large" onClick={() => dialog.close()}>
+              {language.t("common.cancel")}
+            </Button>
+            <Button variant="primary" size="large" onClick={handleDelete}>
+              {language.t("session.delete.button")}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    )
+  }
+
   function DialogDeleteWorkspace(props: { root: string; directory: string }) {
     const name = createMemo(() => getFilename(props.directory))
     const [data, setData] = createStore({
@@ -1764,7 +1992,7 @@ export default function Layout(props: ParentProps) {
 
     onMount(() => {
       globalSDK.client.file
-        .status({ directory: props.directory })
+        .list({ path: props.directory })
         .then((x) => {
           const files = x.data ?? []
           const dirty = files.length > 0
@@ -1832,7 +2060,7 @@ export default function Layout(props: ParentProps) {
 
     onMount(() => {
       globalSDK.client.file
-        .status({ directory: props.directory })
+        .list({ path: props.directory })
         .then((x) => {
           const files = x.data ?? []
           const dirty = files.length > 0
@@ -1942,11 +2170,12 @@ export default function Layout(props: ParentProps) {
   )
 
   createEffect(() => {
-    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 48
+    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 64
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
   })
 
   const side = createMemo(() => Math.max(layout.sidebar.width(), 244))
+  const desktopSidebarWidth = createMemo(() => (layout.sidebar.opened() ? side() : 64))
   const panel = createMemo(() => Math.max(side() - 64, 0))
 
   const loadedSessionDirs = new Set<string>()
@@ -1978,7 +2207,6 @@ export default function Layout(props: ParentProps) {
   function handleDragStart(event: unknown) {
     const id = getDraggableId(event)
     if (!id) return
-    setHoverProject(undefined)
     setStore("activeProject", id)
   }
 
@@ -1999,32 +2227,14 @@ export default function Layout(props: ParentProps) {
   }
 
   function workspaceIds(project: LocalProject | undefined) {
-    if (!project) return []
-    const local = project.worktree
-    const dirs = [local, ...(project.sandboxes ?? [])]
-    const active = currentProject()
-    const directory = workspaceKey(active?.worktree ?? "") === workspaceKey(project.worktree) ? currentDir() : undefined
-    const extra =
-      directory &&
-      workspaceKey(directory) !== workspaceKey(local) &&
-      !dirs.some((item) => workspaceKey(item) === workspaceKey(directory))
-        ? directory
-        : undefined
-    const pending = extra ? WorktreeState.get(extra)?.status === "pending" : false
-
-    const ordered = effectiveWorkspaceOrder(local, dirs, store.workspaceOrder[project.worktree])
-    if (pending && extra) return [local, extra, ...ordered.filter((item) => item !== local)]
-    if (!extra) return ordered
-    if (pending) return ordered
-    return [...ordered, extra]
+    return orderedWorkspaceDirs({
+      project,
+      activeProjectWorktree: currentProject()?.worktree,
+      currentDir: currentDir(),
+      persisted: project ? store.workspaceOrder[project.worktree] : undefined,
+      isPending: (directory) => WorktreeState.get(directory)?.status === "pending",
+    })
   }
-
-  const sidebarProject = createMemo(() => {
-    if (layout.sidebar.opened()) return currentProject()
-    const hovered = hoverProjectData()
-    if (hovered) return hovered
-    return currentProject()
-  })
 
   function handleWorkspaceDragStart(event: unknown) {
     const id = getDraggableId(event)
@@ -2036,7 +2246,7 @@ export default function Layout(props: ParentProps) {
     const { draggable, droppable } = event
     if (!draggable || !droppable) return
 
-    const project = sidebarProject()
+    const project = currentProject()
     if (!project) return
 
     const ids = workspaceIds(project)
@@ -2107,7 +2317,9 @@ export default function Layout(props: ParentProps) {
     sidebarHovering,
     clearHoverProjectSoon,
     prefetchSession,
+    renameSession,
     archiveSession,
+    showDeleteSessionDialog: (session) => dialog.show(() => <DialogDeleteSession session={session} />),
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2129,31 +2341,48 @@ export default function Layout(props: ParentProps) {
 
   const projectSidebarCtx: ProjectSidebarContext = {
     currentDir,
+    currentSessionID: () => params.id,
     currentProject,
     sidebarOpened: () => layout.sidebar.opened(),
     sidebarHovering,
-    hoverProject: () => state.hoverProject,
-    onProjectMouseEnter: (worktree, event) => aim.enter(worktree, event),
-    onProjectMouseLeave: (worktree) => aim.leave(worktree),
-    onProjectFocus: (worktree) => aim.activate(worktree),
-    onHoverOpenChanged: (worktree, hoverOpen) => {
-      if (!hoverOpen && state.hoverProject && state.hoverProject !== worktree) return
-      setState("hoverProject", hoverOpen ? worktree : undefined)
-    },
     navigateToProject,
     openSidebar: () => layout.sidebar.open(),
+    toggleExpanded: (directory: string) => setStore("projectExpanded", workspaceKey(directory), (current) => !current),
+    isExpanded: (directory: string) => {
+      const persisted = store.projectExpanded[workspaceKey(directory)]
+      if (persisted !== undefined) return persisted
+      return workspaceKey(directory) === workspaceKey(currentProject()?.worktree ?? "")
+    },
+    setExpanded: (directory: string, value: boolean) => setStore("projectExpanded", workspaceKey(directory), value),
+    isProjectPinned: (project: LocalProject) => layout.projects.isPinned(project.worktree),
+    toggleProjectPinned: (project: LocalProject) => layout.projects.togglePinned(project.worktree),
     closeProject,
-    showEditProjectDialog,
+    startProjectRename,
     toggleProjectWorkspaces,
-    workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
+    workspacesEnabled: (project: LocalProject) =>
+      project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
     workspaceIds,
     workspaceLabel,
+    projectEditorID,
+    renameProject,
+    openProjectInExplorer,
+    archiveProjectSessions,
+    clearProjectNotifications,
+    canOpenProjectPath,
+    editorOpen,
+    InlineEditor,
     sessionProps: {
       navList: currentSessions,
       sidebarExpanded,
+      sidebarHovering,
       clearHoverProjectSoon,
       prefetchSession,
+      renameSession,
       archiveSession,
+      showDeleteSessionDialog: (session: Session) => dialog.show(() => <DialogDeleteSession session={session} />),
+      editorOpen,
+      openEditor,
+      InlineEditor,
     },
   }
 
@@ -2418,7 +2647,7 @@ export default function Layout(props: ParentProps) {
                         </div>
                         <DragOverlay>
                           <WorkspaceDragOverlay
-                            sidebarProject={sidebarProject}
+                            sidebarProject={currentProject}
                             activeWorkspace={() => store.activeWorkspace}
                             workspaceLabel={workspaceLabel}
                           />
@@ -2464,24 +2693,111 @@ export default function Layout(props: ParentProps) {
     )
   }
 
-  const projects = () => layout.projects.list()
-  const projectOverlay = () => <ProjectDragOverlay projects={projects} activeProject={() => store.activeProject} />
+  const projects = () =>
+    sortedProjects(
+      layout.projects.list().filter((project) => project.worktree !== "/"),
+      {
+        pinned: (project) => layout.projects.isPinned(project.worktree),
+      },
+    )
+  const sidebarRail = () => (
+    <div class="flex h-full w-full flex-col items-center justify-between px-2 py-3">
+      <div class="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto no-scrollbar">
+        <Tooltip placement="right" value={language.t("command.project.open")}>
+          <IconButton
+            icon="plus"
+            variant="ghost"
+            size="large"
+            onClick={chooseProject}
+            aria-label={language.t("command.project.open")}
+          />
+        </Tooltip>
+        <For each={projects()}>
+          {(project) => {
+            const active = () => workspaceKey(project.worktree) === workspaceKey(currentProject()?.worktree ?? "")
+            return (
+              <Tooltip placement="right" value={displayName(project)}>
+                <button
+                  type="button"
+                  classList={{
+                    "flex size-10 shrink-0 items-center justify-center rounded-lg transition-colors": true,
+                    "bg-surface-base-active text-icon-strong": active(),
+                    "text-icon-weak hover:bg-surface-raised-base-hover hover:text-icon-strong": !active(),
+                  }}
+                  aria-label={displayName(project)}
+                  onClick={() => {
+                    projectSidebarCtx.setExpanded(project.worktree, true)
+                    projectSidebarCtx.navigateToProject(project.worktree)
+                    layout.sidebar.open()
+                  }}
+                >
+                  <Icon name="folder" size="small" />
+                </button>
+              </Tooltip>
+            )
+          }}
+        </For>
+      </div>
+      <div class="flex w-full flex-col items-center gap-2 border-t border-border-weak-base pt-3">
+        <Tooltip
+          placement="right"
+          value={settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings")}
+        >
+          <IconButton
+            icon={settingsOpen() ? "arrow-left" : "settings-gear"}
+            variant="ghost"
+            size="large"
+            data-action="settings-toggle"
+            onClick={() => {
+              if (settingsOpen()) {
+                closeSettings()
+                return
+              }
+              openSettings()
+            }}
+            aria-label={settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings")}
+          />
+        </Tooltip>
+        <Tooltip placement="right" value={language.t("sidebar.help")}>
+          <IconButton
+            icon="help"
+            variant="ghost"
+            size="large"
+            onClick={() => platform.openLink("https://lfcode.ai/desktop-feedback")}
+            aria-label={language.t("sidebar.help")}
+          />
+        </Tooltip>
+      </div>
+    </div>
+  )
+
   const sidebarContent = (mobile?: boolean) => (
     <SidebarContent
       mobile={mobile}
-      opened={() => layout.sidebar.opened()}
-      aimMove={aim.move}
-      projects={projects}
-      renderProject={(project) => (
-        <SortableProject ctx={projectSidebarCtx} project={project} sortNow={sortNow} mobile={mobile} />
-      )}
-      handleDragStart={handleDragStart}
-      handleDragEnd={handleDragEnd}
-      handleDragOver={handleDragOver}
+      sections={() =>
+        projects().length === 0
+          ? [
+              <div class="flex-1 min-h-0 -mt-4 flex items-center justify-center px-6 pb-64 text-center">
+                <div class="mt-8 flex max-w-60 flex-col items-center gap-6 text-center">
+                  <div class="flex flex-col gap-3">
+                    <div class="text-14-medium text-text-strong">{language.t("sidebar.empty.title")}</div>
+                    <div class="text-14-regular text-text-base" style={{ "line-height": "var(--line-height-normal)" }}>
+                      {language.t("sidebar.empty.description")}
+                    </div>
+                  </div>
+                  <Button size="large" icon="folder-add-left" onClick={chooseProject}>
+                    {language.t("command.project.open")}
+                  </Button>
+                </div>
+              </div>,
+            ]
+          : projects().map((project) => (
+              <ProjectSection ctx={projectSidebarCtx} project={project} sortNow={sortNow} mobile={mobile} />
+            ))
+      }
       openProjectLabel={language.t("command.project.open")}
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
-      renderProjectOverlay={projectOverlay}
       settingsOpen={settingsOpen}
       settingsLabel={() => (settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings"))}
       settingsKeybind={() => (settingsOpen() ? undefined : command.keybind("settings.open"))}
@@ -2489,9 +2805,6 @@ export default function Layout(props: ParentProps) {
       onCloseSettings={closeSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://lfcode.ai/desktop-feedback")}
-      renderPanel={() =>
-        mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
-      }
     />
   )
 
@@ -2510,21 +2823,16 @@ export default function Layout(props: ParentProps) {
                 "absolute inset-y-0 left-0": true,
                 "z-10": true,
               }}
-              style={{ width: `${side()}px` }}
+              style={{ width: `${desktopSidebarWidth()}px` }}
               ref={(el) => {
                 setState("nav", el)
               }}
-              onMouseEnter={() => {
-                disarm()
-              }}
-              onMouseLeave={() => {
-                aim.reset()
-                if (!sidebarHovering()) return
-
-                arm()
-              }}
             >
-              <div class="@container w-full h-full contain-strict">{sidebarContent()}</div>
+              <div class="@container w-full h-full contain-strict">
+                <Show when={layout.sidebar.opened()} fallback={sidebarRail()}>
+                  {sidebarContent()}
+                </Show>
+              </div>
             </nav>
 
             <Show when={layout.sidebar.opened()}>
@@ -2587,59 +2895,31 @@ export default function Layout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                "--main-left": `${desktopSidebarWidth()}px`,
               }}
             >
               <main
                 classList={{
-                  "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l xl:rounded-tl-[12px]": true,
+                  "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l": true,
+                  "xl:rounded-tl-[12px]": !settingsOpen(),
                 }}
               >
                 <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
-                  <Show when={settingsOpen()} fallback={props.children}>
-                    <SettingsView />
-                  </Show>
+                  <div class="relative size-full">
+                    <div class="size-full">{props.children}</div>
+                  </div>
                 </Show>
               </main>
-            </div>
-
-            <div
-              classList={{
-                "hidden xl:flex absolute inset-y-0 left-16 z-30": true,
-                "opacity-100 translate-x-0 pointer-events-auto": state.peeked && !layout.sidebar.opened(),
-                "opacity-0 -translate-x-2 pointer-events-none": !state.peeked || layout.sidebar.opened(),
-                "transition-[opacity,transform] motion-reduce:transition-none": true,
-                "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
-                "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
-              }}
-              onMouseMove={disarm}
-              onMouseEnter={() => {
-                disarm()
-                aim.reset()
-              }}
-              onPointerDown={disarm}
-              onMouseLeave={() => {
-                arm()
-              }}
-            >
-              <Show when={peekProject()}>
-                <SidebarPanel project={peekProject} merged={false} />
+              <Show when={settingsOpen()}>
+                <div class="absolute inset-0 z-30 bg-background-base">
+                  <SettingsView directory={currentDir() || currentProject()?.worktree} />
+                </div>
               </Show>
             </div>
 
-            <div
-              classList={{
-                "hidden xl:block pointer-events-none absolute inset-y-0 right-0 z-25 overflow-hidden": true,
-                "opacity-100 translate-x-0": state.peeked && !layout.sidebar.opened(),
-                "opacity-0 -translate-x-2": !state.peeked || layout.sidebar.opened(),
-                "transition-[opacity,transform] motion-reduce:transition-none": true,
-                "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
-                "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
-              }}
-              style={{ left: `calc(4rem + ${panel()}px)` }}
-            >
-              <div class="h-full w-px" style={{ "box-shadow": "var(--shadow-sidebar-overlay)" }} />
-            </div>
+            <Show when={import.meta.env.DEV}>
+              <DebugBar />
+            </Show>
           </div>
         </div>
       </div>

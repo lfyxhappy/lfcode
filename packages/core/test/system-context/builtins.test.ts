@@ -34,7 +34,7 @@ const it = testEffect(
 )
 const instructionFS = Layer.effect(
   FSUtil.Service,
-  FSUtil.Service.pipe(
+  FSUtil.Service.asEffect().pipe(
     Effect.map((fs) =>
       FSUtil.Service.of({
         ...fs,

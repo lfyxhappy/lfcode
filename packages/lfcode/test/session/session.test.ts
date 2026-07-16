@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import path from "path"
+import fs from "fs/promises"
 import { Session as SessionNs } from "../../src/session"
 import { Bus } from "../../src/bus"
 import { Log } from "../../src/util"
@@ -7,10 +8,15 @@ import { Instance } from "../../src/project/instance"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { AppRuntime } from "../../src/effect/app-runtime"
+import { Global } from "../../src/global"
+import { Database, eq } from "../../src/storage"
+import { PartTable } from "../../src/session/session.sql"
+import { initProjectors } from "../../src/server/projectors"
 import { tmpdir } from "../fixture/fixture"
 
 const projectRoot = path.join(__dirname, "../..")
 void Log.init({ print: false })
+initProjectors()
 
 function create(input?: SessionNs.CreateInput) {
   return AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create(input)))
@@ -177,5 +183,117 @@ describe("Session", () => {
     })
 
     expect(missing).toBe(true)
+  })
+
+  test("stores large file parts as blobs and hydrates them on read", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const info = await create({})
+        const messageID = MessageID.ascending()
+        await updateMessage({
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+
+        const body = "x".repeat(300 * 1024)
+        const url = `data:text/plain;base64,${Buffer.from(body).toString("base64")}`
+        const partID = PartID.ascending()
+        await updatePart({
+          id: partID,
+          sessionID: info.id,
+          messageID,
+          type: "file",
+          mime: "text/plain",
+          filename: "huge.txt",
+          url,
+        })
+
+        const row = Database.use((db) =>
+          db.select().from(PartTable).where(eq(PartTable.id, partID)).get(),
+        ) as ({ data: MessageV2.FilePart } & typeof PartTable.$inferSelect) | undefined
+        expect(row?.data.type).toBe("file")
+        expect(row?.data.url.startsWith("lfcode-blob://")).toBe(true)
+        expect(row?.data.blob?.mode).toBe("blob")
+        expect(row?.data.blob?.path).toContain(path.join("blobs", "attachments"))
+
+        const hydrated = await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) => svc.getPart({ sessionID: info.id, messageID, partID })),
+        )
+        expect(hydrated?.type).toBe("file")
+        if (hydrated?.type !== "file") throw new Error(`expected hydrated file part, got ${hydrated?.type}`)
+        expect(hydrated.url).toBe(url)
+
+        const blobPath = path.isAbsolute(row!.data.blob!.path)
+          ? row!.data.blob!.path
+          : path.join(Global.Path.data, row!.data.blob!.path)
+        expect(await fs.readFile(blobPath, "utf8")).toBe(url)
+
+        await remove(info.id)
+      },
+    })
+  })
+
+  test("hydrates legacy inline file parts from storage rows", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const info = await create({})
+        const messageID = MessageID.ascending()
+        await updateMessage({
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as MessageV2.Info)
+
+        const partID = PartID.ascending()
+        const url = "data:text/plain;base64,Zm9v"
+        const legacyPart: MessageV2.FilePart = {
+          id: partID,
+          messageID,
+          sessionID: info.id,
+          type: "file",
+          mime: "text/plain",
+          filename: "legacy.txt",
+          url,
+        }
+        const { id, messageID: storedMessageID, sessionID: storedSessionID, ...data } = legacyPart
+        Database.use((db) => {
+          db.insert(PartTable)
+            .values({
+              id,
+              message_id: storedMessageID,
+              session_id: storedSessionID,
+              data,
+              time_created: Date.now(),
+            })
+            .run()
+        })
+
+        const hydrated = await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) => svc.getPart({ sessionID: info.id, messageID, partID })),
+        )
+        expect(hydrated?.type).toBe("file")
+        if (hydrated?.type !== "file") throw new Error(`expected hydrated file part, got ${hydrated?.type}`)
+        expect(hydrated.url).toBe(url)
+
+        await remove(info.id)
+      },
+    })
   })
 })

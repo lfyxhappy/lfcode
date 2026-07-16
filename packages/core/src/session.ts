@@ -364,7 +364,7 @@ export const layer = Layer.effect(
             }).pipe(
               Effect.catchDefect((defect) =>
                 defect instanceof SessionInput.LifecycleConflict
-                  ? new PromptConflictError({ sessionID: input.sessionID, messageID })
+                  ? Effect.fail(new PromptConflictError({ sessionID: input.sessionID, messageID }))
                   : Effect.die(defect),
               ),
             )

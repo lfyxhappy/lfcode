@@ -14,7 +14,9 @@ import type {
 import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
+import { mergeSessionGoal } from "./session-goal"
 import { diffs as list, message as clean } from "@/utils/diffs"
+import { dropInlineImageCacheForSessionParts, sanitizeSessionPart } from "../session-part-sanitize"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -75,6 +77,7 @@ export function cleanupDroppedSessionCaches(
     ...Object.keys(store.permission),
     ...Object.keys(store.question),
     ...Object.keys(store.session_status),
+    ...Object.keys(store.session_goal),
     ...Object.values(store.part)
       .map((parts) => parts?.find((part) => !!part?.sessionID)?.sessionID)
       .filter((sessionID): sessionID is string => !!sessionID),
@@ -109,6 +112,7 @@ export function applyDirectoryEvent(input: {
     case "session.created": {
       const info = (event.properties as { info: Session }).info
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
+      input.setStore("session_goal", info.id, (prev) => mergeSessionGoal(prev, { goal: (info as any).goal }))
       if (result.found) {
         input.setStore("session", result.index, reconcile(info))
         break
@@ -124,6 +128,7 @@ export function applyDirectoryEvent(input: {
     case "session.updated": {
       const info = (event.properties as { info: Session }).info
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
+      input.setStore("session_goal", info.id, (prev) => mergeSessionGoal(prev, { goal: (info as any).goal }))
       if (info.time.archived) {
         if (result.found) {
           input.setStore(
@@ -181,6 +186,20 @@ export function applyDirectoryEvent(input: {
       input.setStore("session_status", props.sessionID, reconcile(props.status))
       break
     }
+    case "session.goal": {
+      const props = event.properties as {
+        sessionID: string
+        goal?: unknown
+        lastVerdict?: unknown
+      }
+      input.setStore("session_goal", props.sessionID, (prev) =>
+        mergeSessionGoal(prev, {
+          goal: props.goal as any,
+          lastVerdict: props.lastVerdict as any,
+        }),
+      )
+      break
+    }
     case "message.updated": {
       const info = clean((event.properties as { info: Message }).info)
       const messages = input.store.message[info.sessionID]
@@ -204,6 +223,7 @@ export function applyDirectoryEvent(input: {
     }
     case "message.removed": {
       const props = event.properties as { sessionID: string; messageID: string }
+      dropInlineImageCacheForSessionParts(input.store.part[props.messageID])
       input.setStore(
         produce((draft) => {
           const messages = draft.message[props.sessionID]
@@ -217,7 +237,8 @@ export function applyDirectoryEvent(input: {
       break
     }
     case "message.part.updated": {
-      const part = (event.properties as { part: Part }).part
+      const raw = (event.properties as { part: Part }).part
+      const part = sanitizeSessionPart(raw)
       if (SKIP_PARTS.has(part.type)) break
       const parts = input.store.part[part.messageID]
       if (!parts) {
@@ -244,6 +265,7 @@ export function applyDirectoryEvent(input: {
       if (!parts) break
       const result = Binary.search(parts, props.partID, (p) => p.id)
       if (result.found) {
+        dropInlineImageCacheForSessionParts([parts[result.index]])
         input.setStore(
           produce((draft) => {
             const list = draft.part[props.messageID]
@@ -271,6 +293,27 @@ export function applyDirectoryEvent(input: {
           const field = props.field as keyof typeof part
           const existing = part[field] as string | undefined
           ;(part[field] as string) = (existing ?? "") + props.delta
+        }),
+      )
+      break
+    }
+    case "actor.removed": {
+      const props = event.properties as { sessionID: string; actorID: string }
+      input.setStore(
+        produce((draft) => {
+          const actors = draft.actor[props.sessionID]
+          if (actors) draft.actor[props.sessionID] = actors.filter((actor) => actor.actorID !== props.actorID)
+          const messages = draft.message[props.sessionID]
+          if (messages) {
+            const removed = messages.filter((message) => message.agentID === props.actorID)
+            draft.message[props.sessionID] = messages.filter((message) => message.agentID !== props.actorID)
+            for (const message of removed) {
+              dropInlineImageCacheForSessionParts(draft.part[message.id])
+              delete draft.part[message.id]
+            }
+          }
+          const buckets = draft.messageByAgent[props.sessionID]
+          if (buckets) delete buckets[props.actorID]
         }),
       )
       break

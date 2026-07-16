@@ -1,4 +1,4 @@
-import { DatabaseSync, type SQLInputValue } from "node:sqlite"
+import { DatabaseSync } from "node:sqlite"
 import { drizzle } from "drizzle-orm/node-sqlite"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -16,6 +16,7 @@ import * as Statement from "effect/unstable/sql/Statement"
 import { Sqlite } from "./sqlite"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
+type SqliteValue = null | number | bigint | string | Uint8Array
 
 const TypeId = "~@lfcode-ai/core/database/SqliteNode" as const
 type TypeId = typeof TypeId
@@ -58,7 +59,9 @@ const make = (options: Config) =>
         const statement = native.prepare(query)
         statement.setReadBigInts(Context.get(fiber.context, Client.SafeIntegers))
         try {
-          return Effect.succeed(statement.all(...(params as SQLInputValue[])) as Array<Record<string, unknown>>)
+          const rows = statement.all(...requireSqliteValues(params))
+          if (!rows.every(isRecordRow)) throw new TypeError("SQLite returned an invalid object row")
+          return Effect.succeed(rows)
         } catch (cause) {
           return Effect.fail(
             new SqlError({
@@ -72,11 +75,16 @@ const make = (options: Config) =>
       Effect.withFiber<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>((fiber) => {
         const statement = native.prepare(query)
         statement.setReadBigInts(Context.get(fiber.context, Client.SafeIntegers))
-        statement.setReturnArrays(true)
         try {
-          return Effect.succeed(
-            statement.all(...(params as SQLInputValue[])) as unknown as ReadonlyArray<ReadonlyArray<unknown>>,
-          )
+          if ("setReturnArrays" in statement && typeof statement.setReturnArrays === "function") {
+            statement.setReturnArrays(true)
+            const rows = statement.all(...requireSqliteValues(params))
+            if (!rows.every(isArrayRow)) throw new TypeError("SQLite returned an invalid array row")
+            return Effect.succeed(rows)
+          }
+          const rows = statement.all(...requireSqliteValues(params))
+          if (!rows.every(isRecordRow)) throw new TypeError("SQLite returned an invalid object row")
+          return Effect.succeed(rows.map(Object.values))
         } catch (cause) {
           return Effect.fail(
             new SqlError({
@@ -150,12 +158,15 @@ const nativeLayer = (config: Config) =>
     Effect.gen(function* () {
       const native = new DatabaseSync(config.filename, {
         readOnly: config.readonly,
-        timeout: config.timeout,
         allowExtension: config.allowExtension,
         enableForeignKeyConstraints: true,
         open: true,
       })
       yield* Effect.addFinalizer(() => Effect.sync(() => native.close()))
+      if (config.timeout !== undefined) {
+        if (!Number.isInteger(config.timeout)) throw new TypeError("SQLite timeout must be an integer")
+        native.exec(`PRAGMA busy_timeout = ${Math.max(0, config.timeout)};`)
+      }
       if (config.disableWAL !== true && config.readonly !== true) native.exec("PRAGMA journal_mode = WAL;")
       return native
     }),
@@ -175,4 +186,26 @@ export const layer = (config: Config) => {
   return Layer.merge(native, Layer.merge(sqliteLayer(config), drizzleLayer).pipe(Layer.provide(native))).pipe(
     Layer.provide(Reactivity.layer),
   )
+}
+
+function requireSqliteValues(params: ReadonlyArray<unknown>): Array<SqliteValue> {
+  return params.map((param) => {
+    if (
+      param === null ||
+      typeof param === "number" ||
+      typeof param === "bigint" ||
+      typeof param === "string" ||
+      param instanceof Uint8Array
+    )
+      return param
+    throw new TypeError(`Unsupported SQLite parameter type: ${typeof param}`)
+  })
+}
+
+function isRecordRow(row: unknown): row is Record<string, unknown> {
+  return typeof row === "object" && row !== null && !Array.isArray(row)
+}
+
+function isArrayRow(row: unknown): row is Array<unknown> {
+  return Array.isArray(row)
 }

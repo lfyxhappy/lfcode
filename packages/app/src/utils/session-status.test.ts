@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionStatus } from "@lfcode-ai/sdk/v2/client"
-import { isSessionWorking } from "./session-status"
+import { isSessionStreaming, isSessionWaiting, isSessionWorking } from "./session-status"
 
 describe("isSessionWorking", () => {
   test("does not treat missing or idle status as working", () => {
@@ -8,14 +8,35 @@ describe("isSessionWorking", () => {
     expect(isSessionWorking({ type: "idle" })).toBe(false)
   })
 
-  test("treats active statuses as working", () => {
+  test("treats only streaming statuses as working", () => {
     expect(isSessionWorking({ type: "busy" })).toBe(true)
+    expect(isSessionStreaming({ type: "busy" })).toBe(true)
     expect(
       isSessionWorking({
         type: "retry",
         attempt: 1,
         message: "retrying",
         next: Date.now(),
+      } satisfies SessionStatus),
+    ).toBe(true)
+    expect(
+      isSessionStreaming({
+        type: "retry",
+        attempt: 1,
+        message: "retrying",
+        next: Date.now(),
+      } satisfies SessionStatus),
+    ).toBe(true)
+    expect(
+      isSessionWorking({
+        type: "waiting",
+        mode: "interactive-html",
+      } satisfies SessionStatus),
+    ).toBe(false)
+    expect(
+      isSessionWaiting({
+        type: "waiting",
+        mode: "interactive-html",
       } satisfies SessionStatus),
     ).toBe(true)
   })

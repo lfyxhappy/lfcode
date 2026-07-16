@@ -28,7 +28,7 @@ export default [
     name: "lfcode-desktop:theme-preload",
     transformIndexHtml(html) {
       return html.replace(
-        '<script id="oc-theme-preload-script" src="/oc-theme-preload.js"></script>',
+        '<script id="oc-theme-preload-script" src="/oc-theme-preload.js" type="module"></script>',
         `<script id="oc-theme-preload-script">${readFileSync(theme, "utf8")}</script>`,
       )
     },

@@ -23,6 +23,8 @@ export const subscribe = Effect.fn("Metrics.subscribe")(function* () {
         return send("model_call", p.sessionID, {
           finish_reason: p.finish_reason,
           ttft_ms: p.ttft_ms,
+          submit_to_first_delta_ms: p.submit_to_first_delta_ms,
+          pre_stream_ms: p.pre_stream_ms,
           latency_ms: p.latency_ms,
           cached_read_tokens: p.cached_read_tokens,
           model_id: p.model_id,
@@ -39,6 +41,13 @@ export const subscribe = Effect.fn("Metrics.subscribe")(function* () {
           output_bytes: p.output_bytes,
           tool_call_id: p.tool_call_id,
           tool_call_status: p.tool_call_status,
+          execute_ms: p.execute_ms,
+          schema_build_ms: p.schema_build_ms,
+          error_category: p.error_category,
+          retry_count: p.retry_count,
+          kind: p.kind,
+          namespace: p.namespace,
+          latency_class: p.latency_class,
         })
       }),
       svc.subscribeCallback(AgentRequest, (e) => {

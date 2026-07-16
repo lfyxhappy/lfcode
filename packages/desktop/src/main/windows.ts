@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs"
 import windowState from "electron-window-state"
 import log from "electron-log/main.js"
-import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, shell } from "electron"
+import { app, BrowserWindow, dialog, net, nativeImage, nativeTheme, protocol, session, shell, webContents } from "electron"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { getBootstrapState } from "./bootstrap"
 import type { DetachedSidePanelKind, TitlebarTheme } from "../preload/types"
-import { browserPartition } from "./browser-runtime"
+import { browserPartition, clearBrowserWindow, getBrowserGuestOwner, recordBrowserNetwork } from "./browser-runtime"
 import { wireBrowserGuest } from "./browser-management"
+import { downloadNeedsOpenConfirmation, isManagedAutomationDownload } from "./download-security"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -36,6 +37,7 @@ let relaunchHandler = () => {
   app.relaunch()
   app.exit(0)
 }
+const wiredSessions = new WeakSet<Electron.Session>()
 
 function isHeadlessWindowMode() {
   return process.env.LFCODE_DESKTOP_HEADLESS === "1"
@@ -290,57 +292,202 @@ function createAppWindow(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
       webviewTag: input.webviewTag ?? false,
     },
   })
 }
 
 function wireBrowserEvents(win: BrowserWindow) {
+  win.on("closed", () => {
+    clearBrowserWindow(win.id)
+  })
+  win.webContents.setBackgroundThrottling(false)
   win.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
     webPreferences.preload = join(root, "../preload/browser-webview.js")
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
     webPreferences.webSecurity = true
+    webPreferences.backgroundThrottling = false
     params.partition = browserPartition()
     if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
       params.src = "about:blank"
     }
   })
   win.webContents.on("did-attach-webview", (_event, guest) => {
+    log.scope("browser").info("webview attached", {
+      window: win.id,
+      guestID: guest.id,
+      url: guest.getURL(),
+    })
+    guest.setBackgroundThrottling(false)
     wireBrowserGuest({
       sourceWindowID: win.id,
       guest,
     })
+    guest.on("render-process-gone", (_guestEvent, details) => {
+      log.scope("browser").error("webview renderer process gone", {
+        window: win.id,
+        guestID: guest.id,
+        url: guest.getURL(),
+        details,
+        snapshot: processSnapshot(),
+      })
+    })
+    guest.on("destroyed", () => {
+      log.scope("browser").info("webview destroyed", {
+        window: win.id,
+        guestID: guest.id,
+      })
+    })
     guest.setWindowOpenHandler(({ url }) => {
-      win.webContents.send("browser-window-open", url)
+      win.webContents.send("browser-window-open", {
+        ...getBrowserGuestOwner(guest.id),
+        url,
+        reason: "human",
+      })
       return { action: "deny" }
     })
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    win.webContents.send("browser-window-open", url)
+    win.webContents.send("browser-window-open", { url, reason: "human" })
     return { action: "deny" }
   })
   win.webContents.on("will-navigate", (event, url) => {
     if (!isExternalMainWindowNavigation(url)) return
     event.preventDefault()
-    win.webContents.send("browser-window-open", url)
+    win.webContents.send("browser-window-open", { url, reason: "human" })
   })
-  win.webContents.session.on("will-download", (_event, item) => {
-    void shell.openPath(item.getSavePath()).catch(() => undefined)
-  })
-  win.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
-    const { requestHeaders } = details
-    upsertKeyValue(requestHeaders, "Access-Control-Allow-Origin", ["*"])
-    callback({ requestHeaders })
+  wireSessionEvents(win.webContents.session)
+  wireSessionEvents(session.fromPartition(browserPartition()))
+}
+
+function wireSessionEvents(current: Electron.Session) {
+  if (wiredSessions.has(current)) return
+  wiredSessions.add(current)
+
+  current.on("will-download", (_event, item, contents) => {
+    item.once("done", (_itemEvent, state) => {
+      const sourceWindowID = getBrowserGuestOwner(contents.id)?.sourceWindowID
+      const owner =
+        BrowserWindow.fromWebContents(contents) ??
+        (sourceWindowID ? BrowserWindow.fromId(sourceWindowID) : null) ??
+        BrowserWindow.getFocusedWindow() ??
+        undefined
+      if (state !== "completed") {
+        if (state === "cancelled") return
+        void showDownloadDialog(owner, {
+          type: "error",
+          title: "Download failed",
+          message: item.getFilename(),
+          detail: `The download did not complete (${state}). The file was not opened.`,
+          buttons: ["Close"],
+        })
+        return
+      }
+      const savePath = item.getSavePath()
+      if (isManagedAutomationDownload(savePath, app.getPath("userData"))) return
+      void promptForCompletedDownload(owner, savePath, item.getFilename())
+    })
   })
 
-  win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    const { responseHeaders = {} } = details
-    upsertKeyValue(responseHeaders, "Access-Control-Allow-Origin", ["*"])
-    upsertKeyValue(responseHeaders, "Access-Control-Allow-Headers", ["*"])
-    callback({ responseHeaders })
+  current.webRequest.onCompleted((details) => {
+    if (typeof details.webContentsId !== "number") return
+    recordBrowserNetwork({
+      guestID: details.webContentsId,
+      entry: {
+        url: details.url,
+        method: details.method,
+        resourceType: details.resourceType,
+        statusCode: details.statusCode,
+        fromCache: details.fromCache,
+        mimeType: readHeaderValue(details.responseHeaders, "content-type"),
+        contentDisposition: readHeaderValue(details.responseHeaders, "content-disposition"),
+        time: Date.now(),
+      },
+    })
   })
+
+  current.webRequest.onErrorOccurred((details) => {
+    if (typeof details.webContentsId !== "number") return
+    recordBrowserNetwork({
+      guestID: details.webContentsId,
+      entry: {
+        url: details.url,
+        method: details.method,
+        resourceType: details.resourceType,
+        error: details.error,
+        time: Date.now(),
+      },
+    })
+  })
+}
+
+function processSnapshot() {
+  const appMetrics = app.getAppMetrics()
+  return {
+    summary: summarizeAppMetrics(appMetrics),
+    mainProcessMemory: summarizeNodeMemory(process.memoryUsage()),
+    appMetrics: appMetrics.map((item) => ({
+      pid: item.pid,
+      type: item.type,
+      serviceName: item.serviceName,
+      creationTime: item.creationTime,
+      memory: item.memory,
+      cpu: item.cpu,
+      sandboxed: item.sandboxed,
+      integrityLevel: item.integrityLevel,
+    })),
+    contents: webContents.getAllWebContents().map((item) => ({
+      id: item.id,
+      type: item.getType(),
+      url: safe(() => item.getURL()),
+      title: safe(() => item.getTitle()),
+      loading: safe(() => item.isLoading()),
+      destroyed: item.isDestroyed(),
+      osPid: safe(() => item.getOSProcessId()),
+    })),
+  }
+}
+
+function summarizeAppMetrics(metrics: Electron.ProcessMetric[]) {
+  const totalWorkingSetSize = metrics.reduce((sum, item) => sum + item.memory.workingSetSize, 0)
+  const totalPrivateBytes = metrics.reduce((sum, item) => sum + (item.memory.privateBytes ?? 0), 0)
+  return {
+    processCount: metrics.length,
+    totalWorkingSetMb: Math.round(totalWorkingSetSize / 1024),
+    totalPrivateMb: Math.round(totalPrivateBytes / 1024),
+    topWorkingSet: [...metrics]
+      .sort((a, b) => b.memory.workingSetSize - a.memory.workingSetSize)
+      .slice(0, 5)
+      .map((item) => ({
+        pid: item.pid,
+        type: item.type,
+        serviceName: item.serviceName,
+        workingSetMb: Math.round(item.memory.workingSetSize / 1024),
+        privateMb: Math.round((item.memory.privateBytes ?? 0) / 1024),
+        cpuPercent: Math.round(item.cpu.percentCPUUsage * 10) / 10,
+      })),
+  }
+}
+
+function summarizeNodeMemory(memory: NodeJS.MemoryUsage) {
+  return {
+    rssMb: Math.round(memory.rss / 1024 / 1024),
+    heapTotalMb: Math.round(memory.heapTotal / 1024 / 1024),
+    heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+    externalMb: Math.round(memory.external / 1024 / 1024),
+    arrayBuffersMb: Math.round(memory.arrayBuffers / 1024 / 1024),
+  }
+}
+
+function safe<T>(fn: () => T) {
+  try {
+    return fn()
+  } catch (error) {
+    return formatError(error)
+  }
 }
 
 function wireWindowRecovery(win: BrowserWindow, name: string) {
@@ -417,6 +564,7 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
       window: name,
       currentURL: currentUrl(win),
       details,
+      snapshot: processSnapshot(),
     })
     void show(
       "Lfcode window terminated unexpectedly",
@@ -426,7 +574,11 @@ function wireWindowRecovery(win: BrowserWindow, name: string) {
   })
 
   win.on("unresponsive", () => {
-    log.scope("window").error("renderer unresponsive", { window: name, currentURL: currentUrl(win) })
+    log.scope("window").error("renderer unresponsive", {
+      window: name,
+      currentURL: currentUrl(win),
+      snapshot: processSnapshot(),
+    })
     void show(
       "Lfcode is not responding",
       [`Window: ${name}`, `URL: ${currentUrl(win)}`].join("\n"),
@@ -466,16 +618,63 @@ function wireZoom(win: BrowserWindow) {
   })
 }
 
-function upsertKeyValue(obj: Record<string, any>, keyToChange: string, value: any) {
-  const keyToChangeLower = keyToChange.toLowerCase()
-  for (const key of Object.keys(obj)) {
-    if (key.toLowerCase() === keyToChangeLower) {
-      // Reassign old key
-      obj[key] = value
-      // Done
-      return
+async function promptForCompletedDownload(owner: BrowserWindow | undefined, savePath: string, filename: string) {
+  const risky = downloadNeedsOpenConfirmation(filename)
+  const result = await showDownloadDialog(owner, {
+    type: risky ? "warning" : "info",
+    title: "Download completed",
+    message: filename,
+    detail: risky
+      ? "This file type can run code or is not recognized. Review its source before opening it."
+      : "The file was downloaded successfully. Choose whether to reveal or open it.",
+    buttons: ["Show in folder", risky ? "Review and open" : "Open file", "Close"],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true,
+  })
+  if (result.response === 0) {
+    shell.showItemInFolder(savePath)
+    return
+  }
+  if (result.response !== 1) return
+  if (risky) {
+    const confirmation = await showDownloadDialog(owner, {
+      type: "warning",
+      title: "Open potentially unsafe download?",
+      message: filename,
+      detail: "Only continue if you trust the download source. Lfcode has not verified this file.",
+      buttons: ["Cancel", "Open anyway"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (confirmation.response !== 1) return
+  }
+  const error = await shell.openPath(savePath)
+  if (!error) return
+  await showDownloadDialog(owner, {
+    type: "error",
+    title: "Unable to open download",
+    message: filename,
+    detail: error,
+    buttons: ["Close"],
+  })
+}
+
+function showDownloadDialog(owner: BrowserWindow | undefined, options: Electron.MessageBoxOptions) {
+  if (owner) return dialog.showMessageBox(owner, options)
+  return dialog.showMessageBox(options)
+}
+
+function readHeaderValue(headers: Electron.OnHeadersReceivedListenerDetails["responseHeaders"], key: string) {
+  if (!headers) return undefined
+  const lower = key.toLowerCase()
+  for (const [header, value] of Object.entries(headers)) {
+    if (header.toLowerCase() !== lower) continue
+    if (Array.isArray(value)) {
+      const next = value.find((item): item is string => typeof item === "string" && item.trim().length > 0)
+      return next?.trim()
     }
   }
-  // Insert at end instead
-  obj[keyToChange] = value
+  return undefined
 }

@@ -1,11 +1,16 @@
 export type SettingsTab =
   | "general"
+  | "editor"
+  | "personalization"
+  | "maintenance"
+  | "appControl"
   | "shortcuts"
   | "browser"
+  | "runtimes"
   | "archives"
-  | "providers"
   | "models"
   | "mcp"
+  | "plugins"
   | "skills"
   | "usage"
 

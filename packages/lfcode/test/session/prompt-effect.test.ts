@@ -29,6 +29,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
+import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
@@ -146,11 +147,23 @@ const lsp = Layer.succeed(
     status: () => Effect.succeed([]),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
+    syncFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
     hover: () => Effect.succeed(undefined),
+    completion: () => Effect.succeed(undefined),
+    signatureHelp: () => Effect.succeed(undefined),
+    prepareRename: () => Effect.succeed(undefined),
+    rename: () => Effect.succeed(undefined),
+    formatting: () => Effect.succeed([]),
+    rangeFormatting: () => Effect.succeed([]),
+    codeAction: () => Effect.succeed([]),
+    executeCommand: () => Effect.succeed(undefined),
+    declaration: () => Effect.succeed([]),
     definition: () => Effect.succeed([]),
+    typeDefinition: () => Effect.succeed([]),
     references: () => Effect.succeed([]),
     implementation: () => Effect.succeed([]),
+    documentHighlights: () => Effect.succeed([]),
     documentSymbol: () => Effect.succeed([]),
     workspaceSymbol: () => Effect.succeed([]),
     prepareCallHierarchy: () => Effect.succeed([]),
@@ -196,6 +209,7 @@ function makeHttp() {
   const team = Team.defaultLayer
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
+    Layer.provide(Goal.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
@@ -208,6 +222,7 @@ function makeHttp() {
     Layer.provide(History.defaultLayer),
     Layer.provide(TaskRegistry.defaultLayer),
     Layer.provide(Auth.defaultLayer),
+    Layer.provide(Layer.mergeAll(Instruction.defaultLayer, Bus.layer)),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
@@ -223,12 +238,23 @@ function makeHttp() {
     Layer.provide(AgentSvc.defaultLayer),
     Layer.provide(Plugin.defaultLayer),
     Layer.provideMerge(deps),
+    Layer.provide(
+      Layer.mergeAll(
+        Goal.defaultLayer,
+        ProviderSvc.defaultLayer,
+        Session.defaultLayer,
+        Truncate.defaultLayer,
+        AgentSvc.defaultLayer,
+      ),
+    ),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
   return Layer.mergeAll(
     TestLLMServer.layer,
     SessionPrompt.layer.pipe(
-    Layer.provide(Goal.defaultLayer),
+      Layer.provide(Goal.defaultLayer),
+      Layer.provide(ComposeGateState.defaultLayer),
+      Layer.provide(Skill.defaultLayer),
       Layer.provide(TaskGateState.defaultLayer),
       Layer.provide(TaskRegistry.defaultLayer),
       Layer.provide(SessionRevert.defaultLayer),
@@ -247,7 +273,12 @@ function makeHttp() {
       Layer.provide(Inbox.defaultLayer),
       Layer.provideMerge(deps),
     ),
-  ).pipe(Layer.provide(summary))
+  ).pipe(
+    Layer.provide(summary),
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(ProviderSvc.defaultLayer),
+    Layer.provide(Session.defaultLayer),
+  )
 }
 
 const it = testEffect(makeHttp())
@@ -1399,9 +1430,9 @@ unix(
           if (!tool) return
 
           expect(tool.state.metadata.truncated).toBe(true)
-          expect(typeof tool.state.metadata.outputPath).toBe("string")
+          expect(typeof tool.state.metadata.outputRef).toBe("string")
           expect(tool.state.output).toMatch(/\.\.\.output truncated\.\.\./)
-          expect(tool.state.output).toMatch(/Full output saved to:\s+\S+/)
+          expect(tool.state.output).toMatch(/Full output is available as tool-output:tool_/)
           expect(tool.state.output).not.toContain("Tool execution aborted")
         }),
       { git: true, config: providerCfg },

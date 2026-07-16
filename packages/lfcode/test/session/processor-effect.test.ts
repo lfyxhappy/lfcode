@@ -11,6 +11,7 @@ import { Plugin } from "../../src/plugin"
 import { Provider } from "../../src/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
+import { Goal } from "../../src/session/goal"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionProcessor } from "../../src/session/processor"
@@ -165,6 +166,7 @@ const deps = Layer.mergeAll(
   LLM.defaultLayer,
   Provider.defaultLayer,
   status,
+  Goal.defaultLayer,
 ).pipe(Layer.provideMerge(infra))
 const env = Layer.mergeAll(
   TestLLMServer.layer,
@@ -212,6 +214,7 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
             model: { providerID: ref.providerID, modelID: ref.modelID },
           } satisfies MessageV2.User,
           sessionID: chat.id,
+          submitAt: parent.time.created,
           model: mdl,
           agent: agent(),
           system: [],
@@ -222,7 +225,6 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         const value = yield* handle.process(input)
         const parts = MessageV2.parts(msg.id)
         const calls = yield* llm.calls
-
         expect(value).toBe("continue")
         expect(calls).toBe(1)
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
@@ -445,6 +447,8 @@ it.live("session.processor effect tests record step timing and status", () =>
         expect(finish?.time?.ttft).not.toBeNull()
         expect(finish?.time?.start).toBeDefined()
         expect(finish?.time?.end).toBeDefined()
+        expect(finish?.time?.submit_to_first_delta).toBeDefined()
+        expect(finish?.time?.pre_stream).toBeDefined()
         if (!finish?.time) return
         expect(finish.time.end).toBeGreaterThanOrEqual(finish.time.start)
       }),
@@ -1011,6 +1015,61 @@ it.live("session.processor effect tests record aborted errors and idle state", (
   ),
 )
 
+it.live("session.processor effect tests skip idle reset when runner owns session status", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const sts = yield* SessionStatus.Service
+
+        yield* llm.hang
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "runner owns status")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+          manageSessionStatus: false,
+        })
+
+        yield* sts.set(chat.id, { type: "busy" })
+
+        const run = yield* handle
+          .process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "runner owns status" }],
+            tools: {},
+          })
+          .pipe(Effect.forkChild)
+
+        yield* llm.wait(1)
+        yield* Fiber.interrupt(run)
+
+        const exit = yield* Fiber.await(run)
+        const state = yield* sts.get(chat.id)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(handle.message.error?.name).toBe("MessageAbortedError")
+        expect(state).toMatchObject({ type: "busy" })
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
 it.live("session.processor effect tests mark interruptions aborted without manual abort", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
@@ -1063,6 +1122,55 @@ it.live("session.processor effect tests mark interruptions aborted without manua
           expect(stored.info.error?.name).toBe("MessageAbortedError")
         }
         expect(state).toMatchObject({ type: "idle" })
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor effect tests accumulate active goal usage from finish-step", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const goal = yield* Goal.Service
+
+        yield* llm.text("done", {
+          usage: { input: 12, output: 7 },
+        })
+
+        const chat = yield* session.create({})
+        yield* goal.create(chat.id, "finish processor goal stats")
+        const parent = yield* user(chat.id, "track goal usage")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const result = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          submitAt: parent.time.created,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "track goal usage" }],
+          tools: {},
+        })
+
+        expect(result).toBe("continue")
+        const current = yield* goal.get(chat.id)
+        expect(current?.stats.tokens.input).toBeGreaterThan(0)
+        expect(current?.stats.tokens.output).toBeGreaterThan(0)
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),

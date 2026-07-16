@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  approxBytes,
   evictContentLru,
   getFileContentBytesTotal,
   getFileContentEntryCount,
@@ -61,5 +62,22 @@ describe("file content eviction accounting", () => {
     expect(evicted).toEqual(["b"])
     expect(getFileContentEntryCount()).toBe(2)
     expect(getFileContentBytesTotal()).toBe(chunk * 2)
+  })
+
+  test("counts only cached file body bytes", () => {
+    expect(
+      approxBytes({
+        type: "text",
+        exists: true,
+        content: "hello",
+        checksum: "checksum-hello",
+        diff: "@@ -1 +1 @@\n-old\n+new\n",
+        patch: {
+          oldFileName: "a.txt",
+          newFileName: "a.txt",
+          hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-old", "+new"] }],
+        },
+      }),
+    ).toBe("hello".length * 2)
   })
 })

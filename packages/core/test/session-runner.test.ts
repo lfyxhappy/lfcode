@@ -172,7 +172,7 @@ let systemUnavailable = false
 let systemLoadHook = Effect.void
 const skillBaselines = new Map<AgentV2.ID, string>()
 const systemContext = Layer.effectDiscard(
-  SystemContextRegistry.Service.pipe(
+  SystemContextRegistry.Service.asEffect().pipe(
     Effect.flatMap((registry) =>
       registry.register({
         key: systemContextKey,
@@ -251,7 +251,7 @@ const runner = SessionRunnerLLM.layer.pipe(
 const coordinator = SessionRunCoordinator.layer.pipe(Layer.provide(runner))
 const execution = Layer.effect(
   SessionExecution.Service,
-  SessionRunCoordinator.Service.pipe(
+  SessionRunCoordinator.Service.asEffect().pipe(
     Effect.map((coordinator) =>
       SessionExecution.Service.of({
         resume: coordinator.run,
@@ -704,7 +704,7 @@ describe("SessionRunnerLLM", () => {
       yield* events.publish(SessionEvent.Moved, {
         sessionID,
         timestamp: DateTime.makeUnsafe(1),
-        location: { directory: AbsolutePath.make("/moved") },
+        location: new Location.Ref({ directory: AbsolutePath.make("/moved") }),
       })
       expect(
         yield* db
@@ -762,7 +762,7 @@ describe("SessionRunnerLLM", () => {
           .publish(SessionEvent.Moved, {
             sessionID,
             timestamp: DateTime.makeUnsafe(1),
-            location: { directory: AbsolutePath.make("/moved") },
+            location: new Location.Ref({ directory: AbsolutePath.make("/moved") }),
           })
           .pipe(Effect.asVoid)
       })

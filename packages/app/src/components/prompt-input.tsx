@@ -29,6 +29,7 @@ import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { shouldFocusComposerFromPointer } from "@/pages/session/editable-surface"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import {
@@ -155,7 +156,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     dirty: () => promptContext.scope(props.scope).dirty(),
     context: {
       items: () => promptContext.scope(props.scope).context.items(),
-      add: (item: Parameters<typeof promptContext.context.add>[0]) => promptContext.scope(props.scope).context.add(item),
+      add: (item: Parameters<typeof promptContext.context.add>[0]) =>
+        promptContext.scope(props.scope).context.add(item),
       remove: (key: string) => promptContext.scope(props.scope).context.remove(key),
       removeComment: (path: string, commentID: string) =>
         promptContext.scope(props.scope).context.removeComment(path, commentID),
@@ -505,7 +507,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const setMode = (mode: "normal" | "shell") => {
     setStore("mode", mode)
     setStore("popover", null)
-    requestAnimationFrame(() => editorRef?.focus())
+    editorRef?.focus()
   }
 
   const shellModeKey = PROMPT_SHELL_MODE_KEYBIND
@@ -526,7 +528,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const closePopover = () => setStore("popover", null)
 
   const resetHistoryNavigation = (force = false) => {
-    if (!shouldResetPromptHistoryNavigation({ force, historyIndex: store.historyIndex, applyingHistory: store.applyingHistory })) return
+    if (
+      !shouldResetPromptHistoryNavigation({
+        force,
+        historyIndex: store.historyIndex,
+        applyingHistory: store.applyingHistory,
+      })
+    )
+      return
     setStore("historyIndex", -1)
     setStore("savedPrompt", null)
   }
@@ -536,6 +545,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const setEditorText = (text: string) => setPromptEditorText(editorRef, text)
 
   const focusEditorEnd = () => scheduleFocusPromptEditorEnd(editorRef)
+
+  const focusComposerFromPointer = (event: PointerEvent) => {
+    if (event.button !== 0 || !shouldFocusComposerFromPointer({ target: event.target, composer: composerRef })) return
+    editorRef.focus({ preventScroll: true })
+    setCursorPosition(editorRef, prompt.cursor() ?? promptLength(prompt.current()))
+  }
 
   const currentCursor = () => {
     return getPromptCurrentCursor(editorRef)
@@ -734,7 +749,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const images = imageAttachments()
     const selectedText = selectedTextAttachments()
     const cursorPosition = getCursorPosition(editorRef)
-    const rawText = rawParts.length === 1 && rawParts[0]?.type === "text" ? rawParts[0].content : promptInputText(rawParts)
+    const rawText =
+      rawParts.length === 1 && rawParts[0]?.type === "text" ? rawParts[0].content : promptInputText(rawParts)
     const shouldReset = shouldResetPromptInput({
       prompt: rawParts,
       imageCount: images.length,
@@ -789,7 +805,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const range = selection.getRangeAt(0)
     if (!editorRef.contains(range.startContainer)) return false
 
-    if (part.type === "file" || part.type === "agent" || part.type === "selected-text" || part.type === "web-reference") {
+    if (
+      part.type === "file" ||
+      part.type === "agent" ||
+      part.type === "selected-text" ||
+      part.type === "web-reference"
+    ) {
       const cursorPosition = getCursorPosition(editorRef)
       const rawText = prompt
         .current()
@@ -797,7 +818,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         .join("")
       const textBeforeCursor = rawText.substring(0, cursorPosition)
       const triggerMatch =
-        part.type === "agent" ? textBeforeCursor.match(/\$(\S*)$/) : part.type === "file" ? textBeforeCursor.match(/@(\S*)$/) : null
+        part.type === "agent"
+          ? textBeforeCursor.match(/\$(\S*)$/)
+          : part.type === "file"
+            ? textBeforeCursor.match(/@(\S*)$/)
+            : null
       const pill = createPromptInlineAttachmentNode(part)
       const gap = document.createTextNode(" ")
 
@@ -1207,6 +1232,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <div
         ref={(el) => (composerRef = el)}
         data-prompt-composer="true"
+        data-editable-surface="composer"
+        onPointerDown={focusComposerFromPointer}
         onPaste={handlePaste}
         classList={{
           "group/prompt-input": true,
@@ -1217,7 +1244,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         <DockShellForm ref={(el) => (formRef = el)} onSubmit={handleSubmit}>
           <PromptEditorSurface
             dragType={store.draggingType}
-            dragLabel={language.t(store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label")}
+            dragLabel={language.t(
+              store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label",
+            )}
             selectedTextItems={selectedTextAttachments()}
             onRemoveSelectedText={(item) => {
               const next = prompt.current().filter((part) => part !== item)
@@ -1235,17 +1264,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }}
             t={(key) => language.t(key as Parameters<typeof language.t>[0])}
             imageAttachments={imageAttachments()}
-            onOpenImage={(attachment) => dialog.show(() => <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />)}
+            onOpenImage={(attachment) =>
+              dialog.show(() => <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />)
+            }
             onRemoveImage={removeAttachment}
             imageRemoveLabel={language.t("prompt.attachment.remove")}
-            onMouseDown={(e) => {
-              const target = e.target
-              if (!(target instanceof HTMLElement)) return
-              if (target.closest('[data-action="prompt-attach"], [data-action="prompt-submit"]')) {
-                return
-              }
-              editorRef?.focus()
-            }}
             setScrollRef={(el) => (scrollRef = el)}
             scrollPaddingBottom={space}
             setEditorRef={(el) => {
@@ -1289,54 +1312,54 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         <Show when={store.mode === "normal" || store.mode === "shell"}>
           <DockTray attach="top" style={{ "z-index": 20 }}>
             <PromptControlStrip
-            shellMode={store.mode === "shell"}
-            shellLabel={language.t("prompt.mode.shell")}
-            shellStyle={shell()}
-            controlStyle={control()}
-            agentsLoading={agentsLoading()}
-            agentCycleTitle={language.t("command.agent.cycle")}
-            agentCycleKeybind={command.keybind("agent.cycle")}
-            agentNames={agentNames()}
-            currentAgent={local.agent.current()?.name ?? ""}
-            onAgentSelect={(value) => {
-              local.agent.set(value)
-              restoreFocus()
-            }}
-            providersLoading={providersLoading()}
-            paidProviderCount={providers.paid().length}
-            modelChooseTitle={language.t("command.model.choose")}
-            modelChooseKeybind={command.keybind("model.choose")}
-            model={local.model}
-            currentModelProviderID={local.model.current()?.provider?.id}
-            currentModelLabel={currentModelLabel()}
-            selectModelTitle={language.t("dialog.model.select.title")}
-            onSelectUnpaidModel={() => {
-              void import("@/components/dialog-select-model-unpaid").then((x) => {
-                dialog.show(() => <x.DialogSelectModelUnpaid model={local.model} />)
-              })
-            }}
-            onModelClose={restoreFocus}
-            submitTooltip={tip()}
-            submitTooltipInactive={!streaming() && blank()}
-            submitDisabled={store.mode !== "normal" || (!streaming() && blank())}
-            submitLabel={language.t("prompt.action.send")}
-            stopLabel={language.t("prompt.action.stop")}
-            stopping={stopping()}
-            submitStyle={buttons()}
-            moreDisabled={store.mode !== "normal"}
-            moreTabIndex={store.mode === "normal" ? undefined : -1}
-            moreLabel={language.t("prompt.more")}
-            onSubmit={requestSubmitPrompt}
-            hasGoal={!!goalState()}
-            goalPaused={goalState()?.status === "paused"}
-            features={promptFeatureMenuItems()}
-            onGoalOpen={() => openGoalDialog(goalState() ? "edit" : "create")}
-            onGoalPauseToggle={() => runGoalCommand(goalState()?.status === "paused" ? "resume" : "pause")}
-            onGoalDelete={() => runGoalCommand("delete")}
-            onFeatureChange={(feature, checked) => {
-              local.promptFeatures.set(nextPromptFeatures(local.promptFeatures.current(), feature, checked))
-              restoreFocus()
-            }}
+              shellMode={store.mode === "shell"}
+              shellLabel={language.t("prompt.mode.shell")}
+              shellStyle={shell()}
+              controlStyle={control()}
+              agentsLoading={agentsLoading()}
+              agentCycleTitle={language.t("command.agent.cycle")}
+              agentCycleKeybind={command.keybind("agent.cycle")}
+              agentNames={agentNames()}
+              currentAgent={local.agent.current()?.name ?? ""}
+              onAgentSelect={(value) => {
+                local.agent.set(value)
+                restoreFocus()
+              }}
+              providersLoading={providersLoading()}
+              paidProviderCount={providers.paid().length}
+              modelChooseTitle={language.t("command.model.choose")}
+              modelChooseKeybind={command.keybind("model.choose")}
+              model={local.model}
+              currentModelProviderID={local.model.current()?.provider?.id}
+              currentModelLabel={currentModelLabel()}
+              selectModelTitle={language.t("dialog.model.select.title")}
+              onSelectUnpaidModel={() => {
+                void import("@/components/dialog-select-model-unpaid").then((x) => {
+                  dialog.show(() => <x.DialogSelectModelUnpaid model={local.model} />)
+                })
+              }}
+              onModelClose={restoreFocus}
+              submitTooltip={tip()}
+              submitTooltipInactive={!streaming() && blank()}
+              submitDisabled={store.mode !== "normal" || (!streaming() && blank())}
+              submitLabel={language.t("prompt.action.send")}
+              stopLabel={language.t("prompt.action.stop")}
+              stopping={stopping()}
+              submitStyle={buttons()}
+              moreDisabled={store.mode !== "normal"}
+              moreTabIndex={store.mode === "normal" ? undefined : -1}
+              moreLabel={language.t("prompt.more")}
+              onSubmit={requestSubmitPrompt}
+              hasGoal={!!goalState()}
+              goalPaused={goalState()?.status === "paused"}
+              features={promptFeatureMenuItems()}
+              onGoalOpen={() => openGoalDialog(goalState() ? "edit" : "create")}
+              onGoalPauseToggle={() => runGoalCommand(goalState()?.status === "paused" ? "resume" : "pause")}
+              onGoalDelete={() => runGoalCommand("delete")}
+              onFeatureChange={(feature, checked) => {
+                local.promptFeatures.set(nextPromptFeatures(local.promptFeatures.current(), feature, checked))
+                restoreFocus()
+              }}
             />
           </DockTray>
         </Show>

@@ -307,6 +307,48 @@ describe("skills routes", () => {
     })
   })
 
+  test("POST /skills/import from Codex only imports general-purpose skills", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const home = path.join(tmp.path, "home")
+    await fs.mkdir(path.join(home, ".codex", "skills"), { recursive: true })
+    await writeSkill(path.join(home, ".codex", "skills", "playwright"), "playwright", "Playwright automation.")
+    await writeSkill(path.join(home, ".codex", "skills", "inspect-readonly"), "inspect-readonly", "Readonly inspection.")
+    await writeSkill(path.join(home, ".codex", "skills", "chatgpt-apps"), "chatgpt-apps", "ChatGPT app workflow.")
+    await writeSkill(path.join(home, ".codex", "skills", "cloudflare__web-perf"), "cloudflare__web-perf", "Cloudflare web perf.")
+
+    await withManagedPaths(tmp.path, async () => {
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const originalHome = process.env.HOME
+          const originalUserProfile = process.env.USERPROFILE
+          process.env.HOME = home
+          process.env.USERPROFILE = home
+          try {
+            const response = await Server.Default().app.request("/skills/import", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "x-lfcode-directory": tmp.path,
+              },
+              body: JSON.stringify({ kind: "codex" }),
+            })
+
+            await expectOk(response)
+            const body = (await response.json()) as Array<{ name: string }>
+            expect(body.map((skill) => skill.name).toSorted()).toEqual(["inspect-readonly", "playwright"])
+          } finally {
+            if (originalHome === undefined) delete process.env.HOME
+            else process.env.HOME = originalHome
+            if (originalUserProfile === undefined) delete process.env.USERPROFILE
+            else process.env.USERPROFILE = originalUserProfile
+            await disposeTestInstance(tmp.path)
+          }
+        },
+      })
+    })
+  })
+
   test("POST /skills/import overwrites duplicate target directories and refreshes", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
     await withManagedPaths(tmp.path, async () => {

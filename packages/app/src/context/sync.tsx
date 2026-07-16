@@ -4,6 +4,7 @@ import { Binary } from "@lfcode-ai/shared/util/binary"
 import { retry } from "@lfcode-ai/shared/util/retry"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import {
+  cancelSessionPrefetch,
   clearSessionPrefetch,
   getSessionPrefetch,
   getSessionPrefetchPromise,
@@ -12,13 +13,22 @@ import {
 import { useGlobalSync } from "./global-sync"
 import { useSDK } from "./sdk"
 import type { Message, Part } from "@lfcode-ai/sdk/v2/client"
-import { SESSION_CACHE_LIMIT, dropSessionCaches, pickSessionCacheEvictions } from "./global-sync/session-cache"
+import {
+  SESSION_CACHE_LIMIT,
+  SESSION_CACHE_BYTES_LIMIT,
+  SESSION_PART_CACHE_LIMIT,
+  SESSION_MESSAGE_CACHE_LIMIT,
+  dropSessionCaches,
+  estimateSessionCacheBytes,
+  pickSessionCacheEvictions,
+} from "./global-sync/session-cache"
 import { diffs as list, message as clean } from "@/utils/diffs"
+import { sanitizeSessionParts } from "./session-part-sanitize"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
 function sortParts(parts: Part[]) {
-  return parts.filter((part) => !!part?.id).sort((a, b) => cmp(a.id, b.id))
+  return sanitizeSessionParts(parts).sort((a, b) => cmp(a.id, b.id))
 }
 
 function runInflight(map: Map<string, Promise<void>>, key: string, task: () => Promise<void>) {
@@ -181,13 +191,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       return globalSync.child(directory)
     }
     const absolute = (path: string) => (current()[0].path.directory + "/" + path).replace("//", "/")
-    const initialMessagePageSize = 80
-    const historyMessagePageSize = 200
+    const initialMessagePageSize = 24
+    const historyMessagePageSize = 80
     const inflight = new Map<string, Promise<void>>()
     const inflightDiff = new Map<string, Promise<void>>()
     const inflightTodo = new Map<string, Promise<void>>()
     const optimistic = new Map<string, Map<string, OptimisticItem>>()
-    const maxDirs = 30
+    const maxDirs = 12
     const seen = new Map<string, Set<string>>()
     const [meta, setMeta] = createStore({
       limit: {} as Record<string, number>,
@@ -282,13 +292,30 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       clearMeta(directory, sessionIDs)
     }
 
-    const touch = (directory: string, setStore: Setter, sessionID: string) => {
+    const touch = (directory: string, store: Child[0], setStore: Setter, sessionID: string) => {
+      const tracked = seenFor(directory)
+      tracked.add(sessionID)
       const stale = pickSessionCacheEvictions({
-        seen: seenFor(directory),
+        seen: tracked,
         keep: sessionID,
         limit: SESSION_CACHE_LIMIT,
       })
       evict(directory, setStore, stale)
+    }
+
+    const sessionPartMetrics = (store: Child[0], sessionID: string) => {
+      const messages = store.message[sessionID] ?? []
+      return messages.reduce(
+        (sum, message) => {
+          const parts = store.part[message.id]
+          if (!parts?.length) return sum
+          return {
+            count: sum.count + parts.length,
+            bytes: sum.bytes + estimateSessionCacheBytes(undefined, parts),
+          }
+        },
+        { count: 0, bytes: 0 },
+      )
     }
 
     const fetchMessages = async (input: {
@@ -434,12 +461,27 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           })
         },
         async sync(sessionID: string, opts?: { force?: boolean }) {
+          // Route params can be absent on the new-session page. Treat an
+          // unexpected runtime value as a no-op instead of issuing /session/undefined.
+          if (!sessionID) return
           const directory = sdk.directory
           const client = sdk.client
           const [store, setStore] = globalSync.child(directory)
           const key = keyFor(directory, sessionID)
+          const cachedMessageCount = () => store.message[sessionID]?.length ?? 0
+          const cachedParts = () => sessionPartMetrics(store, sessionID)
+          const cachedPartCount = () => cachedParts().count
+          const cachedBytes = () => estimateSessionCacheBytes(store.message[sessionID], undefined) + cachedParts().bytes
 
-          touch(directory, setStore, sessionID)
+          if (
+            !opts?.force &&
+            (cachedMessageCount() > SESSION_MESSAGE_CACHE_LIMIT ||
+              cachedPartCount() > SESSION_PART_CACHE_LIMIT ||
+              cachedBytes() > SESSION_CACHE_BYTES_LIMIT)
+          ) {
+            evict(directory, setStore, [sessionID])
+          }
+          touch(directory, store, setStore, sessionID)
 
           const seeded = getSessionPrefetch(directory, sessionID)
           if (seeded?.scope === "all" && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
@@ -454,16 +496,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           return runInflight(inflight, key, async () => {
             const pending = getSessionPrefetchPromise(directory, sessionID)
             if (pending) {
-              await pending
-              const seeded = getSessionPrefetch(directory, sessionID)
-              if (seeded?.scope === "all" && store.message[sessionID] !== undefined && meta.limit[key] === undefined) {
-                batch(() => {
-                  setMeta("limit", key, seeded.limit)
-                  setMeta("cursor", key, seeded.cursor)
-                  setMeta("complete", key, seeded.complete)
-                  setMeta("loading", key, false)
-                })
-              }
+              // A navigation must never wait behind a speculative sidebar request.
+              // The normal session fetch below becomes the authoritative request.
+              cancelSessionPrefetch(directory, [sessionID])
             }
 
             const hasSession = Binary.search(store.session, sessionID, (s) => s.id).found
@@ -524,7 +559,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const directory = sdk.directory
           const client = sdk.client
           const [store, setStore] = globalSync.child(directory)
-          touch(directory, setStore, sessionID)
+          touch(directory, store, setStore, sessionID)
           if (store.session_diff[sessionID] !== undefined && !opts?.force) return
 
           const key = keyFor(directory, sessionID)
@@ -539,7 +574,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const directory = sdk.directory
           const client = sdk.client
           const [store, setStore] = globalSync.child(directory)
-          touch(directory, setStore, sessionID)
+          touch(directory, store, setStore, sessionID)
           const existing = store.todo[sessionID]
           const cached = globalSync.data.session_todo[sessionID]
           if (existing !== undefined) {
@@ -579,8 +614,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           async loadMore(sessionID: string, count?: number) {
             const directory = sdk.directory
             const client = sdk.client
-            const [, setStore] = globalSync.child(directory)
-            touch(directory, setStore, sessionID)
+            const [store, setStore] = globalSync.child(directory)
+            touch(directory, store, setStore, sessionID)
             const key = keyFor(directory, sessionID)
             const step = count ?? historyMessagePageSize
             if (meta.loading[key]) return

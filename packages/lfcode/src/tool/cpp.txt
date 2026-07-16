@@ -1,0 +1,12 @@
+Compile or run a single C++ source file with the preferred local compiler.
+
+Use this when:
+- you need to build or execute one `.cpp` / `.cc` / `.cxx` / `.c++` file
+- you want a structured compile-versus-run result instead of hand-writing shell commands
+- you need a stable path under `.lfcode/build/cpp/` for the produced binary
+
+Notes:
+- `mode="build"` only compiles and returns the output binary path.
+- `mode="run"` compiles first, then executes the produced binary.
+- Use `args` for runtime CLI arguments and `compilerArgs` for extra compiler flags.
+- The default standard is `c++20`.

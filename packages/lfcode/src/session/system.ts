@@ -2,33 +2,14 @@ import { Context, Effect, Layer } from "effect"
 
 import { Instance } from "../project/instance"
 
-import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
-import PROMPT_BEAST from "./prompt/beast.txt"
-import PROMPT_GEMINI from "./prompt/gemini.txt"
-import PROMPT_GPT from "./prompt/gpt.txt"
-import PROMPT_KIMI from "./prompt/kimi.txt"
-
-import PROMPT_CODEX from "./prompt/codex.txt"
-import PROMPT_TRINITY from "./prompt/trinity.txt"
 import type { Provider } from "@/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
+import { managedPythonPackageSummary } from "@/python/managed-packages"
 import { Skill } from "@/skill"
 
-export function provider(model: Provider.Model) {
-  if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-    return [PROMPT_BEAST]
-  if (model.api.id.includes("gpt")) {
-    if (model.api.id.includes("codex")) {
-      return [PROMPT_CODEX]
-    }
-    return [PROMPT_GPT]
-  }
-  if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-  if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-  if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-  if (model.api.id.toLowerCase().includes("kimi")) return [PROMPT_KIMI]
+export function provider(_model: Provider.Model) {
   return [PROMPT_DEFAULT]
 }
 
@@ -49,7 +30,7 @@ export const layer = Layer.effect(
         const project = Instance.project
         return [
           [
-            `You are MiMo Code Agent, built by Xiaomi MiMo Team. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.`,
+            `You are Lfcode, an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
@@ -61,19 +42,25 @@ export const layer = Layer.effect(
             `</env>`,
           ].join("\n"),
           `IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user.`,
+          [
+            `Default working style:`,
+            `- For non-trivial work, prefer grounding decisions in the current codebase, config, logs, runtime state, and tool results.`,
+            `- Avoid speculative claims when evidence is easy to gather.`,
+            `- A good default loop is inspect -> confirm target -> edit -> verify, but use judgment based on the task.`,
+            `- Use memory when cross-session context is actually useful, not as a mandatory checklist.`,
+            `- When you choose the Python tool, note that Lfcode's managed Python environment already preinstalls these common packages: ${managedPythonPackageSummary()}. Prefer using them directly before installing duplicates.`,
+          ].join("\n"),
         ]
       },
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
-
         const list = yield* skill.available(agent)
 
         return [
-          "Skills provide specialized instructions and workflows for specific tasks.",
-          "Use the skill tool to load a skill when a task matches its description.",
-          // the agents seem to ingest the information about skills a bit better if we present a more verbose
-          // version of them here and a less verbose version in tool description, rather than vice versa.
+          "Skills are optional instruction bundles for specialized tasks.",
+          "The current installed skills are already listed in <available_skills>; if the user asks what skills are available, answer from that list directly.",
+          "Use the skill tool to search by keywords first, then load the exact skill name you need.",
           Skill.fmt(list, { verbose: true }),
         ].join("\n")
       }),

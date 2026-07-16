@@ -1,12 +1,15 @@
 import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core"
 import { ProjectTable } from "../project/project.sql"
 import type { MessageV2 } from "./message-v2"
-import type { Snapshot } from "../snapshot"
+import type { Vcs } from "../project"
 import type { Permission } from "../permission"
 import type { ProjectID } from "../project/schema"
 import type { SessionID, MessageID, PartID } from "./schema"
 import type { WorkspaceID } from "../control-plane/schema"
 import { Timestamps } from "../storage/schema.sql"
+import type { GoalState } from "./goal-state"
+import type { Info as SessionInteractionInfo } from "./interaction"
+import type { ComposeRoute } from "./compose-route"
 
 type PartData = Omit<MessageV2.Part, "id" | "sessionID" | "messageID">
 type InfoData = Omit<MessageV2.Info, "id" | "sessionID">
@@ -31,10 +34,14 @@ export const SessionTable = sqliteTable(
     summary_additions: integer(),
     summary_deletions: integer(),
     summary_files: integer(),
-    summary_diffs: text({ mode: "json" }).$type<Snapshot.FileDiff[]>(),
-    revert: text({ mode: "json" }).$type<{ messageID: MessageID; partID?: PartID; snapshot?: string; diff?: string }>(),
+    summary_diffs: text({ mode: "json" }).$type<Vcs.FileDiff[]>(),
+    revert: text({ mode: "json" }).$type<{ messageID: MessageID; partID?: PartID; diff?: string }>(),
     permission: text({ mode: "json" }).$type<Permission.Ruleset>(),
+    goal: text({ mode: "json" }).$type<GoalState>(),
+    interaction: text({ mode: "json" }).$type<SessionInteractionInfo>(),
+    compose_route: text({ mode: "json" }).$type<ComposeRoute>(),
     ...Timestamps,
+    time_last_user: integer(),
     time_compacting: integer(),
     time_archived: integer(),
     last_checkpoint_message_id: text().$type<MessageID>(),

@@ -10,7 +10,6 @@ import { Vcs } from "@/project"
 import { Agent } from "@/agent/agent"
 import { Skill } from "@/skill"
 import { Global } from "@/global"
-import { LSP } from "@/lsp"
 import { Command } from "@/command"
 import { QuestionRoutes } from "./question"
 import { PermissionRoutes } from "./permission"
@@ -30,6 +29,10 @@ import { EventRoutes } from "./event"
 import { SyncRoutes } from "./sync"
 import { UsageRoutes } from "./usage"
 import { SkillsRoutes } from "./skills"
+import { CppRoutes } from "./cpp"
+import { LspRoutes } from "./lsp"
+import { BackgroundJobRoutes } from "./background-job"
+import { PluginRoutes } from "./plugin"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
 
@@ -50,6 +53,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     app.get("/config/providers", (c) => handler(c.req.raw, context))
     app.get("/provider", (c) => handler(c.req.raw, context))
     app.get("/provider/auth", (c) => handler(c.req.raw, context))
+    app.post("/provider/:providerID/models/:modelID/detect", (c) => handler(c.req.raw, context))
     app.post("/provider/:providerID/oauth/authorize", (c) => handler(c.req.raw, context))
     app.post("/provider/:providerID/oauth/callback", (c) => handler(c.req.raw, context))
     app.get("/project", (c) => handler(c.req.raw, context))
@@ -68,9 +72,13 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/bash-interactive", BashInteractiveRoutes())
     .route("/provider", ProviderRoutes())
     .route("/sync", SyncRoutes())
+    .route("/cpp", CppRoutes())
+    .route("/lsp", LspRoutes())
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/skills", SkillsRoutes())
+    .route("/background-job", BackgroundJobRoutes())
+    .route("/plugin", PluginRoutes())
     .route("/mcp", McpRoutes())
     .route("/usage", UsageRoutes())
     .route("/tui", TuiRoutes())
@@ -162,35 +170,6 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
         }),
     )
     .get(
-      "/vcs/diff",
-      describeRoute({
-        summary: "Get VCS diff",
-        description: "Retrieve the current git diff for the working tree or against the default branch.",
-        operationId: "vcs.diff",
-        responses: {
-          200: {
-            description: "VCS diff",
-            content: {
-              "application/json": {
-                schema: resolver(Vcs.FileDiff.array()),
-              },
-            },
-          },
-        },
-      }),
-      validator(
-        "query",
-        z.object({
-          mode: Vcs.Mode,
-        }),
-      ),
-      async (c) =>
-        jsonRequest("InstanceRoutes.vcs.diff", c, function* () {
-          const vcs = yield* Vcs.Service
-          return yield* vcs.diff(c.req.valid("query").mode)
-        }),
-    )
-    .get(
       "/command",
       describeRoute({
         summary: "List commands",
@@ -257,29 +236,6 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
         jsonRequest("InstanceRoutes.skill.list", c, function* () {
           const skill = yield* Skill.Service
           return yield* skill.all()
-        }),
-    )
-    .get(
-      "/lsp",
-      describeRoute({
-        summary: "Get LSP status",
-        description: "Get LSP server status",
-        operationId: "lsp.status",
-        responses: {
-          200: {
-            description: "LSP server status",
-            content: {
-              "application/json": {
-                schema: resolver(LSP.Status.array()),
-              },
-            },
-          },
-        },
-      }),
-      async (c) =>
-        jsonRequest("InstanceRoutes.lsp.status", c, function* () {
-          const lsp = yield* LSP.Service
-          return yield* lsp.status()
         }),
     )
     .get(

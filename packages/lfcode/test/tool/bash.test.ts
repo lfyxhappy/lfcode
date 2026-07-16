@@ -3,7 +3,7 @@ import { Effect, Layer, ManagedRuntime } from "effect"
 import os from "os"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
-import { BashTool } from "../../src/tool/bash"
+import { BashTool, ShellTool } from "../../src/tool/bash"
 import { Instance } from "../../src/project/instance"
 import { Filesystem } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -15,19 +15,31 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "../../src/plugin"
 
-const runtime = ManagedRuntime.make(
-  Layer.mergeAll(
-    CrossSpawnSpawner.defaultLayer,
-    AppFileSystem.defaultLayer,
-    Plugin.defaultLayer,
-    Truncate.defaultLayer,
-    Agent.defaultLayer,
-  ),
+const testLayer = Layer.mergeAll(
+  CrossSpawnSpawner.defaultLayer,
+  AppFileSystem.defaultLayer,
+  Plugin.defaultLayer,
+  Truncate.defaultLayer,
+  Agent.defaultLayer,
 )
+const runtime = ManagedRuntime.make(testLayer)
 
-function initBash() {
-  return runtime.runPromise(BashTool.pipe(Effect.flatMap((info) => info.init())))
+function bindToolRuntime<T extends { execute: (args: any, ctx: any) => Effect.Effect<any, any, any> }>(tool: T): T {
+  return {
+    ...tool,
+    execute: (args, ctx) => tool.execute(args, ctx).pipe(Effect.provide(testLayer)),
+  }
 }
+
+function initShell() {
+  return runtime.runPromise(ShellTool.pipe(Effect.flatMap((info) => info.init()), Effect.map(bindToolRuntime)))
+}
+
+function initBashAlias() {
+  return runtime.runPromise(BashTool.pipe(Effect.flatMap((info) => info.init()), Effect.map(bindToolRuntime)))
+}
+
+const initBash = initShell
 
 const ctx = {
   sessionID: SessionID.make("ses_test"),
@@ -79,6 +91,14 @@ const fill = (mode: "lines" | "bytes", n: number) => {
   if (PS.has(sh())) return `& ${text}`
   return text
 }
+
+const timeoutCommand = (seconds: number) => {
+  const shell = sh()
+  if (PS.has(shell)) return `Write-Output started; Start-Sleep -Seconds ${seconds}`
+  if (shell === "cmd") return `echo started && timeout /t ${seconds} /nobreak > nul`
+  return `echo started && sleep ${seconds}`
+}
+
 const glob = (p: string) =>
   process.platform === "win32" ? Filesystem.normalizePathPattern(p) : p.replaceAll("\\", "/")
 
@@ -133,7 +153,7 @@ const mustTruncate = (result: {
   )
 }
 
-describe("tool.bash", () => {
+describe("tool.shell", () => {
   each("basic", async () => {
     await Instance.provide({
       directory: projectRoot,
@@ -153,10 +173,127 @@ describe("tool.bash", () => {
       },
     })
   })
+
+  test("description reflects pwsh-only Windows contract", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        if (process.platform === "win32") {
+          expect(bash.description).toContain("PowerShell 7 (`pwsh`)")
+          expect(bash.description).toContain("public tool name is `shell`")
+          expect(bash.description).toContain(
+            "Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior.",
+          )
+          expect(bash.description).toContain("PowerShell 7 quick reference:")
+          expect(bash.description).toContain("Environment variables: use `$env:NAME = \"value\"`")
+          expect(bash.description).toContain("Multi-line scripts: use PowerShell here-strings")
+          return
+        }
+
+        expect(bash.description).toContain("current POSIX shell")
+      },
+    })
+  })
+
+  test("legacy bash alias still advertises shell as the preferred tool", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBashAlias()
+        expect(bash.description).toContain("compatibility alias")
+        expect(bash.description).toContain("Prefer `shell` in new calls")
+      },
+    })
+  })
+
+  test("rejects bash-style export syntax on Windows with pwsh guidance", async () => {
+    if (process.platform !== "win32") return
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        await expect(
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: "export DEMO=value",
+                description: "Set env var",
+              },
+              ctx,
+            ),
+          ),
+        ).rejects.toThrow("`$env:DEMO = value`")
+      },
+    })
+  })
+
+  test("rejects bash heredoc syntax on Windows with pwsh guidance", async () => {
+    if (process.platform !== "win32") return
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        await expect(
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: ["cat <<'EOF'", "hello", "EOF"].join("\n"),
+                description: "Write heredoc",
+              },
+              ctx,
+            ),
+          ),
+        ).rejects.toThrow("PowerShell here-string")
+      },
+    })
+  })
+
+  test("rejects bash inline env assignment on Windows with pwsh guidance", async () => {
+    if (process.platform !== "win32") return
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        await expect(
+          Effect.runPromise(
+            bash.execute(
+              {
+                command: "NODE_ENV=production bun run build",
+                description: "Build prod bundle",
+              },
+              ctx,
+            ),
+          ),
+        ).rejects.toThrow("`$env:NODE_ENV = production; bun run build`")
+      },
+    })
+  })
+
+  test("does not misclassify PowerShell here-strings as bash syntax on Windows", async () => {
+    if (process.platform !== "win32") return
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await initBash()
+        const result = await Effect.runPromise(
+          bash.execute(
+            {
+              command: "$script = @'\nhello\n'@; Write-Output $script",
+              description: "Emit here string",
+            },
+            ctx,
+          ),
+        )
+        expect(result.metadata.exit).toBe(0)
+        expect(result.metadata.output).toContain("hello")
+      },
+    })
+  })
 })
 
-describe("tool.bash permissions", () => {
-  each("asks for bash permission with correct pattern", async () => {
+describe("tool.shell permissions", () => {
+  each("asks for shell permission with correct pattern", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -173,13 +310,13 @@ describe("tool.bash permissions", () => {
           ),
         )
         expect(requests.length).toBe(1)
-        expect(requests[0].permission).toBe("bash")
+        expect(requests[0].permission).toBe("shell")
         expect(requests[0].patterns).toContain("echo hello")
       },
     })
   })
 
-  each("asks for bash permission with multiple commands", async () => {
+  each("asks for shell permission with multiple commands", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -196,7 +333,7 @@ describe("tool.bash permissions", () => {
           ),
         )
         expect(requests.length).toBe(1)
-        expect(requests[0].permission).toBe("bash")
+        expect(requests[0].permission).toBe("shell")
         expect(requests[0].patterns).toContain("echo foo")
         expect(requests[0].patterns).toContain("echo bar")
       },
@@ -221,7 +358,7 @@ describe("tool.bash permissions", () => {
                 capture(requests),
               ),
             )
-            const bashReq = requests.find((r) => r.permission === "bash")
+            const bashReq = requests.find((r) => r.permission === "shell")
             expect(bashReq).toBeDefined()
             expect(bashReq!.patterns).toContain("Write-Host foo")
             expect(bashReq!.patterns).toContain("Write-Host bar")
@@ -285,7 +422,7 @@ describe("tool.bash permissions", () => {
                 ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === "bash")
+              const bashReq = requests.find((r) => r.permission === "shell")
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(glob(path.join(outerTmp.path, "*")))
               expect(bashReq).toBeDefined()
@@ -348,7 +485,7 @@ describe("tool.bash permissions", () => {
                 ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === "bash")
+              const bashReq = requests.find((r) => r.permission === "shell")
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(glob(path.join(process.env.WINDIR!, "*")))
               expect(bashReq).toBeDefined()
@@ -474,7 +611,9 @@ describe("tool.bash permissions", () => {
               ).rejects.toThrow(err.message)
               expect(requests[0]?.permission).toBe("external_directory")
               if (requests[0]?.permission !== "external_directory") return
-              expect(requests[0].patterns).toContain(glob(path.join(path.dirname(item.shell), "*")))
+              expect(requests[0].patterns).toContain(
+                glob(path.join(path.dirname(Shell.resolvePowerShell(item.shell)), "*")),
+              )
             },
           })
         }),
@@ -632,7 +771,7 @@ describe("tool.bash permissions", () => {
                 ),
               )
               const extDirReq = requests.find((r) => r.permission === "external_directory")
-              const bashReq = requests.find((r) => r.permission === "bash")
+              const bashReq = requests.find((r) => r.permission === "shell")
               expect(extDirReq).toBeDefined()
               expect(extDirReq!.patterns).toContain(
                 Filesystem.normalizePathPattern(path.join(process.env.WINDIR!, "*")),
@@ -662,7 +801,7 @@ describe("tool.bash permissions", () => {
                   capture(requests),
                 ),
               )
-              const bashReq = requests.find((r) => r.permission === "bash")
+              const bashReq = requests.find((r) => r.permission === "shell")
               expect(bashReq).toBeDefined()
               expect(bashReq!.patterns).not.toContain("a * 3")
               expect(bashReq!.always).not.toContain("a *")
@@ -764,7 +903,7 @@ describe("tool.bash permissions", () => {
 
     if (bash) {
       test(
-        "uses Git Bash /tmp semantics for external workdir",
+        "forces pwsh /tmp semantics for external workdir even when SHELL points to Git Bash",
         withShell({ label: "bash", shell: bash }, async () => {
           await Instance.provide({
             directory: projectRoot,
@@ -772,7 +911,7 @@ describe("tool.bash permissions", () => {
               const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              const want = glob(path.join(os.tmpdir(), "*"))
+              const want = glob(path.join(Filesystem.windowsPath("/tmp"), "*"))
               await expect(
                 Effect.runPromise(
                   bash.execute(
@@ -796,7 +935,7 @@ describe("tool.bash permissions", () => {
       )
 
       test(
-        "uses Git Bash /tmp semantics for external file paths",
+        "forces pwsh /tmp semantics for external file paths even when SHELL points to Git Bash",
         withShell({ label: "bash", shell: bash }, async () => {
           await Instance.provide({
             directory: projectRoot,
@@ -804,7 +943,7 @@ describe("tool.bash permissions", () => {
               const bash = await initBash()
               const err = new Error("stop after permission")
               const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
-              const want = glob(path.join(os.tmpdir(), "*"))
+              const want = glob(path.join(Filesystem.windowsPath("/tmp"), "*"))
               await expect(
                 Effect.runPromise(
                   bash.execute(
@@ -911,7 +1050,7 @@ describe("tool.bash permissions", () => {
     })
   })
 
-  each("does not ask for bash permission when command is cd only", async () => {
+  each("does not ask for shell permission when command is cd only", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -927,7 +1066,7 @@ describe("tool.bash permissions", () => {
             capture(requests),
           ),
         )
-        const bashReq = requests.find((r) => r.permission === "bash")
+        const bashReq = requests.find((r) => r.permission === "shell")
         expect(bashReq).toBeUndefined()
       },
     })
@@ -949,7 +1088,7 @@ describe("tool.bash permissions", () => {
             ),
           ),
         ).rejects.toThrow(err.message)
-        const bashReq = requests.find((r) => r.permission === "bash")
+        const bashReq = requests.find((r) => r.permission === "shell")
         expect(bashReq).toBeDefined()
         expect(bashReq!.patterns).toContain("echo test > output.txt")
       },
@@ -964,7 +1103,7 @@ describe("tool.bash permissions", () => {
         const bash = await initBash()
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
         await Effect.runPromise(bash.execute({ command: "ls -la", description: "List" }, capture(requests)))
-        const bashReq = requests.find((r) => r.permission === "bash")
+        const bashReq = requests.find((r) => r.permission === "shell")
         expect(bashReq).toBeDefined()
         expect(bashReq!.always[0]).toBe("ls *")
       },
@@ -972,7 +1111,7 @@ describe("tool.bash permissions", () => {
   })
 })
 
-describe("tool.bash abort", () => {
+describe("tool.shell abort", () => {
   test("preserves output when aborted", async () => {
     await Instance.provide({
       directory: projectRoot,
@@ -1015,7 +1154,7 @@ describe("tool.bash abort", () => {
         const result = await Effect.runPromise(
           bash.execute(
             {
-              command: `echo started && sleep 60`,
+              command: timeoutCommand(60),
               description: "Timeout test",
               timeout: 500,
             },
@@ -1023,7 +1162,7 @@ describe("tool.bash abort", () => {
           ),
         )
         expect(result.output).toContain("started")
-        expect(result.output).toContain("bash tool terminated command after exceeding timeout")
+        expect(result.output).toContain("terminal tool terminated command after exceeding timeout")
         expect(result.output).toContain("retry with a larger timeout value in milliseconds")
       },
     })
@@ -1099,7 +1238,7 @@ describe("tool.bash abort", () => {
   })
 })
 
-describe("tool.bash truncation", () => {
+describe("tool.shell truncation", () => {
   test("truncates output exceeding line limit", async () => {
     await Instance.provide({
       directory: projectRoot,
@@ -1117,10 +1256,10 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
-        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).toMatch(/Full output is available as tool-output:tool_/)
       },
     })
-  })
+  }, 15_000)
 
   test("truncates output exceeding byte limit", async () => {
     await Instance.provide({
@@ -1139,7 +1278,7 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
         expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
-        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).toMatch(/Full output is available as tool-output:tool_/)
       },
     })
   })
@@ -1181,7 +1320,9 @@ describe("tool.bash truncation", () => {
         )
         mustTruncate(result)
 
-        const filepath = (result.metadata as { outputPath?: string }).outputPath
+        const outputRef = (result.metadata as { outputRef?: string }).outputRef
+        expect(outputRef).toMatch(/^tool-output:tool_/)
+        const filepath = Truncate.resolveOutputReference(outputRef!)
         expect(filepath).toBeTruthy()
 
         const saved = await Filesystem.readText(filepath!)

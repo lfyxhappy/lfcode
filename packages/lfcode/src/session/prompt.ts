@@ -29,6 +29,7 @@ import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import PROMPT_COMPOSE from "../session/prompt/compose.txt"
 import { composeSkillsBlock } from "@/skill/compose/extract"
+import { Skill } from "@/skill"
 import { ToolRegistry } from "../tool"
 import { transformedToolSchema } from "../tool/registry"
 import { MCP } from "../mcp"
@@ -65,7 +66,7 @@ import { InstanceState } from "@/effect"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { Goal } from "./goal"
-import { isRealUserPart, stepSignature } from "./part-helpers"
+import { isRealUserPart, repeatedToolValidationFailure, stepSignature } from "./part-helpers"
 import { TaskGate, MAX_TASK_GATE_MAIN_REACT } from "@/task/gate"
 import { TaskGateState } from "@/task/gate-state"
 import { TaskRegistry } from "@/task/registry"
@@ -134,6 +135,7 @@ const MAX_COMPOSE_GATE_MAIN_REACT = 3
  * signal the model is stuck repeating itself rather than making progress.
  */
 const REPEATED_STEP_THRESHOLD = 3
+const REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD = 3
 
 /**
  * Stable signature for an assistant step's *action* — the tool calls it made
@@ -218,6 +220,7 @@ export const layer = Layer.effect(
     const llm = yield* LLM.Service
     const actorRegistry = yield* ActorRegistry.Service
     const inbox = yield* Inbox.Service
+    const skill = yield* Skill.Service
 
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
@@ -255,6 +258,7 @@ export const layer = Layer.effect(
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
+          Effect.provideService(Skill.Service, skill),
           Effect.catch(() => Effect.succeed(empty)),
         )
         return { ...prefix, parentPermission: ag.permission }
@@ -658,7 +662,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         capabilities: input.model.capabilities,
       })) {
         if (composeRuntimePolicy && !isComposeRuntimeToolAllowed(composeRuntimePolicy, item.id)) continue
+        const schemaBuildStartedAt = Date.now()
         const schema = transformedToolSchema(input.model, item.parameters)
+        const schemaBuildMs = Date.now() - schemaBuildStartedAt
         tools[item.id] = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
@@ -717,6 +723,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     output_bytes: Buffer.byteLength(output.output ?? "", "utf8"),
                     tool_call_id: options.toolCallId,
                     tool_call_status: "success",
+                    execute_ms: Date.now() - startTs,
+                    schema_build_ms: schemaBuildMs,
+                    kind: Tool.definitionMetadata(item).kind,
+                    namespace: Tool.definitionMetadata(item).namespace,
+                    latency_class: Tool.definitionMetadata(item).latencyClass,
                   })
                   .pipe(Effect.ignore)
                 if (options.abortSignal?.aborted) {
@@ -729,12 +740,72 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       }
 
-      for (const [key, item] of Object.entries(yield* mcp.tools())) {
+      const connectedMcpTools = yield* mcp.tools()
+      const mcpSearchTool = tool({
+        description:
+          "Search connected MCP tools by name or keyword. The result includes the exact name and input schema required by mcp_use_tool.",
+        inputSchema: z.object({
+          query: z.string().optional().describe("Tool name or keyword. Omit to list the first tools."),
+          limit: z.coerce.number().int().min(1).max(20).optional().describe("Maximum number of tools to return."),
+        }),
+        execute: async ({ query, limit = 10 }) => {
+          const needle = query?.trim().toLowerCase()
+          const matches = Object.entries(connectedMcpTools)
+            .filter(([name, item]) => {
+              if (!needle) return true
+              return `${name} ${item.description ?? ""}`.toLowerCase().includes(needle)
+            })
+            .slice(0, limit)
+            .map(([name, item]) => ({
+              name,
+              description: item.description,
+              input_schema: asSchema(item.inputSchema).jsonSchema,
+            }))
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ tools: matches }, null, 2) }],
+          }
+        },
+      })
+      const mcpUseTool = tool({
+        description:
+          "Execute one exact MCP tool returned by mcp_search_tool. Search first when the tool name or arguments are uncertain.",
+        inputSchema: z.object({
+          name: z.string().min(1).describe("Exact MCP tool name returned by mcp_search_tool."),
+          arguments: z.record(z.string(), z.unknown()).default({}).describe("Arguments matching the discovered input schema."),
+        }),
+        execute: async ({ name, arguments: args }, options) => {
+          const item = connectedMcpTools[name]
+          if (!item?.execute) {
+            return {
+              isError: true,
+              content: [{ type: "text" as const, text: `MCP tool '${name}' was not found. Search MCP tools first.` }],
+            }
+          }
+          if (whitelist && !whitelist.has(name) && !whitelist.has("mcp_use_tool")) {
+            return {
+              isError: true,
+              content: [{ type: "text" as const, text: rejectionFor(name).output }],
+            }
+          }
+          const nextArgs =
+            name.startsWith("playwright_") && args && typeof args === "object" && !Array.isArray(args)
+              ? { ...args, _lfcodeSessionID: input.session.id }
+              : args
+          return item.execute(nextArgs, options)
+        },
+      })
+      const mcpFacadeTools: Record<string, AITool> = {
+        mcp_search_tool: mcpSearchTool,
+        mcp_use_tool: mcpUseTool,
+      }
+      for (const [key, item] of Object.entries(mcpFacadeTools)) {
         const execute = item.execute
         if (!execute) continue
 
+        const schemaBuildStartedAt = Date.now()
         const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
         const transformed = ProviderTransform.schema(input.model, schema)
+        const schemaBuildMs = Date.now() - schemaBuildStartedAt
         item.inputSchema = jsonSchema(transformed)
         item.execute = (args, opts) =>
           run.promise(
@@ -798,6 +869,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   output_bytes: Metrics.jsonByteLength(result.content ?? ""),
                   tool_call_id: opts.toolCallId,
                   tool_call_status: "success",
+                  execute_ms: Date.now() - startTs,
+                  schema_build_ms: schemaBuildMs,
                 })
                 .pipe(Effect.ignore)
               const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
@@ -1661,7 +1734,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* Effect.sleep("25 millis")
         }
       }).pipe(
-        Effect.catchAllCause((cause) =>
+        Effect.catchCause((cause) =>
           elog.error("pending steer wake failed", {
             sessionID,
             error: Cause.squash(cause),
@@ -2094,8 +2167,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return false
           }
           if (!composeRoute) {
-            const count = yield* composeGateState.get(sessionID)
-            if (count >= MAX_COMPOSE_GATE_MAIN_REACT) {
+            const state = yield* composeGateState.get(sessionID)
+            if (state.count >= MAX_COMPOSE_GATE_MAIN_REACT) {
               yield* slog.warn("compose route gate hit cap without a route; allowing stop", { sessionID })
               yield* composeGateState.clear(sessionID)
               return false
@@ -2602,6 +2675,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               yield* slog.info("exiting loop", { classification: classification.type })
               break
             }
+          }
+
+          if (
+            repeatedToolValidationFailure({
+              messages: msgs,
+              threshold: REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD,
+            })
+          ) {
+            yield* slog.warn("stopping repeated tool validation failure", {
+              sessionID,
+              threshold: REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD,
+            })
+            if (lastAssistant) {
+              yield* writeModelError({
+                assistant: lastAssistant,
+                reason: `Stopped automatic continuation after ${REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD} identical tool validation failures. Use a different tool shape or report the provider compatibility problem instead of retrying the same invalid call.`,
+              })
+            }
+            break
           }
 
           step++
@@ -3166,6 +3258,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }).pipe(
               Effect.provideService(LLM.Service, llm),
               Effect.provideService(ToolRegistry.Service, registry),
+              Effect.provideService(Skill.Service, skill),
             )
             yield* slog.info("buildLLMRequestPrefix", {
               status: "completed",
@@ -3595,6 +3688,7 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(LSP.defaultLayer),
     Layer.provide(ToolRegistry.defaultLayer),
     Layer.provide(Truncate.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
     Layer.provide(Provider.defaultLayer),
     Layer.provide(Instruction.defaultLayer),
     Layer.provide(AppFileSystem.defaultLayer),

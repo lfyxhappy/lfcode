@@ -1,4 +1,5 @@
 import path from "path"
+import { PLUGIN_ENTRYPOINT_TARGETS, readLfcodePluginManifest, type PluginEntrypointTarget } from "@lfcode-ai/plugin"
 import {
   type ParseError as JsoncParseError,
   applyEdits,
@@ -97,9 +98,14 @@ function pluginSpec(item: unknown) {
 
 function pluginList(data: unknown) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return
-  const item = data as { plugin?: unknown }
-  if (!Array.isArray(item.plugin)) return
-  return item.plugin
+  const item = data as { plugin?: unknown; plugins?: unknown }
+  const legacy = Array.isArray(item.plugin) ? item.plugin : undefined
+  const current = Array.isArray(item.plugins) ? item.plugins : undefined
+  if (!legacy && !current) return
+  return {
+    list: [...(legacy ?? []), ...(current ?? [])],
+    cleanupLegacy: Boolean(legacy),
+  }
 }
 
 function exportValue(value: unknown): string | undefined {
@@ -145,6 +151,16 @@ function hasMainTarget(pkg: Record<string, unknown>) {
 function packageTargets(pkg: { json: Record<string, unknown>; dir: string; pkg: string }) {
   const spec =
     typeof pkg.json.name === "string" && pkg.json.name.trim().length > 0 ? pkg.json.name.trim() : path.basename(pkg.dir)
+  const manifest = readLfcodePluginManifest(pkg.json.lfcode, spec)
+  if (manifest) {
+    return PLUGIN_ENTRYPOINT_TARGETS.flatMap((target) => {
+      const entry = manifest.entrypoints[target]
+      const kind = installTargetKind(target)
+      if (!entry || !kind) return []
+      return [{ kind, opts: entry.config } satisfies Target]
+    })
+  }
+
   const targets: Target[] = []
   const server = exportTarget(pkg.json, "server")
   if (server) {
@@ -165,6 +181,11 @@ function packageTargets(pkg: { json: Record<string, unknown>; dir: string; pkg: 
   return targets
 }
 
+function installTargetKind(target: PluginEntrypointTarget): Kind | undefined {
+  if (target === "location") return "server"
+  if (target === "tui") return "tui"
+}
+
 function patch(text: string, path: Array<string | number>, value: unknown, insert = false) {
   return applyEdits(
     text,
@@ -180,13 +201,15 @@ function patch(text: string, path: Array<string | number>, value: unknown, inser
 
 function patchPluginList(
   text: string,
-  list: unknown[] | undefined,
+  state: ReturnType<typeof pluginList>,
   spec: string,
   next: unknown,
   force = false,
 ): { mode: Mode; text: string } {
+  const targetKey = "plugins"
   const pkg = parsePluginSpecifier(spec).pkg
-  const rows = (list ?? []).map((item, i) => ({
+  const list = state?.list ?? []
+  const rows = list.map((item, i) => ({
     item,
     i,
     spec: pluginSpec(item),
@@ -199,22 +222,24 @@ function patchPluginList(
   })
 
   if (!dup.length) {
-    if (!list) {
-      return {
-        mode: "add",
-        text: patch(text, ["plugin"], [next]),
-      }
-    }
+    const out = patch(text, [targetKey], [...list, next])
+    if (!state?.cleanupLegacy) return { mode: "add" as const, text: out }
     return {
       mode: "add",
-      text: patch(text, ["plugin", list.length], next, true),
+      text: patch(out, ["plugin"], undefined),
     }
   }
 
   if (!force) {
+    if (!state?.cleanupLegacy) {
+      return {
+        mode: "noop" as const,
+        text,
+      }
+    }
     return {
-      mode: "noop",
-      text,
+      mode: "replace" as const,
+      text: patch(patch(text, [targetKey], list), ["plugin"], undefined),
     }
   }
 
@@ -227,32 +252,33 @@ function patchPluginList(
   }
 
   if (dup.length === 1 && keep.spec === spec) {
+    if (!state?.cleanupLegacy) {
+      return {
+        mode: "noop" as const,
+        text,
+      }
+    }
     return {
-      mode: "noop",
-      text,
+      mode: "replace" as const,
+      text: patch(patch(text, [targetKey], state.list), ["plugin"], undefined),
     }
   }
 
-  let out = text
-  if (typeof keep.item === "string") {
-    out = patch(out, ["plugin", keep.i], next)
-  }
-  if (Array.isArray(keep.item) && typeof keep.item[0] === "string") {
-    out = patch(out, ["plugin", keep.i, 0], spec)
-  }
+  const nextList = [...list]
+  if (typeof keep.item === "string") nextList[keep.i] = next
+  if (Array.isArray(keep.item) && typeof keep.item[0] === "string") nextList[keep.i] = [spec, keep.item[1]]
 
   const del = dup
     .map((item) => item.i)
     .filter((i) => i !== keep.i)
     .sort((a, b) => b - a)
 
-  for (const i of del) {
-    out = patch(out, ["plugin", i], undefined)
-  }
+  for (const i of del) nextList.splice(i, 1)
+  const out = patch(text, [targetKey], nextList)
 
   return {
-    mode: "replace",
-    text: out,
+    mode: "replace" as const,
+    text: state?.cleanupLegacy ? patch(out, ["plugin"], undefined) : out,
   }
 }
 

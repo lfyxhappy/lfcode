@@ -27,15 +27,40 @@ export interface AgentPart extends PartBase {
   name: string
 }
 
+export interface SelectedTextAttachmentPart extends PartBase {
+  type: "selected-text"
+  text: string
+  messageID?: string
+  selection?: FileSelection
+}
+
+export interface WebReferenceAttachmentPart extends PartBase {
+  type: "web-reference"
+  label: string
+  text: string
+  url: string
+  title?: string
+  selector?: string
+  mode: "selection" | "element"
+}
+
 export interface ImageAttachmentPart {
   type: "image"
   id: string
   filename: string
   mime: string
   dataUrl: string
+  previewDataUrl?: string
+  byteSize?: number
 }
 
-export type ContentPart = TextPart | FileAttachmentPart | AgentPart | ImageAttachmentPart
+export type ContentPart =
+  | TextPart
+  | FileAttachmentPart
+  | AgentPart
+  | SelectedTextAttachmentPart
+  | WebReferenceAttachmentPart
+  | ImageAttachmentPart
 export type Prompt = ContentPart[]
 
 export type FileContextItem = {
@@ -68,6 +93,23 @@ function isPartEqual(partA: ContentPart, partB: ContentPart) {
       return partB.type === "file" && partA.path === partB.path && isSelectionEqual(partA.selection, partB.selection)
     case "agent":
       return partB.type === "agent" && partA.name === partB.name
+    case "selected-text":
+      return (
+        partB.type === "selected-text" &&
+        partA.text === partB.text &&
+        partA.messageID === partB.messageID &&
+        isSelectionEqual(partA.selection, partB.selection)
+      )
+    case "web-reference":
+      return (
+        partB.type === "web-reference" &&
+        partA.label === partB.label &&
+        partA.text === partB.text &&
+        partA.url === partB.url &&
+        partA.title === partB.title &&
+        partA.selector === partB.selector &&
+        partA.mode === partB.mode
+      )
     case "image":
       return partB.type === "image" && partA.id === partB.id
   }
@@ -90,6 +132,8 @@ function clonePart(part: ContentPart): ContentPart {
   if (part.type === "text") return { ...part }
   if (part.type === "image") return { ...part }
   if (part.type === "agent") return { ...part }
+  if (part.type === "selected-text") return { ...part, selection: cloneSelection(part.selection) }
+  if (part.type === "web-reference") return { ...part }
   return {
     ...part,
     selection: cloneSelection(part.selection),
@@ -151,7 +195,7 @@ const MAX_PROMPT_SESSIONS = 20
 
 type PromptSession = ReturnType<typeof createPromptSession>
 
-type Scope = {
+export type PromptScope = {
   dir: string
   id?: string
 }
@@ -274,7 +318,7 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
     }
 
     const session = createMemo(() => load(params.dir!, params.id))
-    const pick = (scope?: Scope) => (scope ? load(scope.dir, scope.id) : session())
+    const pick = (scope?: PromptScope) => (scope ? load(scope.dir, scope.id) : session())
 
     return {
       ready: () => session().ready,
@@ -290,8 +334,9 @@ export const { use: usePrompt, provider: PromptProvider } = createSimpleContext(
           session().context.updateComment(path, commentID, next),
         replaceComments: (items: FileContextItem[]) => session().context.replaceComments(items),
       },
-      set: (prompt: Prompt, cursorPosition?: number, scope?: Scope) => pick(scope).set(prompt, cursorPosition),
-      reset: (scope?: Scope) => pick(scope).reset(),
+      set: (prompt: Prompt, cursorPosition?: number, scope?: PromptScope) => pick(scope).set(prompt, cursorPosition),
+      reset: (scope?: PromptScope) => pick(scope).reset(),
+      scope: pick,
     }
   },
 })

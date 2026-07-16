@@ -14,6 +14,7 @@ import { which } from "../util/which"
 import { Module } from "@lfcode-ai/shared/util/module"
 import { spawn } from "./launch"
 import { Npm } from "../npm"
+import { installManagedJavaArtifact, resolvePreferredJavaBinary } from "@/runtime-registry"
 
 const log = Log.create({ service: "lsp.server" })
 const pathExists = async (p: string) =>
@@ -1093,15 +1094,12 @@ export const JDTLS: Info = {
   },
   extensions: [".java"],
   async spawn(root) {
-    const java = which("java")
+    const java = await ensureJavaForJdtls()
     if (!java) {
       log.error("Java 21 or newer is required to run the JDTLS. Please install it first.")
       return
     }
-    const javaMajorVersion = await run(["java", "-version"]).then((result) => {
-      const m = /"(\d+)\.\d+\.\d+"/.exec(result.stderr.toString())
-      return !m ? undefined : parseInt(m[1])
-    })
+    const javaMajorVersion = await readJavaMajorVersion(java)
     if (javaMajorVersion == null || javaMajorVersion < 21) {
       log.error("JDTLS requires at least Java 21.")
       return
@@ -1184,6 +1182,33 @@ export const JDTLS: Info = {
       ),
     }
   },
+}
+
+async function ensureJavaForJdtls() {
+  const existing = resolvePreferredJavaBinary("java")?.path ?? which("java")
+  const existingMajor = await readJavaMajorVersion(existing ?? undefined)
+  if (existing && existingMajor != null && existingMajor >= 21) return existing
+  if (process.platform !== "win32" || Flag.LFCODE_DISABLE_LSP_DOWNLOAD) return existing
+  try {
+    log.info("installing managed Java SDK for JDTLS", {
+      current: existing,
+      version: existingMajor,
+    })
+    await installManagedJavaArtifact("java-sdk")
+  } catch (error) {
+    log.error("failed to install managed Java SDK for JDTLS", { error })
+    return existing
+  }
+  return resolvePreferredJavaBinary("java")?.path ?? existing
+}
+
+async function readJavaMajorVersion(java: string | undefined) {
+  if (!java) return
+  const result = await run([java, "-version"])
+  const outputText = `${result.stdout.toString()}\n${result.stderr.toString()}`
+  const version = /"(\d+)(?:\.\d+)*(?:_[^"]+)?"/.exec(outputText)?.[1]
+  if (!version) return
+  return parseInt(version)
 }
 
 export const KotlinLS: Info = {

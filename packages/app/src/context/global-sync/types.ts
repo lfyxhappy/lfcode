@@ -30,6 +30,51 @@ export type ProjectMeta = {
   }
 }
 
+export type GoalVerdict = {
+  ok: boolean
+  impossible?: boolean
+  reason: string
+  attempt: number
+  error?: boolean
+}
+
+export type GoalStats = {
+  tokens?: {
+    input?: number
+    output?: number
+    reasoning?: number
+    cache?: {
+      read?: number
+      write?: number
+    }
+  }
+  elapsed?: number
+  started?: number
+  activeSince?: number
+  pausedAt?: number
+}
+
+export type SessionGoal = {
+  state?: {
+    status?: string
+    objective?: string
+    condition: string
+    react?: number
+    blockedCount?: number
+    blockedReason?: string
+    time?: {
+      created: number
+      updated: number
+    }
+    stats?: GoalStats
+    lastVerdict?: GoalVerdict
+  }
+  verdicts: {
+    [messageID: string]: GoalVerdict
+  }
+  lastMessageID?: string
+}
+
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
@@ -45,6 +90,9 @@ export type State = {
   sessionTotal: number
   session_status: {
     [sessionID: string]: SessionStatus
+  }
+  session_goal: {
+    [sessionID: string]: SessionGoal | undefined
   }
   session_diff: {
     [sessionID: string]: SnapshotFileDiff[]
@@ -146,7 +194,7 @@ export type RootLoadResult = {
   limited: boolean
 }
 
-export const MAX_DIR_STORES = 30
-export const DIR_IDLE_TTL_MS = 20 * 60 * 1000
-export const SESSION_RECENT_WINDOW = 4 * 60 * 60 * 1000
-export const SESSION_RECENT_LIMIT = 50
+export const MAX_DIR_STORES = 8
+export const DIR_IDLE_TTL_MS = 3 * 60 * 1000
+export const SESSION_RECENT_WINDOW = 2 * 60 * 60 * 1000
+export const SESSION_RECENT_LIMIT = 24

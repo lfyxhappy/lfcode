@@ -49,11 +49,18 @@ async function fetchProviderIcons() {
   const providers = await fetch(`${url}/api.json`)
     .then((res) => res.json())
     .then((json) => Object.keys(json))
+    .catch((error) => {
+      console.warn(`[provider-icons-plugin] skip remote provider icon refresh from ${url}`, error)
+      return [] as string[]
+    })
   await Promise.all(
     providers.map((provider) =>
       fetch(`${url}/logos/${provider}.svg`)
         .then((res) => res.text())
-        .then((svg) => fs.writeFileSync(`./src/assets/icons/provider/${provider}.svg`, svg)),
+        .then((svg) => fs.writeFileSync(`./src/assets/icons/provider/${provider}.svg`, svg))
+        .catch((error) => {
+          console.warn(`[provider-icons-plugin] skip icon refresh for ${provider}`, error)
+        }),
     ),
   )
 }

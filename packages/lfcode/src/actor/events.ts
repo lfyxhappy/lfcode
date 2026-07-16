@@ -29,6 +29,14 @@ export const ActorStatusChanged = BusEvent.define(
   }),
 )
 
+export const ActorRemoved = BusEvent.define(
+  "actor.removed",
+  z.object({
+    sessionID: SessionID.zod,
+    actorID: z.string(),
+  }),
+)
+
 export const ActorStuck = BusEvent.define(
   "actor.stuck",
   z.object({

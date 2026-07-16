@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { AbsolutePath } from "./schema"
 import { FSUtil } from "./fs-util"
+import { resolveGitCommand } from "./git-runtime"
 import { AppProcess } from "./process"
 import { LayerNode } from "./effect/layer-node"
 
@@ -81,6 +82,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const proc = yield* AppProcess.Service
+    const gitCommand = resolveGitCommand()
 
     const find = Effect.fn("Git.find")(function* (input: AbsolutePath) {
       const dotgit = yield* fs.up({ targets: [".git"], start: input }).pipe(
@@ -249,7 +251,7 @@ export const layer = Layer.effect(
     const applyPatch = Effect.fn("Git.applyPatch")(function* (input: { directory: AbsolutePath; patch: string }) {
       const result = yield* proc
         .run(
-          ChildProcess.make("git", ["apply", "-"], {
+          ChildProcess.make(gitCommand, ["apply", "-"], {
             cwd: input.directory,
             extendEnv: true,
             stdin: Stream.make(new TextEncoder().encode(input.patch)),
@@ -334,7 +336,7 @@ export const layer = Layer.effect(
       cwd = repo.directory,
     ) {
       const result = yield* proc
-        .run(ChildProcess.make("git", args, { cwd, extendEnv: true, stdin: "ignore" }))
+        .run(ChildProcess.make(gitCommand, args, { cwd, extendEnv: true, stdin: "ignore" }))
         .pipe(
           Effect.mapError(
             (cause) => new WorktreeError({ operation, directory: worktreeDirectory, message: cause.message, cause }),
@@ -418,7 +420,7 @@ function execute(cwd: string, proc: AppProcess.Interface) {
   return (args: string[]) =>
     proc
       .run(
-        ChildProcess.make("git", args, {
+        ChildProcess.make(resolveGitCommand(), args, {
           cwd,
           extendEnv: true,
           stdin: "ignore",

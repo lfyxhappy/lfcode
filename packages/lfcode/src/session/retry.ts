@@ -17,6 +17,50 @@ export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for se
 const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT"])
 const SSE_TIMEOUT_MESSAGE = "SSE read timed out"
 const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504, 529])
+const NON_RETRYABLE_PROVIDER_CODES = new Set([
+  "insufficient_quota",
+  "usage_not_included",
+  "billing_hard_limit_reached",
+  "insufficient_balance",
+])
+const NON_RETRYABLE_MESSAGE_PATTERNS = [
+  /exceeded your current quota/i,
+  /insufficient (?:account )?balance/i,
+  /free usage exceeded/i,
+  /usage not included/i,
+]
+
+function parseErrorBody(input: unknown) {
+  if (typeof input !== "string") return undefined
+  try {
+    const parsed = JSON.parse(input)
+    return parsed && typeof parsed === "object" ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isNonRetryableProviderLimitError(error: Error) {
+  const responseBody = (error as { responseBody?: unknown }).responseBody
+  const body = parseErrorBody(responseBody)
+  const code =
+    typeof body?.error?.code === "string"
+      ? body.error.code
+      : typeof body?.code === "string"
+        ? body.code
+        : undefined
+  if (code && NON_RETRYABLE_PROVIDER_CODES.has(code)) return true
+
+  const candidates = [
+    error.message,
+    typeof responseBody === "string" ? responseBody : undefined,
+    typeof body?.error?.message === "string" ? body.error.message : undefined,
+    typeof body?.message === "string" ? body.message : undefined,
+    typeof body?.error === "string" ? body.error : undefined,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)
+
+  return candidates.some((value) => NON_RETRYABLE_MESSAGE_PATTERNS.some((pattern) => pattern.test(value)))
+}
 
 /**
  * Single source of truth for "is this transient and retryable?".
@@ -30,6 +74,7 @@ const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504, 529])
  */
 export function isRetryableTransientError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
+  if (isNonRetryableProviderLimitError(error)) return false
 
   const status =
     (error as { status?: number }).status ??

@@ -225,6 +225,7 @@ export function createAutoScroll(options: AutoScrollOptions) {
     contentRef: (el: HTMLElement | undefined) => setStore("contentRef", el),
     handleScroll,
     handleInteraction,
+    markUserScrolled: () => stop(),
     pause: stop,
     resume: () => {
       if (store.userScrolled) setStore("userScrolled", false)

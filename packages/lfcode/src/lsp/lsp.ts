@@ -129,6 +129,40 @@ const filterExperimentalServers = (servers: Record<string, LSPServer.Info>) => {
 }
 
 type LocInput = { file: string; line: number; character: number }
+type CompletionInput = LocInput & { triggerCharacter?: string; maxItems?: number }
+type SignatureHelpInput = LocInput & { triggerCharacter?: string }
+type RenameInput = LocInput & { newName: string }
+type FormattingOptions = {
+  tabSize: number
+  insertSpaces: boolean
+  trimTrailingWhitespace?: boolean
+  insertFinalNewline?: boolean
+  trimFinalNewlines?: boolean
+}
+type RangeInput = {
+  file: string
+  startLine: number
+  startCharacter: number
+  endLine: number
+  endCharacter: number
+}
+type RangeFormattingInput = RangeInput & {
+  options: FormattingOptions
+}
+type FormattingInput = {
+  file: string
+  options: FormattingOptions
+}
+type CodeActionInput = RangeInput & {
+  diagnostics?: unknown[]
+  only?: string
+}
+type ExecuteCommandInput = {
+  file: string
+  command: string
+  arguments?: unknown[]
+}
+type SyncInput = { file: string; text: string; waitForDiagnostics?: boolean }
 
 interface State {
   clients: LSPClient.Info[]
@@ -142,11 +176,23 @@ export interface Interface {
   readonly status: () => Effect.Effect<Status[]>
   readonly hasClients: (file: string) => Effect.Effect<boolean>
   readonly touchFile: (input: string, waitForDiagnostics?: boolean) => Effect.Effect<void>
+  readonly syncFile: (input: SyncInput) => Effect.Effect<void>
   readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
   readonly hover: (input: LocInput) => Effect.Effect<any>
+  readonly completion: (input: CompletionInput) => Effect.Effect<any>
+  readonly signatureHelp: (input: SignatureHelpInput) => Effect.Effect<any>
+  readonly prepareRename: (input: LocInput) => Effect.Effect<any>
+  readonly rename: (input: RenameInput) => Effect.Effect<any>
+  readonly formatting: (input: FormattingInput) => Effect.Effect<any[]>
+  readonly rangeFormatting: (input: RangeFormattingInput) => Effect.Effect<any[]>
+  readonly codeAction: (input: CodeActionInput) => Effect.Effect<any[]>
+  readonly executeCommand: (input: ExecuteCommandInput) => Effect.Effect<any>
+  readonly declaration: (input: LocInput) => Effect.Effect<any[]>
   readonly definition: (input: LocInput) => Effect.Effect<any[]>
+  readonly typeDefinition: (input: LocInput) => Effect.Effect<any[]>
   readonly references: (input: LocInput) => Effect.Effect<any[]>
   readonly implementation: (input: LocInput) => Effect.Effect<any[]>
+  readonly documentHighlights: (input: LocInput) => Effect.Effect<any[]>
   readonly documentSymbol: (uri: string) => Effect.Effect<(DocumentSymbol | Symbol)[]>
   readonly workspaceSymbol: (query: string) => Effect.Effect<Symbol[]>
   readonly prepareCallHierarchy: (input: LocInput) => Effect.Effect<any[]>
@@ -348,19 +394,7 @@ export const layer = Layer.effect(
     })
 
     const hasClients = Effect.fn("LSP.hasClients")(function* (file: string) {
-      const ctx = yield* InstanceState.context
-      const s = yield* InstanceState.get(state)
-      return yield* Effect.promise(async () => {
-        const extension = path.parse(file).ext || file
-        for (const server of Object.values(s.servers)) {
-          if (server.extensions.length && !server.extensions.includes(extension)) continue
-          const root = await server.root(file, ctx)
-          if (!root) continue
-          if (s.broken.has(root + server.id)) continue
-          return true
-        }
-        return false
-      })
+      return (yield* getClients(file)).length > 0
     })
 
     const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, waitForDiagnostics?: boolean) {
@@ -375,6 +409,22 @@ export const layer = Layer.effect(
           }),
         ).catch((err) => {
           log.error("failed to touch file", { err, file: input })
+        }),
+      )
+    })
+
+    const syncFile = Effect.fn("LSP.syncFile")(function* (input: SyncInput) {
+      log.info("syncing file", { file: input.file, textLength: input.text.length })
+      const clients = yield* getClients(input.file)
+      yield* Effect.promise(() =>
+        Promise.all(
+          clients.map(async (client) => {
+            const wait = input.waitForDiagnostics ? client.waitForDiagnostics({ path: input.file }) : Promise.resolve()
+            await client.notify.open({ path: input.file, text: input.text })
+            return wait
+          }),
+        ).catch((err) => {
+          log.error("failed to sync file", { err, file: input.file })
         }),
       )
     })
@@ -403,10 +453,181 @@ export const layer = Layer.effect(
       )
     })
 
+    const completion = Effect.fn("LSP.completion")(function* (input: CompletionInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/completion", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+            context: input.triggerCharacter
+              ? {
+                  triggerKind: 2,
+                  triggerCharacter: input.triggerCharacter,
+                }
+              : {
+                  triggerKind: 1,
+                },
+          })
+          .catch(() => null),
+      )
+      const result = results.find(Boolean)
+      if (!result) return null
+      if (Array.isArray(result)) return input.maxItems ? result.slice(0, input.maxItems) : result
+      if (typeof result === "object" && result && "items" in result && Array.isArray(result.items)) {
+        return {
+          ...result,
+          items: input.maxItems ? result.items.slice(0, input.maxItems) : result.items,
+        }
+      }
+      return result
+    })
+
+    const signatureHelp = Effect.fn("LSP.signatureHelp")(function* (input: SignatureHelpInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/signatureHelp", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+            context: input.triggerCharacter
+              ? {
+                  triggerKind: 2,
+                  triggerCharacter: input.triggerCharacter,
+                  isRetrigger: true,
+                }
+              : {
+                  triggerKind: 1,
+                  isRetrigger: false,
+                },
+          })
+          .catch(() => null),
+      )
+      return results.find(Boolean) ?? null
+    })
+
+    const prepareRename = Effect.fn("LSP.prepareRename")(function* (input: LocInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/prepareRename", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+          })
+          .catch(() => null),
+      )
+      return results.find(Boolean) ?? null
+    })
+
+    const rename = Effect.fn("LSP.rename")(function* (input: RenameInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/rename", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+            newName: input.newName,
+          })
+          .catch(() => null),
+      )
+      return results.find(Boolean) ?? null
+    })
+
+    const formatting = Effect.fn("LSP.formatting")(function* (input: FormattingInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/formatting", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            options: input.options,
+          })
+          .catch(() => []),
+      )
+      return results.flat().filter(Boolean)
+    })
+
+    const rangeFormatting = Effect.fn("LSP.rangeFormatting")(function* (input: RangeFormattingInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/rangeFormatting", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            range: {
+              start: {
+                line: input.startLine,
+                character: input.startCharacter,
+              },
+              end: {
+                line: input.endLine,
+                character: input.endCharacter,
+              },
+            },
+            options: input.options,
+          })
+          .catch(() => []),
+      )
+      return results.flat().filter(Boolean)
+    })
+
+    const codeAction = Effect.fn("LSP.codeAction")(function* (input: CodeActionInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/codeAction", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            range: {
+              start: {
+                line: input.startLine,
+                character: input.startCharacter,
+              },
+              end: {
+                line: input.endLine,
+                character: input.endCharacter,
+              },
+            },
+            context: {
+              diagnostics: normalizeCodeActionDiagnostics(input.diagnostics),
+              only: input.only ? [input.only] : undefined,
+            },
+          })
+          .catch(() => []),
+      )
+      return results.flat().filter(Boolean)
+    })
+
+    const executeCommand = Effect.fn("LSP.executeCommand")(function* (input: ExecuteCommandInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("workspace/executeCommand", {
+            command: input.command,
+            arguments: input.arguments,
+          })
+          .catch(() => null),
+      )
+      return results.find(Boolean) ?? null
+    })
+
+    const declaration = Effect.fn("LSP.declaration")(function* (input: LocInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/declaration", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+          })
+          .catch(() => null),
+      )
+      return results.flat().filter(Boolean)
+    })
+
     const definition = Effect.fn("LSP.definition")(function* (input: LocInput) {
       const results = yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/definition", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
+          })
+          .catch(() => null),
+      )
+      return results.flat().filter(Boolean)
+    })
+
+    const typeDefinition = Effect.fn("LSP.typeDefinition")(function* (input: LocInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/typeDefinition", {
             textDocument: { uri: pathToFileURL(input.file).href },
             position: { line: input.line, character: input.character },
           })
@@ -422,6 +643,18 @@ export const layer = Layer.effect(
             textDocument: { uri: pathToFileURL(input.file).href },
             position: { line: input.line, character: input.character },
             context: { includeDeclaration: true },
+          })
+          .catch(() => []),
+      )
+      return results.flat().filter(Boolean)
+    })
+
+    const documentHighlights = Effect.fn("LSP.documentHighlights")(function* (input: LocInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection
+          .sendRequest("textDocument/documentHighlight", {
+            textDocument: { uri: pathToFileURL(input.file).href },
+            position: { line: input.line, character: input.character },
           })
           .catch(() => []),
       )
@@ -500,11 +733,23 @@ export const layer = Layer.effect(
       status,
       hasClients,
       touchFile,
+      syncFile,
       diagnostics,
       hover,
+      completion,
+      signatureHelp,
+      prepareRename,
+      rename,
+      formatting,
+      rangeFormatting,
+      codeAction,
+      executeCommand,
+      declaration,
       definition,
+      typeDefinition,
       references,
       implementation,
+      documentHighlights,
       documentSymbol,
       workspaceSymbol,
       prepareCallHierarchy,
@@ -513,6 +758,53 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+function normalizeCodeActionDiagnostics(input: unknown[] | undefined) {
+  if (!input) return []
+  return input.flatMap((item) => {
+    if (!item || typeof item !== "object") return []
+    const diagnostic = item as {
+      message?: unknown
+      severity?: unknown
+      source?: unknown
+      code?: unknown
+      startLineNumber?: unknown
+      startColumn?: unknown
+      endLineNumber?: unknown
+      endColumn?: unknown
+    }
+    if (typeof diagnostic.message !== "string") return []
+    if (typeof diagnostic.startLineNumber !== "number") return []
+    if (typeof diagnostic.startColumn !== "number") return []
+    if (typeof diagnostic.endLineNumber !== "number") return []
+    if (typeof diagnostic.endColumn !== "number") return []
+    return [
+      {
+        message: diagnostic.message,
+        severity: normalizeCodeActionDiagnosticSeverity(diagnostic.severity),
+        source: typeof diagnostic.source === "string" ? diagnostic.source : undefined,
+        code: typeof diagnostic.code === "string" || typeof diagnostic.code === "number" ? diagnostic.code : undefined,
+        range: {
+          start: {
+            line: diagnostic.startLineNumber - 1,
+            character: diagnostic.startColumn - 1,
+          },
+          end: {
+            line: diagnostic.endLineNumber - 1,
+            character: diagnostic.endColumn - 1,
+          },
+        },
+      },
+    ]
+  })
+}
+
+function normalizeCodeActionDiagnosticSeverity(severity: unknown) {
+  if (severity === 8 || severity === "Error") return 1
+  if (severity === 4 || severity === "Warning") return 2
+  if (severity === 2 || severity === "Info") return 3
+  return 4
+}
 
 export const defaultLayer = layer.pipe(Layer.provide(Config.defaultLayer))
 

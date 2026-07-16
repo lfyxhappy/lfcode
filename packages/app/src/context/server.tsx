@@ -172,6 +172,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [state, setState] = createStore({
       active: props.defaultServer,
       healthy: undefined as boolean | undefined,
+      lastHealthyAt: 0,
     })
 
     const healthy = () => state.healthy
@@ -186,7 +187,13 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
         void check(conn)
           .then((next) => {
             if (!alive) return
-            setState("healthy", next)
+            if (next === true) {
+              setState("healthy", true)
+              setState("lastHealthyAt", Date.now())
+              return
+            }
+            const withinGrace = Date.now() - state.lastHealthyAt < HEALTH_POLL_INTERVAL_MS * 3
+            setState("healthy", withinGrace ? true : false)
           })
           .finally(() => {
             busy = false
@@ -234,7 +241,12 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
 
     const isReady = createMemo(() => ready() && !!state.active)
 
-    const check = (conn: ServerConnection.Any) => checkServerHealth(conn.http).then((x) => x.healthy)
+    const check = (conn: ServerConnection.Any) =>
+      checkServerHealth(conn.http).then((x) => {
+        if (x.healthy) return true
+        if (x.transient && state.lastHealthyAt > 0) return true
+        return false
+      })
 
     createEffect(() => {
       const current_ = current()

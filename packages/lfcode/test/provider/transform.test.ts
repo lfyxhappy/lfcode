@@ -2264,7 +2264,34 @@ describe("ProviderTransform.variants", () => {
     expect(result).toEqual({})
   })
 
-  test("deepseek returns empty object", () => {
+  test("detection mode still probes openai-compatible reasoning variants when current capability is false", () => {
+    const model = createMockModel({
+      id: "step_fun/step-3.7-flash",
+      providerID: "step_fun",
+      api: {
+        id: "step-3.7-flash",
+        url: "https://api.stepfun.com/step_plan/v1",
+        npm: "@ai-sdk/openai-compatible",
+      },
+      capabilities: {
+        temperature: true,
+        reasoning: false,
+        attachment: true,
+        toolcall: false,
+        input: { text: true, audio: false, image: true, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({})
+    expect(Object.keys(ProviderTransform.variants(model, { ignoreReasoningCapability: true }))).toEqual([
+      "low",
+      "medium",
+      "high",
+    ])
+  })
+
+  test("deepseek returns reasoningEffort variants", () => {
     const model = createMockModel({
       id: "deepseek/deepseek-chat",
       providerID: "deepseek",
@@ -2275,10 +2302,10 @@ describe("ProviderTransform.variants", () => {
       },
     })
     const result = ProviderTransform.variants(model)
-    expect(result).toEqual({})
+    expect(Object.keys(result)).toEqual(["low", "medium", "high"])
   })
 
-  test("minimax returns empty object", () => {
+  test("minimax returns reasoningEffort variants", () => {
     const model = createMockModel({
       id: "minimax/minimax-model",
       providerID: "minimax",
@@ -2289,10 +2316,10 @@ describe("ProviderTransform.variants", () => {
       },
     })
     const result = ProviderTransform.variants(model)
-    expect(result).toEqual({})
+    expect(Object.keys(result)).toEqual(["low", "medium", "high"])
   })
 
-  test("glm returns empty object", () => {
+  test("glm returns reasoningEffort variants", () => {
     const model = createMockModel({
       id: "glm/glm-4",
       providerID: "glm",
@@ -2303,7 +2330,7 @@ describe("ProviderTransform.variants", () => {
       },
     })
     const result = ProviderTransform.variants(model)
-    expect(result).toEqual({})
+    expect(Object.keys(result)).toEqual(["low", "medium", "high"])
   })
 
   test("mistral returns empty object", () => {
@@ -3422,5 +3449,48 @@ describe("ProviderTransform.schema - openai discriminated-union flatten", () => 
     expect(result.type).toBe("object")
     expect(result.properties.a).toBeDefined()
     expect(result.anyOf).toBeUndefined()
+  })
+
+  test("openai-compatible — recursively flattens a nested task operation", () => {
+    const nested = {
+      type: "object",
+      properties: {
+        operation: {
+          type: "object",
+          description: "Task operation",
+          ...anyOfSchema,
+        },
+      },
+      required: ["operation"],
+      additionalProperties: false,
+    } as any
+    const result = ProviderTransform.schema(
+      { providerID: "jws", api: { id: "grok-4.5", npm: "@ai-sdk/openai-compatible" } } as any,
+      nested,
+    ) as any
+
+    expect(result.required).toEqual(["operation"])
+    expect(result.properties.operation.type).toBe("object")
+    expect(result.properties.operation.description).toBe("Task operation")
+    expect(result.properties.operation.anyOf).toBeUndefined()
+    expect(result.properties.operation.oneOf).toBeUndefined()
+    expect(result.properties.operation.required).toEqual(["action"])
+    expect(result.properties.operation.properties.action.enum).toEqual(["create", "list", "rename"])
+    expect(result.properties.operation.properties.action.description).toContain("create: requires summary")
+  })
+
+  test("openai-compatible — leaves non-discriminated nested unions intact", () => {
+    const nested = {
+      type: "object",
+      properties: {
+        value: { anyOf: [{ type: "string" }, { type: "number" }] },
+      },
+    } as any
+    const result = ProviderTransform.schema(
+      { providerID: "jws", api: { id: "grok-4.5", npm: "@ai-sdk/openai-compatible" } } as any,
+      nested,
+    ) as any
+
+    expect(result.properties.value.anyOf).toHaveLength(2)
   })
 })
