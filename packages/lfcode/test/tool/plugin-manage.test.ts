@@ -87,7 +87,6 @@ describe("plugin_manage", () => {
           tool.execute(
             {
               action: "list",
-              description: "List managed plugins before commit",
             },
             ctx,
           ),

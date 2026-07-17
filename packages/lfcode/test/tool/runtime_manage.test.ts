@@ -43,7 +43,6 @@ describe("tool.runtime_manage", () => {
           tool.execute(
             {
               action: "list",
-              description: "List runtime status",
             },
             ctx,
           ),
@@ -73,7 +72,6 @@ describe("tool.runtime_manage", () => {
               action: "logs",
               id: "python-managed",
               limit: 5,
-              description: "Read runtime logs",
             },
             ctx,
           ),

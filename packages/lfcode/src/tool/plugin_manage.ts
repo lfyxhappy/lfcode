@@ -29,7 +29,7 @@ const Parameters = z.object({
   path: z.string().optional(),
   token: z.string().optional(),
   output: z.string().optional(),
-  description: z.string().describe("Clear description of the plugin operation in 5-10 words."),
+  description: z.string().min(1).optional().describe("Required for plugin changes; optional for read-only list, inspect, and preview operations."),
 })
 
 export const PluginManageTool = Tool.define(
@@ -40,15 +40,18 @@ export const PluginManageTool = Tool.define(
     parameters: Parameters,
     execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
       Effect.gen(function* () {
+        if (["import_commit", "enable", "disable", "uninstall", "export"].includes(params.action) && !params.description) {
+          throw new Error(`plugin_manage ${params.action} requires description`)
+        }
         if (params.action === "list") {
           const items = yield* Effect.promise(() => listInstalledPlugins())
-          return result(params.description, items.map(publicRecord))
+          return result(params.description ?? "List managed plugins", items.map(publicRecord))
         }
         if (params.action === "inspect") {
           if (!params.spec) throw new Error("plugin_manage inspect requires spec")
           const item = (yield* Effect.promise(() => listInstalledPlugins())).find((entry) => entry.spec === params.spec)
           if (!item) throw new Error(`Managed plugin not found: ${params.spec}`)
-          return result(params.description, publicRecord(item))
+          return result(params.description ?? "Inspect managed plugin", publicRecord(item))
         }
         if (params.action === "import_preview") {
           if (!params.path || !params.source) throw new Error("plugin_manage import_preview requires source and path")
@@ -57,7 +60,7 @@ export const PluginManageTool = Tool.define(
             if (params.source === "zip") return previewZipImport({ file: params.path! })
             return previewDirectoryImport({ directory: params.path! })
           })
-          return result(params.description, preview)
+          return result(params.description ?? "Preview plugin import", preview)
         }
 
         const reviewed =
@@ -82,7 +85,7 @@ export const PluginManageTool = Tool.define(
           previewed: params.action !== "import_commit" || Boolean(reviewed),
           reversible: params.action !== "uninstall",
           target: reviewed ? `lfplugin:${reviewed.report.id}` : (params.spec ?? params.output),
-          reason: params.description,
+          reason: params.description!,
           metadata: reviewed ? { pluginID: reviewed.report.id, digest: reviewed.report.source.digest } : undefined,
         })
         requireCapabilityDecision(gate.decision)
@@ -113,27 +116,27 @@ export const PluginManageTool = Tool.define(
           const item = yield* Effect.promise(() => commitImport(params.token!))
           completeCapabilityOperation(gate.auditID, "completed", { action: "uninstall", spec: item.spec })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
-          return result(params.description, publicRecord(item))
+          return result(params.description!, publicRecord(item))
         }
         if (params.action === "enable" || params.action === "disable") {
           if (!params.spec) throw new Error(`plugin_manage ${params.action} requires spec`)
           const item = yield* Effect.promise(() => setPluginEnabled(params.spec!, params.action === "enable"))
           completeCapabilityOperation(gate.auditID, "completed", { action: "toggle", enabled: params.action !== "enable" })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
-          return result(params.description, item)
+          return result(params.description!, item)
         }
         if (params.action === "uninstall") {
           if (!params.spec) throw new Error("plugin_manage uninstall requires spec")
           const item = yield* Effect.promise(() => uninstallPlugin(params.spec!))
           completeCapabilityOperation(gate.auditID, "completed")
           yield* Effect.promise(() => Instance.invalidateAllCaches())
-          return result(params.description, item)
+          return result(params.description!, item)
         }
         if (!params.spec || !params.output) throw new Error("plugin_manage export requires spec and output")
         const output = path.resolve(params.output)
         const item = yield* Effect.promise(() => exportPlugin(params.spec!, output))
         completeCapabilityOperation(gate.auditID, "completed")
-        return result(params.description, item)
+        return result(params.description!, item)
       }).pipe(Effect.orDie),
   }),
 )

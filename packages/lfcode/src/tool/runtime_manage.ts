@@ -17,7 +17,7 @@ const Parameters = z.object({
   action: z.enum(["list", "install", "repair", "update", "logs"]).describe("The runtime-management action to perform."),
   id: RuntimeManageItemID.optional().describe("Runtime item ID for install, repair, update, or filtered logs."),
   limit: z.number().optional().describe("Optional number of log entries to return for logs. Defaults to 20."),
-  description: z.string().describe("Clear, concise description of what this runtime action does in 5-10 words."),
+  description: z.string().min(1).optional().describe("Required for install, repair, and update; optional for read-only list and logs."),
 })
 
 export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, never>(
@@ -29,6 +29,9 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
       Effect.gen(function* () {
         if ((params.action === "install" || params.action === "repair" || params.action === "update") && !params.id) {
           throw new Error(`runtime_manage action '${params.action}' requires an id.`)
+        }
+        if ((params.action === "install" || params.action === "repair" || params.action === "update") && !params.description) {
+          throw new Error(`runtime_manage action '${params.action}' requires description.`)
         }
 
         const gate =
@@ -42,7 +45,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
                 previewed: true,
                 reversible: false,
                 target: `runtime:${params.id}`,
-                reason: params.description,
+                reason: params.description!,
                 metadata: { runtimeAction: params.action, runtimeID: params.id },
               })
             : undefined
@@ -66,7 +69,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
         if (params.action === "list") {
           const state = yield* Effect.promise(() => getRuntimeManageState())
           return {
-            title: params.description,
+            title: params.description ?? "List runtime status",
             output: renderListOutput(state, params.id),
             metadata: {
               action: params.action,
@@ -85,7 +88,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
             }),
           )
           return {
-            title: params.description,
+            title: params.description ?? "Read runtime logs",
             output: renderLogsOutput(state),
             metadata: {
               action: params.action,
@@ -104,7 +107,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
         completeCapabilityOperation(gate!.auditID, "completed")
 
         return {
-          title: params.description,
+          title: params.description!,
           output: renderMutationOutput(params.action, params.id!, result),
           metadata: {
             action: params.action,
