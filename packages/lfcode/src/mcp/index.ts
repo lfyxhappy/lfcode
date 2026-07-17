@@ -21,6 +21,7 @@ import { AppFileSystem } from "@/filesystem"
 import { McpOAuthProvider } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
+import { mcpControlRef } from "./control-ref"
 import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
@@ -1028,7 +1029,7 @@ export const layer = Layer.effect(
       return (expired ? "expired" : "authenticated") as AuthStatus
     })
 
-    return Service.of({
+    const service = Service.of({
       status,
       clients,
       tools,
@@ -1047,6 +1048,13 @@ export const layer = Layer.effect(
       hasStoredTokens,
       getAuthStatus,
     })
+    mcpControlRef.current = service
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        if (mcpControlRef.current === service) mcpControlRef.current = undefined
+      }),
+    )
+    return service
   }),
 )
 

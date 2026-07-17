@@ -13,6 +13,7 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { CapabilityPersistence } from "../../src/capability/persistence"
 
 afterEach(async () => {
   Database.use((db) => {
@@ -61,7 +62,7 @@ describe("HistoryTool", () => {
         const info = yield* HistoryTool
         const tool = yield* info.init()
         const result = yield* tool.execute(
-          { operation: "search", query: "JWT", scope: "global" },
+          { operation: "search", query: "JWT", scope: "global", reason: "Read cross-project JWT history" },
           ctx as any,
         )
         expect(result.output).toContain("msg_a")
@@ -228,6 +229,10 @@ describe("HistoryTool", () => {
         expect(result.metadata.session_found).toBe(true)
         expect(result.metadata.checkpoint_found).toBe(true)
         expect(result.metadata.count).toBe(1)
+        const audit = CapabilityPersistence.listAudit({ capability: "context_read" }).find(
+          (item) => item.reason === "Read cross-project JWT history",
+        )
+        expect(audit?.rollback).toMatchObject({ projects: ["proj_a"], sessions: ["ses_a"], messages: ["msg_a"] })
         expect(result.output).toContain("ses_hist")
         expect(result.output).toContain("assistant reply")
         expect(result.output).not.toContain("checkpoint body")

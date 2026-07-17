@@ -22,13 +22,14 @@ describe("LSP service lifecycle", () => {
 
   it.live("init() completes without error", () => provideTmpdirInstance(() => LSP.Service.use((lsp) => lsp.init())))
 
-  it.live("status() returns empty array initially", () =>
+  it.live("status() lists available language servers before they are connected", () =>
     provideTmpdirInstance(() =>
       LSP.Service.use((lsp) =>
         Effect.gen(function* () {
           const result = yield* lsp.status()
           expect(Array.isArray(result)).toBe(true)
-          expect(result.length).toBe(0)
+          expect(result.length).toBeGreaterThan(0)
+          expect(result.every((item) => item.status === "available")).toBe(true)
         }),
       ),
     ),
@@ -57,26 +58,44 @@ describe("LSP service lifecycle", () => {
     ),
   )
 
-  it.live("hasClients() returns true for .ts files in instance when lsp is true", () =>
+  it.live("hasClients() returns false when the configured test server cannot start", () =>
     provideTmpdirInstance(
       (dir) =>
         LSP.Service.use((lsp) =>
           Effect.gen(function* () {
             const result = yield* lsp.hasClients(path.join(dir, "test.ts"))
-            expect(result).toBe(true)
+            expect(result).toBe(false)
           }),
         ),
       { config: { lsp: true } },
     ),
   )
 
-  it.live("hasClients() keeps built-in LSPs when config object is provided", () =>
+  it.live("status() exposes enabled language servers before they are connected", () =>
+    provideTmpdirInstance(
+      () =>
+        LSP.Service.use((lsp) =>
+          Effect.gen(function* () {
+            const result = yield* lsp.status()
+            const typescript = result.find((item) => item.id === "typescript")
+            expect(typescript).toMatchObject({
+              status: "available",
+              extensions: expect.arrayContaining([".ts"]),
+              capabilities: { completion: true, hover: true, diagnostics: true, definition: true, formatting: true },
+            })
+          }),
+        ),
+      { config: { lsp: true } },
+    ),
+  )
+
+  it.live("hasClients() keeps built-in configuration when a custom LSP object is provided", () =>
     provideTmpdirInstance(
       (dir) =>
         LSP.Service.use((lsp) =>
           Effect.gen(function* () {
             const result = yield* lsp.hasClients(path.join(dir, "test.ts"))
-            expect(result).toBe(true)
+            expect(result).toBe(false)
           }),
         ),
       {

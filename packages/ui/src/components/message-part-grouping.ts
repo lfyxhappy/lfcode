@@ -32,6 +32,11 @@ export type PartGroup =
       type: "context"
       refs: PartRef[]
     }
+  | {
+      key: string
+      type: "tool-error"
+      refs: PartRef[]
+    }
 
 function sameRef(a: PartRef, b: PartRef) {
   return a.messageID === b.messageID && a.partID === b.partID
@@ -45,7 +50,7 @@ function sameGroup(a: PartGroup, b: PartGroup) {
     if (b.type !== "part") return false
     return sameRef(a.ref, b.ref)
   }
-  if (b.type !== "context") return false
+  if (b.type !== a.type) return false
   if (a.refs.length !== b.refs.length) return false
   return a.refs.every((ref, i) => sameRef(ref, b.refs[i]!))
 }
@@ -59,34 +64,73 @@ export function sameGroups(a: readonly PartGroup[] | undefined, b: readonly Part
 
 export function groupParts(parts: { messageID: string; part: PartType }[]) {
   const result: PartGroup[] = []
-  let start = -1
+  let contextStart = -1
+  let errorStart = -1
+  let errorSignature: string | undefined
 
-  const flush = (end: number) => {
-    if (start < 0) return
-    const first = parts[start]
+  const flushContext = (end: number) => {
+    if (contextStart < 0) return
+    const first = parts[contextStart]
     const last = parts[end]
     if (!first || !last) {
-      start = -1
+      contextStart = -1
       return
     }
     result.push({
       key: `context:${first.part.id}`,
       type: "context",
-      refs: parts.slice(start, end + 1).map((item) => ({
+      refs: parts.slice(contextStart, end + 1).map((item) => ({
         messageID: item.messageID,
         partID: item.part.id,
       })),
     })
-    start = -1
+    contextStart = -1
+  }
+
+  const flushErrors = (end: number) => {
+    if (errorStart < 0) return
+    const first = parts[errorStart]
+    const last = parts[end]
+    if (!first || !last) {
+      errorStart = -1
+      errorSignature = undefined
+      return
+    }
+    result.push({
+      key: `tool-error:${first.part.id}`,
+      type: "tool-error",
+      refs: parts.slice(errorStart, end + 1).map((item) => ({
+        messageID: item.messageID,
+        partID: item.part.id,
+      })),
+    })
+    errorStart = -1
+    errorSignature = undefined
   }
 
   parts.forEach((item, index) => {
-    if (isContextGroupTool(item.part)) {
-      if (start < 0) start = index
+    const signature = toolErrorSignature(item.part)
+    if (signature) {
+      flushContext(index - 1)
+      if (errorStart < 0) {
+        errorStart = index
+        errorSignature = signature
+        return
+      }
+      if (errorSignature === signature) return
+      flushErrors(index - 1)
+      errorStart = index
+      errorSignature = signature
       return
     }
 
-    flush(index - 1)
+    flushErrors(index - 1)
+    if (isContextGroupTool(item.part)) {
+      if (contextStart < 0) contextStart = index
+      return
+    }
+
+    flushContext(index - 1)
     result.push({
       key: `part:${item.messageID}:${item.part.id}`,
       type: "part",
@@ -97,7 +141,8 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
     })
   })
 
-  flush(parts.length - 1)
+  flushContext(parts.length - 1)
+  flushErrors(parts.length - 1)
   return result
 }
 
@@ -140,4 +185,9 @@ export function partDefaultOpen(part: PartType, shell = false, edit = false) {
 
 export function isContextGroupTool(part: PartType): part is ToolPart {
   return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
+}
+
+function toolErrorSignature(part: PartType) {
+  if (part.type !== "tool" || part.state.status !== "error") return
+  return `${part.tool}\0${part.state.error.replace(/^Error:\s*/, "").replace(/\s+/g, " ").trim()}`
 }

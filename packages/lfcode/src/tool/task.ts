@@ -4,6 +4,7 @@ import SHELL_DESCRIPTION from "./task.shell.txt"
 import { tokenize } from "./shell-tokenize"
 import z from "zod"
 import { Effect } from "effect"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 import { TaskRegistry } from "@/task/registry"
 import type { SessionID } from "../session/schema"
 
@@ -145,6 +146,7 @@ const taskParameters = z.preprocess(normalizeTaskArgs, parameters)
 
 function formatTaskValidationError(error: z.ZodError) {
   const field = error.issues[0]?.path.length ? error.issues[0].path.join(".") : undefined
+  const fields = [...new Set(error.issues.map((issue) => issue.path.join(".")).filter(Boolean))].sort()
   const details = error.issues
     .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "arguments"}: ${issue.message}`)
     .join("; ")
@@ -154,8 +156,10 @@ function formatTaskValidationError(error: z.ZodError) {
       tool: "task",
       category: "schema",
       ...(field ? { field } : {}),
+      ...(fields.length > 0 ? { fields } : {}),
       retryable: true,
       recovery: "Correct the operation envelope and do not retry the same arguments unchanged.",
+      message: details,
     })}`,
     "The task tool received invalid arguments.",
     details,
@@ -387,11 +391,16 @@ export const TaskTool = Tool.define<typeof taskParameters, Metadata, TaskRegistr
       }
 
       if (op.action === "list") {
+        const gate = contextReadGate(ctx, "list", sessionID)
         const tasks = yield* reg.list({
           session_id: sessionID,
           status: op.status,
           include_terminal: op.include_terminal,
           include_archived: op.include_archived,
+        })
+        completeCapabilityOperation(gate.auditID, `completed (${tasks.length} tasks)`, {
+          sessions: [sessionID],
+          tasks: tasks.map((task) => task.id),
         })
         const lines =
           tasks.length === 0
@@ -407,7 +416,12 @@ export const TaskTool = Tool.define<typeof taskParameters, Metadata, TaskRegistr
       }
 
       if (op.action === "get") {
+        const gate = contextReadGate(ctx, "get", sessionID, op.id)
         const t = yield* reg.get({ session_id: sessionID, id: op.id })
+        completeCapabilityOperation(gate.auditID, t ? "completed (1 task)" : "completed (0 tasks)", {
+          sessions: [sessionID],
+          tasks: t ? [t.id] : [],
+        })
         if (!t)
           return {
             title: `Task ${op.id}: not found`,
@@ -476,7 +490,25 @@ export const TaskTool = Tool.define<typeof taskParameters, Metadata, TaskRegistr
       }
 
       return yield* Effect.fail(new Error(`Unknown operation: ${(op as { action: string }).action}`))
-    })
+})
+
+function contextReadGate(ctx: Tool.Context<Metadata>, operation: "list" | "get", sessionID: SessionID, taskID?: string) {
+  const gate = decideCapabilityOperation({
+    caller: "tool:task",
+    capability: "context_read",
+    risk: "read",
+    source: "core",
+    operation: "read",
+    previewed: true,
+    reversible: true,
+    target: taskID ? `task:${taskID}` : `tasks:${sessionID}`,
+    sessionID: ctx.sessionID,
+    messageID: ctx.messageID,
+    reason: `Task ${operation}`,
+  })
+  requireCapabilityDecision(gate.decision)
+  return gate
+}
 
     return {
       description: DESCRIPTION,

@@ -19,6 +19,12 @@ import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
+import { SkillManageTool } from "./skill_manage"
+import { McpManageTool } from "./mcp_manage"
+import { ProviderManageTool } from "./provider_manage"
+import { CredentialManageTool } from "./credential_manage"
+import { ContextBrokerTool } from "./context_broker"
+import { CapabilityManageTool } from "./capability_manage"
 import * as Tool from "./tool"
 import { Config } from "../config"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@lfcode-ai/plugin"
@@ -244,6 +250,12 @@ export const layer = Layer.effect(
     const toolOutput = yield* ToolOutputTool
     const pluginAuthor = yield* PluginAuthorTool
     const pluginManage = yield* PluginManageTool
+    const skillManage = yield* SkillManageTool
+    const mcpManage = yield* McpManageTool
+    const providerManage = yield* ProviderManageTool
+    const credentialManage = yield* CredentialManageTool
+    const contextBroker = yield* ContextBrokerTool
+    const capabilityManage = yield* CapabilityManageTool
     const codesearch = yield* CodeSearchTool
     const globtool = yield* GlobTool
     const fileInfoTool = yield* FileInfoTool
@@ -378,6 +390,12 @@ export const layer = Layer.effect(
           toolOutput: Tool.init(toolOutput),
           pluginAuthor: Tool.init(pluginAuthor),
           pluginManage: Tool.init(pluginManage),
+          skillManage: Tool.init(skillManage),
+          mcpManage: Tool.init(mcpManage),
+          providerManage: Tool.init(providerManage),
+          credentialManage: Tool.init(credentialManage),
+          contextBroker: Tool.init(contextBroker),
+          capabilityManage: Tool.init(capabilityManage),
           read: Tool.init(read),
           fileInfo: Tool.init(fileInfoTool),
           glob: Tool.init(globtool),
@@ -510,6 +528,12 @@ export const layer = Layer.effect(
             tool.toolOutput,
             tool.pluginAuthor,
             tool.pluginManage,
+            tool.skillManage,
+            tool.mcpManage,
+            tool.providerManage,
+            tool.credentialManage,
+            tool.contextBroker,
+            tool.capabilityManage,
             tool.read,
             tool.fileInfo,
             tool.fileSearch,

@@ -61,6 +61,24 @@ import { useSettings } from "@/context/settings"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 
+type LspRuntimeStatus = {
+  id: string
+  name: string
+  extensions: string[]
+  capabilities: {
+    completion: boolean
+    completionTriggerCharacters: string[]
+    hover: boolean
+    diagnostics: boolean
+    definition: boolean
+    formatting: boolean
+  }
+  status: "available" | "connected" | "error"
+  error?: string
+}
+
+const LSP_DOWNLOAD_REMINDER_PREFIX = "lfcode.editor.lsp.download-reminder.v1:"
+
 function getRenderFinalNewlineOption(enabled: boolean): "off" | "on" {
   return enabled ? "on" : "off"
 }
@@ -101,6 +119,11 @@ export function CodeEditorHost(props: {
   const [recoveringFallback, setRecoveringFallback] = createSignal(false)
   const [cursor, setCursor] = createSignal({ line: 1, column: 1 })
   const [serverLspTick, setServerLspTick] = createSignal(0)
+  const [serverLspActivated, setServerLspActivated] = createSignal(false)
+  const [lspCompletionTriggerCharacters, setLspCompletionTriggerCharacters] = createSignal<string[]>([])
+  const [lspDownloadPrompt, setLspDownloadPrompt] = createSignal<LspRuntimeStatus>()
+  const [lspDownloadError, setLspDownloadError] = createSignal<string>()
+  const [lspDownloading, setLspDownloading] = createSignal(false)
   const [documentSymbols, setDocumentSymbols] = createSignal<CodeEditorDocumentSymbolItem[]>([])
   const [diagnostics, setDiagnostics] = createSignal<ReturnType<typeof collectCodeEditorDiagnostics>>({
     errors: 0,
@@ -124,8 +147,76 @@ export function CodeEditorHost(props: {
   let symbolRequestToken = 0
   const resolvedLanguage = () =>
     getCodeEditorLanguageFromHint(props.language) ?? getCodeEditorLanguage(props.path) ?? "plaintext"
-  const serverLspEnabled = () => shouldUseCodeEditorServerLsp(resolvedLanguage())
+  const requiresManagedLsp = () => {
+    const current = resolvedLanguage()
+    return Boolean(current && shouldUseCodeEditorServerLsp(current) && !["typescript", "javascript"].includes(current))
+  }
+  const serverLspEnabled = () =>
+    shouldUseCodeEditorServerLsp(resolvedLanguage()) && (!requiresManagedLsp() || serverLspActivated())
   const capabilities = () => getCodeEditorCapabilities(props.preset ?? "sidebar-full")
+
+  const isLspDownloadSuppressed = (id: string) => {
+    try {
+      return localStorage.getItem(LSP_DOWNLOAD_REMINDER_PREFIX + id) === "true"
+    } catch {
+      return false
+    }
+  }
+
+  const suppressLspDownload = (id: string) => {
+    try {
+      localStorage.setItem(LSP_DOWNLOAD_REMINDER_PREFIX + id, "true")
+    } catch {}
+  }
+
+  const refreshLspDownloadPrompt = async () => {
+    if (!requiresManagedLsp() || !server.current?.http) return
+    const filename = props.path.split(/[\\/]/).at(-1)?.toLowerCase()
+    const extension = props.path.match(/(\.[^.\\/]+)$/)?.[1]?.toLowerCase()
+    if (!extension && !filename) return
+    const response = await sdk.client.lsp.status()
+    const candidate = (response.data as LspRuntimeStatus[] | undefined)?.find((item) =>
+      item.extensions.some((itemExtension) => {
+        const current = itemExtension.toLowerCase()
+        return current === extension || current === filename
+      }),
+    )
+    if (!candidate) return
+    setLspCompletionTriggerCharacters(candidate.capabilities.completionTriggerCharacters)
+    if (candidate.status === "connected") {
+      setServerLspActivated(true)
+      setLspDownloadPrompt(undefined)
+      return
+    }
+    if (isLspDownloadSuppressed(candidate.id)) return
+    setLspDownloadError(candidate.error)
+    setLspDownloadPrompt(candidate)
+  }
+
+  const enableServerLsp = async () => {
+    if (lspDownloading()) return
+    setLspDownloading(true)
+    setLspDownloadError(undefined)
+    try {
+      const response = await sdk.client.lsp.ensure({ path: props.path })
+      if (!response.data?.supported) {
+        const failure = response.data?.status.find((item) => item.id === lspDownloadPrompt()?.id && item.status === "error")
+        setLspDownloadError(failure?.error ?? "Language server could not be started")
+        return
+      }
+      const prompt = lspDownloadPrompt()
+      setServerLspActivated(true)
+      setLspDownloadPrompt(undefined)
+      const active = response.data.status.find((item) => item.id === prompt?.id && item.status === "connected")
+      setLspCompletionTriggerCharacters(active?.capabilities.completionTriggerCharacters ?? [])
+      await refreshServerLspProviders()
+      setServerLspTick((value) => value + 1)
+    } catch (error) {
+      setLspDownloadError(error instanceof Error ? error.message : "Language server download failed")
+    } finally {
+      setLspDownloading(false)
+    }
+  }
   const breadcrumbSymbols = createMemo(() =>
     documentSymbols()
       .filter((symbol) => containsEditorSelection(symbol.range ?? symbol.selection, cursor()))
@@ -801,6 +892,30 @@ export function CodeEditorHost(props: {
     },
   })
 
+  const refreshServerLspProviders = async (input?: {
+    runtime?: Awaited<ReturnType<typeof initializeCodeEditorRuntime>>
+    path?: string
+    language?: string
+    value?: string
+  }) => {
+    const path = input?.path ?? editorPath
+    if (!path || !editor) return
+    const language = input?.language ?? resolvedLanguage()
+    const runtime = input?.runtime ?? (await initializeCodeEditorRuntime())
+    if (!editor || editorPath !== path) return
+    releaseServerLspProviders?.()
+    releaseServerLspProviders = registerCodeEditorServerLspProviders({
+      monaco: runtime.monaco,
+      server: server.current?.http,
+      directory: sdk.directory,
+      path,
+      language,
+      getText: () => editor?.getValue() ?? input?.value ?? props.value,
+      enabled: serverLspEnabled,
+      completionTriggerCharacters: lspCompletionTriggerCharacters(),
+    })
+  }
+
   const disposeDocument = () => {
     serverLspRequestToken += 1
     if (editor && editorPath) saveCodeEditorViewState(editorPath, editor.saveViewState())
@@ -925,14 +1040,7 @@ export function CodeEditorHost(props: {
       if (props.onOpenPath) {
         navigationCleanup = registerCodeEditorOpenHandler(activeEditor, props.onOpenPath)
       }
-      releaseServerLspProviders = registerCodeEditorServerLspProviders({
-        monaco: runtime.monaco,
-        server: server.current?.http,
-        directory: sdk.directory,
-        path: input.path,
-        language: input.language,
-        getText: () => editor?.getValue() ?? input.value,
-      })
+      await refreshServerLspProviders({ runtime, path: input.path, language: input.language, value: input.value })
       releaseSnippetProvider = registerCodeEditorSnippetProvider({
         monaco: runtime.monaco,
         directory: sdk.directory,
@@ -997,6 +1105,19 @@ export function CodeEditorHost(props: {
         void setupEditor()
       },
       { defer: true },
+    ),
+  )
+
+  createEffect(
+    on(
+      [ready, failed, resolvedLanguage, () => props.path],
+      ([isReady, isFailed]) => {
+        if (!isReady || isFailed) return
+        setServerLspActivated(!requiresManagedLsp())
+        setLspDownloadPrompt(undefined)
+        setLspDownloadError(undefined)
+        void refreshLspDownloadPrompt().catch(() => {})
+      },
     ),
   )
 
@@ -1195,6 +1316,45 @@ export function CodeEditorHost(props: {
             >
               {language.t("common.retry")}
             </button>
+          </div>
+        )}
+      </Show>
+      <Show when={!failed() && lspDownloadPrompt()}>
+        {(prompt) => (
+          <div class="absolute left-3 right-3 top-3 z-20 flex items-center justify-between gap-3 rounded-md border border-status-warning/30 bg-background-base/95 px-3 py-2 text-[11px] text-text-weak shadow-sm">
+            <span class="min-w-0 break-words">
+              {lspDownloadError() ??
+                language.t("settings.editor.intellisense.download.prompt", { server: prompt().name })}
+            </span>
+            <div class="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                class="rounded border border-border-weak-base px-2 py-1 text-text-primary hover:bg-surface-secondary disabled:opacity-50"
+                disabled={lspDownloading()}
+                onClick={() => void enableServerLsp()}
+              >
+                {lspDownloading()
+                  ? language.t("settings.editor.intellisense.download.starting")
+                  : language.t("settings.editor.intellisense.download.start")}
+              </button>
+              <button
+                type="button"
+                class="rounded px-2 py-1 hover:bg-surface-secondary"
+                onClick={() => setLspDownloadPrompt(undefined)}
+              >
+                {language.t("settings.editor.intellisense.download.later")}
+              </button>
+              <button
+                type="button"
+                class="rounded px-2 py-1 hover:bg-surface-secondary"
+                onClick={() => {
+                  suppressLspDownload(prompt().id)
+                  setLspDownloadPrompt(undefined)
+                }}
+              >
+                {language.t("settings.editor.intellisense.download.never")}
+              </button>
+            </div>
           </div>
         )}
       </Show>

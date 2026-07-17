@@ -9,6 +9,7 @@ import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Effect } from "effect"
 import { jsonRequest, runRequest } from "./trace"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 
 export const McpRoutes = lazy(() =>
   new Hono()
@@ -86,8 +87,24 @@ export const McpRoutes = lazy(() =>
       validator("json", McpCatalog.CatalogInstallInput),
       async (c) =>
         jsonRequest("McpRoutes.catalog.install", c, function* () {
+          const input = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.catalog.install",
+            capability: "mcp_manage",
+            risk: "install",
+            source: "official",
+            operation: "install",
+            previewed: true,
+            reversible: true,
+            target: input.id,
+            reason: "Install an official MCP catalog entry",
+            metadata: { target: input.target ?? "global" },
+          })
+          requireCapabilityDecision(gate.decision)
           const catalog = yield* McpCatalog.Service
-          return yield* catalog.install(c.req.valid("json"))
+          const result = yield* catalog.install(input)
+          completeCapabilityOperation(gate.auditID, "completed", { action: "remove" })
+          return result
         }),
     )
     .get(
@@ -141,8 +158,21 @@ export const McpRoutes = lazy(() =>
       async (c) =>
         jsonRequest("McpRoutes.add", c, function* () {
           const { name, config } = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.add",
+            capability: "mcp_manage",
+            risk: "install",
+            source: "mcp",
+            operation: "install",
+            previewed: true,
+            reversible: true,
+            target: name,
+            reason: "Explicit MCP server add",
+          })
+          requireCapabilityDecision(gate.decision)
           const mcp = yield* MCP.Service
           const result = yield* mcp.add(name, config)
+          completeCapabilityOperation(gate.auditID, "completed", { action: "disconnect" })
           return result.status
         }),
     )
@@ -174,12 +204,26 @@ export const McpRoutes = lazy(() =>
           "McpRoutes.auth.start",
           c,
           Effect.gen(function* () {
+            const gate = decideCapabilityOperation({
+              caller: "route:mcp.auth.start",
+              capability: "mcp_manage",
+              risk: "credential",
+              source: "mcp",
+              operation: "execute",
+              previewed: true,
+              reversible: true,
+              target: name,
+              reason: "Start MCP OAuth credential flow",
+            })
+            requireCapabilityDecision(gate.decision)
             const mcp = yield* MCP.Service
             const supports = yield* mcp.supportsOAuth(name)
             if (!supports) return { supports }
+            const auth = yield* mcp.startAuth(name)
+            completeCapabilityOperation(gate.auditID, "authorization started")
             return {
               supports,
-              auth: yield* mcp.startAuth(name),
+              auth,
             }
           }),
         )
@@ -218,8 +262,22 @@ export const McpRoutes = lazy(() =>
         jsonRequest("McpRoutes.auth.callback", c, function* () {
           const name = c.req.param("name")
           const { code } = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.auth.callback",
+            capability: "mcp_manage",
+            risk: "credential",
+            source: "mcp",
+            operation: "update",
+            previewed: true,
+            reversible: true,
+            target: name,
+            reason: "Complete MCP OAuth credential flow",
+          })
+          requireCapabilityDecision(gate.decision)
           const mcp = yield* MCP.Service
-          return yield* mcp.finishAuth(name, code)
+          const status = yield* mcp.finishAuth(name, code)
+          completeCapabilityOperation(gate.auditID, "completed")
+          return status
         }),
     )
     .post(
@@ -246,12 +304,26 @@ export const McpRoutes = lazy(() =>
           "McpRoutes.auth.authenticate",
           c,
           Effect.gen(function* () {
+            const gate = decideCapabilityOperation({
+              caller: "route:mcp.auth.authenticate",
+              capability: "mcp_manage",
+              risk: "credential",
+              source: "mcp",
+              operation: "execute",
+              previewed: true,
+              reversible: true,
+              target: name,
+              reason: "Authenticate MCP OAuth credential flow",
+            })
+            requireCapabilityDecision(gate.decision)
             const mcp = yield* MCP.Service
             const supports = yield* mcp.supportsOAuth(name)
             if (!supports) return { supports }
+            const status = yield* mcp.authenticate(name)
+            completeCapabilityOperation(gate.auditID, "completed")
             return {
               supports,
-              status: yield* mcp.authenticate(name),
+              status,
             }
           }),
         )
@@ -282,8 +354,21 @@ export const McpRoutes = lazy(() =>
       async (c) =>
         jsonRequest("McpRoutes.auth.remove", c, function* () {
           const name = c.req.param("name")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.auth.remove",
+            capability: "mcp_manage",
+            risk: "destructive",
+            source: "mcp",
+            operation: "delete",
+            previewed: true,
+            reversible: false,
+            target: name,
+            reason: "Remove MCP OAuth credentials",
+          })
+          requireCapabilityDecision(gate.decision)
           const mcp = yield* MCP.Service
           yield* mcp.removeAuth(name)
+          completeCapabilityOperation(gate.auditID, "completed")
           return { success: true as const }
         }),
     )
@@ -307,8 +392,21 @@ export const McpRoutes = lazy(() =>
       async (c) =>
         jsonRequest("McpRoutes.connect", c, function* () {
           const { name } = c.req.valid("param")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.connect",
+            capability: "mcp_manage",
+            risk: "modify",
+            source: "mcp",
+            operation: "execute",
+            previewed: true,
+            reversible: true,
+            target: name,
+            reason: "Explicit MCP server connection",
+          })
+          requireCapabilityDecision(gate.decision)
           const mcp = yield* MCP.Service
           yield* mcp.connect(name)
+          completeCapabilityOperation(gate.auditID, "completed")
           return true
         }),
     )
@@ -342,11 +440,25 @@ export const McpRoutes = lazy(() =>
         jsonRequest("McpRoutes.manage.update", c, function* () {
           const { name } = c.req.valid("param")
           const { config, target } = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.manage.update",
+            capability: "mcp_manage",
+            risk: "modify",
+            source: "mcp",
+            operation: "update",
+            previewed: true,
+            reversible: true,
+            target: name,
+            reason: "Explicit MCP configuration update",
+            metadata: { target: target ?? "auto" },
+          })
+          requireCapabilityDecision(gate.decision)
           const cfg = yield* Config.Service
           yield* cfg.upsertMcp(name, config, { target: target ?? "auto" })
           const catalog = yield* McpCatalog.Service
           const item = (yield* catalog.manage()).find((entry) => entry.name === name)
           if (!item) throw new Error(`MCP ${name} not found after update`)
+          completeCapabilityOperation(gate.auditID, "completed")
           return item
         }),
     )
@@ -370,8 +482,21 @@ export const McpRoutes = lazy(() =>
       async (c) =>
         jsonRequest("McpRoutes.disconnect", c, function* () {
           const { name } = c.req.valid("param")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.disconnect",
+            capability: "mcp_manage",
+            risk: "modify",
+            source: "mcp",
+            operation: "execute",
+            previewed: true,
+            reversible: true,
+            target: name,
+            reason: "Explicit MCP server disconnection",
+          })
+          requireCapabilityDecision(gate.decision)
           const mcp = yield* MCP.Service
           yield* mcp.disconnect(name)
+          completeCapabilityOperation(gate.auditID, "completed")
           return true
         }),
     )
@@ -397,6 +522,18 @@ export const McpRoutes = lazy(() =>
       async (c) =>
         jsonRequest("McpRoutes.manage.delete", c, function* () {
           const { name } = c.req.valid("param")
+          const gate = decideCapabilityOperation({
+            caller: "route:mcp.manage.delete",
+            capability: "mcp_manage",
+            risk: "destructive",
+            source: "mcp",
+            operation: "delete",
+            previewed: true,
+            reversible: false,
+            target: name,
+            reason: "Explicit MCP configuration deletion",
+          })
+          requireCapabilityDecision(gate.decision)
           const cfg = yield* Config.Service
           const mcp = yield* MCP.Service
           const catalog = yield* McpCatalog.Service
@@ -404,6 +541,7 @@ export const McpRoutes = lazy(() =>
           yield* cfg.removeMcp(name)
           yield* catalog.removeManagedFiles(name)
           yield* mcp.removeAuth(name).pipe(Effect.catch(() => Effect.void))
+          completeCapabilityOperation(gate.auditID, "completed")
           return { success: true as const }
         }),
     ),

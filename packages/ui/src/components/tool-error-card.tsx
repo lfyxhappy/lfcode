@@ -13,6 +13,7 @@ export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "c
   defaultOpen?: boolean
   subtitle?: string
   href?: string
+  occurrences?: number
 }
 
 export function ToolErrorCard(props: ToolErrorCardProps) {
@@ -23,7 +24,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   })
   const open = () => state.open
   const copied = () => state.copied
-  const [split, rest] = splitProps(props, ["tool", "error", "defaultOpen", "subtitle", "href"])
+  const [split, rest] = splitProps(props, ["tool", "error", "defaultOpen", "subtitle", "href", "occurrences"])
   const name = createMemo(() => {
     const map: Record<string, string> = {
       read: "ui.tool.read",
@@ -52,12 +53,13 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   })
 
   const subtitle = createMemo(() => {
-    if (split.subtitle) return split.subtitle
+    const count = split.occurrences && split.occurrences > 1 ? ` ×${split.occurrences}` : ""
+    if (split.subtitle) return `${split.subtitle}${count}`
     const parts = tail().split(": ")
-    if (parts.length <= 1) return i18n.t("ui.toolErrorCard.failed")
+    if (parts.length <= 1) return `${i18n.t("ui.toolErrorCard.failed")}${count}`
     const head = (parts[0] ?? "").trim()
-    if (!head) return i18n.t("ui.toolErrorCard.failed")
-    return head[0] ? head[0].toUpperCase() + head.slice(1) : i18n.t("ui.toolErrorCard.failed")
+    if (!head) return `${i18n.t("ui.toolErrorCard.failed")}${count}`
+    return `${head[0] ? head[0].toUpperCase() + head.slice(1) : i18n.t("ui.toolErrorCard.failed")}${count}`
   })
 
   const body = createMemo(() => {

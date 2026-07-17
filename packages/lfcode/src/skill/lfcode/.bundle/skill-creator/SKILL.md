@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Use when creating, updating, packaging, or validating an Lfcode skill. Covers normal user-managed skills stored under the Lfcode data directory `skills/<name>/` and built-in bundled skills shipped from `packages/lfcode/src/skill/lfcode/.bundle/<name>/`.
+description: Use when creating, updating, packaging, or validating an Lfcode skill. Covers normal user-managed skills stored under `~/.lfcode/skills/<name>/` and built-in bundled skills shipped from `packages/lfcode/src/skill/lfcode/.bundle/<name>/`.
 ---
 
 # Lfcode Skill Creator
@@ -9,7 +9,7 @@ Create only the files another Lfcode agent needs.
 
 ## Choose the skill type
 
-1. Create a user-managed skill under `<lfcode-config-root>/skills/<skill-name>/` when the skill should live in user data and be editable from the app.
+1. Create a user-managed skill under `~/.lfcode/skills/<skill-name>/` when the skill should live in user data and be editable from the app.
 2. Create a built-in skill under `packages/lfcode/src/skill/lfcode/.bundle/<skill-name>/` when the skill should ship with Lfcode itself.
 3. Keep the folder name identical to the skill `name`. Use lowercase letters, digits, and hyphens only.
 
@@ -43,7 +43,7 @@ Then write the body as operational instructions, not user-facing marketing text.
 
 For a user-managed skill:
 
-1. Create or update files under `<lfcode-config-root>/skills/<skill-name>/`.
+1. Create or update files under `~/.lfcode/skills/<skill-name>/`.
 2. Confirm the folder contains `SKILL.md`.
 3. Refresh skills in the app or call the skill discovery path again if needed.
 

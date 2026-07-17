@@ -8,3 +8,4 @@ export { BackgroundJobTable, BackgroundJobLogTable } from "../background-job/bac
 export { HistoryFtsTable } from "../history/fts.sql"
 export { MemoryRecordTable } from "../memory/record.sql"
 export { MaintenanceRunTable, MaintenanceCandidateTable, MaintenanceCandidateEventTable, MaintenanceLockTable } from "../maintenance/maintenance.sql"
+export { CapabilityGrantTable, CapabilityAuditTable } from "../capability/capability.sql"

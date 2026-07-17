@@ -2,6 +2,7 @@ import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
+import { CapabilityPersistence } from "../../src/capability/persistence"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
@@ -66,6 +67,9 @@ describe("task tool", () => {
         const tool = yield* info.init()
         const result = yield* tool.execute({ operation: { action: "list" } }, ctx(sess.id))
         expect(result.metadata.count).toBe(2)
+        expect(CapabilityPersistence.listAudit({ capability: "context_read" })).toContainEqual(
+          expect.objectContaining({ reason: "Task list", rollback: expect.objectContaining({ sessions: [sess.id], tasks: ["T1", "T2"] }) }),
+        )
       }),
     ),
   )

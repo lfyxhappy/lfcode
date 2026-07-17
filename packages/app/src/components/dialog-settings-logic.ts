@@ -6,13 +6,13 @@ export type SettingsTab =
   | "appControl"
   | "shortcuts"
   | "browser"
-  | "runtimes"
   | "archives"
   | "models"
   | "mcp"
   | "plugins"
   | "skills"
   | "usage"
+  | "agentOS"
 
 export function nextVisitedSettingsTabs(current: Set<SettingsTab>, tab: SettingsTab) {
   if (current.has(tab)) return current

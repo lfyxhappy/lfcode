@@ -23,9 +23,12 @@ import { lazy } from "@/util/lazy"
 import { jsonRequest } from "./trace"
 import { Plugin } from "@/plugin"
 import { Instance } from "@/project/instance"
+import { getRuntimeManageState, RuntimeManageItem, type RuntimeManageItem as RuntimeManageItemValue } from "@/runtime-registry"
+import { Skill } from "@/skill"
 import {
   commitImport,
   exportPlugin,
+  inspectImportPreview,
   isManagedPluginSpecifier,
   listInstalledPlugins,
   previewDirectoryImport,
@@ -34,6 +37,12 @@ import {
   setPluginEnabled,
   uninstallPlugin,
 } from "@/plugin/library"
+import {
+  capabilitySourceFromPluginTrust,
+  completeCapabilityOperation,
+  decideCapabilityOperation,
+  requireCapabilityDecision,
+} from "@/capability/gate"
 
 const PluginTargetStatus = z
   .object({
@@ -51,6 +60,27 @@ const PluginRuntimeStatus = z
     error: z.string().optional(),
   })
   .meta({ ref: "PluginRuntimeStatus" })
+
+const PluginRuntimeDependencyStatus = z
+  .object({
+    id: z.string(),
+    required: z.boolean(),
+    installed: z.boolean(),
+    source: z.enum(["bundled", "managed", "system", "missing"]),
+    version: z.string().optional(),
+    detail: z.string().optional(),
+    install: z.boolean(),
+  })
+  .meta({ ref: "PluginRuntimeDependencyStatus" })
+
+const PluginSkillDependencyStatus = z
+  .object({
+    id: z.string(),
+    required: z.boolean(),
+    available: z.boolean(),
+    purpose: z.string().optional(),
+  })
+  .meta({ ref: "PluginSkillDependencyStatus" })
 
 const PluginToggle = z
   .object({
@@ -154,14 +184,21 @@ const PluginManifestSummary = z
         }),
       )
       .optional(),
+    skillRequirements: z
+      .array(z.object({ id: z.string(), purpose: z.string().optional(), required: z.boolean().optional() }))
+      .optional(),
+    uiContributions: z
+      .array(z.object({ slot: z.enum(["tui-slot", "desktop-settings-panel", "desktop-session-toolbar"]), title: z.string().optional() }))
+      .optional(),
   })
   .meta({ ref: "PluginManifestSummary" })
 
 const PluginInspect = z
   .object({
+    kind: z.enum(["plugin", "runtime"]),
     spec: z.string(),
     scope: z.enum(["global", "local"]),
-    source: z.enum(["file", "npm", "managed"]),
+    source: z.enum(["file", "npm", "managed", "runtime"]),
     declaredIn: z.string(),
     packageName: z.string().optional(),
     enabled: z.boolean(),
@@ -171,6 +208,9 @@ const PluginInspect = z
     server: PluginTargetStatus,
     tui: PluginTargetStatus,
     runtime: PluginRuntimeStatus.optional(),
+    runtimeItem: RuntimeManageItem.optional(),
+    runtimeDependencies: z.array(PluginRuntimeDependencyStatus),
+    skillRequirements: z.array(PluginSkillDependencyStatus),
   })
   .meta({ ref: "PluginInspect" })
 
@@ -211,7 +251,14 @@ async function inspectPluginTarget(spec: string, kind: "server" | "tui", target?
   }
 }
 
-async function inspectPlugin(spec: string, scope: "global" | "local", declaredIn: string, enabled: boolean) {
+async function inspectPlugin(
+  spec: string,
+  scope: "global" | "local",
+  declaredIn: string,
+  enabled: boolean,
+  runtimeState?: Awaited<ReturnType<typeof getRuntimeManageState>>,
+  skills: ReadonlyArray<Skill.Info> = [],
+) {
   const source = pluginSource(spec)
   const packageName = source === "npm" ? parsePluginSpecifier(spec).pkg : undefined
   const target = await resolveInspectTarget(spec, source, packageName)
@@ -219,6 +266,7 @@ async function inspectPlugin(spec: string, scope: "global" | "local", declaredIn
   const compatible = await inspectCompatibility(source, target, pkg)
   const manifest = readPluginManifestSummary(spec, pkg)
   return {
+    kind: "plugin" as const,
     spec,
     scope,
     source,
@@ -230,6 +278,51 @@ async function inspectPlugin(spec: string, scope: "global" | "local", declaredIn
     ...(compatible.message ? { compatibilityMessage: compatible.message } : {}),
     server: await inspectPluginTarget(spec, "server", target),
     tui: await inspectPluginTarget(spec, "tui", target),
+    runtimeDependencies: (manifest?.runtimeDependencies ?? []).map((dependency) => {
+      const item = runtimeState?.items.find((candidate) => candidate.id === dependency.id)
+      return {
+        id: dependency.id,
+        required: dependency.required !== false,
+        installed: item?.installed ?? false,
+        source: item?.source ?? "missing",
+        ...(item?.version ? { version: item.version } : {}),
+        ...(item?.detail ? { detail: item.detail } : {}),
+        install: item?.actions.install ?? false,
+      }
+    }),
+    skillRequirements: (manifest?.skillRequirements ?? []).map((dependency) => ({
+      id: dependency.id,
+      required: dependency.required !== false,
+      available: skills.some((skill) => skill.name === dependency.id),
+      ...(dependency.purpose ? { purpose: dependency.purpose } : {}),
+    })),
+  }
+}
+
+function inspectRuntimePlugin(item: RuntimeManageItemValue) {
+  return {
+    kind: "runtime" as const,
+    spec: `runtime:${item.id}`,
+    scope: "global" as const,
+    source: "runtime" as const,
+    declaredIn: "runtime-registry",
+    enabled: true,
+    manifest: {
+      id: item.id,
+      name: item.title,
+      ...(item.version ? { version: item.version } : {}),
+      description: item.description,
+      category: "runtime" as const,
+      trust: "bundled",
+      apiVersion: "runtime-registry",
+      capabilities: item.usedBy,
+    },
+    compatible: true,
+    server: unresolvedTarget("Managed by Runtime Registry"),
+    tui: unresolvedTarget("Managed by Runtime Registry"),
+    runtimeItem: item,
+    runtimeDependencies: [],
+    skillRequirements: [],
   }
 }
 
@@ -288,8 +381,11 @@ export const PluginRoutes = lazy(() =>
           const cfg = yield* Config.Service
           const info = yield* cfg.get()
           const runtime = yield* Plugin.Service.use((svc) => svc.status())
-          return yield* Effect.promise(() =>
-            Promise.all(
+          const skill = yield* Skill.Service
+          const skills = yield* skill.all()
+          return yield* Effect.promise(async () => {
+            const runtimeState = await getRuntimeManageState()
+            const plugins = await Promise.all(
               (info.plugin_origins ?? []).map(async (origin) => {
                 const spec = ConfigPlugin.pluginSpecifier(origin.spec)
                 const entry = await inspectPlugin(
@@ -297,6 +393,8 @@ export const PluginRoutes = lazy(() =>
                   origin.scope,
                   origin.source,
                   info.plugin_enabled?.[spec] !== false,
+                  runtimeState,
+                  skills,
                 )
                 const active = runtime.find((item) => item.spec === spec)
                 if (!active) return entry
@@ -309,8 +407,9 @@ export const PluginRoutes = lazy(() =>
                   },
                 }
               }),
-            ),
-          )
+            )
+            return [...plugins, ...runtimeState.items.map(inspectRuntimePlugin)]
+          })
         }),
     )
     .get(
@@ -376,7 +475,22 @@ export const PluginRoutes = lazy(() =>
       validator("json", PluginLibraryCommitInput),
       async (c) =>
         jsonRequest("PluginRoutes.libraryCommit", c, function* () {
+          const preview = yield* Effect.promise(() => inspectImportPreview(c.req.valid("json").token))
+          const gate = decideCapabilityOperation({
+            caller: "route:plugin.libraryCommit",
+            capability: "plugin_manage",
+            risk: "install",
+            source: capabilitySourceFromPluginTrust(preview.report.trust),
+            operation: "install",
+            previewed: true,
+            reversible: true,
+            target: `lfplugin:${preview.report.id}`,
+            reason: "Commit an explicitly previewed plugin import",
+            metadata: { pluginID: preview.report.id, digest: preview.report.source.digest },
+          })
+          requireCapabilityDecision(gate.decision)
           const result = yield* Effect.promise(() => commitImport(c.req.valid("json").token))
+          completeCapabilityOperation(gate.auditID, "completed", { action: "uninstall", spec: result.spec })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return publicLibraryRecord(result)
         }),
@@ -401,7 +515,20 @@ export const PluginRoutes = lazy(() =>
       async (c) =>
         jsonRequest("PluginRoutes.libraryToggle", c, function* () {
           const input = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:plugin.libraryToggle",
+            capability: "plugin_manage",
+            risk: "modify",
+            source: "plugin",
+            operation: input.enabled ? "enable" : "disable",
+            previewed: true,
+            reversible: true,
+            target: input.spec,
+            reason: "Explicit plugin lifecycle change",
+          })
+          requireCapabilityDecision(gate.decision)
           const result = yield* Effect.promise(() => setPluginEnabled(input.spec, input.enabled))
+          completeCapabilityOperation(gate.auditID, "completed", { action: "toggle", enabled: !input.enabled })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return result
         }),
@@ -425,7 +552,21 @@ export const PluginRoutes = lazy(() =>
       validator("json", PluginLibrarySpecInput),
       async (c) =>
         jsonRequest("PluginRoutes.libraryUninstall", c, function* () {
-          const result = yield* Effect.promise(() => uninstallPlugin(c.req.valid("json").spec))
+          const spec = c.req.valid("json").spec
+          const gate = decideCapabilityOperation({
+            caller: "route:plugin.libraryUninstall",
+            capability: "plugin_manage",
+            risk: "destructive",
+            source: "plugin",
+            operation: "delete",
+            previewed: true,
+            reversible: false,
+            target: spec,
+            reason: "Explicit managed plugin uninstall",
+          })
+          requireCapabilityDecision(gate.decision)
+          const result = yield* Effect.promise(() => uninstallPlugin(spec))
+          completeCapabilityOperation(gate.auditID, "completed")
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return result
         }),
@@ -450,7 +591,22 @@ export const PluginRoutes = lazy(() =>
       async (c) =>
         jsonRequest("PluginRoutes.libraryExport", c, function* () {
           const input = c.req.valid("json")
-          return yield* Effect.promise(() => exportPlugin(input.spec, input.output))
+          const gate = decideCapabilityOperation({
+            caller: "route:plugin.libraryExport",
+            capability: "plugin_manage",
+            risk: "modify",
+            source: "plugin",
+            operation: "export",
+            previewed: true,
+            reversible: true,
+            target: input.spec,
+            reason: "Explicit managed plugin export",
+            metadata: { output: input.output },
+          })
+          requireCapabilityDecision(gate.decision)
+          const result = yield* Effect.promise(() => exportPlugin(input.spec, input.output))
+          completeCapabilityOperation(gate.auditID, "completed")
+          return result
         }),
     )
     .post(

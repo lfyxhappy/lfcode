@@ -50,6 +50,7 @@ export const ReplaceRangeTool = Tool.define(
                   tool: "replace_range",
                   category: "context",
                   field: "expected_version",
+                  fields: ["expected_version"],
                   retryable: true,
                   recovery: "Read the target file again and retry with the new version.",
                   message: "The file changed after the previous read.",

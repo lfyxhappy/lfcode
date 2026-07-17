@@ -59,7 +59,7 @@ type RuntimeOperationLogState = {
 const PYTHON_BASE_ID = "python-base"
 const PYTHON_MANAGED_ID = "python-managed"
 
-export const SettingsRuntimes: Component = () => {
+export const SettingsRuntimes: Component<{ embedded?: boolean }> = (props) => {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
   const platform = usePlatform()
@@ -181,8 +181,9 @@ export const SettingsRuntimes: Component = () => {
   }
 
   return (
-    <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+    <div class={props.embedded ? "flex flex-col gap-4" : "no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10"}>
+      <Show when={!props.embedded}>
+        <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
         <div class="flex max-w-[980px] items-start justify-between gap-4 pb-6 pt-6">
           <div class="flex flex-col gap-1">
             <h2 class="text-16-medium text-text-strong">{language.t("settings.tab.runtimes")}</h2>
@@ -192,9 +193,10 @@ export const SettingsRuntimes: Component = () => {
             {state.loading ? language.t("common.loading") : language.t("settings.runtimes.action.refresh")}
           </Button>
         </div>
-      </div>
+        </div>
+      </Show>
 
-      <div class="max-w-[980px]">
+      <div class={props.embedded ? "flex flex-col gap-8" : "max-w-[980px]"}>
         <Show when={loadError()}>
           {(message) => <SettingsMessage>{message()}</SettingsMessage>}
         </Show>

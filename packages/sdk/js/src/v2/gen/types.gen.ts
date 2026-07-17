@@ -255,6 +255,13 @@ export type EventMetricsToolCall = {
     output_bytes: number
     tool_call_id: string
     tool_call_status: "success" | "error"
+    execute_ms?: number
+    schema_build_ms?: number
+    error_category?: string
+    retry_count?: number
+    kind?: string
+    namespace?: string
+    latency_class?: string
   }
 }
 
@@ -859,25 +866,6 @@ export type EventSessionGoal = {
   }
 }
 
-export type Todo = {
-  /**
-   * Brief description of the task
-   */
-  content: string
-  /**
-   * Current status of the task: pending, in_progress, completed, cancelled
-   */
-  status: string
-}
-
-export type EventTodoUpdated = {
-  type: "todo.updated"
-  properties: {
-    sessionID: string
-    todos: Array<Todo>
-  }
-}
-
 export type SessionStatus =
   | {
       type: "idle"
@@ -910,6 +898,25 @@ export type EventSessionIdle = {
   type: "session.idle"
   properties: {
     sessionID: string
+  }
+}
+
+export type Todo = {
+  /**
+   * Brief description of the task
+   */
+  content: string
+  /**
+   * Current status of the task: pending, in_progress, completed, cancelled
+   */
+  status: string
+}
+
+export type EventTodoUpdated = {
+  type: "todo.updated"
+  properties: {
+    sessionID: string
+    todos: Array<Todo>
   }
 }
 
@@ -1770,9 +1777,9 @@ export type GlobalEvent = {
     | EventBashInteractiveAsked
     | EventBashInteractiveReplied
     | EventSessionGoal
-    | EventTodoUpdated
     | EventSessionStatus
     | EventSessionIdle
+    | EventTodoUpdated
     | EventSessionCompacted
     | EventMcpToolsChanged
     | EventMcpBrowserOpenFailed
@@ -3046,8 +3053,18 @@ export type ProviderAuthAuthorization = {
 export type LspStatus = {
   id: string
   name: string
-  root: string
-  status: "connected" | "error"
+  root?: string
+  extensions: Array<string>
+  capabilities: {
+    completion: boolean
+    completionTriggerCharacters: Array<string>
+    hover: boolean
+    diagnostics: boolean
+    definition: boolean
+    formatting: boolean
+  }
+  status: "available" | "connected" | "error"
+  error?: string
 }
 
 export type Symbol = {
@@ -3143,9 +3160,9 @@ export type Event =
   | EventBashInteractiveAsked
   | EventBashInteractiveReplied
   | EventSessionGoal
-  | EventTodoUpdated
   | EventSessionStatus
   | EventSessionIdle
+  | EventTodoUpdated
   | EventSessionCompacted
   | EventMcpToolsChanged
   | EventMcpBrowserOpenFailed
@@ -3238,6 +3255,15 @@ export type PluginManifestSummary = {
     version?: string
     required?: boolean
   }>
+  skillRequirements?: Array<{
+    id: string
+    purpose?: string
+    required?: boolean
+  }>
+  uiContributions?: Array<{
+    slot: "tui-slot" | "desktop-settings-panel" | "desktop-session-toolbar"
+    title?: string
+  }>
 }
 
 export type PluginTargetStatus = {
@@ -3253,10 +3279,28 @@ export type PluginRuntimeStatus = {
   error?: string
 }
 
+export type PluginRuntimeDependencyStatus = {
+  id: string
+  required: boolean
+  installed: boolean
+  source: "bundled" | "managed" | "system" | "missing"
+  version?: string
+  detail?: string
+  install: boolean
+}
+
+export type PluginSkillDependencyStatus = {
+  id: string
+  required: boolean
+  available: boolean
+  purpose?: string
+}
+
 export type PluginInspect = {
+  kind: "plugin" | "runtime"
   spec: string
   scope: "global" | "local"
-  source: "file" | "npm" | "managed"
+  source: "file" | "npm" | "managed" | "runtime"
   declaredIn: string
   packageName?: string
   enabled: boolean
@@ -3266,6 +3310,9 @@ export type PluginInspect = {
   server: PluginTargetStatus
   tui: PluginTargetStatus
   runtime?: PluginRuntimeStatus
+  runtimeItem?: RuntimeManageItem
+  runtimeDependencies: Array<PluginRuntimeDependencyStatus>
+  skillRequirements: Array<PluginSkillDependencyStatus>
 }
 
 export type PluginLibraryRecord = {
@@ -3391,6 +3438,70 @@ export type PluginLibraryExportInput = {
 export type PluginToggle = {
   spec: string
   enabled: boolean
+}
+
+export type CapabilityCatalogEntry = {
+  id: string
+  title: string
+  description?: string
+  kind: "tool" | "skill" | "plugin" | "mcp" | "runtime"
+  source: "core" | "official" | "local" | "public" | "plugin" | "mcp" | "runtime"
+  risk: "read" | "modify" | "install" | "credential" | "destructive" | "release"
+  scope: "global" | "project"
+  health: "ready" | "disabled" | "degraded" | "missing"
+  authentication: "not_required" | "available" | "required" | "unknown"
+  dependencies: Array<string>
+  foreground: boolean
+  background: boolean
+  subagent: boolean
+  reversible: boolean
+}
+
+export type CapabilityGrant = {
+  id: string
+  capability: string
+  scope: string
+  source: "core" | "official" | "local" | "public" | "plugin" | "mcp" | "runtime"
+  expiresAt?: number
+  remainingBudget?: number
+  revoked?: boolean
+}
+
+export type CapabilityStopResult = {
+  scope: "global" | "project" | "session"
+  sessions: Array<{
+    id: string
+    projectID: string
+    status: "requested" | "skipped" | "failed"
+    error?: string
+  }>
+  jobs: Array<{
+    id: string
+    status: "cancelled" | "unchanged" | "failed"
+    error?: string
+  }>
+}
+
+export type CapabilityAudit = {
+  id: string
+  caller: string
+  capability: string
+  operation: "read" | "execute" | "stop" | "install" | "update" | "enable" | "disable" | "delete" | "export" | "publish"
+  decision: "allow" | "preview" | "confirm" | "deny"
+  target?: string
+  projectID?: string
+  sessionID?: string
+  messageID?: string
+  reason?: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  result?: string
+  rollback?: {
+    [key: string]: unknown
+  }
+  createdAt: number
+  updatedAt: number
 }
 
 export type McpStatusConnected = {
@@ -7114,6 +7225,30 @@ export type LspStatusResponses = {
 
 export type LspStatusResponse = LspStatusResponses[keyof LspStatusResponses]
 
+export type LspEnsureData = {
+  body?: {
+    path: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/lsp/ensure"
+}
+
+export type LspEnsureResponses = {
+  /**
+   * Language service start result
+   */
+  200: {
+    supported: boolean
+    status: Array<LspStatus>
+  }
+}
+
+export type LspEnsureResponse = LspEnsureResponses[keyof LspEnsureResponses]
+
 export type LspQueryData = {
   body?:
     | {
@@ -7145,6 +7280,12 @@ export type LspQueryData = {
         }
         triggerCharacter?: string
         maxItems?: number
+      }
+    | {
+        kind: "completionResolve"
+        path: string
+        text: string
+        item: unknown
       }
     | {
         kind: "signatureHelp"
@@ -8138,6 +8279,294 @@ export type PluginToggleResponses = {
 }
 
 export type PluginToggleResponse = PluginToggleResponses[keyof PluginToggleResponses]
+
+export type CapabilityListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    q?: string
+    kind?: "tool" | "skill" | "plugin" | "mcp" | "runtime"
+  }
+  url: "/capability"
+}
+
+export type CapabilityListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type CapabilityListError = CapabilityListErrors[keyof CapabilityListErrors]
+
+export type CapabilityListResponses = {
+  /**
+   * Capabilities
+   */
+  200: Array<CapabilityCatalogEntry>
+}
+
+export type CapabilityListResponse = CapabilityListResponses[keyof CapabilityListResponses]
+
+export type CapabilityGrantListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    capability?: string
+    activeOnly?: boolean
+  }
+  url: "/capability/grant"
+}
+
+export type CapabilityGrantListResponses = {
+  /**
+   * Capability grants
+   */
+  200: Array<CapabilityGrant>
+}
+
+export type CapabilityGrantListResponse = CapabilityGrantListResponses[keyof CapabilityGrantListResponses]
+
+export type CapabilityGrantSaveData = {
+  body?: CapabilityGrant
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/grant"
+}
+
+export type CapabilityGrantSaveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type CapabilityGrantSaveError = CapabilityGrantSaveErrors[keyof CapabilityGrantSaveErrors]
+
+export type CapabilityGrantSaveResponses = {
+  /**
+   * Capability grant
+   */
+  200: CapabilityGrant
+}
+
+export type CapabilityGrantSaveResponse = CapabilityGrantSaveResponses[keyof CapabilityGrantSaveResponses]
+
+export type CapabilityGrantRevokeData = {
+  body?: never
+  path: {
+    grantID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/grant/{grantID}/revoke"
+}
+
+export type CapabilityGrantRevokeErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type CapabilityGrantRevokeError = CapabilityGrantRevokeErrors[keyof CapabilityGrantRevokeErrors]
+
+export type CapabilityGrantRevokeResponses = {
+  /**
+   * Revoked capability grant
+   */
+  200: CapabilityGrant
+}
+
+export type CapabilityGrantRevokeResponse = CapabilityGrantRevokeResponses[keyof CapabilityGrantRevokeResponses]
+
+export type CapabilityDisableData = {
+  body?: {
+    capability: string
+    caller: string
+    scope?: string
+    reason?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/disable"
+}
+
+export type CapabilityDisableErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type CapabilityDisableError = CapabilityDisableErrors[keyof CapabilityDisableErrors]
+
+export type CapabilityDisableResponses = {
+  /**
+   * Capability disable grant
+   */
+  200: CapabilityGrant
+}
+
+export type CapabilityDisableResponse = CapabilityDisableResponses[keyof CapabilityDisableResponses]
+
+export type CapabilityStopData = {
+  body?: {
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    caller: string
+    reason?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/stop"
+}
+
+export type CapabilityStopErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type CapabilityStopError = CapabilityStopErrors[keyof CapabilityStopErrors]
+
+export type CapabilityStopResponses = {
+  /**
+   * Stop result
+   */
+  200: CapabilityStopResult
+}
+
+export type CapabilityStopResponse = CapabilityStopResponses[keyof CapabilityStopResponses]
+
+export type CapabilityAuditListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    capability?: string
+    sessionID?: string
+    projectID?: string
+    limit?: number
+  }
+  url: "/capability/audit"
+}
+
+export type CapabilityAuditListResponses = {
+  /**
+   * Capability audit events
+   */
+  200: Array<CapabilityAudit>
+}
+
+export type CapabilityAuditListResponse = CapabilityAuditListResponses[keyof CapabilityAuditListResponses]
+
+export type CapabilityDecisionData = {
+  body?: {
+    auditID: string
+    caller: string
+    capability: string
+    risk: "read" | "modify" | "install" | "credential" | "destructive" | "release"
+    source: "core" | "official" | "local" | "public" | "plugin" | "mcp" | "runtime"
+    operation:
+      | "read"
+      | "execute"
+      | "stop"
+      | "install"
+      | "update"
+      | "enable"
+      | "disable"
+      | "delete"
+      | "export"
+      | "publish"
+    previewed: boolean
+    reversible: boolean
+    grantID?: string
+    target?: string
+    projectID?: string
+    sessionID?: string
+    messageID?: string
+    reason?: string
+    metadata?: {
+      [key: string]: unknown
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/decision"
+}
+
+export type CapabilityDecisionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type CapabilityDecisionError = CapabilityDecisionErrors[keyof CapabilityDecisionErrors]
+
+export type CapabilityDecisionResponses = {
+  /**
+   * Policy decision and audit event
+   */
+  200: {
+    decision: "allow" | "preview" | "confirm" | "deny"
+    audit: CapabilityAudit
+  }
+}
+
+export type CapabilityDecisionResponse = CapabilityDecisionResponses[keyof CapabilityDecisionResponses]
+
+export type CapabilityGetData = {
+  body?: never
+  path: {
+    capabilityID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/capability/{capabilityID}"
+}
+
+export type CapabilityGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type CapabilityGetError = CapabilityGetErrors[keyof CapabilityGetErrors]
+
+export type CapabilityGetResponses = {
+  /**
+   * Capability
+   */
+  200: CapabilityCatalogEntry
+}
+
+export type CapabilityGetResponse = CapabilityGetResponses[keyof CapabilityGetResponses]
 
 export type McpManageListData = {
   body?: never

@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import z from "zod"
 import { MessageID, SessionID } from "@/session/schema"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 import { cancelBackgroundJob, reconcileBackgroundJob } from "@/background-job/control"
 import { BackgroundJobPersistence } from "@/background-job/persistence"
 import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
@@ -99,10 +100,16 @@ export const BackgroundJobRoutes = lazy(() =>
       async (c) =>
         jsonRequest("BackgroundJobRoutes.list", c, function* () {
           const query = c.req.valid("query")
-          return BackgroundJobPersistence.list({
+          const gate = contextReadGate(query.sessionID ? `background-jobs:${query.sessionID}` : "background-jobs")
+          const jobs = BackgroundJobPersistence.list({
             ...(query.sessionID ? { sessionID: query.sessionID } : {}),
             ...(query.status ? { status: query.status } : {}),
           })
+          completeCapabilityOperation(gate.auditID, `completed (${jobs.length} jobs)`, {
+            ...(query.sessionID ? { sessions: [query.sessionID] } : {}),
+            jobs: jobs.map((job) => job.id),
+          })
+          return jobs
         }),
     )
     .get(
@@ -132,7 +139,11 @@ export const BackgroundJobRoutes = lazy(() =>
       async (c) =>
         jsonRequest("BackgroundJobRoutes.get", c, function* () {
           const params = c.req.valid("param")
+          const gate = contextReadGate(`background-job:${params.jobID}`)
           const job = BackgroundJobPersistence.load(params.jobID)
+          completeCapabilityOperation(gate.auditID, job ? "completed (1 job)" : "completed (0 jobs)", {
+            ...(job ? { sessions: [job.sessionID], jobs: [job.id] } : { jobs: [] }),
+          })
           if (!job) throw new NotFoundError({ message: `Background job not found: ${params.jobID}` })
           return job
         }),
@@ -171,12 +182,22 @@ export const BackgroundJobRoutes = lazy(() =>
         jsonRequest("BackgroundJobRoutes.logs", c, function* () {
           const params = c.req.valid("param")
           const query = c.req.valid("query")
+          const gate = contextReadGate(`background-job:${params.jobID}`)
           const job = BackgroundJobPersistence.load(params.jobID)
-          if (!job) throw new NotFoundError({ message: `Background job not found: ${params.jobID}` })
-          return BackgroundJobPersistence.listLogs({
+          if (!job) {
+            completeCapabilityOperation(gate.auditID, "completed (0 jobs)", { jobs: [] })
+            throw new NotFoundError({ message: `Background job not found: ${params.jobID}` })
+          }
+          const logs = BackgroundJobPersistence.listLogs({
             jobID: params.jobID,
             ...(query.afterSeq !== undefined ? { afterSeq: query.afterSeq } : {}),
           })
+          completeCapabilityOperation(gate.auditID, `completed (${logs.length} log rows)`, {
+            sessions: [job.sessionID],
+            jobs: [job.id],
+            logCount: logs.length,
+          })
+          return logs
         }),
     )
     .post(
@@ -250,3 +271,19 @@ export const BackgroundJobRoutes = lazy(() =>
         }),
     ),
 )
+
+function contextReadGate(target: string) {
+  const gate = decideCapabilityOperation({
+    caller: "route:background-job",
+    capability: "context_read",
+    risk: "read",
+    source: "core",
+    operation: "read",
+    previewed: true,
+    reversible: true,
+    target,
+    reason: "Background job route read",
+  })
+  requireCapabilityDecision(gate.decision)
+  return gate
+}

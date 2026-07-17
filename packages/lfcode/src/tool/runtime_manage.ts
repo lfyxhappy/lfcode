@@ -1,6 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
 import * as Tool from "./tool"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 import DESCRIPTION from "./runtime_manage.txt"
 import {
   getRuntimeManageState,
@@ -30,17 +31,36 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
           throw new Error(`runtime_manage action '${params.action}' requires an id.`)
         }
 
+        const gate =
+          params.action === "install" || params.action === "repair" || params.action === "update"
+            ? decideCapabilityOperation({
+                caller: "tool:runtime_manage",
+                capability: "runtime_manage",
+                risk: params.action === "repair" ? "modify" : "install",
+                source: "core",
+                operation: params.action === "install" ? "install" : "update",
+                previewed: true,
+                reversible: false,
+                target: `runtime:${params.id}`,
+                reason: params.description,
+                metadata: { runtimeAction: params.action, runtimeID: params.id },
+              })
+            : undefined
+
         if (params.action === "install" || params.action === "repair" || params.action === "update") {
-          yield* ctx.ask({
-            permission: "bash",
-            patterns: [`runtime:${params.action}:${params.id}`],
-            always: ["*"],
-            metadata: {
-              command: `runtime ${params.action} ${params.id}`,
-              runtime_action: params.action,
-              runtime_id: params.id!,
-            },
-          })
+          requireCapabilityDecision(gate!.decision)
+          if (gate!.decision === "confirm") {
+            yield* ctx.ask({
+              permission: "bash",
+              patterns: [`runtime:${params.action}:${params.id}`],
+              always: ["*"],
+              metadata: {
+                command: `runtime ${params.action} ${params.id}`,
+                runtime_action: params.action,
+                runtime_id: params.id!,
+              },
+            })
+          }
         }
 
         if (params.action === "list") {
@@ -81,6 +101,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
           : params.action === "repair"
             ? repairRuntime(params.id!)
             : updateRuntime(params.id!))
+        completeCapabilityOperation(gate!.auditID, "completed")
 
         return {
           title: params.description,

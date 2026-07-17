@@ -67,13 +67,32 @@ export const Status = z
   .object({
     id: z.string(),
     name: z.string(),
-    root: z.string(),
-    status: z.union([z.literal("connected"), z.literal("error")]),
+    root: z.string().optional(),
+    extensions: z.array(z.string()),
+    capabilities: z.object({
+      completion: z.boolean(),
+      completionTriggerCharacters: z.array(z.string()),
+      hover: z.boolean(),
+      diagnostics: z.boolean(),
+      definition: z.boolean(),
+      formatting: z.boolean(),
+    }),
+    status: z.union([z.literal("available"), z.literal("connected"), z.literal("error")]),
+    error: z.string().optional(),
   })
   .meta({
     ref: "LSPStatus",
   })
 export type Status = z.infer<typeof Status>
+
+const defaultCapabilities = {
+  completion: true,
+  completionTriggerCharacters: [],
+  hover: true,
+  diagnostics: true,
+  definition: true,
+  formatting: true,
+}
 
 enum SymbolKind {
   File = 1,
@@ -130,6 +149,7 @@ const filterExperimentalServers = (servers: Record<string, LSPServer.Info>) => {
 
 type LocInput = { file: string; line: number; character: number }
 type CompletionInput = LocInput & { triggerCharacter?: string; maxItems?: number }
+type CompletionResolveInput = { file: string; item: unknown }
 type SignatureHelpInput = LocInput & { triggerCharacter?: string }
 type RenameInput = LocInput & { newName: string }
 type FormattingOptions = {
@@ -180,6 +200,7 @@ export interface Interface {
   readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
   readonly hover: (input: LocInput) => Effect.Effect<any>
   readonly completion: (input: CompletionInput) => Effect.Effect<any>
+  readonly completionResolve?: (input: CompletionResolveInput) => Effect.Effect<any>
   readonly signatureHelp: (input: SignatureHelpInput) => Effect.Effect<any>
   readonly prepareRename: (input: LocInput) => Effect.Effect<any>
   readonly rename: (input: RenameInput) => Effect.Effect<any>
@@ -382,13 +403,30 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const s = yield* InstanceState.get(state)
       const result: Status[] = []
-      for (const client of s.clients) {
-        result.push({
-          id: client.serverID,
-          name: s.servers[client.serverID].id,
-          root: path.relative(ctx.directory, client.root),
-          status: "connected",
-        })
+      for (const server of Object.values(s.servers).toSorted((a, b) => a.id.localeCompare(b.id))) {
+        const clients = s.clients.filter((client) => client.serverID === server.id)
+        if (clients.length === 0) {
+          const failed = Array.from(s.broken).some((key) => key.endsWith(server.id))
+          result.push({
+            id: server.id,
+            name: server.id,
+            extensions: server.extensions,
+            capabilities: defaultCapabilities,
+            status: failed ? "error" : "available",
+            ...(failed ? { error: "Failed to start language server" } : {}),
+          })
+          continue
+        }
+        for (const client of clients) {
+          result.push({
+            id: client.serverID,
+            name: server.id,
+            root: path.relative(ctx.directory, client.root),
+            extensions: server.extensions,
+            capabilities: client.capabilities,
+            status: "connected",
+          })
+        }
       }
       return result
     })
@@ -480,6 +518,13 @@ export const layer = Layer.effect(
         }
       }
       return result
+    })
+
+    const completionResolve = Effect.fn("LSP.completionResolve")(function* (input: CompletionResolveInput) {
+      const results = yield* run(input.file, (client) =>
+        client.connection.sendRequest("completionItem/resolve", input.item).catch(() => null),
+      )
+      return results.find(Boolean) ?? null
     })
 
     const signatureHelp = Effect.fn("LSP.signatureHelp")(function* (input: SignatureHelpInput) {
@@ -737,6 +782,7 @@ export const layer = Layer.effect(
       diagnostics,
       hover,
       completion,
+      completionResolve,
       signatureHelp,
       prepareRename,
       rename,

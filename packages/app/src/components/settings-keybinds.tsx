@@ -11,22 +11,22 @@ import { formatKeybind, parseKeybind, useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { SettingsList } from "./settings-list"
+import {
+  featuredFor,
+  groupFor,
+  groupedFor,
+  KEYBIND_GROUPS,
+  priorityFor,
+  type KeybindGroup,
+  type KeybindMeta,
+} from "./settings-keybinds-logic"
 
 const IS_MAC = typeof navigator === "object" && /(Mac|iPod|iPhone|iPad)/.test(navigator.platform)
 const PALETTE_ID = "command.palette"
 const DEFAULT_PALETTE_KEYBIND = "mod+shift+p"
 
-type KeybindGroup = "General" | "Session" | "Navigation" | "Model and agent" | "Terminal" | "Prompt"
-
-type KeybindMeta = {
-  title: string
-  group: KeybindGroup
-}
-
 type KeybindMap = Record<string, string | undefined>
 type CommandContext = ReturnType<typeof useCommand>
-
-const GROUPS: KeybindGroup[] = ["General", "Session", "Navigation", "Model and agent", "Terminal", "Prompt"]
 
 type GroupKey =
   | "settings.shortcuts.group.general"
@@ -35,6 +35,7 @@ type GroupKey =
   | "settings.shortcuts.group.modelAndAgent"
   | "settings.shortcuts.group.terminal"
   | "settings.shortcuts.group.prompt"
+  | "settings.shortcuts.group.browser"
 
 const groupKey: Record<KeybindGroup, GroupKey> = {
   General: "settings.shortcuts.group.general",
@@ -43,24 +44,7 @@ const groupKey: Record<KeybindGroup, GroupKey> = {
   "Model and agent": "settings.shortcuts.group.modelAndAgent",
   Terminal: "settings.shortcuts.group.terminal",
   Prompt: "settings.shortcuts.group.prompt",
-}
-
-function groupFor(id: string): KeybindGroup {
-  if (id === PALETTE_ID) return "General"
-  if (id.startsWith("terminal.")) return "Terminal"
-  if (id.startsWith("model.") || id.startsWith("agent.") || id.startsWith("mcp.")) return "Model and agent"
-  if (id.startsWith("file.") || id.startsWith("fileTree.")) return "Navigation"
-  if (id.startsWith("prompt.")) return "Prompt"
-  if (
-    id.startsWith("session.") ||
-    id.startsWith("message.") ||
-    id.startsWith("permissions.") ||
-    id.startsWith("steps.") ||
-    id.startsWith("review.")
-  )
-    return "Session"
-
-  return "General"
+  Browser: "settings.shortcuts.group.browser",
 }
 
 function isModifier(key: string) {
@@ -119,41 +103,22 @@ function keybinds(value: unknown): KeybindMap {
 
 function listFor(command: CommandContext, map: KeybindMap, palette: string) {
   const out = new Map<string, KeybindMeta>()
-  out.set(PALETTE_ID, { title: palette, group: "General" })
+  out.set(PALETTE_ID, { title: palette, group: "General", priority: priorityFor(PALETTE_ID) })
 
   for (const opt of command.catalog) {
     if (opt.id.startsWith("suggested.")) continue
-    out.set(opt.id, { title: opt.title, group: groupFor(opt.id) })
+    out.set(opt.id, { title: opt.title, group: groupFor(opt.id), priority: priorityFor(opt.id) })
   }
 
   for (const opt of command.options) {
     if (opt.id.startsWith("suggested.")) continue
-    out.set(opt.id, { title: opt.title, group: groupFor(opt.id) })
+    out.set(opt.id, { title: opt.title, group: groupFor(opt.id), priority: priorityFor(opt.id) })
   }
 
   for (const [id, value] of Object.entries(map)) {
     if (typeof value !== "string") continue
     if (out.has(id)) continue
-    out.set(id, { title: id, group: groupFor(id) })
-  }
-
-  return out
-}
-
-function groupedFor(list: Map<string, KeybindMeta>) {
-  const out = new Map<KeybindGroup, string[]>()
-  for (const group of GROUPS) out.set(group, [])
-
-  for (const [id, item] of list) {
-    const ids = out.get(item.group)
-    if (!ids) continue
-    ids.push(id)
-  }
-
-  for (const group of GROUPS) {
-    const ids = out.get(group)
-    if (!ids) continue
-    ids.sort((a, b) => (list.get(a)?.title ?? "").localeCompare(list.get(b)?.title ?? ""))
+    out.set(id, { title: id, group: groupFor(id), priority: priorityFor(id) })
   }
 
   return out
@@ -169,7 +134,7 @@ function filteredFor(
   if (!value) return grouped
 
   const out = new Map<KeybindGroup, string[]>()
-  for (const group of GROUPS) out.set(group, [])
+  for (const group of KEYBIND_GROUPS) out.set(group, [])
 
   const items = Array.from(list.entries()).map(([id, meta]) => ({
     id,
@@ -303,14 +268,19 @@ export const SettingsKeybinds: Component = () => {
 
   const title = (id: string) => list().get(id)?.title ?? ""
 
-  const grouped = createMemo(() => groupedFor(list()))
+  const grouped = createMemo(() => groupedFor(list(), command.keybind))
+
+  const featured = createMemo(() => {
+    if (store.filter) return []
+    return featuredFor(list())
+  })
 
   const filtered = createMemo(() => {
     return filteredFor(store.filter, list(), grouped(), (id) => command.keybind(id) || "")
   })
 
   const hasResults = createMemo(() => {
-    for (const group of GROUPS) {
+    for (const group of KEYBIND_GROUPS) {
       const ids = filtered().get(group) ?? []
       if (ids.length > 0) return true
     }
@@ -372,7 +342,7 @@ export const SettingsKeybinds: Component = () => {
   return (
     <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
       <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex flex-col gap-4 pt-6 pb-6 max-w-[720px]">
+        <div class="flex flex-col w-full max-w-[1440px] mx-auto gap-4 pt-6 pb-6">
           <div class="flex items-center justify-between gap-4">
             <h2 class="text-16-medium text-text-strong">{language.t("settings.shortcuts.title")}</h2>
             <Button size="small" variant="secondary" onClick={resetAll} disabled={!hasOverrides()}>
@@ -406,8 +376,37 @@ export const SettingsKeybinds: Component = () => {
         </div>
       </div>
 
-      <div class="flex flex-col gap-8 max-w-[720px]">
-        <For each={GROUPS}>
+      <div class="flex flex-col w-full max-w-[1440px] mx-auto gap-8">
+        <Show when={featured().length > 0}>
+          <div class="flex flex-col gap-1">
+            <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.shortcuts.group.featured")}</h3>
+            <SettingsList>
+              <For each={featured()}>
+                {(id) => (
+                  <div class="flex items-center justify-between gap-4 py-3 border-b border-border-weak-base last:border-none">
+                    <span class="text-14-regular text-text-strong">{title(id)}</span>
+                    <button
+                      type="button"
+                      data-keybind-id={id}
+                      classList={{
+                        "h-8 px-3 rounded-md text-12-regular": true,
+                        "bg-surface-base text-text-subtle hover:bg-surface-raised-base-hover active:bg-surface-raised-base-active":
+                          store.active !== id,
+                        "border border-border-weak-base bg-surface-inset-base text-text-weak": store.active === id,
+                      }}
+                      onClick={() => start(id)}
+                    >
+                      <Show when={store.active === id} fallback={command.keybind(id) || language.t("settings.shortcuts.unassigned")}>
+                        {language.t("settings.shortcuts.pressKeys")}
+                      </Show>
+                    </button>
+                  </div>
+                )}
+              </For>
+            </SettingsList>
+          </div>
+        </Show>
+        <For each={KEYBIND_GROUPS}>
           {(group) => (
             <Show when={(filtered().get(group) ?? []).length > 0}>
               <div class="flex flex-col gap-1">

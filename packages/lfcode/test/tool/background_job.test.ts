@@ -4,6 +4,7 @@ import { AppRuntime } from "@/effect/app-runtime"
 import { Agent } from "../../src/agent/agent"
 import { defaultLayer as ShellBackgroundRuntimeLayer } from "../../src/background-job/runtime"
 import { BackgroundJobPersistence } from "../../src/background-job/persistence"
+import { CapabilityPersistence } from "../../src/capability/persistence"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "../../src/plugin"
@@ -117,6 +118,20 @@ describe("background job tools", () => {
         )
         const jobID = String((started.metadata as Record<string, unknown>).jobID ?? "")
         expect(jobID).toBeTruthy()
+
+        const details = await runtime.runPromise(
+          backgroundJob.execute(
+            {
+              operation: "get",
+              job_id: jobID,
+            },
+            ctx(session.id),
+          ),
+        )
+        expect(details.metadata.jobFound).toBe(true)
+        expect(CapabilityPersistence.listAudit({ capability: "context_read" })).toContainEqual(
+          expect.objectContaining({ reason: "Background job get", rollback: expect.objectContaining({ jobs: [jobID] }) }),
+        )
 
         const waited = await runtime.runPromise(
           backgroundJob.execute(
@@ -233,4 +248,67 @@ describe("background job tools", () => {
     },
     20000,
   )
+
+  test("a finite background_job grant is consumed before a shell background job starts", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const budgetRuntime = ManagedRuntime.make(testLayer)
+        const grantID = `background-budget-${Date.now()}`
+        CapabilityPersistence.saveGrant({
+          id: grantID,
+          capability: "background_job",
+          scope: "global",
+          source: "core",
+          remainingBudget: 1,
+        })
+        try {
+          const session = await createSession("shell-bg-budget")
+          const shell = await initShellTool(budgetRuntime)
+          const backgroundJob = await initBackgroundJobTool(budgetRuntime)
+          const first = await budgetRuntime.runPromise(
+            shell.execute(
+              {
+                command: emitLine("budgeted-background-job"),
+                description: "Use one background budget unit",
+                background: true,
+              },
+              ctx(session.id),
+            ),
+          )
+          const jobID = String((first.metadata as Record<string, unknown>).jobID ?? "")
+          expect(BackgroundJobPersistence.load(jobID)?.metadata).toMatchObject({ capabilityGrantID: grantID })
+          expect(CapabilityPersistence.loadGrant(grantID)).toMatchObject({ remainingBudget: 0 })
+
+          await expect(
+            budgetRuntime.runPromise(
+              shell.execute(
+                {
+                  command: emitLine("must-not-start"),
+                  description: "Exhausted background budget",
+                  background: true,
+                },
+                ctx(session.id),
+              ),
+            ),
+          ).rejects.toThrow("Background job budget denied: exhausted")
+
+          await budgetRuntime.runPromise(
+            backgroundJob.execute(
+              {
+                operation: "wait",
+                job_id: jobID,
+                timeout_ms: 5_000,
+              },
+              ctx(session.id),
+            ),
+          )
+        } finally {
+          CapabilityPersistence.revokeGrant(grantID)
+          await budgetRuntime.dispose()
+        }
+      },
+    })
+  })
 })

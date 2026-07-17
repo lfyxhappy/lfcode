@@ -1,13 +1,14 @@
-import type {
-  Hooks,
-  PluginInput,
-  Plugin as PluginInstance,
-  PluginModule,
-  WorkspaceAdaptor as PluginWorkspaceAdaptor,
-  ActorPreStopInput,
-  ActorPostStopInput,
-  ActorStopOutput,
-  ActorMatcher,
+import {
+  readLfcodePluginManifest,
+  type Hooks,
+  type PluginInput,
+  type Plugin as PluginInstance,
+  type PluginModule,
+  type WorkspaceAdaptor as PluginWorkspaceAdaptor,
+  type ActorPreStopInput,
+  type ActorPostStopInput,
+  type ActorStopOutput,
+  type ActorMatcher,
 } from "@lfcode-ai/plugin"
 import { z } from "zod"
 import { matchesActor } from "./matcher"
@@ -35,6 +36,8 @@ import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, pluginSource, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdaptor } from "@/control-plane/adaptors"
 import type { WorkspaceAdaptor } from "@/control-plane/types"
+import { getRuntimeManageState } from "@/runtime-registry"
+import { Skill } from "@/skill"
 
 const log = Log.create({ service: "plugin" })
 
@@ -171,7 +174,10 @@ async function applyPlugin(
   input: PluginInput,
   hooks: Hooks[],
   hooksWithMeta: HookEntry[],
+  skill: Skill.Interface,
 ): Promise<RuntimeStatus[]> {
+  await requirePluginRuntimeDependencies(load)
+  await requirePluginSkillRequirements(load, skill)
   const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
   if (plugin) {
     const pluginName = await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
@@ -215,11 +221,32 @@ async function applyPlugin(
   return status
 }
 
+async function requirePluginRuntimeDependencies(load: PluginLoader.Loaded) {
+  const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+  const required = manifest?.runtimeDependencies?.filter((dependency) => dependency.required !== false) ?? []
+  if (required.length === 0) return
+  const runtime = await getRuntimeManageState()
+  const missing = required.filter((dependency) => !runtime.items.find((item) => item.id === dependency.id)?.installed)
+  if (missing.length === 0) return
+  throw new Error(`Missing required runtime dependencies: ${missing.map((dependency) => dependency.id).join(", ")}`)
+}
+
+async function requirePluginSkillRequirements(load: PluginLoader.Loaded, skill: Skill.Interface) {
+  const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+  const required = manifest?.skillRequirements?.filter((dependency) => dependency.required !== false) ?? []
+  if (required.length === 0) return
+  const available = new Set((await Effect.runPromise(skill.all())).map((item) => item.name))
+  const missing = required.filter((dependency) => !available.has(dependency.id))
+  if (missing.length === 0) return
+  throw new Error(`Missing required skills: ${missing.map((dependency) => dependency.id).join(", ")}`)
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const config = yield* Config.Service
+    const skill = yield* Skill.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Plugin.state")(function* (ctx) {
@@ -367,7 +394,7 @@ export const layer = Layer.effect(
           // Keep plugin execution sequential so hook registration and execution
           // order remains deterministic across plugin runs.
           yield* Effect.tryPromise({
-            try: () => applyPlugin(load, input, hooks, hooksWithMeta),
+            try: () => applyPlugin(load, input, hooks, hooksWithMeta, skill),
             catch: (err) => {
               const message = errorMessage(err)
               log.error("failed to load plugin", { path: load.spec, error: message })
@@ -566,6 +593,10 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(Bus.layer), Layer.provide(Config.defaultLayer))
+export const defaultLayer = layer.pipe(
+  Layer.provide(Bus.layer),
+  Layer.provide(Config.defaultLayer),
+  Layer.provide(Skill.defaultLayer),
+)
 
 export * as Plugin from "."

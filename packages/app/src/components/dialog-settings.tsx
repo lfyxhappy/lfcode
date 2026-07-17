@@ -37,13 +37,13 @@ const SettingsPersonalization = lazy(() =>
 const SettingsMaintenance = lazy(() =>
   import("./settings-maintenance").then((mod) => ({ default: mod.SettingsMaintenance })),
 )
-const SettingsRuntimes = lazy(() => import("./settings-runtimes").then((mod) => ({ default: mod.SettingsRuntimes })))
 const SettingsUsage = lazy(() => import("./settings-usage").then((mod) => ({ default: mod.SettingsUsage })))
 const SettingsSkills = lazy(() => import("./settings-skills").then((mod) => ({ default: mod.SettingsSkills })))
+const SettingsAgentOS = lazy(() => import("./settings-agent-os").then((mod) => ({ default: mod.SettingsAgentOS })))
 
 type SettingsPanelRenderers = Partial<Record<SettingsTab, Component>>
 
-const serverTabs = ["archives", "models", "mcp", "plugins", "skills", "usage"] as const satisfies SettingsTab[]
+const serverTabs = ["archives", "models", "mcp", "plugins", "skills", "agentOS", "usage"] as const satisfies SettingsTab[]
 const desktopTabs = [
   "general",
   "editor",
@@ -52,7 +52,6 @@ const desktopTabs = [
   "appControl",
   "shortcuts",
   "browser",
-  "runtimes",
 ] as const satisfies SettingsTab[]
 
 function SettingsPanelSkeleton() {
@@ -106,8 +105,6 @@ function renderLazyPanel(tab: Exclude<SettingsTab, "general" | "editor" | "short
       return SettingsAppControl
     case "browser":
       return SettingsBrowser
-    case "runtimes":
-      return SettingsRuntimes
     case "archives":
       return SettingsArchives
     case "models":
@@ -120,6 +117,8 @@ function renderLazyPanel(tab: Exclude<SettingsTab, "general" | "editor" | "short
       return SettingsSkills
     case "usage":
       return SettingsUsage
+    case "agentOS":
+      return SettingsAgentOS
   }
 }
 
@@ -211,12 +210,12 @@ export const SettingsView: Component<{
         appControl: { icon: "settings-gear" as const, label: language.t("settings.tab.appControl") },
         shortcuts: { icon: "keyboard" as const, label: language.t("settings.tab.shortcuts") },
         browser: { icon: "window-cursor" as const, label: language.t("settings.browser.title") },
-        runtimes: { icon: "server" as const, label: language.t("settings.tab.runtimes") },
         archives: { icon: "archive" as const, label: language.t("settings.archives.title") },
         models: { icon: "models" as const, label: language.t("settings.models.title") },
         mcp: { icon: "server" as const, label: language.t("settings.mcp.title") },
         plugins: { icon: "status" as const, label: language.t("settings.plugins.title") },
         skills: { icon: "folder-add-left" as const, label: language.t("settings.skills.title") },
+        agentOS: { icon: "brain" as const, label: "Agent OS" },
         usage: { icon: "status" as const, label: language.t("settings.usage.title") },
       }) satisfies Record<SettingsTab, { icon: Parameters<typeof Icon>[0]["name"]; label: string }>,
   )
@@ -293,7 +292,6 @@ export const SettingsView: Component<{
       <SettingsPanel tab="appControl" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <SettingsPanel tab="shortcuts" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <SettingsPanel tab="browser" selected={selected} visited={visited} renderers={props.tabRenderers} />
-      <SettingsPanel tab="runtimes" selected={selected} visited={visited} renderers={props.tabRenderers} />
       <For each={serverTabs}>
         {(tab) => <SettingsPanel tab={tab} selected={selected} visited={visited} renderers={props.tabRenderers} />}
       </For>

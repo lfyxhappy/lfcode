@@ -8,6 +8,8 @@ import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { isCodeEditorPhase0Enabled, setCodeEditorPhase0Enabled } from "@/components/code-editor/core/phase0"
 
+const LSP_DOWNLOAD_REMINDER_PREFIX = "lfcode.editor.lsp.download-reminder.v1:"
+
 export const SettingsEditor: Component<{ directory?: string }> = (props) => {
   const language = useLanguage()
   const settings = useSettings()
@@ -20,6 +22,14 @@ export const SettingsEditor: Component<{ directory?: string }> = (props) => {
         .lsp.status()
         .then((result) => result.data ?? []),
   )
+
+  const resetLspDownloadReminders = () => {
+    try {
+      Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+        .filter((key): key is string => Boolean(key?.startsWith(LSP_DOWNLOAD_REMINDER_PREFIX)))
+        .forEach((key) => localStorage.removeItem(key))
+    } catch {}
+  }
 
   const editorFontSizeOptions = createMemo(() =>
     Array.from({ length: 14 }, (_, index) => {
@@ -195,6 +205,7 @@ export const SettingsEditor: Component<{ directory?: string }> = (props) => {
                       <span
                         classList={{
                           "rounded-full px-2 py-0.5": true,
+                          "bg-surface-raised text-text-weak": item.status === "available",
                           "bg-status-success/15 text-status-success": item.status === "connected",
                           "bg-status-error/15 text-status-error": item.status === "error",
                         }}
@@ -206,6 +217,18 @@ export const SettingsEditor: Component<{ directory?: string }> = (props) => {
                 </Show>
               </Show>
             </div>
+          </SettingsRow>
+          <SettingsRow
+            title={language.t("settings.editor.intellisense.download.reset.title")}
+            description={language.t("settings.editor.intellisense.download.reset.description")}
+          >
+            <button
+              type="button"
+              class="rounded border border-border-weak-base px-2 py-1 text-12-regular text-text-primary hover:bg-surface-secondary"
+              onClick={resetLspDownloadReminders}
+            >
+              {language.t("common.reset")}
+            </button>
           </SettingsRow>
           <SettingsRow
             title={language.t("settings.editor.intellisense.snippets.title")}

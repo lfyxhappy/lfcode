@@ -9,12 +9,12 @@ import { InstanceState } from "@/effect"
 import { Flag } from "@/flag/flag"
 import { Permission } from "@/permission"
 import { AppFileSystem } from "@/filesystem"
-import { Global } from "@/global"
 import { ConfigMarkdown } from "../config"
 import { Glob } from "@lfcode-ai/shared/util/glob"
 import { Log } from "../util"
 import { extractComposeBundle } from "./compose/extract"
 import { extractLfcodeBundle } from "./lfcode/extract"
+import { globalSkillRoot, migrateExternalGlobalSkills } from "./global-directory"
 
 const log = Log.create({ service: "skill" })
 const SKILL_PATTERN = "**/SKILL.md"
@@ -177,9 +177,18 @@ const discoverSkills = Effect.fnUntraced(function* (fsys: AppFileSystem.Interfac
     }
   }
 
-  const globalSkillRoot = path.join(Global.Path.config, "skills")
-  if (yield* fsys.isDir(globalSkillRoot)) {
-    yield* scan(state, globalSkillRoot, SKILL_PATTERN, { scope: "global" })
+  yield* Effect.tryPromise({
+    try: migrateExternalGlobalSkills,
+    catch: (error) => error,
+  }).pipe(
+    Effect.catch((error) => {
+      log.warn("failed to migrate external global skills", { error })
+      return Effect.void
+    }),
+  )
+
+  if (yield* fsys.isDir(globalSkillRoot())) {
+    yield* scan(state, globalSkillRoot(), SKILL_PATTERN, { scope: "global" })
   }
 
   return {

@@ -56,7 +56,7 @@ export interface Interface {
     message_id: string
     before?: number
     after?: number
-  }) => Effect.Effect<{ session_id: string; messages: MessageContext[] }>
+  }) => Effect.Effect<{ session_id: string; project_id?: string; messages: MessageContext[] }>
 
   readonly session: (input: {
     session_id: string
@@ -67,6 +67,7 @@ export interface Interface {
     session_found: boolean
     checkpoint_found: boolean
     session_id: string
+    project_id?: string
     messages: MessageContext[]
   }>
 }
@@ -177,6 +178,13 @@ export const layer = Layer.effect(
           .get(),
       )
       if (!anchor) return { session_id: "", messages: [] }
+      const session = Database.use((db) =>
+        db
+          .select({ project_id: SessionTable.project_id })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, anchor.session_id))
+          .get(),
+      )
 
       const beforeRows = Database.use((db) =>
         db
@@ -208,7 +216,9 @@ export const layer = Layer.effect(
       )
 
       const messages = [...beforeRows.reverse(), ...afterRows]
-      if (messages.length === 0) return { session_id: anchor.session_id, messages: [] }
+      if (messages.length === 0) {
+        return { session_id: anchor.session_id, project_id: session?.project_id, messages: [] }
+      }
       const parts = Database.use((db) =>
         db
           .select()
@@ -266,7 +276,7 @@ export const layer = Layer.effect(
         }
       })
 
-      return { session_id: anchor.session_id, messages: out }
+      return { session_id: anchor.session_id, project_id: session?.project_id, messages: out }
     })
 
     const session = Effect.fn("History.session")(function* (input: Parameters<Interface["session"]>[0]) {
@@ -275,8 +285,9 @@ export const layer = Layer.effect(
       const sessionRow = Database.use((db) =>
         db
           .select({
-            id: SessionTable.id,
-            last_checkpoint_message_id: SessionTable.last_checkpoint_message_id,
+          id: SessionTable.id,
+          project_id: SessionTable.project_id,
+          last_checkpoint_message_id: SessionTable.last_checkpoint_message_id,
           })
           .from(SessionTable)
           .where(eq(SessionTable.id, sessionID))
@@ -326,6 +337,7 @@ export const layer = Layer.effect(
           session_found: true,
           checkpoint_found: !!sessionRow.last_checkpoint_message_id,
           session_id: input.session_id,
+          project_id: sessionRow.project_id,
           messages: [],
         }
       }
@@ -407,6 +419,7 @@ export const layer = Layer.effect(
         session_found: true,
         checkpoint_found,
         session_id: input.session_id,
+        project_id: sessionRow.project_id,
         messages: filtered,
       }
     })

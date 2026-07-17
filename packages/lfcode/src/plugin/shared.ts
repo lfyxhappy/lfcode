@@ -1,6 +1,12 @@
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
-import { readLfcodePluginManifest, type PluginCategory, type PluginTrust } from "@lfcode-ai/plugin"
+import {
+  readLfcodePluginManifest,
+  type PluginCategory,
+  type PluginSkillRequirement,
+  type PluginTrust,
+  type PluginUIContribution,
+} from "@lfcode-ai/plugin"
 import npa from "npm-package-arg"
 import semver from "semver"
 import { Filesystem } from "@/util"
@@ -63,6 +69,8 @@ export type PluginManifestSummary = {
   capabilities?: string[]
   lfcodeRange?: string
   runtimeDependencies?: { id: string; version?: string; required?: boolean }[]
+  skillRequirements?: PluginSkillRequirement[]
+  uiContributions?: PluginUIContribution[]
 }
 
 const INDEX_FILES = ["index.ts", "index.tsx", "index.js", "index.mjs", "index.cjs"]
@@ -210,6 +218,8 @@ export function readPluginManifestSummary(spec: string, pkg?: PluginPackage): Pl
     capabilities: manifest.capabilities?.length ? [...manifest.capabilities] : undefined,
     lfcodeRange: manifest.compatibility?.lfcode,
     runtimeDependencies: manifest.runtimeDependencies?.length ? [...manifest.runtimeDependencies] : undefined,
+    skillRequirements: manifest.skillRequirements?.length ? [...manifest.skillRequirements] : undefined,
+    uiContributions: manifest.uiContributions?.length ? [...manifest.uiContributions] : undefined,
   }
 }
 

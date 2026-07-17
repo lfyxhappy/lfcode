@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   getCodeEditorServerLspRegistryKey,
+  getCodeEditorServerLspCompletionCacheKey,
+  getCodeEditorServerLspCompletionTriggerCharacters,
   getCodeEditorFilePathFromUri,
   shouldAcceptCodeEditorCompletionResult,
   shouldAcceptCodeEditorServerLspResult,
@@ -43,6 +45,39 @@ describe("code editor server LSP", () => {
     expect(keys[0]).not.toBe(otherLanguage)
   })
 
+  test("only shares completion work for the same document revision, cursor, and trigger", () => {
+    const binding = {
+      stamp: { key: "lfcode-editor://model/C:/workspace/main.ts", revision: 4, modelVersion: 12 },
+    }
+    const base = {
+      binding,
+      query: {
+        kind: "completion" as const,
+        position: { lineNumber: 3, column: 9 },
+        triggerCharacter: ".",
+        maxItems: 200,
+      },
+    }
+    expect(getCodeEditorServerLspCompletionCacheKey(base)).toBe(getCodeEditorServerLspCompletionCacheKey(base))
+    expect(
+      getCodeEditorServerLspCompletionCacheKey({
+        ...base,
+        query: { ...base.query, position: { lineNumber: 3, column: 10 } },
+      }),
+    ).not.toBe(getCodeEditorServerLspCompletionCacheKey(base))
+    expect(
+      getCodeEditorServerLspCompletionCacheKey({
+        ...base,
+        binding: { stamp: { ...binding.stamp, revision: 5 } },
+      }),
+    ).not.toBe(getCodeEditorServerLspCompletionCacheKey(base))
+  })
+
+  test("uses advertised LSP completion triggers and falls back before a server connects", () => {
+    expect(getCodeEditorServerLspCompletionTriggerCharacters([":", ".", ":"])).toEqual([":", "."])
+    expect(getCodeEditorServerLspCompletionTriggerCharacters()).toContain(".")
+  })
+
   test("rejects provider results after a revision, model version, or path binding changes", () => {
     const stamp = { key: "lfcode-editor://model/C:/workspace/main.ts", revision: 4, modelVersion: 12 }
     const accepted = {
@@ -71,5 +106,13 @@ describe("code editor server LSP", () => {
   test("uses the server LSP for project-aware TypeScript and JavaScript semantics", () => {
     expect(shouldUseCodeEditorServerLsp("typescript")).toBe(true)
     expect(shouldUseCodeEditorServerLsp("javascript")).toBe(true)
+  })
+
+  test("uses the server LSP for managed language runtimes with Monaco support", () => {
+    expect(shouldUseCodeEditorServerLsp("go")).toBe(true)
+    expect(shouldUseCodeEditorServerLsp("rust")).toBe(true)
+    expect(shouldUseCodeEditorServerLsp("java")).toBe(true)
+    expect(shouldUseCodeEditorServerLsp("yaml")).toBe(true)
+    expect(shouldUseCodeEditorServerLsp("shell")).toBe(true)
   })
 })

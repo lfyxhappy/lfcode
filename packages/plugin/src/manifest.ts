@@ -21,6 +21,22 @@ export type PluginRuntimeDependency = {
   required?: boolean
 }
 
+export type PluginSkillRequirement = {
+  id: string
+  required?: boolean
+  purpose?: string
+}
+
+// Desktop slots are declarations only until the desktop host provides a sandboxed loader.
+// `tui-slot` is the sole executable plugin UI surface in this contract.
+export const PLUGIN_UI_CONTRIBUTION_SLOTS = ["tui-slot", "desktop-settings-panel", "desktop-session-toolbar"] as const
+export type PluginUIContributionSlot = (typeof PLUGIN_UI_CONTRIBUTION_SLOTS)[number]
+
+export type PluginUIContribution = {
+  slot: PluginUIContributionSlot
+  title?: string
+}
+
 export type PluginManifest = {
   apiVersion: number | string
   id?: string
@@ -35,6 +51,8 @@ export type PluginManifest = {
   trust?: PluginTrust
   entrypoints: Partial<Record<PluginEntrypointTarget, PluginEntrypoint>>
   runtimeDependencies?: PluginRuntimeDependency[]
+  skillRequirements?: PluginSkillRequirement[]
+  uiContributions?: PluginUIContribution[]
   configSchema?: unknown
   migrations?: unknown
 }
@@ -51,6 +69,8 @@ export function readLfcodePluginManifest(value: unknown, spec: string) {
   const trust = readTrust(value.trust, spec)
   const compatibility = readCompatibility(value.compatibility, spec)
   const runtimeDependencies = readRuntimeDependencies(value.runtimeDependencies, spec)
+  const skillRequirements = readSkillRequirements(value.skillRequirements, spec)
+  const uiContributions = readUIContributions(value.uiContributions, spec)
 
   return {
     apiVersion: readApiVersion(value.apiVersion, spec),
@@ -64,9 +84,43 @@ export function readLfcodePluginManifest(value: unknown, spec: string) {
     trust,
     entrypoints,
     runtimeDependencies,
+    skillRequirements,
+    uiContributions,
     configSchema: value.configSchema,
     migrations: value.migrations,
   } satisfies PluginManifest
+}
+
+function readSkillRequirements(value: unknown, spec: string) {
+  if (value === undefined) return
+  if (!Array.isArray(value)) throw new TypeError(`Plugin ${spec} has invalid lfcode.skillRequirements`)
+  return value.map((item) => {
+    if (!isRecord(item)) throw new TypeError(`Plugin ${spec} has invalid lfcode.skillRequirements entry`)
+    const id = readOptionalString(item.id, spec, "lfcode.skillRequirements[].id")
+    if (!id) throw new TypeError(`Plugin ${spec} must declare lfcode.skillRequirements[].id`)
+    const purpose = readOptionalString(item.purpose, spec, "lfcode.skillRequirements[].purpose")
+    if (item.required !== undefined && typeof item.required !== "boolean") {
+      throw new TypeError(`Plugin ${spec} has invalid lfcode.skillRequirements[].required`)
+    }
+    return {
+      id,
+      ...(purpose ? { purpose } : {}),
+      ...(item.required === undefined ? {} : { required: item.required }),
+    }
+  })
+}
+
+function readUIContributions(value: unknown, spec: string) {
+  if (value === undefined) return
+  if (!Array.isArray(value)) throw new TypeError(`Plugin ${spec} has invalid lfcode.uiContributions`)
+  return value.map((item) => {
+    if (!isRecord(item)) throw new TypeError(`Plugin ${spec} has invalid lfcode.uiContributions entry`)
+    if (typeof item.slot !== "string" || !PLUGIN_UI_CONTRIBUTION_SLOTS.includes(item.slot as PluginUIContributionSlot)) {
+      throw new TypeError(`Plugin ${spec} has invalid lfcode.uiContributions[].slot`)
+    }
+    const title = readOptionalString(item.title, spec, "lfcode.uiContributions[].title")
+    return { slot: item.slot as PluginUIContributionSlot, ...(title ? { title } : {}) }
+  })
 }
 
 function readCategory(value: unknown, spec: string) {

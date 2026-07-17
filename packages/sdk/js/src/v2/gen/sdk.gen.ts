@@ -26,6 +26,23 @@ import type {
   BashInteractiveListResponses,
   BashInteractiveReplyErrors,
   BashInteractiveReplyResponses,
+  CapabilityAuditListResponses,
+  CapabilityDecisionErrors,
+  CapabilityDecisionResponses,
+  CapabilityDisableErrors,
+  CapabilityDisableResponses,
+  CapabilityGetErrors,
+  CapabilityGetResponses,
+  CapabilityGrant,
+  CapabilityGrantListResponses,
+  CapabilityGrantRevokeErrors,
+  CapabilityGrantRevokeResponses,
+  CapabilityGrantSaveErrors,
+  CapabilityGrantSaveResponses,
+  CapabilityListErrors,
+  CapabilityListResponses,
+  CapabilityStopErrors,
+  CapabilityStopResponses,
   CommandListResponses,
   Config as Config3,
   ConfigGetResponses,
@@ -113,6 +130,7 @@ import type {
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeResponses,
+  LspEnsureResponses,
   LspQueryResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -4474,6 +4492,43 @@ export class Lsp extends HeyApiClient {
   }
 
   /**
+   * Start language services for a file
+   *
+   * Start or download the configured language service for a project file without editing its content.
+   */
+  public ensure<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<LspEnsureResponses, unknown, ThrowOnError>({
+      url: "/lsp/ensure",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Query LSP for editor integrations
    *
    * Sync the current editor draft to the server-side LSP client and query diagnostics or symbol/navigation data.
@@ -4512,6 +4567,12 @@ export class Lsp extends HeyApiClient {
             }
             triggerCharacter?: string
             maxItems?: number
+          }
+        | {
+            kind: "completionResolve"
+            path: string
+            text: string
+            item: unknown
           }
         | {
             kind: "signatureHelp"
@@ -5794,6 +5855,390 @@ export class Plugin extends HeyApiClient {
   }
 }
 
+export class Grant extends HeyApiClient {
+  /**
+   * List capability grants
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      capability?: string
+      activeOnly?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "capability" },
+            { in: "query", key: "activeOnly" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<CapabilityGrantListResponses, unknown, ThrowOnError>({
+      url: "/capability/grant",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Save a capability grant
+   */
+  public save<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      capabilityGrant?: CapabilityGrant
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "capabilityGrant", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<CapabilityGrantSaveResponses, CapabilityGrantSaveErrors, ThrowOnError>(
+      {
+        url: "/capability/grant",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Revoke a capability grant
+   */
+  public revoke<ThrowOnError extends boolean = false>(
+    parameters: {
+      grantID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "grantID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      CapabilityGrantRevokeResponses,
+      CapabilityGrantRevokeErrors,
+      ThrowOnError
+    >({
+      url: "/capability/grant/{grantID}/revoke",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Audit extends HeyApiClient {
+  /**
+   * List capability audit events
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      capability?: string
+      sessionID?: string
+      projectID?: string
+      limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "capability" },
+            { in: "query", key: "sessionID" },
+            { in: "query", key: "projectID" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<CapabilityAuditListResponses, unknown, ThrowOnError>({
+      url: "/capability/audit",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Capability extends HeyApiClient {
+  /**
+   * List Agent OS capabilities
+   *
+   * List tools, skills, plugins, MCP servers, and runtimes through one capability catalog.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      q?: string
+      kind?: "tool" | "skill" | "plugin" | "mcp" | "runtime"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "q" },
+            { in: "query", key: "kind" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<CapabilityListResponses, CapabilityListErrors, ThrowOnError>({
+      url: "/capability",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Disable an Agent OS capability
+   *
+   * Adds a durable revoke sentinel so future matching capability decisions are denied until a newer grant is saved.
+   */
+  public disable<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      capability?: string
+      caller?: string
+      scope?: string
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "capability" },
+            { in: "body", key: "caller" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<CapabilityDisableResponses, CapabilityDisableErrors, ThrowOnError>({
+      url: "/capability/disable",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Stop Agent OS work
+   *
+   * Stops active loaded sessions and cancels durable background jobs in a session, project, or all projects without booting inactive projects.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      scope?: "global" | "project" | "session"
+      projectID?: string
+      sessionID?: string
+      caller?: string
+      reason?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "scope" },
+            { in: "body", key: "projectID" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "caller" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<CapabilityStopResponses, CapabilityStopErrors, ThrowOnError>({
+      url: "/capability/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Evaluate and audit a capability operation
+   *
+   * Records the policy decision before a management operation runs; callers execute only allow decisions.
+   */
+  public decision<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      auditID?: string
+      caller?: string
+      capability?: string
+      risk?: "read" | "modify" | "install" | "credential" | "destructive" | "release"
+      source?: "core" | "official" | "local" | "public" | "plugin" | "mcp" | "runtime"
+      operation?:
+        | "read"
+        | "execute"
+        | "stop"
+        | "install"
+        | "update"
+        | "enable"
+        | "disable"
+        | "delete"
+        | "export"
+        | "publish"
+      previewed?: boolean
+      reversible?: boolean
+      grantID?: string
+      target?: string
+      projectID?: string
+      sessionID?: string
+      messageID?: string
+      reason?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "auditID" },
+            { in: "body", key: "caller" },
+            { in: "body", key: "capability" },
+            { in: "body", key: "risk" },
+            { in: "body", key: "source" },
+            { in: "body", key: "operation" },
+            { in: "body", key: "previewed" },
+            { in: "body", key: "reversible" },
+            { in: "body", key: "grantID" },
+            { in: "body", key: "target" },
+            { in: "body", key: "projectID" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "messageID" },
+            { in: "body", key: "reason" },
+            { in: "body", key: "metadata" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<CapabilityDecisionResponses, CapabilityDecisionErrors, ThrowOnError>({
+      url: "/capability/decision",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Agent OS capability
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      capabilityID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "capabilityID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<CapabilityGetResponses, CapabilityGetErrors, ThrowOnError>({
+      url: "/capability/{capabilityID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _grant?: Grant
+  get grant(): Grant {
+    return (this._grant ??= new Grant({ client: this.client }))
+  }
+
+  private _audit?: Audit
+  get audit(): Audit {
+    return (this._audit ??= new Audit({ client: this.client }))
+  }
+}
+
 export class Manage2 extends HeyApiClient {
   /**
    * List managed MCP servers
@@ -7058,6 +7503,11 @@ export class LfcodeClient extends HeyApiClient {
   private _plugin?: Plugin
   get plugin(): Plugin {
     return (this._plugin ??= new Plugin({ client: this.client }))
+  }
+
+  private _capability?: Capability
+  get capability(): Capability {
+    return (this._capability ??= new Capability({ client: this.client }))
   }
 
   private _mcp?: Mcp

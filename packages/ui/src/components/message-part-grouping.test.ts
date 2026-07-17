@@ -66,6 +66,23 @@ function runningToolPart(id: string, tool: string): PartType {
   }
 }
 
+function errorToolPart(id: string, tool: string, error: string): PartType {
+  return {
+    id,
+    sessionID: "s",
+    messageID: "m",
+    type: "tool",
+    callID: `c-${id}`,
+    tool,
+    state: {
+      status: "error",
+      input: {},
+      error,
+      time: { start: 0, end: 1 },
+    },
+  }
+}
+
 describe("message-part-grouping", () => {
   test("groups adjacent context tools into one context entry", () => {
     const grouped = groupParts([
@@ -117,6 +134,31 @@ describe("message-part-grouping", () => {
         },
       ]),
     ).toBe(false)
+  })
+
+  test("groups consecutive duplicate tool failures and keeps the last diagnostic", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: errorToolPart("p1", "task", "Error: schema: operation.id is not allowed") },
+      { messageID: "m1", part: errorToolPart("p2", "task", "schema:   operation.id is not allowed") },
+      { messageID: "m1", part: errorToolPart("p3", "task", "schema: summary is required") },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        key: "tool-error:p1",
+        type: "tool-error",
+        refs: [
+          { messageID: "m1", partID: "p1" },
+          { messageID: "m1", partID: "p2" },
+        ],
+      },
+      {
+        key: "tool-error:p3",
+        type: "tool-error",
+        refs: [{ messageID: "m1", partID: "p3" }],
+      },
+    ])
+    expect(groupAnchorMessageIDs(grouped)).toEqual([["m1"], []])
   })
 
   test("assigns anchor ids to the first group that renders each message", () => {

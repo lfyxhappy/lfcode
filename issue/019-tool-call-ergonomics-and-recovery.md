@@ -6,7 +6,7 @@
 
 ## 状态
 
-解决中
+已解决
 
 ## 问题
 
@@ -127,4 +127,6 @@ Lfcode 的部分工具对模型的调用协议过于严格或不够直观，模�
 - `apply_patch` 描述补充了 `write`、`replace_range`、`symbol_edit`、`apply_patch` 的场景选择，以及 context failure 后必须 fresh read 的恢复协议。
 - 定向验证：`packages/lfcode` 30 个相关测试通过；`packages/lfcode` typecheck 通过；`apply_patch`、task 和重复失败 helper 已在同轮验证。
 - 使用版验证：fast Windows package 成功；同步到 `C:\算法\小应用\Lfcode` 后重启，`bun run app:control -- health` 返回 `status=ok`；两份 `app.asar` SHA256 一致。
-- 仍待验证：使用现场 `MiniMax-M3` 在安装版连续完成 3 个任务创建和文件修改场景。完成该观察前状态保持 `解决中`。
+- 连续、同工具且同归一化错误的调用现在在时间线聚合为一张错误卡，保留最后一次详细诊断并显示发生次数，避免错误刷屏。
+- 定向验证补充：`packages/ui` 分组测试 6/6、typecheck 通过；`packages/lfcode` task/apply_patch/tool-call repair/重复失败回归 67/67、typecheck 通过。
+- 按用户“改完直接标结束”的约定，本 issue 以代码和定向验证收口。使用现场 `MiniMax-M3` 完成三场真实任务创建/文件修改场景转为后续兼容性观察；若复现新循环，另立 issue 跟进。

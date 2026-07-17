@@ -4,6 +4,12 @@ import { Effect } from "effect"
 
 import { Instance } from "@/project/instance"
 import {
+  capabilitySourceFromPluginTrust,
+  completeCapabilityOperation,
+  decideCapabilityOperation,
+  requireCapabilityDecision,
+} from "@/capability/gate"
+import {
   commitImport,
   exportPlugin,
   inspectImportPreview,
@@ -58,47 +64,75 @@ export const PluginManageTool = Tool.define(
           params.action === "import_commit" && params.token
             ? yield* Effect.promise(() => inspectImportPreview(params.token!))
             : undefined
-        yield* ctx.ask({
-          permission: "edit",
-          patterns: [
-            `plugin:${params.action}:${reviewed ? `${reviewed.report.id}:${reviewed.report.source.digest.slice(0, 12)}` : (params.spec ?? params.output ?? "managed")}`,
-          ],
-          always: [],
-          metadata: {
-            plugin_action: params.action,
-            spec: params.spec,
-            output: params.output,
-            ...(reviewed
-              ? {
-                  plugin_id: reviewed.report.id,
-                  plugin_source: reviewed.report.source.type,
-                  plugin_digest: reviewed.report.source.digest,
-                }
-              : {}),
-          },
+        const gate = decideCapabilityOperation({
+          caller: `tool:plugin_manage`,
+          capability: "plugin_manage",
+          risk: params.action === "import_commit" ? "install" : params.action === "uninstall" ? "destructive" : "modify",
+          source: reviewed ? capabilitySourceFromPluginTrust(reviewed.report.trust) : "plugin",
+          operation:
+            params.action === "import_commit"
+              ? "install"
+              : params.action === "uninstall"
+                ? "delete"
+                : params.action === "export"
+                  ? "export"
+                  : params.action === "enable"
+                    ? "enable"
+                    : "disable",
+          previewed: params.action !== "import_commit" || Boolean(reviewed),
+          reversible: params.action !== "uninstall",
+          target: reviewed ? `lfplugin:${reviewed.report.id}` : (params.spec ?? params.output),
+          reason: params.description,
+          metadata: reviewed ? { pluginID: reviewed.report.id, digest: reviewed.report.source.digest } : undefined,
         })
+        requireCapabilityDecision(gate.decision)
+        if (gate.decision === "confirm") {
+          yield* ctx.ask({
+            permission: "edit",
+            patterns: [
+              `plugin:${params.action}:${reviewed ? `${reviewed.report.id}:${reviewed.report.source.digest.slice(0, 12)}` : (params.spec ?? params.output ?? "managed")}`,
+            ],
+            always: [],
+            metadata: {
+              plugin_action: params.action,
+              spec: params.spec,
+              output: params.output,
+              ...(reviewed
+                ? {
+                    plugin_id: reviewed.report.id,
+                    plugin_source: reviewed.report.source.type,
+                    plugin_digest: reviewed.report.source.digest,
+                  }
+                : {}),
+            },
+          })
+        }
 
         if (params.action === "import_commit") {
           if (!params.token) throw new Error("plugin_manage import_commit requires token")
           const item = yield* Effect.promise(() => commitImport(params.token!))
+          completeCapabilityOperation(gate.auditID, "completed", { action: "uninstall", spec: item.spec })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return result(params.description, publicRecord(item))
         }
         if (params.action === "enable" || params.action === "disable") {
           if (!params.spec) throw new Error(`plugin_manage ${params.action} requires spec`)
           const item = yield* Effect.promise(() => setPluginEnabled(params.spec!, params.action === "enable"))
+          completeCapabilityOperation(gate.auditID, "completed", { action: "toggle", enabled: params.action !== "enable" })
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return result(params.description, item)
         }
         if (params.action === "uninstall") {
           if (!params.spec) throw new Error("plugin_manage uninstall requires spec")
           const item = yield* Effect.promise(() => uninstallPlugin(params.spec!))
+          completeCapabilityOperation(gate.auditID, "completed")
           yield* Effect.promise(() => Instance.invalidateAllCaches())
           return result(params.description, item)
         }
         if (!params.spec || !params.output) throw new Error("plugin_manage export requires spec and output")
         const output = path.resolve(params.output)
         const item = yield* Effect.promise(() => exportPlugin(params.spec!, output))
+        completeCapabilityOperation(gate.auditID, "completed")
         return result(params.description, item)
       }).pipe(Effect.orDie),
   }),

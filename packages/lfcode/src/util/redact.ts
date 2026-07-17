@@ -8,3 +8,16 @@ export function redactSensitiveText(text: string) {
       "$1$2[REDACTED]",
     )
 }
+
+/** Removes credential-shaped fields from structured data returned to models and audit readers. */
+export function redactSensitiveValue(value: unknown): unknown {
+  if (typeof value === "string") return redactSensitiveText(value)
+  if (Array.isArray(value)) return value.map(redactSensitiveValue)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      /token|secret|password|credential|api[_-]?key|authorization|cookie/i.test(key) ? "[REDACTED]" : redactSensitiveValue(item),
+    ]),
+  )
+}

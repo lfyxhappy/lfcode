@@ -6,6 +6,7 @@ import { pathToFileURL } from "url"
 import { readPluginManifest } from "../../src/plugin/install"
 import { createPluginEntry, resolvePluginId } from "../../src/plugin/shared"
 import { tmpdir } from "../fixture/fixture"
+import { readLfcodePluginManifest } from "@lfcode-ai/plugin"
 
 async function createPluginPackage(root: string, json: Record<string, unknown>) {
   const dir = path.join(root, "plugin")
@@ -15,6 +16,36 @@ async function createPluginPackage(root: string, json: Record<string, unknown>) 
 }
 
 describe("plugin manifest entrypoints", () => {
+  test("reads skill requirements and constrained UI contribution declarations", () => {
+    const manifest = readLfcodePluginManifest(
+      {
+        apiVersion: 2,
+        entrypoints: {},
+        skillRequirements: [
+          { id: "office-documents", purpose: "Validate generated Office documents" },
+          { id: "optional-style-guide", required: false },
+        ],
+        uiContributions: [{ slot: "desktop-settings-panel", title: "Office settings" }],
+      },
+      "manifest-contract",
+    )
+
+    expect(manifest?.skillRequirements).toEqual([
+      { id: "office-documents", purpose: "Validate generated Office documents" },
+      { id: "optional-style-guide", required: false },
+    ])
+    expect(manifest?.uiContributions).toEqual([{ slot: "desktop-settings-panel", title: "Office settings" }])
+  })
+
+  test("rejects UI contribution slots outside the host allowlist", () => {
+    expect(() =>
+      readLfcodePluginManifest(
+        { apiVersion: 2, entrypoints: {}, uiContributions: [{ slot: "editor-dom" }] },
+        "unsafe-ui-plugin",
+      ),
+    ).toThrow("invalid lfcode.uiContributions[].slot")
+  })
+
   test("readPluginManifest prefers lfcode manifest entrypoints over legacy exports", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {

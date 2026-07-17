@@ -33,6 +33,7 @@ import { CppRoutes } from "./cpp"
 import { LspRoutes } from "./lsp"
 import { BackgroundJobRoutes } from "./background-job"
 import { PluginRoutes } from "./plugin"
+import { CapabilityRoutes } from "./capability"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
 
@@ -79,6 +80,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/skills", SkillsRoutes())
     .route("/background-job", BackgroundJobRoutes())
     .route("/plugin", PluginRoutes())
+    .route("/capability", CapabilityRoutes())
     .route("/mcp", McpRoutes())
     .route("/usage", UsageRoutes())
     .route("/tui", TuiRoutes())

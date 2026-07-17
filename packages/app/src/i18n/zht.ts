@@ -1074,11 +1074,13 @@ export const dict = {
   "settings.shortcuts.search.empty": "找不到快速鍵",
 
   "settings.shortcuts.group.general": "一般",
+  "settings.shortcuts.group.featured": "常用快捷鍵",
   "settings.shortcuts.group.session": "工作階段",
   "settings.shortcuts.group.navigation": "導覽",
   "settings.shortcuts.group.modelAndAgent": "模型與代理程式",
   "settings.shortcuts.group.terminal": "終端機",
   "settings.shortcuts.group.prompt": "提示",
+  "settings.shortcuts.group.browser": "瀏覽器",
 
   "settings.providers.title": "提供者",
   "settings.providers.description": "提供者設定將在此處可設定。",

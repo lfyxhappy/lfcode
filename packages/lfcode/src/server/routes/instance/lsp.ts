@@ -32,6 +32,15 @@ const LspQueryResult = z.object({
   result: z.any().optional(),
 })
 
+const LspEnsureInput = z.object({
+  path: z.string(),
+})
+
+const LspEnsureResult = z.object({
+  supported: z.boolean(),
+  status: LSP.Status.array(),
+})
+
 const LspQueryInput = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("diagnostics"),
@@ -56,6 +65,12 @@ const LspQueryInput = z.discriminatedUnion("kind", [
     position: LspLocationInput,
     triggerCharacter: z.string().optional(),
     maxItems: z.number().int().positive().optional(),
+  }),
+  z.object({
+    kind: z.literal("completionResolve"),
+    path: z.string(),
+    text: z.string(),
+    item: z.any(),
   }),
   z.object({
     kind: z.literal("signatureHelp"),
@@ -182,6 +197,34 @@ export const LspRoutes = lazy(() =>
         }),
     )
     .post(
+      "/ensure",
+      describeRoute({
+        summary: "Start language services for a file",
+        description: "Start or download the configured language service for a project file without editing its content.",
+        operationId: "lsp.ensure",
+        responses: {
+          200: {
+            description: "Language service start result",
+            content: {
+              "application/json": {
+                schema: resolver(LspEnsureResult),
+              },
+            },
+          },
+        },
+      }),
+      validator("json", LspEnsureInput),
+      async (c) =>
+        jsonRequest("LspRoutes.ensure", c, function* () {
+          const lsp = yield* LSP.Service
+          const filePath = resolveLspQueryPath(c.req.valid("json").path)
+          return {
+            supported: yield* lsp.hasClients(filePath),
+            status: yield* lsp.status(),
+          } satisfies z.infer<typeof LspEnsureResult>
+        }),
+    )
+    .post(
       "/query",
       describeRoute({
         summary: "Query LSP for editor integrations",
@@ -250,6 +293,18 @@ export const LspRoutes = lazy(() =>
                 triggerCharacter: body.triggerCharacter,
                 maxItems: body.maxItems,
               }),
+            } satisfies z.infer<typeof LspQueryResult>
+          }
+
+          if (body.kind === "completionResolve") {
+            return {
+              supported: true,
+              result: lsp.completionResolve
+                ? yield* lsp.completionResolve({
+                    file: filePath,
+                    item: body.item,
+                  })
+                : null,
             } satisfies z.infer<typeof LspQueryResult>
           }
 

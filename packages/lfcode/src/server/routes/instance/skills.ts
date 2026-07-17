@@ -15,6 +15,8 @@ import { lazy } from "@/util/lazy"
 import { runRequest } from "./trace"
 import { Archive } from "@/util"
 import { NotFoundError } from "@/storage"
+import { globalSkillRoot, migrateExternalGlobalSkills } from "@/skill/global-directory"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 
 const skillName = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
 
@@ -44,24 +46,6 @@ const ImportInput = z.object({
   source: z.string().min(1).optional(),
   name: skillName.optional(),
 })
-
-const CODEX_IMPORT_ALLOWLIST = new Set([
-  "archive-extract",
-  "effect",
-  "define-goal",
-  "doc",
-  "formula-pdf-ocr",
-  "humanizer",
-  "inspect-readonly",
-  "pdf",
-  "playwright",
-  "playwright-interactive",
-  "screenshot",
-  "system__skill-creator",
-  "system__skill-installer",
-  "transcribe",
-  "update",
-])
 
 const CreateInput = z.object({
   name: skillName,
@@ -201,6 +185,7 @@ export const SkillsRoutes = lazy(() =>
             c,
             Effect.gen(function* () {
               const fs = yield* AppFileSystem.Service
+              yield* migrateManagedGlobalSkills()
               return yield* loadLocalSkills(fs, localSkillRoot())
             }),
           ),
@@ -232,7 +217,20 @@ export const SkillsRoutes = lazy(() =>
             c,
             Effect.gen(function* () {
               const input = c.req.valid("json")
+              const gate = decideCapabilityOperation({
+                caller: "route:skills.manage.update",
+                capability: "skill_manage",
+                risk: "modify",
+                source: "local",
+                operation: input.hidden ? "disable" : "enable",
+                previewed: true,
+                reversible: true,
+                target: input.directory,
+                reason: "Explicit managed skill visibility change",
+              })
+              requireCapabilityDecision(gate.decision)
               const fs = yield* AppFileSystem.Service
+              yield* migrateManagedGlobalSkills()
               const { file } = resolveLocalSkillTarget(input.directory)
               if (!(yield* fs.existsSafe(file))) throw new NotFoundError({ message: `Skill not found: ${input.directory}` })
 
@@ -249,7 +247,9 @@ export const SkillsRoutes = lazy(() =>
               yield* fs.writeWithDirs(file, matter.stringify(parsed.content, next))
               const skill = yield* Skill.Service
               yield* skill.refresh()
-              return yield* loadLocalSkillInfo({ directory: input.directory, file }, parsed.content, next)
+              const result = yield* loadLocalSkillInfo({ directory: input.directory, file }, parsed.content, next)
+              completeCapabilityOperation(gate.auditID, "completed", { hidden: !input.hidden })
+              return result
             }),
           ),
         ),
@@ -280,14 +280,31 @@ export const SkillsRoutes = lazy(() =>
             c,
             Effect.gen(function* () {
               const input = c.req.valid("json")
+              const gate = decideCapabilityOperation({
+                caller: "route:skills.manage.delete",
+                capability: "skill_manage",
+                risk: "destructive",
+                source: "local",
+                operation: "delete",
+                previewed: true,
+                reversible: false,
+                target: input.directory,
+                reason: "Explicit managed skill deletion",
+              })
+              requireCapabilityDecision(gate.decision)
               const fs = yield* AppFileSystem.Service
+              yield* migrateManagedGlobalSkills()
               const { root, target } = resolveLocalSkillTarget(input.directory)
-              if (!(yield* fs.existsSafe(target))) return true
+              if (!(yield* fs.existsSafe(target))) {
+                completeCapabilityOperation(gate.auditID, "already absent")
+                return true
+              }
               if (target === root) throw new NotFoundError({ message: "Invalid skill directory" })
 
               yield* fs.remove(target, { recursive: true }).pipe(Effect.catch(() => Effect.void))
               const skill = yield* Skill.Service
               yield* skill.refresh()
+              completeCapabilityOperation(gate.auditID, "completed")
               return true
             }),
           ),
@@ -379,7 +396,22 @@ export const SkillsRoutes = lazy(() =>
             c,
             Effect.gen(function* () {
               const input = c.req.valid("json")
-              return yield* installDiscoverySkill(input)
+              const gate = decideCapabilityOperation({
+                caller: "route:skills.discover.install",
+                capability: "skill_manage",
+                risk: "install",
+                source: "public",
+                operation: "install",
+                previewed: true,
+                reversible: true,
+                target: input.url,
+                reason: "Explicit installation of a discovered skill",
+                metadata: { owner: input.owner, repo: input.repo, skill: input.skill },
+              })
+              requireCapabilityDecision(gate.decision)
+              const result = yield* installDiscoverySkill(input)
+              completeCapabilityOperation(gate.auditID, "completed", { action: "delete", skill: result.name })
+              return result
             }),
           ),
         ),
@@ -468,19 +500,38 @@ export const SkillsRoutes = lazy(() =>
             "SkillsRoutes.import",
             c,
             Effect.gen(function* () {
-                const input = c.req.valid("json")
-                const fs = yield* AppFileSystem.Service
-                const source = yield* resolveImportSource(fs, input)
-                const targets = yield* importSkillCandidates(fs, source.path, {
-                  fallbackName: source.fallbackName,
-                  name: input.name,
-                  allowedNames: source.allowedNames,
-                }).pipe(
-                  Effect.ensuring(source.cleanup),
-                )
+              const input = c.req.valid("json")
+              const gate = decideCapabilityOperation({
+                caller: "route:skills.import",
+                capability: "skill_manage",
+                risk: "install",
+                source: input.kind === "codex" || input.kind === "agents" || input.kind === "claude" ? "local" : "public",
+                operation: "install",
+                previewed: true,
+                reversible: true,
+                target: input.source ?? input.kind ?? "managed-skill-source",
+                reason: "Explicit managed skill import",
+                metadata: { kind: input.kind ?? "folder", name: input.name },
+              })
+              requireCapabilityDecision(gate.decision)
+              const fs = yield* AppFileSystem.Service
+              yield* migrateManagedGlobalSkills()
+              const source = yield* resolveImportSource(fs, input)
+              const targets = yield* importSkillCandidates(fs, source.path, {
+                fallbackName: source.fallbackName,
+                name: input.name,
+                allowedNames: source.allowedNames,
+              }).pipe(
+                Effect.ensuring(source.cleanup),
+              )
               const skill = yield* Skill.Service
               yield* skill.refresh()
-              return yield* importedItems(skill, targets)
+              const result = yield* importedItems(skill, targets)
+              completeCapabilityOperation(gate.auditID, `completed (${result.length} skills)`, {
+                action: "delete",
+                skills: result.map((item) => item.name),
+              })
+              return result
             }),
           ),
         ),
@@ -511,7 +562,20 @@ export const SkillsRoutes = lazy(() =>
             c,
             Effect.gen(function* () {
               const { name, description } = c.req.valid("json")
+              const gate = decideCapabilityOperation({
+                caller: "route:skills.create",
+                capability: "skill_manage",
+                risk: "modify",
+                source: "local",
+                operation: "install",
+                previewed: true,
+                reversible: true,
+                target: name,
+                reason: "Explicit creation of a managed skill",
+              })
+              requireCapabilityDecision(gate.decision)
               const fs = yield* AppFileSystem.Service
+              yield* migrateManagedGlobalSkills()
               const target = path.join(localSkillRoot(), name)
               if (yield* fs.existsSafe(target)) {
                 throw new Error(`Skill already exists: ${name}`)
@@ -526,6 +590,7 @@ export const SkillsRoutes = lazy(() =>
               yield* skill.refresh()
               const item = yield* skill.get(name)
               if (!item) throw new Error(`Created skill not found after refresh: ${name}`)
+              completeCapabilityOperation(gate.auditID, "completed", { action: "delete", skill: name })
               return item
             }),
           ),
@@ -707,6 +772,7 @@ function installDiscoverySkill(input: {
 }) {
   return Effect.gen(function* () {
     const fs = yield* AppFileSystem.Service
+    yield* migrateManagedGlobalSkills()
     const html = yield* Effect.promise(() =>
       fetch(input.url).then(async (res) => {
         if (!res.ok) throw new Error(`Failed to fetch ${input.url}: ${res.status}`)
@@ -847,7 +913,6 @@ function resolveImportSource(
           path: target,
           cleanup: Effect.void,
           fallbackName: undefined,
-          allowedNames: CODEX_IMPORT_ALLOWLIST,
         }
       }
     if (kind === "agents") {
@@ -1012,7 +1077,14 @@ async function copyDirectory(fs: AppFileSystem.Interface, source: string, target
 }
 
 function localSkillRoot() {
-  return path.join(Global.Path.config, "skills")
+  return globalSkillRoot()
+}
+
+function migrateManagedGlobalSkills() {
+  return Effect.tryPromise({
+    try: migrateExternalGlobalSkills,
+    catch: (error) => error,
+  }).pipe(Effect.catch(() => Effect.void))
 }
 
 function resolveLocalSkillTarget(directory: string) {

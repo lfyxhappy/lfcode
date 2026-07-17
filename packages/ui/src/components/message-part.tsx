@@ -86,6 +86,7 @@ export { PART_MAPPING } from "./message-part-registry"
 export type { MessagePartProps, ToolProps } from "./message-part-registry"
 
 const CodeDiffView = lazy(() => import("./code-diff-view").then((mod) => ({ default: mod.CodeDiffView })))
+type FailedToolPart = ToolPart & { state: Extract<ToolPart["state"], { status: "error" }> }
 
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
@@ -380,6 +381,7 @@ export function AssistantParts(props: {
   const data = useData()
   const emptyParts: PartType[] = []
   const emptyTools: ToolPart[] = []
+  const emptyErrors: FailedToolPart[] = []
   const messages = createMemo(() => (typeof props.messages === "function" ? props.messages() : props.messages))
   const msgs = createMemo(() => index(messages()))
   const part = createMemo(
@@ -446,6 +448,40 @@ export function AssistantParts(props: {
                   return (
                     <Show when={parts().length > 0}>
                       <ContextToolGroup parts={parts()} busy={busy()} />
+                    </Show>
+                  )
+                })()}
+              </Match>
+              <Match when={entryType() === "tool-error"}>
+                {(() => {
+                  const errors = createMemo(
+                    () => {
+                      const entry = entryAccessor()
+                      if (entry.type !== "tool-error") return emptyErrors
+                      return entry.refs
+                        .map((ref) => part().get(ref.messageID)?.get(ref.partID))
+                        .filter(
+                          (part): part is FailedToolPart =>
+                            !!part && part.type === "tool" && part.state.status === "error",
+                        )
+                    },
+                    emptyErrors,
+                    { equals: same },
+                  )
+                  const lastError = createMemo(() => errors().at(-1))
+
+                  return (
+                    <Show when={lastError()}>
+                      {(item) => (
+                        <div data-component="tool-part-wrapper">
+                          <ToolErrorCard
+                            tool={item().tool}
+                            error={item().state.error}
+                            occurrences={errors().length}
+                            defaultOpen={partDefaultOpen(item(), props.shellToolDefaultOpen, props.editToolDefaultOpen)}
+                          />
+                        </div>
+                      )}
                     </Show>
                   )
                 })()}

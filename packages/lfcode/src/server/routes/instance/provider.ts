@@ -14,6 +14,7 @@ import { lazy } from "@/util/lazy"
 import { Cause, Effect } from "effect"
 import { jsonRequest } from "./trace"
 import { generateText, tool } from "ai"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 
 const DetectResult = z.object({
   detected: ConfigProvider.Model.zod,
@@ -675,6 +676,18 @@ export const ProviderRoutes = lazy(() =>
         jsonRequest("ProviderRoutes.model.detect", c, function* () {
           const providerID = c.req.valid("param").providerID
           const modelID = ModelID.make(c.req.valid("param").modelID)
+          const gate = decideCapabilityOperation({
+            caller: "route:provider.model.detect",
+            capability: "provider_manage",
+            risk: "modify",
+            source: "core",
+            operation: "update",
+            previewed: true,
+            reversible: true,
+            target: `${providerID}/${modelID}`,
+            reason: "Run and save a model capability probe",
+          })
+          requireCapabilityDecision(gate.decision)
           const providerSvc = yield* Provider.Service
           const cfg = yield* Config.Service
           const model = yield* providerSvc.getModel(providerID, modelID)
@@ -690,6 +703,7 @@ export const ProviderRoutes = lazy(() =>
               },
             },
           })
+          completeCapabilityOperation(gate.auditID, "completed")
           return {
             detected,
             saved: true,
@@ -726,12 +740,26 @@ export const ProviderRoutes = lazy(() =>
         jsonRequest("ProviderRoutes.oauth.authorize", c, function* () {
           const providerID = c.req.valid("param").providerID
           const { method, inputs } = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:provider.oauth.authorize",
+            capability: "provider_manage",
+            risk: "credential",
+            source: "core",
+            operation: "update",
+            previewed: true,
+            reversible: true,
+            target: String(providerID),
+            reason: "Start provider OAuth credential flow",
+          })
+          requireCapabilityDecision(gate.decision)
           const svc = yield* ProviderAuth.Service
-          return yield* svc.authorize({
+          const result = yield* svc.authorize({
             providerID,
             method,
             inputs,
           })
+          completeCapabilityOperation(gate.auditID, "completed")
+          return result
         }),
     )
     .post(
@@ -763,12 +791,25 @@ export const ProviderRoutes = lazy(() =>
         jsonRequest("ProviderRoutes.oauth.callback", c, function* () {
           const providerID = c.req.valid("param").providerID
           const { method, code } = c.req.valid("json")
+          const gate = decideCapabilityOperation({
+            caller: "route:provider.oauth.callback",
+            capability: "provider_manage",
+            risk: "credential",
+            source: "core",
+            operation: "update",
+            previewed: true,
+            reversible: true,
+            target: String(providerID),
+            reason: "Complete provider OAuth credential flow",
+          })
+          requireCapabilityDecision(gate.decision)
           const svc = yield* ProviderAuth.Service
           yield* svc.callback({
             providerID,
             method,
             code,
           })
+          completeCapabilityOperation(gate.auditID, "completed")
           return true
         }),
     ),

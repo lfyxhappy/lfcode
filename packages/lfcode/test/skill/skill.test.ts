@@ -30,17 +30,16 @@ describe("skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, "skills", "test-skill", "SKILL.md"),
+              path.join(dir, ".lfcode", "skills", "test-skill", "SKILL.md"),
               `---\nname: test-skill\ndescription: A test skill for verification.\n---\n\n# Test Skill\n\nInstructions here.\n`,
             ),
           )
@@ -51,7 +50,7 @@ describe("skill", () => {
           const item = list.find((x) => x.name === "test-skill")
           expect(item).toBeDefined()
           expect(item!.description).toBe("A test skill for verification.")
-          expect(item!.location).toContain(path.join("skills", "test-skill", "SKILL.md"))
+          expect(item!.location).toContain(path.join(".lfcode", "skills", "test-skill", "SKILL.md"))
         }),
       { git: true },
     ),
@@ -61,24 +60,23 @@ describe("skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, "skills", "dir-skill", "SKILL.md"),
+              path.join(dir, ".lfcode", "skills", "dir-skill", "SKILL.md"),
               `---\nname: dir-skill\ndescription: Skill for dirs test.\n---\n\n# Dir Skill\n`,
             ),
           )
 
           const skill = yield* Skill.Service
           const dirs = yield* skill.dirs()
-          expect(dirs).toContain(path.join(dir, "skills", "dir-skill"))
+          expect(dirs).toContain(path.join(dir, ".lfcode", "skills", "dir-skill"))
           expect(dirs.length).toBe(1)
         }),
       { git: true },
@@ -89,22 +87,21 @@ describe("skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
           yield* Effect.promise(() =>
             Promise.all([
               Bun.write(
-                path.join(dir, "skills", "skill-one", "SKILL.md"),
+                path.join(dir, ".lfcode", "skills", "skill-one", "SKILL.md"),
                 `---\nname: skill-one\ndescription: First test skill.\n---\n\n# Skill One\n`,
               ),
               Bun.write(
-                path.join(dir, "skills", "skill-two", "SKILL.md"),
+                path.join(dir, ".lfcode", "skills", "skill-two", "SKILL.md"),
                 `---\nname: skill-two\ndescription: Second test skill.\n---\n\n# Skill Two\n`,
               ),
             ]),
@@ -120,21 +117,54 @@ describe("skill", () => {
     ),
   )
 
+  it.live("uses the canonical skill when an external migration source has the same directory", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const restoreHome = useManagedSkillHome(dir)
+          yield* Effect.addFinalizer(() =>
+            Effect.sync(() => {
+              restoreHome()
+            }),
+          )
+
+          yield* Effect.promise(() =>
+            Promise.all([
+              Bun.write(
+                path.join(dir, ".lfcode", "skills", "duplicate", "SKILL.md"),
+                `---\nname: canonical-skill\ndescription: Canonical skill.\n---\n`,
+              ),
+              Bun.write(
+                path.join(dir, ".codex", "skills", "duplicate", "SKILL.md"),
+                `---\nname: external-skill\ndescription: External skill.\n---\n`,
+              ),
+            ]),
+          )
+
+          const skill = yield* Skill.Service
+          const list = yield* skill.all()
+          expect(list).toHaveLength(1)
+          expect(list[0]?.name).toBe("canonical-skill")
+          expect(list[0]?.location).toContain(path.join(".lfcode", "skills", "duplicate", "SKILL.md"))
+        }),
+      { git: true },
+    ),
+  )
+
   it.live("skips skills with missing frontmatter", () =>
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, "skills", "no-frontmatter", "SKILL.md"),
+              path.join(dir, ".lfcode", "skills", "no-frontmatter", "SKILL.md"),
               `# No Frontmatter\n\nJust some content without YAML frontmatter.\n`,
             ),
           )
@@ -150,11 +180,10 @@ describe("skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(path.join(dir, "managed-home"))
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
@@ -227,7 +256,7 @@ describe("skill", () => {
           expect(item).toBeDefined()
           expect(item!.description).toContain("creating, updating, packaging, or validating an Lfcode skill")
           expect(item!.description).toContain("built-in bundled skills")
-          expect(item!.content).toContain("Create a user-managed skill under `<lfcode-config-root>/skills/<skill-name>/`")
+          expect(item!.content).toContain("Create a user-managed skill under `~/.lfcode/skills/<skill-name>/`")
           expect(item!.content).toContain("packages/lfcode/src/skill/lfcode/.bundle/<skill-name>/")
           expect(item!.content).toContain("bun test test/skill/skill.test.ts")
           expect(item!.location).toContain(path.join("lfcode-skills"))
@@ -285,3 +314,9 @@ describe("skill", () => {
     ),
   )
 })
+
+function useManagedSkillHome(home: string) {
+  const original = Object.getOwnPropertyDescriptor(Global.Path, "home")
+  Object.defineProperty(Global.Path, "home", { configurable: true, value: home })
+  return () => Object.defineProperty(Global.Path, "home", original!)
+}

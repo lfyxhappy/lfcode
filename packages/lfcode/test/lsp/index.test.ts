@@ -34,7 +34,7 @@ describe("lsp.spawn", () => {
     ),
   )
 
-  it.live("does not spawn builtin LSP for files inside instance when LSP is unset", () =>
+  it.live("spawns builtin LSP for files inside instance when the default LSP configuration is enabled", () =>
     provideTmpdirInstance((dir) =>
       LSP.Service.use((lsp) =>
         Effect.gen(function* () {
@@ -46,7 +46,7 @@ describe("lsp.spawn", () => {
               line: 0,
               character: 0,
             })
-            expect(spy).toHaveBeenCalledTimes(0)
+            expect(spy).toHaveBeenCalledTimes(1)
           } finally {
             spy.mockRestore()
           }

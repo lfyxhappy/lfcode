@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { AppRuntime } from "@/effect/app-runtime"
 import { BackgroundJobPersistence } from "../../src/background-job/persistence"
+import { CapabilityPersistence } from "../../src/capability/persistence"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
@@ -59,6 +60,12 @@ describe("background job routes", () => {
             status: "running",
           }),
         ])
+        expect(CapabilityPersistence.listAudit({ capability: "context_read" })).toContainEqual(
+          expect.objectContaining({
+            caller: "route:background-job",
+            rollback: expect.objectContaining({ sessions: [first.id], jobs: ["job-first"] }),
+          }),
+        )
       },
     })
   })
@@ -117,6 +124,12 @@ describe("background job routes", () => {
         expect(logsBody[0]?.seq).toBe(2)
         expect(logsBody[0]?.stream).toBe("stderr")
         expect(logsBody[0]?.text).toBe("warn")
+        expect(CapabilityPersistence.listAudit({ capability: "context_read" })).toContainEqual(
+          expect.objectContaining({
+            caller: "route:background-job",
+            rollback: expect.objectContaining({ jobs: ["job-detail"], logCount: 1 }),
+          }),
+        )
       },
     })
   })

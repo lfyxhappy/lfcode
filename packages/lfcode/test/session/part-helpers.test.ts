@@ -101,8 +101,8 @@ describe("session part helpers", () => {
     expect(repeatedToolValidationFailure({ messages, threshold: 3 })).toBe(false)
   })
 
-  test("sameToolFailureCount aggregates the exact tool failure signature", () => {
-    const error = "The task tool was called with invalid arguments: missing action"
+  test("sameToolFailureCount groups structured failures despite volatile task input", () => {
+    const error = '[tool_error] {"type":"tool_error","tool":"task","category":"schema","fields":["operation.summary"],"message":"operation.summary: expected string"}'
     const messages = ["m1", "m2", "m3"].map((id) => ({
       info: {
         id: MessageID.make(id),
@@ -133,6 +133,6 @@ describe("session part helpers", () => {
     })) as MessageV2.WithParts[]
 
     expect(sameToolFailureCount({ messages, tool: "task", toolInput: { operation: {} }, error })).toBe(3)
-    expect(sameToolFailureCount({ messages, tool: "task", toolInput: { operation: { action: "list" } }, error })).toBe(0)
+    expect(sameToolFailureCount({ messages, tool: "task", toolInput: { operation: { action: "list", id: "T99" } }, error })).toBe(3)
   })
 })

@@ -85,6 +85,9 @@ export const Instance = {
   get project() {
     return context.use().project
   },
+  has(directory: string) {
+    return cache.has(AppFileSystem.resolve(directory))
+  },
 
   /**
    * Check if a path is within the project boundary.

@@ -21,6 +21,15 @@ export type Info = NonNullable<Awaited<ReturnType<typeof create>>>
 
 export type Diagnostic = VSCodeDiagnostic
 
+export type Capabilities = {
+  completion: boolean
+  completionTriggerCharacters: string[]
+  hover: boolean
+  diagnostics: boolean
+  definition: boolean
+  formatting: boolean
+}
+
 export const InitializeError = NamedError.create(
   "LSPInitializeError",
   z.object({
@@ -78,7 +87,7 @@ export async function create(input: { serverID: string; server: LSPServer.Handle
   connection.listen()
 
   l.info("sending initialize")
-  await withTimeout(
+  const initialized = await withTimeout(
     connection.sendRequest("initialize", {
       rootUri: pathToFileURL(input.root).href,
       processId: input.server.process.pid,
@@ -143,6 +152,7 @@ export async function create(input: { serverID: string; server: LSPServer.Handle
     get connection() {
       return connection
     },
+    capabilities: getLspClientCapabilities(initialized),
     notify: {
       async open(request: { path: string; text?: string }) {
         request.path = path.isAbsolute(request.path) ? request.path : path.resolve(input.directory, request.path)
@@ -246,4 +256,23 @@ export async function create(input: { serverID: string; server: LSPServer.Handle
   l.info("initialized")
 
   return result
+}
+
+export function getLspClientCapabilities(value: unknown): Capabilities {
+  const capabilities = isRecord(value) && isRecord(value.capabilities) ? value.capabilities : {}
+  const completion = isRecord(capabilities.completionProvider) ? capabilities.completionProvider : undefined
+  return {
+    completion: Boolean(capabilities.completionProvider),
+    completionTriggerCharacters: Array.isArray(completion?.triggerCharacters)
+      ? Array.from(new Set(completion.triggerCharacters.filter((item): item is string => typeof item === "string" && item.length === 1)))
+      : [],
+    hover: Boolean(capabilities.hoverProvider),
+    diagnostics: true,
+    definition: Boolean(capabilities.definitionProvider),
+    formatting: Boolean(capabilities.documentFormattingProvider),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

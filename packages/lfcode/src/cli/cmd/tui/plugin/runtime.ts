@@ -88,6 +88,7 @@ const KV_KEY = "plugin_enabled"
 const EMPTY_TUI: TuiPluginModule = {
   tui: async () => {},
 }
+const TUI_UI_TRUST = new Set(["bundled", "official", "dev-local"])
 
 function fail(message: string, data: Record<string, unknown>) {
   if (!("error" in data)) {
@@ -245,7 +246,7 @@ function createMeta(
       state: meta.state,
       ...meta.entry,
       name: load.manifest?.name,
-      trust: load.manifest?.trust,
+      trust: pluginTrust(load),
       apiVersion: load.manifest?.apiVersion,
       capabilities: load.manifest?.capabilities,
       lfcodeRange: load.manifest?.lfcodeRange,
@@ -257,7 +258,7 @@ function createMeta(
     state: load.source === "internal" ? "same" : "first",
     id: id ?? load.spec,
     name: load.manifest?.name,
-    trust: load.manifest?.trust,
+    trust: pluginTrust(load),
     apiVersion: load.manifest?.apiVersion,
     capabilities: load.manifest?.capabilities,
     lfcodeRange: load.manifest?.lfcodeRange,
@@ -269,6 +270,21 @@ function createMeta(
     time_changed: now,
     load_count: 1,
     fingerprint: load.target,
+  }
+}
+
+function pluginTrust(load: PluginLoad): NonNullable<TuiPluginMeta["trust"]> {
+  if (load.source === "internal") return "bundled"
+  return load.manifest?.trust ?? "external"
+}
+
+function tuiSlotAccess(plugin: PluginEntry) {
+  if (plugin.load.source === "internal") return
+  if (!plugin.load.manifest?.uiContributions?.some((item) => item.slot === "tui-slot")) {
+    return "manifest does not declare uiContributions.tui-slot"
+  }
+  if (!TUI_UI_TRUST.has(pluginTrust(plugin.load))) {
+    return `trust ${pluginTrust(plugin.load)} is not permitted for TUI UI`
   }
 }
 
@@ -543,10 +559,28 @@ function pluginApi(runtime: RuntimeState, plugin: PluginEntry, scope: PluginScop
   let count = 0
 
   const slots: TuiPluginApi["slots"] = {
-    register(plugin: TuiSlotPlugin) {
+    register(contribution: TuiSlotPlugin) {
       const id = count ? `${base}:${count}` : base
       count += 1
-      scope.track(host.register({ ...plugin, id }))
+      const denied = tuiSlotAccess(plugin)
+      if (denied) {
+        warn("blocked tui plugin UI contribution", {
+          id: plugin.id,
+          path: plugin.load.spec,
+          reason: denied,
+        })
+        return id
+      }
+
+      try {
+        scope.track(host.register({ ...contribution, id }))
+      } catch (error) {
+        fail("failed to register tui plugin UI contribution", {
+          id: plugin.id,
+          path: plugin.load.spec,
+          error,
+        })
+      }
       return id
     },
   }

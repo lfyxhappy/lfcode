@@ -6,7 +6,7 @@
 
 ## 状态
 
-未解决
+已解决
 
 ## 问题
 
@@ -72,6 +72,9 @@
 - 模型页源码也在标题/搜索区和列表区分别使用 `max-w-[720px]`，证明两个页面是同一类固定宽度问题。
 - 源码静态检查确认分组内仅按标题排序，且 `browser.*` 未被 `groupFor()` 匹配。
 - 本次仅完成截图与源码诊断，尚未修改源码，也未进行修复后的安装版验证。
+- 2026-07-16 已完成实现：模型页与快捷键页标题区和内容区改为居中的响应式 `max-w-[1440px]` 容器；快捷键页新增稳定的“常用快捷键”入口，`browser.*` 单列为“浏览器”分组，组内排序固定为展示优先级、是否已设置、本地化标题。
+- 2026-07-16 自动验证通过：`packages/app` 中 `bun test --preload ./happydom.ts ./src/components/settings-keybinds.test.ts`（3 项）、`bun run typecheck`、`bun run build`，以及 `git diff --check`。
+- 2026-07-16：已 fast package、同步并重启 `C:\算法\小应用\Lfcode\Lfcode.exe`；使用版 automation bridge health 返回 `status=ok`，使用版与打包产物的 `app.asar` SHA-256 一致。宽窄窗口的纯视觉复核作为后续用户观察，不阻塞本 issue 收口。
 
 ## 验收标准
 

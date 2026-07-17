@@ -123,6 +123,8 @@ type ServerLspCommand = {
   arguments?: unknown[]
 }
 
+const DEFAULT_COMPLETION_TRIGGER_CHARACTERS = [".", ":", ">", "/", "\\", "'", "\"", "@", "("]
+
 type ServerLspCodeActionDisabled = {
   reason: string
 }
@@ -190,7 +192,6 @@ type ServerLspQueryResult = {
 type ServerLspPositionQuery = {
   kind:
     | "hover"
-    | "completion"
     | "signatureHelp"
     | "prepareRename"
     | "rename"
@@ -206,6 +207,18 @@ type ServerLspPositionQuery = {
   newName?: string
   triggerCharacter?: string
   maxItems?: number
+}
+
+type ServerLspCompletionQuery = {
+  kind: "completion"
+  position: { lineNumber: number; column: number }
+  triggerCharacter?: string
+  maxItems?: number
+}
+
+type ServerLspCompletionResolveQuery = {
+  kind: "completionResolve"
+  item: unknown
 }
 
 type ServerLspCodeActionQuery = {
@@ -254,6 +267,8 @@ type ServerLspRangeFormattingQuery = {
 type ServerLspQuery =
   | { kind: "diagnostics" | "documentSymbol" }
   | ServerLspPositionQuery
+  | ServerLspCompletionQuery
+  | ServerLspCompletionResolveQuery
   | ServerLspFormattingQuery
   | ServerLspRangeFormattingQuery
   | ServerLspCodeActionQuery
@@ -285,6 +300,7 @@ type ServerLspProviderRegistryEntry = {
   paths: Map<string, number>
   requests: Map<string, Set<AbortController>>
   completionRequests: Map<string, AbortController>
+  completionCache: Map<string, { expiresAt: number; promise: Promise<ServerLspModelQueryResult> }>
   disposables: import("monaco-editor").IDisposable[]
   disposeGeneration: number
 }
@@ -297,8 +313,27 @@ type HoverContent =
       value?: string
     }
 
-const SERVER_LSP_LANGUAGES = new Set(["typescript", "javascript", "python", "c", "cpp"])
+const SERVER_LSP_LANGUAGES = new Set([
+  "typescript",
+  "javascript",
+  "python",
+  "c",
+  "cpp",
+  "go",
+  "rust",
+  "java",
+  "kotlin",
+  "csharp",
+  "ruby",
+  "php",
+  "lua",
+  "yaml",
+  "shell",
+  "dockerfile",
+  "swift",
+])
 const SERVER_LSP_EXECUTE_COMMAND_ID = "lfcode.serverLsp.executeCommand"
+const SERVER_LSP_COMPLETION_CACHE_MS = 180
 let serverLspExecuteCommandRegistration: import("monaco-editor").IDisposable | undefined
 
 export function shouldUseCodeEditorServerLsp(language?: string) {
@@ -320,7 +355,14 @@ export async function requestCodeEditorServerLsp(input: {
     ...createBasicAuthHeader(input.server),
   }
   const body =
-    input.query.kind === "codeAction"
+    input.query.kind === "completionResolve"
+      ? {
+          kind: input.query.kind,
+          path: input.path,
+          text: input.text,
+          item: input.query.item,
+        }
+      : input.query.kind === "codeAction"
       ? {
           kind: input.query.kind,
           path: input.path,
@@ -383,7 +425,7 @@ export async function requestCodeEditorServerLsp(input: {
                 line: Math.max(0, input.query.position.lineNumber - 1),
                 character: Math.max(0, input.query.position.column - 1),
               },
-              newName: input.query.newName,
+              newName: input.query.kind === "completion" ? undefined : input.query.newName,
               triggerCharacter: input.query.triggerCharacter,
               maxItems: input.query.maxItems,
             }
@@ -417,6 +459,11 @@ export function getCodeEditorServerLspRegistryKey(input: {
   return [input.serverURL, input.directory, input.language].join("\n")
 }
 
+export function getCodeEditorServerLspCompletionTriggerCharacters(value?: string[]) {
+  const source = value?.length ? value : DEFAULT_COMPLETION_TRIGGER_CHARACTERS
+  return Array.from(new Set(source.filter((item) => item.length === 1)))
+}
+
 export function registerCodeEditorServerLspProviders(input: {
   monaco: typeof import("monaco-editor")
   server?: ServerConnection.HttpBase
@@ -424,6 +471,8 @@ export function registerCodeEditorServerLspProviders(input: {
   path: string
   language: string
   getText?: () => string
+  enabled?: () => boolean
+  completionTriggerCharacters?: string[]
 }) {
   const server = input.server
   if (!server || !shouldUseCodeEditorServerLsp(input.language)) return () => {}
@@ -453,6 +502,7 @@ export function registerCodeEditorServerLspProviders(input: {
     paths: new Map([[path, 1]]),
     requests: new Map(),
     completionRequests: new Map(),
+    completionCache: new Map(),
     disposables: [],
     disposeGeneration: 1,
   }
@@ -461,16 +511,22 @@ export function registerCodeEditorServerLspProviders(input: {
     model: editor.ITextModel,
     query: ServerLspQuery,
     token?: import("monaco-editor").CancellationToken,
-  ) =>
-    requestCodeEditorServerLspForModel({
+  ) => {
+    if (input.enabled && !input.enabled()) return Promise.resolve({ supported: false } satisfies ServerLspQueryResult)
+    return requestCodeEditorServerLspForModel({
       registry,
       model,
       query,
       token,
     })
+  }
+  const completionResolveItems = new WeakMap<
+    import("monaco-editor").languages.CompletionItem,
+    { model: editor.ITextModel; item: unknown; position: import("monaco-editor").Position }
+  >()
 
   const completion = input.monaco.languages.registerCompletionItemProvider(input.language, {
-    triggerCharacters: [".", ":", ">", "/", "\\", "'", "\"", "@", "("],
+    triggerCharacters: getCodeEditorServerLspCompletionTriggerCharacters(input.completionTriggerCharacters),
     provideCompletionItems: async (model, position, context, token) => {
       const response = await request(
         model,
@@ -483,12 +539,34 @@ export function registerCodeEditorServerLspProviders(input: {
         token,
       )
       if (!response.supported) return { suggestions: [] }
-      return normalizeServerLspCompletionList({
+      const list = normalizeServerLspCompletionList({
         result: response.result,
         monaco: input.monaco,
         model,
         position,
       })
+      const items = getServerLspCompletionItems(response.result)
+      list.suggestions.forEach((item, index) => {
+        const source = items[index]
+        if (!source) return
+        completionResolveItems.set(item, { model, item: source, position })
+      })
+      return list
+    },
+    resolveCompletionItem: async (item, token) => {
+      const context = completionResolveItems.get(item)
+      if (!context) return item
+      const response = await request(context.model, { kind: "completionResolve", item: context.item }, token)
+      if (!response.supported) return item
+      const resolved = normalizeServerLspCompletionList({
+        result: [response.result],
+        monaco: input.monaco,
+        model: context.model,
+        position: context.position,
+      }).suggestions[0]
+      if (!resolved) return item
+      completionResolveItems.set(resolved, { ...context, item: response.result })
+      return { ...item, ...resolved }
     },
   })
 
@@ -1227,6 +1305,48 @@ async function requestCodeEditorServerLspForModel(input: {
 }): Promise<ServerLspModelQueryResult> {
   const binding = input.binding ?? getCodeEditorServerLspModelBinding(input.registry, input.model)
   if (!binding || input.model.isDisposed() || input.token?.isCancellationRequested) return { supported: false }
+  if (input.query.kind !== "completion") {
+    return requestCodeEditorServerLspForModelUncached({ ...input, binding })
+  }
+
+  const cacheKey = getCodeEditorServerLspCompletionCacheKey({ binding, query: input.query })
+  const cached = input.registry.completionCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.promise
+
+  input.registry.completionCache.forEach((entry, key) => {
+    if (entry.expiresAt <= Date.now()) input.registry.completionCache.delete(key)
+  })
+  const promise = requestCodeEditorServerLspForModelUncached({ ...input, binding })
+  input.registry.completionCache.set(cacheKey, {
+    expiresAt: Date.now() + SERVER_LSP_COMPLETION_CACHE_MS,
+    promise,
+  })
+  return promise
+}
+
+export function getCodeEditorServerLspCompletionCacheKey(input: {
+  binding: Pick<ServerLspModelBinding, "stamp">
+  query: ServerLspCompletionQuery
+}) {
+  return [
+    input.binding.stamp.key,
+    input.binding.stamp.revision,
+    input.binding.stamp.modelVersion,
+    input.query.position.lineNumber,
+    input.query.position.column,
+    input.query.triggerCharacter ?? "",
+    input.query.maxItems ?? "",
+  ].join("\\n")
+}
+
+async function requestCodeEditorServerLspForModelUncached(input: {
+  registry: ServerLspProviderRegistryEntry
+  model: editor.ITextModel
+  query: ServerLspQuery
+  token?: import("monaco-editor").CancellationToken
+  binding: ServerLspModelBinding
+}): Promise<ServerLspModelQueryResult> {
+  const binding = input.binding
   if (!isCodeEditorServerLspBindingCurrent({ registry: input.registry, model: input.model, binding, token: input.token })) {
     return { supported: false }
   }

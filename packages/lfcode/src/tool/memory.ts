@@ -4,6 +4,7 @@ import { Memory } from "@/memory"
 import * as Session from "@/session/session"
 import DESCRIPTION from "./memory.txt"
 import * as Tool from "./tool"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 
 const memoryParameters = z.object({
   operation: z.enum(["search", "write_project_record"]).default("search").describe("Memory operation to perform"),
@@ -21,6 +22,7 @@ const memoryParameters = z.object({
   key: z.string().optional().describe("Dream-only record key: MEMORY or MEMORY-<topic>"),
   body: z.string().optional().describe("Dream-only full Markdown body for the durable record"),
   summary: z.string().optional().describe("Dream-only concise record summary"),
+  reason: z.string().min(1).optional().describe("Reason for reading memory; recorded for cross-project access."),
 }).superRefine((value, ctx) => {
   if (value.operation === "search" && !value.query?.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["query"], message: "query is required for memory search" })
@@ -104,12 +106,31 @@ export const MemoryTool = Tool.define(
               metadata: { path: record.path, freshness: record.freshness },
             }
           }
+          const gate = decideCapabilityOperation({
+            caller: "tool:memory",
+            capability: "context_read",
+            risk: "read",
+            source: "core",
+            operation: "read",
+            previewed: true,
+            reversible: true,
+            target: args.scope_id ?? args.scope ?? "global-memory",
+            sessionID: ctx.sessionID,
+            messageID: ctx.messageID,
+            reason: args.reason ?? "Memory search",
+          })
+          requireCapabilityDecision(gate.decision)
           const results = yield* memory.search({
             query: args.query ?? "",
             scope: args.scope,
             scope_id: args.scope_id,
             type: args.type,
             limit: args.limit,
+          })
+          completeCapabilityOperation(gate.auditID, `completed (${results.results.length} matches)`, {
+            scope: args.scope ?? "global",
+            scopeID: args.scope_id,
+            paths: results.results.map((item) => item.path),
           })
           if (results.status === "unavailable") {
             return {

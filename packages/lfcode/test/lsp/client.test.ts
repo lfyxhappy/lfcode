@@ -96,3 +96,36 @@ describe("LSPClient interop", () => {
     await client.shutdown()
   })
 })
+
+describe("LSPClient capabilities", () => {
+  test("reads advertised completion triggers without making unsupported capabilities available", () => {
+    expect(
+      LSPClient.getLspClientCapabilities({
+        capabilities: {
+          completionProvider: { triggerCharacters: [".", ":", ".", "invalid"] },
+          hoverProvider: true,
+          definitionProvider: true,
+          documentFormattingProvider: true,
+        },
+      }),
+    ).toEqual({
+      completion: true,
+      completionTriggerCharacters: [".", ":"],
+      hover: true,
+      diagnostics: true,
+      definition: true,
+      formatting: true,
+    })
+  })
+
+  test("uses safe empty capability defaults for malformed initialize responses", () => {
+    expect(LSPClient.getLspClientCapabilities(undefined)).toEqual({
+      completion: false,
+      completionTriggerCharacters: [],
+      hover: false,
+      diagnostics: true,
+      definition: false,
+      formatting: false,
+    })
+  })
+})

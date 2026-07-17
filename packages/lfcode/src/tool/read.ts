@@ -23,6 +23,10 @@ const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
 const SAMPLE_BYTES = 4096
 const MAX_ARCHIVE_INSPECT_BYTES = 20 * 1024 * 1024
 
+function versionAnchor(version: string) {
+  return `<version>${version}</version>\nUse this version as replace_range.expected_version when editing this file.`
+}
+
 const parameters = z.object({
   filePath: z.string().describe("The absolute or relative path to the file or directory to read."),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
@@ -206,7 +210,7 @@ export const ReadTool = Tool.define(
         const kind: ReadKind = isPdfAttachment(mime) ? "pdf" : "image"
         return {
           title,
-          output: msg,
+          output: [msg, versionAnchor(version)].join("\n"),
           metadata: {
             kind,
             mime,
@@ -234,6 +238,7 @@ export const ReadTool = Tool.define(
             output: [
               `<path>${filepath}</path>`,
               `<type>${inferredKind}</type>`,
+              versionAnchor(version),
               `<mime>${mime}</mime>`,
               `<size>${fileSize}</size>`,
               `File is too large to inspect inline (${Math.ceil(fileSize / 1024 / 1024)} MB).`,
@@ -261,7 +266,13 @@ export const ReadTool = Tool.define(
 
         if ("text" in inspected && inspected.text) {
           const document = paginateText(inspected.text, params.offset ?? 1, params.limit ?? DEFAULT_READ_LIMIT)
-          let output = [`<path>${filepath}</path>`, `<type>${inspected.kind}</type>`, `<mime>${mime}</mime>`, "<content>\n"].join(
+          let output = [
+            `<path>${filepath}</path>`,
+            `<type>${inspected.kind}</type>`,
+            versionAnchor(version),
+            `<mime>${mime}</mime>`,
+            "<content>\n",
+          ].join(
             "\n",
           )
           output += document.raw.map((line, i) => `${i + document.offset}: ${line}`).join("\n")
@@ -299,6 +310,7 @@ export const ReadTool = Tool.define(
           output: [
             `<path>${filepath}</path>`,
             `<type>${inspected.kind}</type>`,
+            versionAnchor(version),
             `<mime>${mime}</mime>`,
             `<entries>`,
             archive.raw.join("\n"),
@@ -329,6 +341,7 @@ export const ReadTool = Tool.define(
           output: [
             `<path>${filepath}</path>`,
             `<type>binary</type>`,
+            versionAnchor(version),
             `<mime>${mime}</mime>`,
             `<size>${fileSize}</size>`,
             "Binary file cannot be rendered as text by read().",
@@ -354,7 +367,12 @@ export const ReadTool = Tool.define(
         )
       }
 
-      let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>\n"].join("\n")
+      let output = [
+        `<path>${filepath}</path>`,
+        `<type>file</type>`,
+        versionAnchor(version),
+        "<content>\n",
+      ].join("\n")
       output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 
       const last = file.offset + file.raw.length - 1

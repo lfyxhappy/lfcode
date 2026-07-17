@@ -1135,6 +1135,13 @@ export const dict = {
   "settings.editor.intellisense.server.description":
     "Python, C/C++, and other supported languages add cross-file completion, signature help, and navigation when an LSP is connected.",
   "settings.editor.intellisense.server.empty": "No language server is currently connected",
+  "settings.editor.intellisense.download.prompt": "{{server}} is not running. Basic completions remain available.",
+  "settings.editor.intellisense.download.start": "Download & enable",
+  "settings.editor.intellisense.download.starting": "Starting…",
+  "settings.editor.intellisense.download.later": "Later",
+  "settings.editor.intellisense.download.never": "Don't remind",
+  "settings.editor.intellisense.download.reset.title": "Language server download reminders",
+  "settings.editor.intellisense.download.reset.description": "Show download prompts again for every supported language.",
   "settings.editor.intellisense.snippets.title": "VS Code snippets",
   "settings.editor.intellisense.snippets.description":
     "Load user and project JSON/JSONC snippets into the native suggestion list with placeholder expansion.",
@@ -1403,11 +1410,13 @@ export const dict = {
   "settings.shortcuts.search.empty": "No shortcuts found",
 
   "settings.shortcuts.group.general": "General",
+  "settings.shortcuts.group.featured": "Frequently used",
   "settings.shortcuts.group.session": "Session",
   "settings.shortcuts.group.navigation": "Navigation",
   "settings.shortcuts.group.modelAndAgent": "Model and agent",
   "settings.shortcuts.group.terminal": "Terminal",
   "settings.shortcuts.group.prompt": "Prompt",
+  "settings.shortcuts.group.browser": "Browser",
 
   "settings.providers.title": "Providers",
   "settings.providers.description": "Provider settings will be configurable here.",

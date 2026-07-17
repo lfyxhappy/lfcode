@@ -116,12 +116,30 @@ test("rolls back failed plugin and continues loading next", async () => {
   }
 })
 
-test("assigns sequential slot ids scoped to plugin", async () => {
+test("registers declared trusted TUI slots and removes them on deactivate", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
-      const file = path.join(dir, "slot-plugin.ts")
-      const spec = pathToFileURL(file).href
+      const plugin = path.join(dir, "slot-plugin")
+      const file = path.join(plugin, "plugin.ts")
+      const spec = pathToFileURL(plugin).href
       const marker = path.join(dir, "slot-setup.txt")
+
+      await fs.mkdir(plugin, { recursive: true })
+      await Bun.write(
+        path.join(plugin, "package.json"),
+        JSON.stringify({
+          name: "demo-slot-plugin",
+          type: "module",
+          lfcode: {
+            apiVersion: "2",
+            id: "demo.slot",
+            category: "ui",
+            trust: "dev-local",
+            entrypoints: { tui: "./plugin.ts" },
+            uiContributions: [{ slot: "tui-slot" }],
+          },
+        }),
+      )
 
       await Bun.write(
         file,
@@ -142,6 +160,7 @@ export default {
     const two = api.slots.register({
       id: 2,
       setup: () => { mark("two") },
+      dispose: () => { mark("disposed") },
       slots: { home_bottom() { return null } },
     })
     mark("id:" + one)
@@ -172,9 +191,77 @@ export default {
       (item) => typeof item[0] === "string" && item[0].includes("failed to initialize tui plugin"),
     )
     expect(hit).toBeUndefined()
+
+    await expect(TuiPluginRuntime.deactivatePlugin("demo.slot")).resolves.toBe(true)
+    await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toContain("disposed")
   } finally {
     await TuiPluginRuntime.dispose()
     err.mockRestore()
+    restore()
+  }
+})
+
+test("blocks undeclared and external TUI UI contributions without disabling their plugin", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      const makePlugin = async (name: string, trust: "external" | "dev-local", declare: boolean, slot: string) => {
+        const plugin = path.join(dir, name)
+        const marker = path.join(dir, `${name}.txt`)
+        await fs.mkdir(plugin, { recursive: true })
+        await Bun.write(
+          path.join(plugin, "package.json"),
+          JSON.stringify({
+            name,
+            type: "module",
+            lfcode: {
+              apiVersion: "2",
+              id: `demo.${name}`,
+              category: "ui",
+              trust,
+              entrypoints: { tui: "./plugin.ts" },
+              ...(declare ? { uiContributions: [{ slot: "tui-slot" }] } : {}),
+            },
+          }),
+        )
+        await Bun.write(
+          path.join(plugin, "plugin.ts"),
+          `import fs from "fs"
+export default {
+  tui: async (api) => {
+    api.slots.register({
+      setup: () => fs.appendFileSync(${JSON.stringify(marker)}, "mounted\\n"),
+      slots: { ${slot}() { return null } },
+    })
+    fs.appendFileSync(${JSON.stringify(marker)}, "continued\\n")
+  },
+}
+`,
+        )
+        return { spec: pathToFileURL(plugin).href, marker }
+      }
+
+      const external = await makePlugin("external-ui", "external", true, "home_bottom")
+      const undeclared = await makePlugin("undeclared-ui", "dev-local", false, "home_bottom")
+      const unsafe = await makePlugin("unsafe-ui", "dev-local", true, "session_prompt")
+      return { external, undeclared, unsafe }
+    },
+  })
+
+  const { config, restore } = mockTuiRuntime(tmp.path, [
+    tmp.extra.external.spec,
+    tmp.extra.undeclared.spec,
+    tmp.extra.unsafe.spec,
+  ])
+
+  try {
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+
+    for (const item of [tmp.extra.external, tmp.extra.undeclared, tmp.extra.unsafe]) {
+      await expect(fs.readFile(item.marker, "utf8")).resolves.toBe("continued\n")
+    }
+    expect(TuiPluginRuntime.list().every((item) => item.active)).toBe(true)
+  } finally {
+    await TuiPluginRuntime.dispose()
     restore()
   }
 })

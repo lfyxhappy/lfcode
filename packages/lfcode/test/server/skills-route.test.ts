@@ -307,7 +307,7 @@ describe("skills routes", () => {
     })
   })
 
-  test("POST /skills/import from Codex only imports general-purpose skills", async () => {
+  test("POST /skills/import from Codex stores every imported skill under the canonical root", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
     const home = path.join(tmp.path, "home")
     await fs.mkdir(path.join(home, ".codex", "skills"), { recursive: true })
@@ -336,7 +336,13 @@ describe("skills routes", () => {
 
             await expectOk(response)
             const body = (await response.json()) as Array<{ name: string }>
-            expect(body.map((skill) => skill.name).toSorted()).toEqual(["inspect-readonly", "playwright"])
+            expect(body.map((skill) => skill.name).toSorted()).toEqual([
+              "chatgpt-apps",
+              "cloudflare__web-perf",
+              "inspect-readonly",
+              "playwright",
+            ])
+            expect(await Bun.file(path.join(home, ".lfcode", "skills", "chatgpt-apps", "SKILL.md")).exists()).toBe(true)
           } finally {
             if (originalHome === undefined) delete process.env.HOME
             else process.env.HOME = originalHome
@@ -398,7 +404,7 @@ describe("skills routes", () => {
     await expectOk(hideResponse)
     const hidden = (await hideResponse.json()) as { hidden?: boolean }
     expect(hidden.hidden).toBe(true)
-    expect(await Bun.file(path.join(tmp.path, "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
 
     const showResponse = await withManagedPaths(tmp.path, () =>
       Server.Default().app.request("/skills/manage/update", {
@@ -414,7 +420,7 @@ describe("skills routes", () => {
     await expectOk(showResponse)
     const shown = (await showResponse.json()) as { hidden?: boolean }
     expect(shown.hidden).toBeUndefined()
-    expect(await Bun.file(path.join(tmp.path, "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
     await disposeTestInstance(tmp.path)
   })
 
@@ -444,7 +450,7 @@ describe("skills routes", () => {
       )
 
       await expectOk(response)
-      expect(await Bun.file(path.join(root, "skills", "managed")).exists()).toBe(false)
+      expect(await Bun.file(path.join(root, "global-home", ".lfcode", "skills", "managed")).exists()).toBe(false)
 
       const bad = await withManagedPaths(root, () =>
         Server.Default().app.request("/skills/manage/delete", {
@@ -466,12 +472,23 @@ describe("skills routes", () => {
 })
 
 async function withManagedPaths<T>(root: string, fn: () => T | Promise<T>) {
-  const original = { config: Global.Path.config, state: Global.Path.state }
+  const original = {
+    config: Global.Path.config,
+    state: Global.Path.state,
+    home: process.env.HOME,
+    userprofile: process.env.USERPROFILE,
+  }
   Object.assign(Global.Path, { config: root, state: root })
+  process.env.HOME = path.join(root, "global-home")
+  process.env.USERPROFILE = path.join(root, "global-home")
   try {
     return await fn()
   } finally {
-    Object.assign(Global.Path, original)
+    Object.assign(Global.Path, { config: original.config, state: original.state })
+    if (original.home === undefined) delete process.env.HOME
+    else process.env.HOME = original.home
+    if (original.userprofile === undefined) delete process.env.USERPROFILE
+    else process.env.USERPROFILE = original.userprofile
   }
 }
 

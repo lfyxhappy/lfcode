@@ -1,6 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 import { cancelBackgroundJob, reconcileBackgroundJob, reconcileRunningBackgroundJobs } from "@/background-job/control"
 import { BackgroundJobPersistence } from "@/background-job/persistence"
 import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
@@ -106,12 +107,17 @@ const definition = {
 
       if (input.operation === "list") {
         const sessionID = (input.session_id ?? ctx.sessionID) as typeof ctx.sessionID
+        const gate = contextReadGate(ctx, "list", `background-jobs:${sessionID}`)
         const jobs = BackgroundJobPersistence.list({
           sessionID,
           ...(input.status ? { status: input.status } : {}),
         })
         const limit = input.limit ?? 10
         const items = jobs.slice(0, limit)
+        completeCapabilityOperation(gate.auditID, `completed (${items.length} jobs)`, {
+          sessions: [sessionID],
+          jobs: items.map((job) => job.id),
+        })
         if (items.length === 0) {
           return {
             title: "Background jobs: 0 jobs",
@@ -228,6 +234,11 @@ const definition = {
       }
 
       if (input.operation === "get") {
+        const gate = contextReadGate(ctx, "get", `background-job:${job.id}`)
+        completeCapabilityOperation(gate.auditID, "completed (1 job)", {
+          sessions: [job.sessionID],
+          jobs: [job.id],
+        })
         return {
           title: `Background job ${job.id}`,
           output: [
@@ -319,12 +330,18 @@ const definition = {
         }
       }
 
+      const gate = contextReadGate(ctx, "logs", `background-job:${job.id}`)
       const limit = input.limit ?? 20
       const logs = BackgroundJobPersistence.listLogs({
         jobID: input.job_id,
         ...(input.after_seq !== undefined ? { afterSeq: input.after_seq } : {}),
       })
       const items = logs.slice(0, limit)
+      completeCapabilityOperation(gate.auditID, `completed (${items.length} log rows)`, {
+        sessions: [job.sessionID],
+        jobs: [job.id],
+        logCount: items.length,
+      })
       if (items.length === 0) {
         return {
           title: `Background job logs ${job.id}: 0 rows`,
@@ -378,3 +395,21 @@ export const BackgroundJobTool = Tool.define(
     return wrapped
   }),
 )
+
+function contextReadGate(ctx: Tool.Context, operation: "list" | "get" | "logs", target: string) {
+  const gate = decideCapabilityOperation({
+    caller: "tool:background_job",
+    capability: "context_read",
+    risk: "read",
+    source: "core",
+    operation: "read",
+    previewed: true,
+    reversible: true,
+    target,
+    sessionID: ctx.sessionID,
+    messageID: ctx.messageID,
+    reason: `Background job ${operation}`,
+  })
+  requireCapabilityDecision(gate.decision)
+  return gate
+}

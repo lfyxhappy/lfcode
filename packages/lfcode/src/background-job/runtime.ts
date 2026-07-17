@@ -1,4 +1,5 @@
 import { BackgroundJobPersistence, type BackgroundJobSummary } from "./persistence"
+import { CapabilityPersistence } from "@/capability/persistence"
 import { shellBackgroundRuntimeRef } from "./runtime-ref"
 import { inboxServiceRef } from "@/inbox/inbox-ref"
 import { Global } from "@/global"
@@ -617,6 +618,27 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
         ]),
       )
 
+      const budget = CapabilityPersistence.reserveBudget({ capability: "background_job" })
+      const audit = CapabilityPersistence.recordAudit({
+        id: `capability_${Identifier.ascending("event")}`,
+        caller: `background:${input.source}`,
+        capability: "background_job",
+        operation: "execute",
+        decision: budget.status === "denied" ? "deny" : "allow",
+        target: input.title,
+        sessionID: input.sessionID,
+        metadata: {
+          budget: budget.status,
+          ...(budget.status === "reserved" ? { grantID: budget.grant.id, remainingBudget: budget.grant.remainingBudget } : {}),
+          ...(budget.status === "denied" ? { reason: budget.reason } : {}),
+        },
+        result: "pending",
+      })
+      if (budget.status === "denied") {
+        CapabilityPersistence.completeAudit({ id: audit.id, result: `background budget denied: ${budget.reason}` })
+        return yield* Effect.die(new Error(`Background job budget denied: ${budget.reason}`))
+      }
+
       const job = BackgroundJobPersistence.recordStart({
         id: jobID,
         sessionID: input.sessionID,
@@ -633,18 +655,35 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
         ...(input.sourceMessageID ? { sourceMessageID: input.sourceMessageID } : {}),
         ...(input.sourceToolCallID ? { sourceToolCallID: input.sourceToolCallID } : {}),
         recovery,
-        ...(input.metadata ? { metadata: input.metadata } : {}),
+        metadata: {
+          ...input.metadata,
+          ...(budget.status === "reserved" ? { capabilityGrantID: budget.grant.id } : {}),
+        },
       })
 
-      const wrapper = yield* Effect.promise(() =>
-        Promise.resolve(
+      const wrapper = yield* Effect.try({
+        try: () =>
           spawn(wrapperRuntime(), [wrapperPath, payloadPath], {
             cwd: input.cwd,
             detached: true,
             stdio: "ignore",
             windowsHide: true,
           }),
+        catch: (error) => error,
+      }).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => {
+            BackgroundJobPersistence.recordTerminal({
+              id: job.id,
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error),
+              pid: null,
+            })
+            if (budget.status === "reserved") CapabilityPersistence.refundBudget(budget.grant.id)
+            CapabilityPersistence.completeAudit({ id: audit.id, result: "background start failed; budget refunded" })
+          }),
         ),
+        Effect.orDie,
       )
       wrapper.unref()
 
@@ -653,8 +692,9 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           id: jobID,
           recovery,
           pid: wrapper.pid,
-        }) ?? job
+      }) ?? job
       yield* Effect.promise(() => attach(next))
+      CapabilityPersistence.completeAudit({ id: audit.id, result: "background job started" })
       return next
     })
 

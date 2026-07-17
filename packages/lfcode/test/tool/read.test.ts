@@ -402,7 +402,8 @@ describe("tool.read truncation", () => {
       yield* put(path.join(dir, "image.bin"), jpeg)
 
       const result = yield* exec(dir, { filePath: path.join(dir, "image.bin") })
-      expect(result.output).toBe("Image read successfully")
+      expect(result.output).toContain("Image read successfully")
+      expect(result.output).toContain(`<version>${result.metadata.version}</version>`)
       expect(result.attachments?.[0].mime).toBe("image/jpeg")
       expect(result.attachments?.[0].url.startsWith("data:image/jpeg;base64,")).toBe(true)
     }),
@@ -540,6 +541,8 @@ describe("tool.read version anchor", () => {
       const second = yield* exec(dir, { filePath: filepath })
 
       expect(first.metadata.version).toMatch(/^[a-f0-9]{64}$/)
+      expect(first.output).toContain(`<version>${first.metadata.version}</version>`)
+      expect(first.output).toContain("replace_range.expected_version")
       expect(second.metadata.version).toMatch(/^[a-f0-9]{64}$/)
       expect(first.metadata.version).not.toBe(second.metadata.version)
     }),

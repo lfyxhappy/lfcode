@@ -40,6 +40,7 @@ export type ValidationError = {
   tool: string
   category: ValidationErrorCategory
   field?: string
+  fields?: string[]
   expected?: string
   retryable: boolean
   recovery: string
@@ -77,6 +78,9 @@ export function defaultMetadata(id: string): DefinitionMetadata {
       latencyClass: id === "background_job" ? "long" : "io",
     }
   }
+  if (["credential_manage", "provider_manage", "mcp_manage", "skill_manage", "plugin_manage", "capability_manage"].includes(id)) {
+    return { kind: "system", namespace: "agent-os", readOnly: false, recovery: "user", latencyClass: "io" }
+  }
   if (["task", "goal", "create_goal", "get_goal", "update_goal", "workflow"].includes(id)) {
     return {
       kind: id === "workflow" ? "workflow" : "task",
@@ -95,7 +99,7 @@ export function defaultMetadata(id: string): DefinitionMetadata {
       latencyClass: "io",
     }
   }
-  if (["memory", "history", "skill"].includes(id)) {
+  if (["memory", "history", "skill", "context_broker"].includes(id)) {
     return {
       kind: id === "memory" ? "memory" : "system",
       namespace: "context",
@@ -123,6 +127,7 @@ export function classifyValidationError(error: unknown): ValidationErrorCategory
 export function formatValidationError(input: { tool: string; error: z.ZodError; recovery?: string }): string {
   const issue = input.error.issues[0]
   const field = issue?.path.length ? issue.path.join(".") : undefined
+  const fields = [...new Set(input.error.issues.map((item) => item.path.join(".")).filter(Boolean))].sort()
   const detail = input.error.issues
     .map((item) => `${item.path.length ? item.path.join(".") : "arguments"}: ${item.message}`)
     .join("; ")
@@ -131,6 +136,7 @@ export function formatValidationError(input: { tool: string; error: z.ZodError; 
     tool: input.tool,
     category: "schema",
     ...(field ? { field } : {}),
+    ...(fields.length > 0 ? { fields } : {}),
     retryable: true,
     recovery: input.recovery ?? "Correct only the reported field and do not repeat the same arguments unchanged.",
     message: detail,

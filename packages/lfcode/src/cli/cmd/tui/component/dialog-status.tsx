@@ -105,6 +105,7 @@ export function DialogStatus() {
                   flexShrink={0}
                   style={{
                     fg: {
+                      available: theme.textMuted,
                       connected: theme.success,
                       error: theme.error,
                     }[item.status],

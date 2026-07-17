@@ -5,6 +5,7 @@ import DESCRIPTION from "./history.txt"
 import * as Tool from "./tool"
 import * as Truncate from "./truncate"
 import { Agent } from "@/agent/agent"
+import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
 
 const KIND = z.enum([
   "user_text",
@@ -39,6 +40,7 @@ const parameters = z.object({
   message_id: z.string().optional().describe("Anchor message id. Required for operation=around."),
   before: z.number().optional().describe("Default 5"),
   after: z.number().optional().describe("Default 5"),
+  reason: z.string().min(1).optional().describe("Reason for reading history; recorded for cross-project access."),
 })
 
 type HistoryMetadata = {
@@ -68,6 +70,7 @@ export const HistoryTool = Tool.define(
                 metadata: { count: 0 },
               }
             }
+            const gate = contextReadGate(args, ctx, args.scope ?? "project")
             const hits = yield* history.search({
               query: args.query,
               scope: args.scope,
@@ -77,6 +80,11 @@ export const HistoryTool = Tool.define(
               time_after: args.time_after,
               time_before: args.time_before,
               limit: args.limit,
+            })
+            completeCapabilityOperation(gate.auditID, `completed (${hits.length} hits)`, {
+              projects: [...new Set(hits.map((item) => item.project_id))],
+              sessions: [...new Set(hits.map((item) => item.session_id))],
+              messages: [...new Set(hits.map((item) => item.message_id))],
             })
             if (hits.length === 0) {
               return {
@@ -108,11 +116,17 @@ export const HistoryTool = Tool.define(
                 metadata: { count: 0, session_found: false, checkpoint_found: false },
               }
             }
+            const gate = contextReadGate(args, ctx, args.session_id)
             const snapshot = yield* history.session({
               session_id: args.session_id,
               agent_scope: args.agent_scope,
               limit: args.limit,
               include_boundaries: args.include_boundaries,
+            })
+            completeCapabilityOperation(gate.auditID, `completed (${snapshot.messages.length} messages)`, {
+              project: snapshot.project_id,
+              session: snapshot.session_id,
+              messages: snapshot.messages.map((item) => item.message_id),
             })
             if (!snapshot.session_found) {
               return {
@@ -157,10 +171,16 @@ export const HistoryTool = Tool.define(
               metadata: { count: 0 },
             }
           }
+          const gate = contextReadGate(args, ctx, args.message_id)
           const around = yield* history.around({
             message_id: args.message_id,
             before: args.before,
             after: args.after,
+          })
+          completeCapabilityOperation(gate.auditID, `completed (${around.messages.length} messages)`, {
+            project: around.project_id,
+            session: around.session_id,
+            messages: around.messages.map((item) => item.message_id),
           })
           if (around.messages.length === 0) {
             return {
@@ -204,3 +224,21 @@ export const HistoryTool = Tool.define(
     return definition
   }),
 )
+
+function contextReadGate(args: z.infer<typeof parameters>, ctx: Tool.Context, target: string) {
+  const gate = decideCapabilityOperation({
+    caller: "tool:history",
+    capability: "context_read",
+    risk: "read",
+    source: "core",
+    operation: "read",
+    previewed: true,
+    reversible: true,
+    target,
+    sessionID: ctx.sessionID,
+    messageID: ctx.messageID,
+    reason: args.reason ?? `History ${args.operation}`,
+  })
+  requireCapabilityDecision(gate.decision)
+  return gate
+}

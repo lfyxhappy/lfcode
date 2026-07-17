@@ -27,6 +27,12 @@ afterEach(async () => {
   await Instance.disposeAll()
 })
 
+function useManagedSkillHome(home: string) {
+  const original = Object.getOwnPropertyDescriptor(Global.Path, "home")
+  Object.defineProperty(Global.Path, "home", { configurable: true, value: home })
+  return () => Object.defineProperty(Global.Path, "home", original!)
+}
+
 const node = CrossSpawnSpawner.defaultLayer
 
 const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, node))
@@ -36,15 +42,14 @@ describe("tool.skill", () => {
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
-          const skill = path.join(dir, "skills", "tool-skill")
+          const skill = path.join(dir, ".lfcode", "skills", "tool-skill")
           yield* Effect.promise(() =>
             Bun.write(
               path.join(skill, "SKILL.md"),
@@ -99,16 +104,15 @@ Use this skill.
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
-          const alpha = path.join(dir, "skills", "react-testing")
-          const beta = path.join(dir, "skills", "vite-build")
+          const alpha = path.join(dir, ".lfcode", "skills", "react-testing")
+          const beta = path.join(dir, ".lfcode", "skills", "vite-build")
           yield* Effect.promise(() =>
             Bun.write(
               path.join(alpha, "SKILL.md"),
@@ -169,15 +173,14 @@ description: Build and bundle Vite projects.
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const originalConfig = Global.Path.config
-          Object.assign(Global.Path, { config: dir })
+          const restoreHome = useManagedSkillHome(dir)
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
-              Object.assign(Global.Path, { config: originalConfig })
+              restoreHome()
             }),
           )
 
-          const alpha = path.join(dir, "skills", "alpha-skill")
+          const alpha = path.join(dir, ".lfcode", "skills", "alpha-skill")
           yield* Effect.promise(() =>
             Bun.write(
               path.join(alpha, "SKILL.md"),

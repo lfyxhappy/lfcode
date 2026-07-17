@@ -6,7 +6,7 @@
 
 ## 状态
 
-未解决
+已解决
 
 ## 问题
 
@@ -67,3 +67,8 @@ Lfcode 当前无法发现用户放置在 `C:\Users\liangfeng\.lfcode\skills\<nam
 - 源码检查确认全局扫描入口为 `packages/lfcode/src/skill/index.ts:180`，使用 `Global.Path.config\skills`。
 - 管理接口检查确认 `packages/lfcode/src/server/routes/instance/skills.ts:1014` 的 `localSkillRoot()` 同样返回 `path.join(Global.Path.config, "skills")`。
 - 当前进程检查确认实际运行进程为 `C:\算法\小应用\Lfcode\Lfcode.exe`。
+- 2026-07-16：新增 `packages/lfcode/src/skill/global-directory.ts` 作为唯一根目录解析点，规范目录为 `Global.Path.home\\.lfcode\\skills`。扫描、`Skill.dirs()`、权限目录、设置页管理接口、创建、导入、隐藏、删除和发现安装统一复用它。
+- 2026-07-16：旧 `Global.Path.config\\skills` 子项会安全迁移；规范目录已有同名 skill 或迁移失败时保留旧副本并只读扫描，规范目录优先。
+- 2026-07-16：定向验证 `test/skill/global-directory.test.ts`、`test/skill/skill.test.ts`、`test/tool/skill.test.ts`、`test/server/skills-route.test.ts` 共 24 项通过，`packages/lfcode` typecheck 通过。`archive-extract` 文件存在于规范目录；使用版已同步、运行且 automation bridge health 为 `ok`，打包产物与使用版 `app.asar` SHA-256 一致。
+- 2026-07-16：后续核查发现迁移冲突时旧目录仍会被当作回退发现源，且 Codex、Claude、Agents 目录只可手动且受限导入，导致用户以为已经统一后仍有 Skill 找不到。已重新打开处理：运行时只允许扫描 `~/.lfcode/skills`，外部目录仅作为一次性迁入来源。
+- 2026-07-16：已改为将旧 Lfcode、Codex、Claude 与 Agents Skill 根目录内容迁入 `C:\Users\liangfeng\.lfcode\skills`，扫描与管理接口只读取该规范目录；同名项始终以规范目录版本为准，旧目录不会再回退发现。移除了 Codex 导入白名单。定向迁移、发现、路由与工具测试通过，`packages/lfcode` typecheck 通过；使用版重新打包、同步并启动，`app:control health` 为 `ok` 且 `app.asar` 哈希与打包产物一致。

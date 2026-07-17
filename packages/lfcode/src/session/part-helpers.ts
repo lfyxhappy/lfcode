@@ -33,8 +33,8 @@ export function repeatedToolValidationFailure(input: {
     const tools = message.parts.filter((part): part is MessageV2.ToolPart => part.type === "tool")
     if (tools.length !== 1) return false
     const tool = tools[0]
-    if (tool.state.status !== "error" || !tool.state.error.includes("tool was called with invalid arguments")) return false
-    signatures.push(`${tool.tool}:${stableStringify(tool.state.input ?? {})}:${tool.state.error}`)
+    if (tool.state.status !== "error" || !isSchemaFailure(tool.state.error)) return false
+    signatures.push(toolFailureSignature(tool.tool, tool.state.error))
   }
   return signatures.length === input.threshold && signatures.every((signature) => signature === signatures[0])
 }
@@ -45,7 +45,7 @@ export function sameToolFailureCount(input: {
   toolInput: unknown
   error: string
 }) {
-  const signature = `${input.tool}:${stableStringify(input.toolInput)}:${input.error}`
+  const signature = toolFailureSignature(input.tool, input.error)
   return input.messages.reduce(
     (count, message) =>
       count +
@@ -54,10 +54,49 @@ export function sameToolFailureCount(input: {
           part.type === "tool" &&
           part.tool === input.tool &&
           part.state.status === "error" &&
-          `${part.tool}:${stableStringify(part.state.input ?? {})}:${part.state.error}` === signature,
+          toolFailureSignature(part.tool, part.state.error) === signature,
       ).length,
     0,
   )
+}
+
+function isSchemaFailure(error: string) {
+  return structuredToolError(error)?.category === "schema" || /tool was called with invalid arguments/i.test(error)
+}
+
+function toolFailureSignature(tool: string, error: string) {
+  const structured = structuredToolError(error)
+  if (structured) {
+    const fields = Array.isArray(structured.fields)
+      ? structured.fields.filter((field): field is string => typeof field === "string").sort()
+      : typeof structured.field === "string"
+        ? [structured.field]
+        : []
+    return `${tool}:${structured.category ?? "runtime"}:${fields.join(",")}:${normalizeFailureText(structured.message ?? error)}`
+  }
+  return `${tool}:${normalizeFailureText(error)}`
+}
+
+function structuredToolError(error: string): Record<string, unknown> | undefined {
+  const match = /^\[tool_error\]\s+(\{.+\})/u.exec(error)
+  if (!match) return
+  try {
+    const value = JSON.parse(match[1])
+    if (!value || typeof value !== "object" || Array.isArray(value)) return
+    return value as Record<string, unknown>
+  } catch {
+    return
+  }
+}
+
+function normalizeFailureText(value: unknown) {
+  return String(value)
+    .replace(/\bT\d+(?:\.\d+)*\b/gu, "<task>")
+    .replace(/\b(?:ses|msg|part)_[A-Za-z0-9]+\b/gu, "<id>")
+    .replace(/\b[a-f0-9]{64}\b/giu, "<hash>")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase()
 }
 
 export function isRealUserPart(part: MessageV2.Part) {
