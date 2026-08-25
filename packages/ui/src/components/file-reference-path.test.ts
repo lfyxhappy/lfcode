@@ -3,6 +3,7 @@ import {
   getParentPath,
   getPlainTextPathMatch,
   inferFileReferenceKind,
+  isAbsoluteFileReferencePath,
   isLocalFileHref,
   isPathLike,
   looksLikeCommand,
@@ -18,6 +19,12 @@ describe("file-reference-path", () => {
     expect(isPathLike("packages/app/src/index.tsx")).toBe(true)
     expect(isPathLike("/usr/local/bin/node")).toBe(true)
     expect(isPathLike("/repo/README.md")).toBe(true)
+  })
+
+  test("recognizes both supported absolute path families", () => {
+    expect(isAbsoluteFileReferencePath("C:\\repo\\src\\app.ts")).toBe(true)
+    expect(isAbsoluteFileReferencePath("/workspace/src/app.ts")).toBe(true)
+    expect(isAbsoluteFileReferencePath("src/app.ts")).toBe(false)
   })
 
   test("rejects short slash-heavy text", () => {

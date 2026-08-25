@@ -1,0 +1,106 @@
+[ 2713273ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[ 2713274ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[ 2718300ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2726323ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2740630ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2745659ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2767920ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2772955ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2795199ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2800237ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2822461ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2827491ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2849747ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2854780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2877008ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2882052ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2904289ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 2909327ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4189910ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[ 4189910ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[ 4194951ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4202992ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4217274ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4222306ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4244560ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4249590ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4271821ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4276846ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4299105ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4304141ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4326371ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4331395ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4353652ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4358690ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4380924ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4385956ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4408180ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4413216ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4435482ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4440512ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4462749ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4467775ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4490020ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4495049ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4517305ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4522354ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4544590ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4549620ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4571871ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4576894ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4599161ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4604191ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4626432ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4631458ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4653706ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4658731ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4681003ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 4686039ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5184157ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[ 5184157ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[ 5198183ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5224479ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5229506ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5251752ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5256796ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5279003ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5284043ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[ 5306269ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11687481ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[11687482ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[11695494ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11709786ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11714826ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11737047ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11742080ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11764343ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11769397ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11791591ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11796626ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11818881ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11823905ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11846166ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11851203ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11873428ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11878466ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11900740ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11905790ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11928012ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11933051ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11955273ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11960309ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11982557ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[11987575ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[12009849ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[12014870ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[12037125ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[14138851ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[14138852ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[14146879ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[14161160ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[14166188ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[14188449ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[14193477ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0
+[16081312ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ https://192.168.10.23:43173/global/event:0
+[16081312ms] [ERROR] [global-sdk] event stream error {url: https://192.168.10.23:43173, fetch: webview, error: TypeError: network error} @ https://192.168.10.23:43173/assets/index-DoMyDavR.js:2379
+[16095345ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://192.168.10.23:43173/global/event:0

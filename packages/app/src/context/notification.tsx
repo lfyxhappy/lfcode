@@ -11,9 +11,12 @@ import { useSettings } from "@/context/settings"
 import { Binary } from "@lfcode-ai/shared/util/binary"
 import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import { decode64 } from "@/utils/base64"
-import { EventSessionError } from "@lfcode-ai/sdk/v2"
+import { EventAutomationRunUpdated, EventSessionError } from "@lfcode-ai/sdk/v2"
 import { Persist, persisted } from "@/utils/persist"
 import { playSoundById } from "@/utils/sound"
+import { shouldNotifyAutomationRun, shouldNotifySessionError } from "@/automation/notification-policy"
+
+export { shouldNotifyAutomationRun, shouldNotifySessionError } from "@/automation/notification-policy"
 
 type NotificationBase = {
   directory?: string
@@ -32,7 +35,16 @@ type ErrorNotification = NotificationBase & {
   error: EventSessionError["properties"]["error"]
 }
 
-export type Notification = TurnCompleteNotification | ErrorNotification
+type AutomationRunNotification = NotificationBase & {
+  type: "automation"
+  taskID: string
+  runID: string
+  taskName: string
+  status: EventAutomationRunUpdated["properties"]["status"]
+  late: boolean
+}
+
+export type Notification = TurnCompleteNotification | ErrorNotification | AutomationRunNotification
 
 type NotificationIndex = {
   session: {
@@ -87,7 +99,7 @@ function buildNotificationIndex(list: Notification[]) {
         const unseen = index.session.unseen[notification.session] ?? []
         index.session.unseen[notification.session] = [...unseen, notification]
         index.session.unseenCount[notification.session] = unseen.length + 1
-        if (notification.type === "error") index.session.unseenHasError[notification.session] = true
+        if (isErrorNotification(notification)) index.session.unseenHasError[notification.session] = true
       }
     }
 
@@ -98,12 +110,16 @@ function buildNotificationIndex(list: Notification[]) {
         const unseen = index.project.unseen[notification.directory] ?? []
         index.project.unseen[notification.directory] = [...unseen, notification]
         index.project.unseenCount[notification.directory] = unseen.length + 1
-        if (notification.type === "error") index.project.unseenHasError[notification.directory] = true
+        if (isErrorNotification(notification)) index.project.unseenHasError[notification.directory] = true
       }
     }
   })
 
   return index
+}
+
+function isErrorNotification(notification: Notification) {
+  return notification.type === "error" || (notification.type === "automation" && notification.status === "failed")
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -161,7 +177,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         scope,
         "unseenHasError",
         key,
-        unseen.some((notification) => notification.type === "error"),
+        unseen.some(isErrorNotification),
       )
     }
 
@@ -171,7 +187,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         if (!notification.viewed) {
           setIndex("session", "unseen", notification.session, (unseen = []) => [...unseen, notification])
           setIndex("session", "unseenCount", notification.session, (count = 0) => count + 1)
-          if (notification.type === "error") setIndex("session", "unseenHasError", notification.session, true)
+          if (isErrorNotification(notification)) setIndex("session", "unseenHasError", notification.session, true)
         }
       }
 
@@ -180,7 +196,7 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         if (!notification.viewed) {
           setIndex("project", "unseen", notification.directory, (unseen = []) => [...unseen, notification])
           setIndex("project", "unseenCount", notification.directory, (count = 0) => count + 1)
-          if (notification.type === "error") setIndex("project", "unseenHasError", notification.directory, true)
+          if (isErrorNotification(notification)) setIndex("project", "unseenHasError", notification.directory, true)
         }
       }
     }
@@ -237,6 +253,11 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         .catch(() => undefined)
     }
 
+    const resolveAutomation = (sessionID?: string) => {
+      if (!sessionID) return Promise.resolve(undefined)
+      return globalSDK.client.global.automation.session.resolve({ sessionID }).then((result) => result.data).catch(() => undefined)
+    }
+
     const viewedInCurrentSession = (directory: string, sessionID?: string) => {
       const activeDirectory = currentDirectory()
       const activeSession = currentSession()
@@ -249,14 +270,20 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
 
     const handleSessionIdle = (directory: string, event: { properties: { sessionID?: string } }, time: number) => {
       const sessionID = event.properties.sessionID
-      void lookup(directory, sessionID).then((session) => {
+      void Promise.all([lookup(directory, sessionID), resolveAutomation(sessionID)]).then(([session, automation]) => {
         if (meta.disposed) return
         if (!session) return
         if (session.parentID) return
+        if (automation?.task.notifications !== undefined && automation.task.notifications !== "all") return
 
         if (settings.sounds.agentEnabled()) {
           void playSoundById(settings.sounds.agent())
         }
+
+        const late = automation?.run?.late === true
+        const metadata = automation
+          ? { source: "automation", taskID: automation.task.id, runID: automation.run?.id, late }
+          : undefined
 
         append({
           directory,
@@ -264,24 +291,31 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
           viewed: viewedInCurrentSession(directory, sessionID),
           type: "turn-complete",
           session: sessionID,
+          metadata,
         })
 
         const href = `/${base64Encode(directory)}/session/${sessionID}`
         if (settings.notifications.agent()) {
-          void platform.notify(language.t("notification.session.responseReady.title"), session.title ?? sessionID, href)
+          void platform.notify(
+            late ? language.t("notification.automation.late.title") : language.t("notification.session.responseReady.title"),
+            automation?.task.name ?? session.title ?? sessionID,
+            href,
+          )
         }
       })
     }
 
     const handleSessionError = (
       directory: string,
-      event: { properties: { sessionID?: string; error?: EventSessionError["properties"]["error"] } },
+      event: { properties: { sessionID?: string; visible?: boolean; error?: EventSessionError["properties"]["error"] } },
       time: number,
     ) => {
+      if (!shouldNotifySessionError(event as Pick<EventSessionError, "properties">)) return
       const sessionID = event.properties.sessionID
-      void lookup(directory, sessionID).then((session) => {
+      void Promise.all([lookup(directory, sessionID), resolveAutomation(sessionID)]).then(([session, automation]) => {
         if (meta.disposed) return
         if (session?.parentID) return
+        if (automation?.task.notifications === "none") return
 
         if (settings.sounds.errorsEnabled()) {
           void playSoundById(settings.sounds.errors())
@@ -290,6 +324,9 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
         const error = "error" in event.properties ? event.properties.error : undefined
         const fallback = language.t("notification.session.error.fallbackDescription")
         const toastDescription = describeError(error, fallback)
+        const metadata = automation
+          ? { source: "automation", taskID: automation.task.id, runID: automation.run?.id, late: automation.run?.late === true }
+          : undefined
         append({
           directory,
           time,
@@ -297,11 +334,12 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
           type: "error",
           session: sessionID ?? "global",
           error,
+          metadata,
         })
         if (viewedInCurrentSession(directory, sessionID)) {
           showToast({
             variant: "error",
-            title: language.t("notification.session.error.title"),
+            title: automation ? language.t("notification.automation.failed.title") : language.t("notification.session.error.title"),
             description: toastDescription,
           })
         }
@@ -310,17 +348,73 @@ export const { use: useNotification, provider: NotificationProvider } = createSi
           (typeof error === "string" ? error : fallback)
         const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
         if (settings.notifications.errors()) {
-          void platform.notify(language.t("notification.session.error.title"), description, href)
+          void platform.notify(
+            automation ? language.t("notification.automation.failed.title") : language.t("notification.session.error.title"),
+            automation?.task.name ?? description,
+            href,
+          )
         }
       })
     }
 
+    const handleAutomationRun = (directory: string, event: EventAutomationRunUpdated, time: number) => {
+      const run = event.properties
+      if (run.status === "completed" || run.status === "cancelled") return
+      if (run.status === "failed" && run.sessionID) return
+      if (run.notifications === "none") return
+      const shouldNotify = shouldNotifyAutomationRun(run)
+      if (run.notifications === "failures" && !shouldNotify) return
+
+      const sessionID = run.sessionID ?? "global"
+      const viewed = viewedInCurrentSession(directory, run.sessionID)
+      const failed = run.status === "failed"
+      const href = run.sessionID ? `/${base64Encode(directory)}/session/${run.sessionID}` : undefined
+      if (failed) {
+        append({
+          directory,
+          time,
+          viewed,
+          type: "error",
+          session: sessionID,
+          error: run.error ? { name: "UnknownError", data: { message: run.error } } : undefined,
+          metadata: { source: "automation", taskID: run.taskID, runID: run.runID, late: run.late },
+        })
+        if (settings.sounds.errorsEnabled()) void playSoundById(settings.sounds.errors())
+        if (settings.notifications.errors()) {
+          void platform.notify(language.t("notification.automation.failed.title"), run.taskName, href)
+        }
+        return
+      }
+
+      append({
+        directory,
+        time,
+        viewed,
+        type: "automation",
+        session: sessionID,
+        taskID: run.taskID,
+        runID: run.runID,
+        taskName: run.taskName,
+        status: run.status,
+        late: run.late,
+        metadata: { source: "automation", taskID: run.taskID, runID: run.runID, late: run.late },
+      })
+
+      if (shouldNotify && settings.notifications.agent()) {
+        void platform.notify(language.t("notification.automation.input.title"), run.taskName, href)
+      }
+    }
+
     const unsub = globalSDK.event.listen((e) => {
       const event = e.details
-      if (event.type !== "session.idle" && event.type !== "session.error") return
-
       const directory = e.name
       const time = Date.now()
+      if (event.type === "automation.run.updated") {
+        handleAutomationRun(directory, event, time)
+        return
+      }
+      if (event.type !== "session.idle" && event.type !== "session.error") return
+
       if (event.type === "session.idle") {
         handleSessionIdle(directory, event, time)
         return

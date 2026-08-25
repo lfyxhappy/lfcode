@@ -1,10 +1,12 @@
-import { Deferred, Effect, Layer, Schema, Context } from "effect"
+import { Deferred, Effect, Exit, Layer, Schema, Context } from "effect"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect"
 import { SessionID, MessageID } from "@/session/schema"
 import { zod } from "@/util/effect-zod"
 import { Log } from "@/util"
+import { Instance } from "@/project/instance"
+import { dispatchHooks } from "@/hook/runtime"
 import { withStatics } from "@/util/schema"
 import { QuestionID } from "./schema"
 
@@ -183,6 +185,32 @@ export const layer = Layer.effect(
       })
       pending.set(id, { info, deferred })
       yield* bus.publish(Event.Asked, info)
+
+      // Register the request before running user hooks. Hook discovery may
+      // initialize the database or invoke a command, and callers must be able
+      // to observe/reply to the question during that work.
+      const hookExit = yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "Elicitation",
+          sessionID: input.sessionID,
+          projectID: String(Instance.project.id),
+          cwd: Instance.worktree,
+          tool: input.tool?.callID,
+          payload: { questions: input.questions, tool: input.tool },
+        }),
+      ).pipe(Effect.exit)
+      if (Exit.isFailure(hookExit)) {
+        pending.delete(id)
+        return yield* Effect.failCause(hookExit.cause)
+      }
+      if (hookExit.value.blocked) {
+        pending.delete(id)
+        yield* bus.publish(Event.Rejected, {
+          sessionID: info.sessionID,
+          requestID: info.id,
+        })
+        return yield* new RejectedError()
+      }
 
       return yield* Effect.ensuring(
         Deferred.await(deferred),

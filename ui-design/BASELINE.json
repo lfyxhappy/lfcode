@@ -1,0 +1,20 @@
+{
+  "viewports": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "stable_seed": "default",
+  "reduced_motion": true,
+  "capture_states": [
+    "initial",
+    "primary-workflow-complete"
+  ]
+}

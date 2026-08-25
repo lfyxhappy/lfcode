@@ -4,7 +4,7 @@ export const SettingsList: Component<{ children: JSX.Element; class?: string }> 
   return (
     <div
       data-component="settings-section-card"
-      class={`rounded-[24px] px-5 py-4 ${props.class ?? ""}`.trim()}
+      class={`px-5 py-4 ${props.class ?? ""}`.trim()}
     >
       {props.children}
     </div>

@@ -1,0 +1,57 @@
+{
+  "name": "@lfcode-ai/tavern",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./location": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "lfcode": {
+    "apiVersion": 2,
+    "id": "lfcode-tavern",
+    "name": "Lfcode 酒馆",
+    "description": "独立管理角色、群组与沉浸式对话的酒馆插件。",
+    "category": "ui",
+    "activation": "startup",
+    "trust": "official",
+    "capabilities": ["project.managed", "session.managed"],
+    "entrypoints": {
+      "location": "./src/index.ts"
+    },
+    "uiContributions": [
+      {
+        "slot": "desktop-settings-panel",
+        "title": "酒馆",
+        "managedSession": {
+          "type": "tavern",
+          "title": "酒馆对话",
+          "label": "进入酒馆"
+        }
+      },
+      {
+        "slot": "desktop-session-composer",
+        "title": "酒馆对话输入框",
+        "sessionComposer": {
+          "type": "tavern",
+          "mode": "replace",
+          "renderer": "conversation",
+          "placeholder": "以角色身份发送消息…",
+          "submitLabel": "发送",
+          "description": "酒馆对话"
+        }
+      }
+    ],
+    "storage": {
+      "data": true
+    }
+  },
+  "dependencies": {
+    "@lfcode-ai/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@lfcode-ai/sdk": "workspace:*"
+  }
+}

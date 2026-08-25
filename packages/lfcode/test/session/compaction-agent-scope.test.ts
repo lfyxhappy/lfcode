@@ -54,6 +54,38 @@ async function addUser(sessionID: SessionID, text: string, agentID?: string) {
   return id
 }
 
+async function completeCompaction(sessionID: SessionID, agentID: string) {
+  const messages = await run(SessionNs.Service.use((session) => session.messages({ sessionID, agentID })))
+  const boundary = messages.findLast((message) => message.parts.some((part) => part.type === "compaction"))
+  if (!boundary) throw new Error("Expected a compaction boundary")
+
+  const id = MessageID.ascending()
+  await svc.updateMessage({
+    id,
+    sessionID,
+    role: "assistant",
+    parentID: boundary.info.id,
+    time: { created: Date.now() + 1 },
+    agent: "compaction",
+    agentID,
+    mode: "compaction",
+    summary: true,
+    providerID: ProviderID.make("test"),
+    modelID: ModelID.make("test"),
+    path: { cwd: "/", root: "/" },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  } as unknown as MessageV2.Info)
+  await svc.updatePart({
+    id: PartID.ascending(),
+    sessionID,
+    messageID: id,
+    type: "text",
+    synthetic: true,
+    text: "summary",
+  })
+}
+
 describe("compaction scope is (session_id, agent_id)", () => {
   test("create({sessionID, agentID}) inserts a compaction-boundary part tagged with that agent_id", async () => {
     await Instance.provide({
@@ -79,17 +111,15 @@ describe("compaction scope is (session_id, agent_id)", () => {
           auto: true,
           agentID: "writer-1",
         })
+        await completeCompaction(session.id, "writer-1")
 
-        // After compaction: writer-1's filterCompacted slice begins at the
-        // synthetic boundary (which is also tagged with agent_id = "writer-1"),
-        // skipping prior writer-1 history.
+        // A boundary is only active once its summary exists. Then writer-1's
+        // continuation slice begins at the synthetic marker and summary,
+        // skipping the prior actor history.
         const writerMsgs = await Effect.runPromise(
           MessageV2.filterCompactedEffect(session.id, { agentID: "writer-1" }),
         )
-        // Expect: only the boundary message remains in writer-1's view
-        // (filterCompacted stops at the first compaction part walking back
-        // newest → oldest).
-        expect(writerMsgs).toHaveLength(1)
+        expect(writerMsgs).toHaveLength(2)
         expect(writerMsgs[0].info.role).toBe("user")
         expect(writerMsgs[0].info.agentID).toBe("writer-1")
         const boundaryPart = writerMsgs[0].parts.find((p) => p.type === "compaction")
@@ -135,6 +165,7 @@ describe("compaction scope is (session_id, agent_id)", () => {
           auto: true,
           agentID: "writer-1",
         })
+        await completeCompaction(session.id, "writer-1")
 
         // writer-2 unchanged: 2 messages, no boundary.
         const w2Msgs = await Effect.runPromise(
@@ -149,16 +180,71 @@ describe("compaction scope is (session_id, agent_id)", () => {
           expect(m.parts.some((p) => p.type === "compaction")).toBe(false)
         }
 
-        // writer-1 is compacted: its slice now starts at the boundary.
+        // writer-1 is compacted: its valid slice starts at the boundary and
+        // includes its generated summary.
         const w1Msgs = await Effect.runPromise(
           MessageV2.filterCompactedEffect(session.id, { agentID: "writer-1" }),
         )
-        expect(w1Msgs).toHaveLength(1)
+        expect(w1Msgs).toHaveLength(2)
         expect(w1Msgs[0].parts.some((p) => p.type === "compaction")).toBe(true)
         expect(w1Msgs[0].info.agentID).toBe("writer-1")
 
         await svc.remove(session.id)
       },
     })
+  })
+})
+
+describe("overflow replay selection", () => {
+  test("selects the previous real user turn exactly once and excludes the boundary", () => {
+    const previous = { id: "u-prev", sessionID: "session", role: "user", time: { created: 1 } } as MessageV2.User
+    const failed = {
+      id: "a-failed",
+      sessionID: "session",
+      role: "assistant",
+      parentID: "u-prev",
+      time: { created: 2 },
+    } as MessageV2.Assistant
+    const boundary = { id: "u-boundary", sessionID: "session", role: "user", time: { created: 3 } } as MessageV2.User
+    const history = [
+      {
+        info: { id: "u-old", sessionID: "session", role: "user", time: { created: 0 } } as MessageV2.User,
+        parts: [{ id: "p-old", sessionID: "session", messageID: "u-old", type: "text", text: "older" }],
+      },
+      {
+        info: previous,
+        parts: [{ id: "p-prev", sessionID: "session", messageID: "u-prev", type: "text", text: "replay me once" }],
+      },
+      { info: failed, parts: [] },
+      {
+        info: boundary,
+        parts: [{ id: "p-boundary", sessionID: "session", messageID: "u-boundary", type: "compaction", auto: true }],
+      },
+    ] as MessageV2.WithParts[]
+
+    const selected = Compaction.selectOverflowReplay(history, MessageID.make("u-boundary"))
+
+    expect(selected.history.map((message) => message.info.id)).toEqual([MessageID.make("u-old")])
+    expect(selected.replay?.info.id).toBe(MessageID.make("u-prev"))
+    expect(selected.replay?.parts).toHaveLength(1)
+    expect(selected.replay?.parts[0]).toMatchObject({ type: "text", text: "replay me once" })
+  })
+
+  test("does not replay when dropping the candidate would leave no summary source", () => {
+    const history = [
+      {
+        info: { id: "u-only", sessionID: "session", role: "user", time: { created: 0 } } as MessageV2.User,
+        parts: [{ id: "p-only", sessionID: "session", messageID: "u-only", type: "text", text: "only turn" }],
+      },
+      {
+        info: { id: "u-boundary", sessionID: "session", role: "user", time: { created: 1 } } as MessageV2.User,
+        parts: [{ id: "p-boundary", sessionID: "session", messageID: "u-boundary", type: "compaction", auto: true }],
+      },
+    ] as MessageV2.WithParts[]
+
+    const selected = Compaction.selectOverflowReplay(history, MessageID.make("u-boundary"))
+
+    expect(selected.history).toBe(history)
+    expect(selected.replay).toBeUndefined()
   })
 })

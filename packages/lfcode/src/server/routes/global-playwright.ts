@@ -15,9 +15,14 @@ import {
   type DesktopBrowserAutomationTarget,
   type DesktopBrowserAutomationWaitResult,
 } from "@lfcode-ai/shared/desktop-browser-automation"
-import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import z from "zod/v4"
 import { InstallationVersion } from "@/installation/version"
+import {
+  allowBrowserNavigation,
+  browserConfirmationRequired,
+  browserSessionKey,
+  clearBrowserNavigationAuthorization,
+} from "./browser-session-authorization"
 
 export const PlaywrightMcpRoutes = () =>
   new Hono().all("/mcp/playwright", async (c) => {
@@ -38,7 +43,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     {
       instructions:
-        "Tools in this MCP server only target the side browser owned by the current Lfcode session. If no side browser target exists for that session yet, call browser_navigate with a URL and Lfcode will create one automatically. Prefer browser_read_page or browser_snapshot before acting. After navigation or actions that may refresh the page, use browser_wait_for_selector, browser_wait_for_url, browser_wait_for_load_state, or browser_wait_for_navigation instead of guessing. If a page behaves unexpectedly, check browser_screenshot, browser_get_console, and browser_get_network before retrying.",
+        "Tools in this MCP server only target the side browser owned by the current Lfcode session. browser_navigate never creates a tab implicitly: if no target exists, ask the user for browser access and retry with confirm=true. Prefer browser_read_page or browser_snapshot before acting. After navigation or actions that may refresh the page, use browser_wait_for_selector, browser_wait_for_url, browser_wait_for_load_state, or browser_wait_for_navigation instead of guessing. If a page behaves unexpectedly, check browser_screenshot, browser_get_console, and browser_get_network before retrying.",
     },
   )
 
@@ -58,9 +63,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
       const target = requireBridge().getTarget({ sessionKey })
       if (!target) {
         return result(
-          "No Lfcode side browser tab exists yet for this session. Call browser_navigate with a URL and Lfcode will create an embedded side browser tab automatically.",
+          "No Lfcode side browser tab exists yet for this session. browser_confirmation_required: ask the user to allow opening the side browser, then retry browser_navigate with confirm=true.",
         )
       }
+      allowBrowserNavigation({ sessionKey, hasTarget: true })
       return result(`Active side browser: ${target.title || "<untitled>"} ${target.url}`, target)
     },
   )
@@ -69,13 +75,26 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     "browser_navigate",
     {
       description:
-        "Navigate the current session's Lfcode side browser tab to a URL, creating one automatically when none exists yet.",
+        "Navigate the current session's Lfcode side browser tab to a URL. When no tab exists, confirm=true is required before creating one.",
       inputSchema: ownerInputSchema.extend({
         url: z.string(),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe("Required on the first navigation when this session has no browser target."),
       }),
     },
-    async ({ url, _lfcodeSessionID }) => {
+    async ({ url, confirm, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
+      const hasTarget = !!requireBridge().getTarget({ sessionKey })
+      if (!allowBrowserNavigation({ sessionKey, hasTarget, confirm })) {
+        const confirmation = browserConfirmationRequired({
+          sessionKey,
+          url,
+          reason: "Opening or navigating the side browser needs explicit user approval.",
+        })
+        return result(JSON.stringify(confirmation))
+      }
       const target = await requireBridge().navigate({ sessionKey, sessionID: _lfcodeSessionID, url })
       return result(`Navigated side browser to ${target.url}`, target)
     },
@@ -476,6 +495,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
       const target = await requireBridge().close({ sessionKey })
+      clearBrowserNavigationAuthorization(sessionKey)
       return result(target ? `Closed browser tab. Active browser is now ${target.url}` : "Closed the current side browser tab.", target)
     },
   )
@@ -614,7 +634,7 @@ function requireOwnerSessionKey(directory: string | undefined, sessionID: string
   if (!directory || !sessionID) {
     throw new Error("Lfcode session-owned browser routing is unavailable because the current session context was not provided")
   }
-  return `${base64Encode(normalizeOwnerDirectory(directory))}/${sessionID}`
+  return browserSessionKey({ directory: normalizeOwnerDirectory(directory), sessionID })
 }
 
 function normalizeOwnerDirectory(directory: string) {

@@ -1,23 +1,17 @@
-Inspect durable background jobs recorded by Lfcode.
+Inspect shell processes started by the `shell` tool for the current session.
 
-Use this tool to:
-- start a durable background shell job for the current session
-- wait for one background job to finish
-- list background jobs for the current session
-- inspect one durable background job by id
-- read durable log chunks for a background job
-- attempt to cancel a durable background job when Lfcode has a tracked pid on this host
-- reconcile stale `running` durable jobs whose tracked pid no longer exists
+Normal command execution:
+- Start every non-interactive command with `shell`. Lfcode keeps its real process running after a model turn stops or a wait times out.
+- Do not poll a process by default. Completion is reported to the session automatically.
+- Use this tool only when status or logs are actually needed.
 
-Recommended usage:
-- `operation="start"` to launch a long-running shell command that should outlive this single tool call
-- `operation="wait"` to block until one job finishes, optionally with `timeout_ms`
-- `operation="list"` to see recent jobs
-- `operation="get"` to inspect one job's metadata and current status
-- `operation="logs"` to read ordered logs, optionally continuing with `after_seq`
-- `operation="reconcile"` to correct stale durable `running` entries after crashes or restarts
+Operations:
+- `get`, `logs`, `list`, and `reconcile` inspect tracked shell processes.
+- `wait` waits for one existing process; its timeout never terminates the process.
+- `cancel` terminates a process tree. Call it only after the user explicitly asks to stop that process.
 
 Notes:
-- this tool only allows the current session
-- log output is paginated by sequence and can be resumed with `after_seq`
-- for `reconcile`, omit `job_id` to sweep all durable jobs still marked `running`
+- This tool only allows the current session.
+- Use a top-level string operation: `wait`, `list`, `get`, `logs`, `cancel`, or `reconcile`.
+- `shell` is the only command-starting tool; this tool has no `start` operation.
+- Log output is paginated by sequence and can be resumed with `after_seq`.

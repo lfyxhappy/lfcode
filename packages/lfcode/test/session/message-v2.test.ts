@@ -182,6 +182,113 @@ describe("session.message-v2.toModelMessage", () => {
     expect(selectContinuationMessages(history).messages).toStrictEqual(history.slice(1))
   })
 
+  test("places a compaction summary before its preserved raw tail", () => {
+    const tail = userMessage("m-2", [{ ...basePart("m-2", "p1"), type: "text", text: "recent user turn" }])
+    const boundary = userMessage("m-3", [
+      {
+        ...basePart("m-3", "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: MessageID.make("m-2"),
+      },
+    ])
+    const summary = assistantMessage("m-4", [{ ...basePart("m-4", "p1"), type: "text", text: "summary" }])
+    summary.info.summary = true
+    const followup = userMessage("m-5", [{ ...basePart("m-5", "p1"), type: "text", text: "continue" }])
+
+    expect(selectContinuationMessages([userMessage("m-1", []), tail, boundary, summary, followup]).messages).toStrictEqual([
+      boundary,
+      summary,
+      tail,
+      followup,
+    ])
+  })
+
+  test("rejects a preserved tail from a different actor", () => {
+    const tail = userMessage("m-2", [{ ...basePart("m-2", "p1"), type: "text", text: "other actor" }])
+    tail.info.agentID = "actor-a"
+    const boundary = userMessage("m-3", [
+      {
+        ...basePart("m-3", "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: MessageID.make("m-2"),
+      },
+    ])
+    boundary.info.agentID = "actor-b"
+    const summary = assistantMessage("m-4", [{ ...basePart("m-4", "p1"), type: "text", text: "summary" }])
+    summary.info.summary = true
+
+    expect(selectContinuationMessages([userMessage("m-1", []), tail, boundary, summary])).toMatchObject({
+      source: "raw",
+      fallbackReason: "compaction: tail belongs to another actor",
+      boundary: {
+        messageID: "m-3",
+        kind: "compaction",
+        valid: false,
+      },
+    })
+  })
+
+  test("rejects a preserved tail from a different session", () => {
+    const tail = userMessage("m-2", [{ ...basePart("m-2", "p1"), type: "text", text: "other session" }])
+    tail.info.sessionID = SessionID.make("other-session")
+    const boundary = userMessage("m-3", [
+      {
+        ...basePart("m-3", "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: MessageID.make("m-2"),
+      },
+    ])
+    const summary = assistantMessage("m-4", [{ ...basePart("m-4", "p1"), type: "text", text: "summary" }])
+    summary.info.summary = true
+
+    expect(selectContinuationMessages([userMessage("m-1", []), tail, boundary, summary])).toMatchObject({
+      source: "raw",
+      fallbackReason: "compaction: tail belongs to another session",
+    })
+  })
+
+  test("rejects a compaction tail that does not start at a user message", () => {
+    const tail = assistantMessage("m-2", [{ ...basePart("m-2", "p1"), type: "text", text: "not a turn start" }])
+    const boundary = userMessage("m-3", [
+      {
+        ...basePart("m-3", "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: MessageID.make("m-2"),
+      },
+    ])
+    const summary = assistantMessage("m-4", [{ ...basePart("m-4", "p1"), type: "text", text: "summary" }])
+    summary.info.summary = true
+
+    expect(selectContinuationMessages([userMessage("m-1", []), tail, boundary, summary])).toMatchObject({
+      source: "raw",
+      fallbackReason: "compaction: tail start is not a user message",
+    })
+  })
+
+  test("rejects an absent preserved tail instead of duplicating history", () => {
+    const boundary = userMessage("m-3", [
+      {
+        ...basePart("m-3", "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: MessageID.make("m-missing"),
+      },
+    ])
+    const summary = assistantMessage("m-4", [{ ...basePart("m-4", "p1"), type: "text", text: "summary" }])
+    summary.info.summary = true
+    const history = [userMessage("m-1", []), boundary, summary]
+
+    expect(selectContinuationMessages(history)).toMatchObject({
+      messages: history,
+      source: "raw",
+      fallbackReason: "compaction: tail start not found",
+    })
+  })
+
   test("falls back to raw history when a checkpoint boundary has no rebuild text", () => {
     const history: MessageV2.WithParts[] = [
       userMessage("m-1", [
@@ -738,6 +845,50 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("omits legacy automatic recall prompts and their generated reply", async () => {
+    const legacyID = "m-legacy-recall"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(legacyID),
+        parts: [
+          {
+            ...basePart(legacyID, "p-legacy"),
+            type: "text",
+            synthetic: true,
+            text: "<system-reminder>\nThis session may already have recorded state.\nBefore asking the user to repeat prior context, check the existing session/task state.\n</system-reminder>",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo("m-legacy-reply", legacyID),
+        parts: [
+          {
+            ...basePart("m-legacy-reply", "p-legacy-reply"),
+            type: "text",
+            text: "I will inspect state before continuing.",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: userInfo("m-current"),
+        parts: [
+          {
+            ...basePart("m-current", "p-current"),
+            type: "text",
+            text: "Continue the actual task.",
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "Continue the actual task." }],
+      },
+    ])
+  })
+
   test("omits completed tool output during compaction summaries", async () => {
     const userID = "m-user-summary"
     const assistantID = "m-assistant-summary"
@@ -1221,6 +1372,120 @@ describe("session.message-v2.toModelMessage", () => {
         ],
       },
     ])
+  })
+})
+
+describe("session.message-v2.activeContext", () => {
+  test("projects only old media, reasoning, and tool output without changing stored history", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-1", [
+        {
+          ...basePart("m-1", "p-file"),
+          type: "file",
+          mime: "image/png",
+          filename: "old.png",
+          url: "data:image/png;base64,old",
+        },
+      ] as MessageV2.Part[]),
+      assistantMessage("m-2", [
+        {
+          ...basePart("m-2", "p-reasoning"),
+          type: "reasoning",
+          text: "hidden reasoning",
+          time: { start: 0 },
+        },
+        {
+          ...basePart("m-2", "p-tool"),
+          type: "tool",
+          callID: "call-old",
+          tool: "read",
+          state: {
+            status: "completed",
+            input: { path: "old.txt" },
+            output: "full old tool output",
+            title: "Read old.txt",
+            metadata: {},
+            time: { start: 0, end: 1 },
+          },
+        },
+      ] as MessageV2.Part[]),
+      userMessage("m-3", [{ ...basePart("m-3", "p3"), type: "text", text: "recent one" }] as MessageV2.Part[]),
+      userMessage("m-4", [{ ...basePart("m-4", "p4"), type: "text", text: "current input" }] as MessageV2.Part[]),
+    ]
+
+    const projection = MessageV2.projectActiveContext(history, { tailTurns: 2 })
+    const oldAttachment = projection.messages[0].parts[0]
+    const oldTool = projection.messages[1].parts.find((part) => part.type === "tool")
+
+    expect(oldAttachment).toMatchObject({ type: "text", text: "[Earlier attachment omitted: image/png (old.png)]" })
+    expect(projection.messages[1].parts.some((part) => part.type === "reasoning")).toBe(false)
+    expect(oldTool).toMatchObject({
+      callID: "call-old",
+      tool: "read",
+      state: { status: "completed", input: { path: "old.txt" }, output: "[Earlier read result omitted from active context]" },
+    })
+    expect(projection.messages[2]).toBe(history[2])
+    expect(projection.messages[3]).toBe(history[3])
+    expect(history[0].parts[0]).toMatchObject({ type: "file", url: "data:image/png;base64,old" })
+    expect((history[1].parts.find((part) => part.type === "tool") as MessageV2.ToolPart).state).toMatchObject({
+      output: "full old tool output",
+    })
+    expect(projection.stats).toEqual({ media: 1, reasoning: 1, toolResults: 1 })
+  })
+
+  test("keeps the current user input intact when no historical tail is configured", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-old", [{ ...basePart("m-old", "p-old"), type: "text", text: "old" }] as MessageV2.Part[]),
+      userMessage("m-current", [
+        {
+          ...basePart("m-current", "p-current"),
+          type: "file",
+          mime: "image/png",
+          url: "data:image/png;base64,current",
+        },
+      ] as MessageV2.Part[]),
+    ]
+
+    const projection = MessageV2.projectActiveContext(history, { tailTurns: 0 })
+
+    expect(projection.messages[1]).toBe(history[1])
+    expect(projection.messages[1].parts[0]).toMatchObject({ type: "file", url: "data:image/png;base64,current" })
+  })
+
+  test("clips oversized recent text and tool output within the tail budget", () => {
+    const history: MessageV2.WithParts[] = [
+      userMessage("m-old", [{ ...basePart("m-old", "p-old"), type: "text", text: "old" }] as MessageV2.Part[]),
+      userMessage("m-current", [
+        { ...basePart("m-current", "p-text"), type: "text", text: "x".repeat(20_000) },
+        {
+          ...basePart("m-current", "p-tool"),
+          type: "tool",
+          callID: "call-current",
+          tool: "read",
+          state: {
+            status: "completed",
+            input: { path: "large.txt" },
+            output: "y".repeat(20_000),
+            title: "Read large.txt",
+            metadata: {},
+            time: { start: 0, end: 1 },
+          },
+        },
+      ] as MessageV2.Part[]),
+    ]
+
+    const projection = MessageV2.projectActiveContext(history, { tailTurns: 2, maxTailTokens: 2_000 })
+    const current = projection.messages[1]
+    expect(JSON.stringify(current.parts).length).toBeLessThan(JSON.stringify(history[1].parts).length)
+    expect(current.parts.some((part) => part.type === "text" && part.text.includes("context clipped"))).toBe(true)
+    expect(current.parts.some((part) => part.type === "tool" && part.state.status === "completed" && part.state.output.includes("tool result clipped"))).toBe(true)
+  })
+
+  test("does not treat an unattached ordinary assistant as a compaction summary", () => {
+    const boundary = userMessage("m-boundary", [{ ...basePart("m-boundary", "p-boundary"), type: "compaction", auto: true }])
+    const ordinary = assistantMessage("m-ordinary", [{ ...basePart("m-ordinary", "p-ordinary"), type: "text", text: "normal response" }])
+    const followup = userMessage("m-followup", [{ ...basePart("m-followup", "p-followup"), type: "text", text: "continue" }])
+    expect(selectContinuationMessages([userMessage("m-old", []), boundary, ordinary, followup]).source).toBe("raw")
   })
 })
 

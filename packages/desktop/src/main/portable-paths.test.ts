@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "node:path"
-import { createRootLayout, migrateRootLayout, prepareDesktopBootstrap, resolveBootstrapTarget, resolveManagedRootDirectory } from "./bootstrap"
+import {
+  createRootLayout,
+  migrateRootLayout,
+  prepareDesktopBootstrap,
+  resolveDesktopBootstrap,
+  resolveBootstrapTarget,
+  resolveCodegraphBootstrap,
+  resolveManagedRootDirectory,
+} from "./bootstrap"
 
 async function tmpdir() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lfcode-desktop-bootstrap-"))
@@ -76,6 +84,55 @@ describe("desktop bootstrap paths", () => {
       userDataDir: "C:\\Lfcode\\win-unpacked\\state\\electron\\com.lfyxhappy.lfcode.dev",
       migrationMarker: "C:\\Lfcode\\win-unpacked\\state\\migration.json",
     })
+  })
+
+  test("sets LFCODE_HOME to the root layout so profile-scoped resources stay isolated", () => {
+    const state = resolveBootstrapTarget({
+      appId: "com.lfyxhappy.lfcode.pre",
+      appName: "Lfcode Pre",
+      legacyUserDataDir: "C:\\Users\\liangfeng\\AppData\\Roaming\\com.lfyxhappy.lfcode.pre",
+      root: "C:\\Users\\liangfeng\\.lfcodepre",
+      rootKind: "portable",
+      rootWritable: true,
+    })
+
+    expect(state.mode).toBe("root")
+    expect(state.env).toMatchObject({
+      LFCODE_HOME: "C:\\Users\\liangfeng\\.lfcodepre",
+      LFCODE_CONFIG_DIR: "C:\\Users\\liangfeng\\.lfcodepre",
+      LFCODE_DATA_DIR: "C:\\Users\\liangfeng\\.lfcodepre\\data",
+    })
+  })
+
+  test("prepares a supplied bootstrap state without resolving the input again", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    await fs.mkdir(root, { recursive: true })
+    const input = {
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      codegraphMode: "shim" as const,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    }
+    const state = resolveDesktopBootstrap(input)
+
+    const prepared = await prepareDesktopBootstrap(
+      {
+        ...input,
+        platform: "linux",
+        portableRoot: undefined,
+      },
+      state,
+    )
+
+    expect(prepared.mode).toBe("root")
+    expect(await fs.stat(path.join(root, "data"))).toBeDefined()
   })
 
   test("falls back to legacy mode when the managed desktop root is not writable", () => {
@@ -203,6 +260,82 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
   })
 
+  test("recognizes an existing Windows x64 CodeGraph runtime without trusting other platforms", async () => {
+    await using tmp = await tmpdir()
+    const executable = path.join(tmp.path, "codegraph.exe")
+    await fs.writeFile(executable, "MZ")
+
+    expect(
+      resolveCodegraphBootstrap({
+        appId: "com.lfyxhappy.lfcode",
+        appName: "Lfcode",
+        arch: "x64",
+        codegraphMode: "bundled",
+        codegraphPath: executable,
+        execPath: path.join(tmp.path, "Lfcode.exe"),
+        isPackaged: true,
+        legacyUserDataDir: path.join(tmp.path, "legacy"),
+        platform: "win32",
+      }),
+    ).toEqual({ kind: "bundled", entry: executable, platformDir: tmp.path })
+    expect(
+      resolveCodegraphBootstrap({
+        appId: "com.lfyxhappy.lfcode",
+        appName: "Lfcode",
+        arch: "arm64",
+        codegraphMode: "bundled",
+        codegraphPath: executable,
+        execPath: path.join(tmp.path, "Lfcode.exe"),
+        isPackaged: true,
+        legacyUserDataDir: path.join(tmp.path, "legacy"),
+        platform: "win32",
+      }),
+    ).toEqual({ kind: "external" })
+  })
+
+  test("does not treat a CodeGraph directory as a bundled executable", async () => {
+    await using tmp = await tmpdir()
+    const executable = path.join(tmp.path, "codegraph.exe")
+    await fs.mkdir(executable, { recursive: true })
+
+    expect(
+      resolveCodegraphBootstrap({
+        appId: "com.lfyxhappy.lfcode",
+        appName: "Lfcode",
+        arch: "x64",
+        codegraphMode: "bundled",
+        codegraphPath: executable,
+        execPath: path.join(tmp.path, "Lfcode.exe"),
+        isPackaged: true,
+        legacyUserDataDir: path.join(tmp.path, "legacy"),
+        platform: "win32",
+      }),
+    ).toEqual({ kind: "external" })
+  })
+
+  test("recognizes the official CodeGraph Node launcher layout", async () => {
+    await using tmp = await tmpdir()
+    const nodePath = path.join(tmp.path, "node.exe")
+    const entry = path.join(tmp.path, "lib", "dist", "bin", "codegraph.js")
+    await fs.mkdir(path.dirname(entry), { recursive: true })
+    await Promise.all([fs.writeFile(nodePath, "MZ"), fs.writeFile(entry, "console.log('codegraph')")])
+
+    expect(
+      resolveCodegraphBootstrap({
+        appId: "com.lfyxhappy.lfcode",
+        appName: "Lfcode",
+        arch: "x64",
+        codegraphMode: "bundled",
+        codegraphNodePath: nodePath,
+        codegraphEntryPath: entry,
+        execPath: path.join(tmp.path, "Lfcode.exe"),
+        isPackaged: true,
+        legacyUserDataDir: path.join(tmp.path, "legacy"),
+        platform: "win32",
+      }),
+    ).toEqual({ kind: "bundled", entry, nodePath, platformDir: tmp.path })
+  })
+
   test("does not write codegraph MCP config when the bundled platform runtime is unavailable", async () => {
     await using tmp = await tmpdir()
     const root = path.join(tmp.path, "root")
@@ -224,6 +357,173 @@ describe("desktop bootstrap paths", () => {
     expect(state.mode).toBe("root")
     expect(state.codegraph).toEqual({ kind: "external" })
     expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8"))).toEqual(defaultRootConfig)
+  })
+
+  test("writes the managed CodeGraph command only for an available bundled runtime", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    const executable = path.join(tmp.path, "resources", "codegraph", "codegraph.exe")
+    await fs.mkdir(path.dirname(executable), { recursive: true })
+    await fs.writeFile(executable, "MZ")
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      arch: "x64",
+      codegraphMode: "bundled",
+      codegraphPath: executable,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.codegraph).toEqual({ kind: "bundled", entry: executable, platformDir: path.dirname(executable) })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).mcp.codegraph).toEqual({
+      type: "local",
+      command: ["{env:LFCODE_CODEGRAPH_EXE}", "serve", "--mcp"],
+      enabled: true,
+    })
+    expect(JSON.parse(await fs.readFile(path.join(root, "state", "migration.json"), "utf8"))).toMatchObject({
+      codegraphMcpVersion: 2,
+    })
+  })
+
+  test("writes the managed Node launcher command for the official bundled runtime", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    const nodePath = path.join(tmp.path, "resources", "codegraph", "node.exe")
+    const entry = path.join(tmp.path, "resources", "codegraph", "lib", "dist", "bin", "codegraph.js")
+    await fs.mkdir(path.dirname(entry), { recursive: true })
+    await fs.mkdir(root, { recursive: true })
+    await Promise.all([fs.writeFile(nodePath, "MZ"), fs.writeFile(entry, "console.log('codegraph')")])
+
+    const state = await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      arch: "x64",
+      codegraphMode: "bundled",
+      codegraphNodePath: nodePath,
+      codegraphEntryPath: entry,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(state.codegraph).toEqual({ kind: "bundled", entry, nodePath, platformDir: path.dirname(nodePath) })
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).mcp.codegraph).toEqual({
+      type: "local",
+      command: ["{env:LFCODE_CODEGRAPH_NODE_EXE}", "{env:LFCODE_CODEGRAPH_ENTRY}", "serve", "--mcp"],
+      enabled: true,
+    })
+  })
+
+  test("migrates the prior managed executable command to the Node launcher", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    const nodePath = path.join(tmp.path, "resources", "codegraph", "node.exe")
+    const entry = path.join(tmp.path, "resources", "codegraph", "lib", "dist", "bin", "codegraph.js")
+    await fs.mkdir(path.dirname(entry), { recursive: true })
+    await fs.mkdir(root, { recursive: true })
+    await Promise.all([fs.writeFile(nodePath, "MZ"), fs.writeFile(entry, "console.log('codegraph')")])
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify({ mcp: { codegraph: { type: "local", command: ["{env:LFCODE_CODEGRAPH_EXE}", "serve", "--mcp"], enabled: true } } }),
+    )
+
+    await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      arch: "x64",
+      codegraphMode: "bundled",
+      codegraphNodePath: nodePath,
+      codegraphEntryPath: entry,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).mcp.codegraph.command).toEqual([
+      "{env:LFCODE_CODEGRAPH_NODE_EXE}",
+      "{env:LFCODE_CODEGRAPH_ENTRY}",
+      "serve",
+      "--mcp",
+    ])
+  })
+
+  test("preserves an enabled custom CodeGraph command when the Node launcher is bundled", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    const nodePath = path.join(tmp.path, "resources", "codegraph", "node.exe")
+    const entry = path.join(tmp.path, "resources", "codegraph", "lib", "dist", "bin", "codegraph.js")
+    const custom = ["C:\\tools\\custom-codegraph.cmd", "serve", "--mcp"]
+    await fs.mkdir(path.dirname(entry), { recursive: true })
+    await fs.mkdir(root, { recursive: true })
+    await Promise.all([fs.writeFile(nodePath, "MZ"), fs.writeFile(entry, "console.log('codegraph')")])
+    await fs.writeFile(path.join(root, "lfcode.jsonc"), JSON.stringify({ mcp: { codegraph: { type: "local", command: custom, enabled: true } } }))
+
+    await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      arch: "x64",
+      codegraphMode: "bundled",
+      codegraphNodePath: nodePath,
+      codegraphEntryPath: entry,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).mcp.codegraph.command).toEqual(custom)
+  })
+
+  test("preserves an explicitly disabled CodeGraph configuration", async () => {
+    await using tmp = await tmpdir()
+    const root = path.join(tmp.path, "root")
+    const executable = path.join(tmp.path, "resources", "codegraph", "codegraph.exe")
+    await fs.mkdir(path.dirname(executable), { recursive: true })
+    await fs.mkdir(root, { recursive: true })
+    await fs.writeFile(executable, "MZ")
+    await fs.writeFile(
+      path.join(root, "lfcode.jsonc"),
+      JSON.stringify({ mcp: { codegraph: { type: "local", command: ["custom-codegraph", "serve", "--mcp"], enabled: false } } }),
+    )
+
+    await prepareDesktopBootstrap({
+      appId: "com.lfyxhappy.lfcode.dev",
+      appName: "Lfcode Dev",
+      arch: "x64",
+      codegraphMode: "bundled",
+      codegraphPath: executable,
+      execPath: path.join(root, "Lfcode Dev.exe"),
+      homeDir: path.join(tmp.path, "home"),
+      isPackaged: true,
+      legacyUserDataDir: path.join(tmp.path, "legacy-user-data"),
+      migrationSources: [],
+      platform: "win32",
+      portableRoot: root,
+    })
+
+    expect(JSON.parse(await fs.readFile(path.join(root, "lfcode.jsonc"), "utf8")).mcp.codegraph).toEqual({
+      type: "local",
+      command: ["custom-codegraph", "serve", "--mcp"],
+      enabled: false,
+    })
   })
 
   test("adds bundled MCP defaults to a migrated legacy config without mcp entries", async () => {

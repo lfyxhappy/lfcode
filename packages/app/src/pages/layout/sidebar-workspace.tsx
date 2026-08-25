@@ -17,7 +17,8 @@ import type { State } from "@/context/global-sync/types"
 import { type LocalProject } from "@/context/layout"
 import { loadSessionsQuery, useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
-import { type InlineEditorComponent, NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
+import { NewSessionItem, SessionItem, SessionSkeleton } from "./sidebar-items"
+import type { RenameTriggerComponent } from "./inline-editor"
 import { sortedRootSessions, workspaceKey } from "./helpers"
 import { useQuery } from "@tanstack/solid-query"
 
@@ -27,19 +28,18 @@ export type WorkspaceSidebarContext = {
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   clearHoverProjectSoon: () => void
+  onSelectSession: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   renameSession: (session: Session, next: string) => Promise<void>
   archiveSession: (session: Session) => Promise<void>
   showDeleteSessionDialog: (session: Session) => void
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
-  editorOpen: (id: string) => boolean
-  openEditor: (id: string, value: string) => void
-  closeEditor: () => void
-  setEditor: (key: "value", value: string) => void
-  InlineEditor: InlineEditorComponent
+  openEditor: (id: string, value: string, onSave: (next: string) => void | Promise<void>) => void
+  RenameTrigger: RenameTriggerComponent
   isBusy: (directory: string) => boolean
   workspaceExpanded: (directory: string, local: boolean) => boolean
+  workspaceExpansionActivated: (directory: string) => boolean
   setWorkspaceExpanded: (directory: string, value: boolean) => void
   showResetWorkspaceDialog: (root: string, directory: string) => void
   showDeleteWorkspaceDialog: (root: string, directory: string) => void
@@ -81,10 +81,6 @@ const WorkspaceHeader = (props: {
   language: ReturnType<typeof useLanguage>
   branch: Accessor<string | undefined>
   workspaceValue: Accessor<string>
-  workspaceEditActive: Accessor<boolean>
-  InlineEditor: WorkspaceSidebarContext["InlineEditor"]
-  renameWorkspace: WorkspaceSidebarContext["renameWorkspace"]
-  setEditor: WorkspaceSidebarContext["setEditor"]
   projectId?: string
 }): JSX.Element => (
   <div class="flex items-center gap-1 min-w-0 flex-1">
@@ -104,21 +100,7 @@ const WorkspaceHeader = (props: {
         </span>
       }
     >
-      <props.InlineEditor
-        id={`workspace:${props.directory}`}
-        value={props.workspaceValue}
-        onSave={(next) => {
-          const trimmed = next.trim()
-          if (!trimmed) return
-          props.renameWorkspace(props.directory, trimmed, props.projectId, props.branch())
-          props.setEditor("value", props.workspaceValue())
-        }}
-        class="text-14-medium text-text-base min-w-0 truncate"
-        displayClass="text-14-medium text-text-base min-w-0 truncate"
-        editing={props.workspaceEditActive()}
-        stopPropagation={false}
-        openOnDblClick={false}
-      />
+      <span class="text-14-medium text-text-base min-w-0 truncate">{props.workspaceValue()}</span>
     </Show>
     <div
       data-component="workspace-chevron"
@@ -140,12 +122,12 @@ const WorkspaceActions = (props: {
   sidebarHovering: Accessor<boolean>
   touch: Accessor<boolean>
   language: ReturnType<typeof useLanguage>
-  workspaceValue: Accessor<string>
-  openEditor: WorkspaceSidebarContext["openEditor"]
+  onRename: () => void
   showResetWorkspaceDialog: WorkspaceSidebarContext["showResetWorkspaceDialog"]
   showDeleteWorkspaceDialog: WorkspaceSidebarContext["showDeleteWorkspaceDialog"]
   root: string
   clearHoverProjectSoon: WorkspaceSidebarContext["clearHoverProjectSoon"]
+  onSelectSession: WorkspaceSidebarContext["onSelectSession"]
   navigateToNewSession: () => void
 }): JSX.Element => (
   <div
@@ -179,7 +161,7 @@ const WorkspaceActions = (props: {
             if (!props.pendingRename()) return
             event.preventDefault()
             props.setPendingRename(false)
-            props.openEditor(`workspace:${props.directory}`, props.workspaceValue())
+            props.onRename()
           }}
         >
           <DropdownMenu.Item
@@ -219,6 +201,7 @@ const WorkspaceActions = (props: {
             event.preventDefault()
             event.stopPropagation()
             props.clearHoverProjectSoon()
+            props.onSelectSession()
             props.navigateToNewSession()
           }}
         />
@@ -246,6 +229,7 @@ const WorkspaceSessionList = (props: {
         mobile={props.mobile}
         sidebarExpanded={props.ctx.sidebarExpanded}
         clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+        onSelect={props.ctx.onSelectSession}
       />
     </Show>
     <Show when={props.loading()}>
@@ -266,13 +250,13 @@ const WorkspaceSessionList = (props: {
               sidebarExpanded={props.ctx.sidebarExpanded}
               sidebarHovering={props.ctx.sidebarHovering}
               clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+              onSelect={props.ctx.onSelectSession}
               prefetchSession={props.ctx.prefetchSession}
               renameSession={props.ctx.renameSession}
               archiveSession={props.ctx.archiveSession}
               showDeleteSessionDialog={props.ctx.showDeleteSessionDialog}
-              editorOpen={props.ctx.editorOpen}
               openEditor={props.ctx.openEditor}
-              InlineEditor={props.ctx.InlineEditor}
+              RenameTrigger={props.ctx.RenameTrigger}
             />
           </div>
         )}
@@ -300,7 +284,6 @@ export const SortableWorkspace = (props: {
   ctx: WorkspaceSidebarContext
   directory: string
   project: LocalProject
-  sortNow: Accessor<number>
   mobile?: boolean
 }): JSX.Element => {
   const navigate = useNavigate()
@@ -314,7 +297,7 @@ export const SortableWorkspace = (props: {
     pendingRename: false,
   })
   const slug = createMemo(() => base64Encode(props.directory))
-  const sessions = createMemo(() => sortedRootSessions(workspaceStore, props.sortNow()))
+  const sessions = createMemo(() => sortedRootSessions(workspaceStore, Date.now()))
   const local = createMemo(() => props.directory === props.project.worktree)
   const active = createMemo(() => workspaceKey(props.ctx.currentDir()) === workspaceKey(props.directory))
   const workspaceValue = createMemo(() => {
@@ -323,7 +306,7 @@ export const SortableWorkspace = (props: {
     return props.ctx.workspaceName(props.directory, props.project.id, branch) ?? name
   })
   const open = createMemo(() => props.ctx.workspaceExpanded(props.directory, local()))
-  const boot = createMemo(() => open() || active())
+  const boot = createMemo(() => active() || (open() && props.ctx.workspaceExpansionActivated(props.directory)))
   const count = createMemo(() => sessions()?.length ?? 0)
   const hasMore = createMemo(() => workspaceStore.sessionTotal > count())
   const query = useQuery(() => ({ ...loadSessionsQuery(props.project.worktree) }))
@@ -336,7 +319,6 @@ export const SortableWorkspace = (props: {
     await globalSync.project.loadSessions(props.directory)
   }
 
-  const workspaceEditActive = createMemo(() => props.ctx.editorOpen(`workspace:${props.directory}`))
   const header = () => (
     <WorkspaceHeader
       local={local}
@@ -346,19 +328,11 @@ export const SortableWorkspace = (props: {
       language={language}
       branch={() => workspaceStore.vcs?.branch}
       workspaceValue={workspaceValue}
-      workspaceEditActive={workspaceEditActive}
-      InlineEditor={props.ctx.InlineEditor}
-      renameWorkspace={props.ctx.renameWorkspace}
-      setEditor={props.ctx.setEditor}
       projectId={props.project.id}
     />
   )
 
-  const openWrapper = (value: boolean) => {
-    props.ctx.setWorkspaceExpanded(props.directory, value)
-    if (value) return
-    if (props.ctx.editorOpen(`workspace:${props.directory}`)) props.ctx.closeEditor()
-  }
+  const openWrapper = (value: boolean) => props.ctx.setWorkspaceExpanded(props.directory, value)
 
   createEffect(() => {
     if (!boot()) return
@@ -382,28 +356,15 @@ export const SortableWorkspace = (props: {
             data-workspace={base64Encode(props.directory)}
           >
             <div class="flex items-center gap-1">
-              <Show
-                when={workspaceEditActive()}
-                fallback={
-                  <Collapsible.Trigger
-                    class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md hover:bg-surface-raised-base-hover transition-[padding] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)] ${
-                      menu.open ? "pr-16" : "pr-2"
-                    } group-hover/workspace:pr-16 group-focus-within/workspace:pr-16`}
-                    data-action="workspace-toggle"
-                    data-workspace={base64Encode(props.directory)}
-                  >
-                    {header()}
-                  </Collapsible.Trigger>
-                }
+              <Collapsible.Trigger
+                class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md hover:bg-surface-raised-base-hover transition-[padding] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)] ${
+                  menu.open ? "pr-16" : "pr-2"
+                } group-hover/workspace:pr-16 group-focus-within/workspace:pr-16`}
+                data-action="workspace-toggle"
+                data-workspace={base64Encode(props.directory)}
               >
-                <div
-                  class={`flex items-center justify-between w-full pl-2 py-1.5 rounded-md transition-[padding] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)] ${
-                    menu.open ? "pr-16" : "pr-2"
-                  } group-hover/workspace:pr-16 group-focus-within/workspace:pr-16`}
-                >
-                  {header()}
-                </div>
-              </Show>
+                {header()}
+              </Collapsible.Trigger>
               <WorkspaceActions
                 directory={props.directory}
                 local={local}
@@ -415,12 +376,16 @@ export const SortableWorkspace = (props: {
                 sidebarHovering={props.ctx.sidebarHovering}
                 touch={touch}
                 language={language}
-                workspaceValue={workspaceValue}
-                openEditor={props.ctx.openEditor}
+                onRename={() =>
+                  props.ctx.openEditor(`workspace:${props.directory}`, workspaceValue(), (next) =>
+                    props.ctx.renameWorkspace(props.directory, next, props.project.id, workspaceStore.vcs?.branch),
+                  )
+                }
                 showResetWorkspaceDialog={props.ctx.showResetWorkspaceDialog}
                 showDeleteWorkspaceDialog={props.ctx.showDeleteWorkspaceDialog}
                 root={props.project.worktree}
                 clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
+                onSelectSession={props.ctx.onSelectSession}
                 navigateToNewSession={() => navigate(`/${slug()}/session`)}
               />
             </div>
@@ -449,7 +414,6 @@ export const SortableWorkspace = (props: {
 export const LocalWorkspace = (props: {
   ctx: WorkspaceSidebarContext
   project: LocalProject
-  sortNow: Accessor<number>
   mobile?: boolean
 }): JSX.Element => {
   const globalSync = useGlobalSync()
@@ -459,7 +423,7 @@ export const LocalWorkspace = (props: {
     return { store, setStore }
   })
   const slug = createMemo(() => base64Encode(props.project.worktree))
-  const sessions = createMemo(() => sortedRootSessions(workspace().store, props.sortNow()))
+  const sessions = createMemo(() => sortedRootSessions(workspace().store, Date.now()))
   const count = createMemo(() => sessions()?.length ?? 0)
   const query = useQuery(() => ({ ...loadSessionsQuery(props.project.worktree) }))
   const hasMore = createMemo(() => workspace().store.sessionTotal > count())

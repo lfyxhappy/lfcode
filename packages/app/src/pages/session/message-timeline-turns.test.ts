@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Message as MessageType, UserMessage } from "@lfcode-ai/sdk/v2"
-import { buildTimelineTurnLookup } from "./message-timeline-turns"
+import type { AssistantMessage, Message as MessageType, Part, UserMessage } from "@lfcode-ai/sdk/v2"
+import { buildTimelineTurnLookup, isRealUserMessage, isShellProcessNotice } from "./message-timeline-turns"
 
 function user(id: string): UserMessage {
   return {
@@ -112,5 +112,55 @@ describe("buildTimelineTurnLookup", () => {
     const result = buildTimelineTurnLookup(messages, [messages[0] as UserMessage, messages[2] as UserMessage])
 
     expect(result.activeMessageID).toBe("compaction-boundary")
+  })
+
+  test("keeps shell completion notifications in the preceding user turn", () => {
+    const messages = [
+      user("user-1"),
+      assistant({ id: "assistant-1", parentID: "user-1", completed: 10 }),
+      user("shell-notice"),
+      assistant({ id: "assistant-2", parentID: "shell-notice", completed: 20 }),
+    ] satisfies MessageType[]
+    const partsByMessageID = {
+      "shell-notice": [
+        {
+          id: "notice-part",
+          sessionID: "session-1",
+          messageID: "shell-notice",
+          type: "text",
+          synthetic: true,
+          text: "Shell process updates:\n- completed: job_id job-1",
+        },
+      ],
+    } satisfies Record<string, Part[]>
+
+    expect(isShellProcessNotice(messages[2]!, partsByMessageID)).toBe(true)
+    const result = buildTimelineTurnLookup(messages, undefined, partsByMessageID)
+
+    expect([...result.turns.keys()]).toEqual(["user-1"])
+    expect(result.turns.get("user-1")?.assistantMessages.map((message) => message.id)).toEqual([
+      "assistant-1",
+      "assistant-2",
+    ])
+  })
+
+  test("does not create turns for generic synthetic user messages", () => {
+    const messages = [user("user-1"), user("system-note")] satisfies MessageType[]
+    const parts = {
+      "system-note": [
+        {
+          id: "system-part",
+          sessionID: "session-1",
+          messageID: "system-note",
+          type: "text",
+          synthetic: true,
+          text: "<system-reminder>continue</system-reminder>",
+        },
+      ],
+    } satisfies Record<string, Part[]>
+
+    expect(isRealUserMessage(messages[0]!, parts)).toBe(true)
+    expect(isRealUserMessage(messages[1]!, parts)).toBe(false)
+    expect([...buildTimelineTurnLookup(messages, undefined, parts).turns.keys()]).toEqual(["user-1"])
   })
 })

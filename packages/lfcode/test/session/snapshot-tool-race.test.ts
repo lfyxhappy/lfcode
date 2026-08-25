@@ -49,7 +49,6 @@ import { SessionProcessor } from "../../src/session/processor"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
@@ -209,7 +208,6 @@ function makeHttp() {
     SessionSummary.defaultLayer,
     SessionPrompt.layer.pipe(
       Layer.provide(Goal.defaultLayer),
-      Layer.provide(ComposeGateState.defaultLayer),
       Layer.provide(Skill.defaultLayer),
       Layer.provide(TaskGateState.defaultLayer),
       Layer.provide(TaskRegistry.defaultLayer),

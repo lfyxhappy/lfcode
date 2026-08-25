@@ -12,6 +12,7 @@ export class AutomationHttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly options?: { retryable?: boolean; recovery?: string },
   ) {
     super(message)
     this.name = "AutomationHttpError"
@@ -131,21 +132,78 @@ export function automationErrorResponse(error: unknown) {
       status: error.status,
       error: error.message,
       logCode: error.code,
+      code: error.code,
+      retryable: error.options?.retryable ?? false,
+      recovery: error.options?.recovery,
     }
   }
   return {
     status: 500,
     error: "Automation request failed",
     logCode: error instanceof Error ? error.name : "unknown_error",
+    code: "automation_request_failed",
+    retryable: false,
+    recovery: "Open Settings > App Control diagnostics and use the request ID to inspect the failure.",
   }
+}
+
+export function browserAutomationError(
+  code: "browser_target_missing" | "browser_target_not_ready" | "browser_bridge_unavailable" | "browser_renderer_unavailable",
+) {
+  const details = {
+    browser_target_missing: {
+      status: 404,
+      message: "No active side browser tab exists for this session.",
+      retryable: false,
+      recovery: "Open or bind a side browser tab for this session, then retry.",
+    },
+    browser_target_not_ready: {
+      status: 409,
+      message: "The side browser tab is still starting.",
+      retryable: true,
+      recovery: "Wait briefly, then retry the browser request.",
+    },
+    browser_bridge_unavailable: {
+      status: 503,
+      message: "The desktop browser automation bridge is unavailable.",
+      retryable: true,
+      recovery: "Keep the desktop app open and retry after its browser surface has loaded.",
+    },
+    browser_renderer_unavailable: {
+      status: 503,
+      message: "The side browser renderer is unavailable.",
+      retryable: true,
+      recovery: "Wait for the tab to finish loading or reopen it, then retry.",
+    },
+  }[code]
+  return new AutomationHttpError(details.status, code, details.message, {
+    retryable: details.retryable,
+    recovery: details.recovery,
+  })
+}
+
+export function inputInjectionDisabled(route: string) {
+  return new AutomationHttpError(
+    410,
+    "input_injection_disabled",
+    `The ${route} route is disabled because desktop automation never injects mouse, keyboard, or focus input.`,
+    {
+      retryable: false,
+      recovery: "Use a semantic UI ref action, an application command, or a non-preemptive window management route instead.",
+    },
+  )
 }
 
 function isReadOnlyRoute(path: string) {
   return (
     path === "/health" ||
+    path === "/meta" ||
     path === "/windows" ||
     path.startsWith("/diagnostics/") ||
     path === "/timeline/state" ||
+    path === "/clipboard" ||
+    path === "/dom/snapshot" ||
+    path === "/ui/catalog" ||
     path === "/browser/target" ||
     path === "/browser/cache-overview"
   )
@@ -153,6 +211,12 @@ function isReadOnlyRoute(path: string) {
 
 function isReadOnlyPostRoute(path: string) {
   return (
+    path === "/diagnostics/desktop-fetch" ||
+    path === "/dom/query" ||
+    path === "/dom/wait" ||
+    path === "/ui/query" ||
+    path === "/ui/read-text" ||
+    path === "/ui/wait" ||
     path === "/browser/snapshot" ||
     path === "/browser/screenshot" ||
     path === "/browser/read-page" ||

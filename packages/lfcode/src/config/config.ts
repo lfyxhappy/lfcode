@@ -1,12 +1,13 @@
 import { Log } from "../util"
 import path from "path"
-import { pathToFileURL } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import os from "os"
 import z from "zod"
 import { mergeDeep, pipe } from "remeda"
 import { Global } from "../global"
 import fsNode from "fs/promises"
 import { NamedError } from "@lfcode-ai/shared/util/error"
+import { parseAutomationDiscovery } from "@lfcode-ai/shared/automation-protocol"
 import { Flag } from "../flag/flag"
 import { Auth } from "../auth"
 import { Env } from "../env"
@@ -41,7 +42,12 @@ import { ConfigProvider } from "./provider"
 import { ConfigServer } from "./server"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@/npm"
+import { A6Api } from "@/provider/a6api"
+import { OpenCode } from "@/provider/opencode"
+import { OpenCodeGo } from "@/provider/opencode-go"
 import { listManagedPluginSpecs, registryFile } from "@/plugin/library"
+import { dispatchHooks } from "@/hook/runtime"
+import { expireAllContextReviews } from "@/context-review/service"
 
 const log = Log.create({ service: "config" })
 
@@ -80,8 +86,14 @@ async function resolveLoadedPlugins<T extends { plugin?: ConfigPlugin.Spec[] }>(
 }
 
 function localPluginDir() {
+  const resources = Reflect.get(process, "resourcesPath")
+  if (typeof resources === "string") {
+    const bundled = path.join(resources, "plugin-sdk")
+    if (existsSync(path.join(bundled, "package.json"))) return bundled
+  }
   try {
-    return path.dirname(import.meta.resolve("@lfcode-ai/plugin/package.json"))
+    const resolved = import.meta.resolve("@lfcode-ai/plugin/package.json")
+    return path.dirname(resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved)
   } catch {
     return
   }
@@ -232,6 +244,10 @@ const InfoSchema = Schema.Struct({
         description:
           "Per-tool override of invocation_style. Keys are tool IDs. A tool without a `shell` field falls back to JSON regardless of this setting.",
       }),
+      presentation: Schema.optional(Schema.Literals(["native", "code", "both", "auto"])).annotate({
+        description:
+          "How tools are presented to the model. auto (default) selects Code Mode when more than 24 tools or 16KB of tool schemas would be visible.",
+      }),
     }),
   ).annotate({
     description: "Tool invocation style configuration (JSON vs shell-style).",
@@ -239,17 +255,29 @@ const InfoSchema = Schema.Struct({
   app_control: Schema.optional(
     Schema.Struct({
       enabled: Schema.optional(Schema.Boolean).annotate({
-        description: "Enable or disable model access to local desktop app-control tools. Default: false.",
+        description: "Enable or disable model access to local desktop app-control tools. Default: true.",
       }),
       permission: Schema.optional(
         Schema.Literals(["read_only", "session_control", "browser_control", "full_app_control"]),
       ).annotate({
         description:
-          "Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, 'browser_control' additionally allows side-browser actions, and 'full_app_control' reserves broader future control.",
+          "Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, and 'full_app_control' allows all app-control actions. 'browser_control' is a legacy value that migrates to session_control; built-in browser access is configured independently with browser_control.",
       }),
     }),
   ).annotate({
     description: "Host-level desktop app-control configuration.",
+  }),
+  browser_control: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable or disable model access to the built-in side browser. Default: true.",
+      }),
+      permission: Schema.optional(Schema.Literals(["read_only", "interactive"])).annotate({
+        description: "Browser permission. 'read_only' allows inspection and diagnostics; 'interactive' also allows navigation and page interaction.",
+      }),
+    }),
+  ).annotate({
+    description: "Host-level built-in browser control configuration.",
   }),
   enterprise: Schema.optional(
     Schema.Struct({
@@ -258,11 +286,14 @@ const InfoSchema = Schema.Struct({
   ),
   compaction: Schema.optional(
     Schema.Struct({
+      strategy: Schema.optional(Schema.Literals(["layered", "legacy"])).annotate({
+        description: "Context recovery strategy. Defaults to layered; legacy preserves direct LLM compaction.",
+      }),
       auto: Schema.optional(Schema.Boolean).annotate({
         description: "Enable automatic compaction when context is full (default: true)",
       }),
       prune: Schema.optional(Schema.Boolean).annotate({
-        description: "Enable pruning of old tool outputs (default: true)",
+        description: "Opt in to persistent pruning of old tool outputs (default: false; active-context projection remains non-destructive)",
       }),
       tail_turns: Schema.optional(NonNegativeInt).annotate({
         description:
@@ -280,7 +311,7 @@ const InfoSchema = Schema.Struct({
     Schema.Struct({
       thresholds: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). Each threshold must be <= window - 20K reserved. No default thresholds are applied; direct compaction is the default hot path unless thresholds are explicitly configured.",
+          "Context fill thresholds that trigger checkpoint writes. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed (\"100K\", \"50%\"). Each threshold must be <= window - 20K reserved. In layered compaction, omitted thresholds default to 55% and 70%; an explicit empty array disables checkpoint writes.",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer reserved for checkpoint operations. Default: 20000.",
@@ -404,6 +435,13 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ),
+  context_review: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean).annotate({
+        description: "Enable the invisible background review that checks for omitted Skills and Memory context. Default: true.",
+      }),
+    }),
+  ),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),
@@ -436,25 +474,9 @@ const InfoSchema = Schema.Struct({
       }),
     }),
   ),
-  workflow: Schema.optional(
-    Schema.Struct({
-      maxConcurrentAgents: Schema.optional(Schema.Number).annotate({
-        description:
-          "Process-wide ceiling on subagents running concurrently across ALL workflow runs (including nested children). Default min(16, 2x CPU cores). No upper clamp: the previous 2x-cores hard cap was removed so an operator can match real provider capacity — but that also means a misconfigured value (e.g. an extra zero) can exhaust provider rate limits or host memory. This is the only concurrency ceiling, so set it deliberately.",
-      }),
-      maxDepth: Schema.optional(Schema.Number).annotate({
-        description: "Max nesting depth for workflow()-calls-workflow. Default 8. Exceeding it fails the run.",
-      }),
-      maxLifecycleAgents: Schema.optional(Schema.Number).annotate({
-        description:
-          "Hard ceiling on total agents a single workflow run may spawn over its life. Default 1000. Over-cap agent() calls return null (graceful degradation). PER-RUN, not tree-wide: each child workflow has its own independent budget, so a deep nesting can spawn maxDepth × this over the whole tree (concurrent in-flight is still bounded by maxConcurrentAgents).",
-      }),
-      scriptDeadlineMs: Schema.optional(Schema.Number).annotate({
-        description:
-          "Wall-clock budget for a whole workflow script, in milliseconds. Default 12h. The sandbox interrupt handler enforces this as a hard kill-switch.",
-      }),
-    }),
-  ).annotate({ description: "Dynamic workflow runtime settings." }),
+  // Read legacy workflow settings without exposing or executing them so an
+  // existing user config stays valid after the runtime retirement.
+  workflow: Schema.optional(Schema.Unknown),
 })
 
 // Schema.Struct produces readonly types by default, but the service code
@@ -485,6 +507,15 @@ export const Info = (zod(InfoSchema) as unknown as z.ZodObject<any>)
   .strict()
   .meta({ ref: "Config" }) as unknown as z.ZodType<DeepMutable<Schema.Schema.Type<typeof InfoSchema>>>
 
+// Legacy workflow settings remain readable from existing local config files,
+// but are intentionally absent from the public API and generated SDK.
+export const PublicInfo = (Info as z.ZodObject<any>).omit({ workflow: true }).meta({ ref: "ConfigPublic" })
+
+export function withoutWorkflow(input: Info) {
+  const { workflow: _workflow, ...result } = input
+  return result
+}
+
 export type Info = z.output<typeof Info> & {
   // plugin_origins is derived state, not a persisted config field. It keeps each winning plugin spec together
   // with the file and scope it came from so later runtime code can make location-sensitive decisions.
@@ -513,11 +544,19 @@ export const GlobalPersonalizationMaintenance = z
   .meta({ ref: "GlobalPersonalizationMaintenance" })
 export type GlobalPersonalizationMaintenance = z.infer<typeof GlobalPersonalizationMaintenance>
 
+export const GlobalPersonalizationContextReview = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .meta({ ref: "GlobalPersonalizationContextReview" })
+export type GlobalPersonalizationContextReview = z.infer<typeof GlobalPersonalizationContextReview>
+
 export const GlobalPersonalizationSave = z
   .object({
     customInstructions: z.string(),
     memory: GlobalPersonalizationMemory,
     maintenance: GlobalPersonalizationMaintenance,
+    contextReview: GlobalPersonalizationContextReview,
   })
   .meta({ ref: "GlobalPersonalizationSave" })
 export type GlobalPersonalizationSave = z.infer<typeof GlobalPersonalizationSave>
@@ -528,6 +567,7 @@ export const GlobalPersonalization = z
     instructionFile: z.string(),
     memory: GlobalPersonalizationMemory,
     maintenance: GlobalPersonalizationMaintenance,
+    contextReview: GlobalPersonalizationContextReview,
     config: Info,
   })
   .meta({ ref: "GlobalPersonalization" })
@@ -542,18 +582,41 @@ function resolvePersonalizationMaintenance(config: Info): GlobalPersonalizationM
   }
 }
 
+function resolvePersonalizationContextReview(config: Info): GlobalPersonalizationContextReview {
+  return {
+    enabled: config.context_review?.enabled ?? true,
+  }
+}
+
 export const GlobalAppControlPermission = z
   .enum(["read_only", "session_control", "browser_control", "full_app_control"])
   .meta({ ref: "GlobalAppControlPermission" })
 export type GlobalAppControlPermission = z.infer<typeof GlobalAppControlPermission>
 
+export const GlobalBrowserControlPermission = z.enum(["read_only", "interactive"]).meta({ ref: "GlobalBrowserControlPermission" })
+export type GlobalBrowserControlPermission = z.infer<typeof GlobalBrowserControlPermission>
+
 export const GlobalAppControlSave = z
   .object({
     enabled: z.boolean(),
     permission: GlobalAppControlPermission,
+    browser: z
+      .object({
+        enabled: z.boolean(),
+        permission: z.enum(["read_only", "interactive"]),
+      })
+      .optional(),
   })
   .meta({ ref: "GlobalAppControlSave" })
 export type GlobalAppControlSave = z.infer<typeof GlobalAppControlSave>
+
+export const GlobalBrowserControlSave = z
+  .object({
+    enabled: z.boolean(),
+    permission: GlobalBrowserControlPermission,
+  })
+  .meta({ ref: "GlobalBrowserControlSave" })
+export type GlobalBrowserControlSave = z.infer<typeof GlobalBrowserControlSave>
 
 export const GlobalAppControlService = z
   .object({
@@ -564,6 +627,8 @@ export const GlobalAppControlService = z
     pid: z.number().optional(),
     version: z.string().optional(),
     startedAt: z.number().optional(),
+    protocolVersion: z.number().int().positive().optional(),
+    instanceID: z.string().optional(),
   })
   .meta({ ref: "GlobalAppControlService" })
 export type GlobalAppControlService = z.infer<typeof GlobalAppControlService>
@@ -574,6 +639,7 @@ export const GlobalAppControl = z
     permission: GlobalAppControlPermission,
     target: z.literal("app"),
     availableTargets: z.array(z.literal("app")),
+    browser: GlobalBrowserControlSave,
     service: GlobalAppControlService,
     config: Info,
   })
@@ -612,6 +678,7 @@ export interface Interface {
   readonly updateMcpEnabled: (name: string, enabled: boolean) => Effect.Effect<Info>
   readonly updatePluginEnabled: (spec: string, enabled: boolean) => Effect.Effect<Info>
   readonly invalidate: (wait?: boolean) => Effect.Effect<void>
+  readonly invalidateAgentDefinitions: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
 }
@@ -658,21 +725,17 @@ async function readGlobalAppControlService() {
     } satisfies GlobalAppControlService
   }
   try {
-    const parsed = JSON.parse(text) as {
-      host?: unknown
-      pid?: unknown
-      port?: unknown
-      startedAt?: unknown
-      version?: unknown
-    }
+    const parsed = parseAutomationDiscovery(JSON.parse(text) as unknown)
     return {
       discoveryFile,
       detected: true,
-      host: typeof parsed.host === "string" ? parsed.host : undefined,
-      port: typeof parsed.port === "number" ? parsed.port : undefined,
-      pid: typeof parsed.pid === "number" ? parsed.pid : undefined,
-      version: typeof parsed.version === "string" ? parsed.version : undefined,
-      startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : undefined,
+      host: parsed.host,
+      port: parsed.port,
+      pid: parsed.pid,
+      version: parsed.version,
+      startedAt: parsed.startedAt,
+      protocolVersion: parsed.protocolVersion,
+      instanceID: parsed.instanceID,
     } satisfies GlobalAppControlService
   } catch {
     return {
@@ -683,10 +746,26 @@ async function readGlobalAppControlService() {
 }
 
 export function resolveGlobalAppControlConfig(config: Info | undefined) {
+  const permission = config?.app_control?.permission
   return {
-    enabled: config?.app_control?.enabled ?? false,
-    permission: config?.app_control?.permission ?? "session_control",
+    enabled: config?.app_control?.enabled ?? true,
+    permission: permission === "browser_control" ? "session_control" : permission ?? "full_app_control",
   } satisfies GlobalAppControlSave
+}
+
+export function resolveGlobalBrowserControlConfig(config: Info | undefined) {
+  if (config?.browser_control) {
+    return {
+      enabled: config.browser_control.enabled ?? true,
+      permission: config.browser_control.permission ?? "interactive",
+    } satisfies GlobalBrowserControlSave
+  }
+  const legacy = config?.app_control
+  if (!legacy) return { enabled: true, permission: "interactive" } satisfies GlobalBrowserControlSave
+  return {
+    enabled: legacy.enabled ?? true,
+    permission: legacy.permission === "browser_control" || legacy.permission === "full_app_control" ? "interactive" : "read_only",
+  } satisfies GlobalBrowserControlSave
 }
 
 function normalizePersonalizationText(input: string) {
@@ -799,7 +878,6 @@ function isCustomProviderConfig(config: ConfigProvider.Info | undefined) {
   ])
   if (config.npm && !knownCustomPackages.has(config.npm)) return false
   if (typeof config.options?.baseURL !== "string" || config.options.baseURL.length === 0) return false
-  if (!config.models || Object.keys(config.models).length === 0) return false
   return true
 }
 
@@ -1138,9 +1216,9 @@ export const layer = Layer.effect(
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
         }
 
-        for (const dir of directories) {
-          if (dir.endsWith(".lfcode") || dir === Flag.LFCODE_CONFIG_DIR) {
-            const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
+        for (const dir of yield* ConfigPaths.pluginDirectories(ctx.directory, ctx.worktree)) {
+          const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
+          if (dir.endsWith(".lfcode") || dir === Flag.LFCODE_CONFIG_DIR || list.length) {
             const pluginDir = localPluginDir()
             if (list.length && pluginDir) {
               // Only prepare dependencies for directories that actually ship local plugins.
@@ -1485,11 +1563,21 @@ export const layer = Layer.effect(
 
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
+      const ctx = yield* InstanceState.context
       const file = path.join(dir, "config.json")
       const existing = yield* loadFile(file)
       yield* fs
         .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
         .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "ConfigChange",
+          projectID: String(ctx.project.id),
+          cwd: ctx.worktree,
+          tool: file,
+          payload: { file, scope: "project" },
+        }),
+      ).pipe(Effect.ignore)
       yield* Effect.promise(() => Instance.dispose())
     })
 
@@ -1508,6 +1596,11 @@ export const layer = Layer.effect(
         )
       if (wait) yield* Effect.promise(() => task)
       else void task
+    })
+
+    const invalidateAgentDefinitions = Effect.fn("Config.invalidateAgentDefinitions")(function* () {
+      yield* invalidateGlobal
+      yield* InstanceState.invalidateAll(state)
     })
 
     const invalidateModelSelection = Effect.fn("Config.invalidateModelSelection")(function* () {
@@ -1549,6 +1642,7 @@ export const layer = Layer.effect(
           autoConsolidation: config.dream?.auto ?? true,
         },
         maintenance: resolvePersonalizationMaintenance(config),
+        contextReview: resolvePersonalizationContextReview(config),
         config,
       }
     })
@@ -1556,12 +1650,14 @@ export const layer = Layer.effect(
     const getGlobalAppControl = Effect.fn("Config.getGlobalAppControl")(function* () {
       const config = yield* getGlobal()
       const current = resolveGlobalAppControlConfig(config)
+      const browser = resolveGlobalBrowserControlConfig(config)
       const service = yield* Effect.promise(() => readGlobalAppControlService())
       return {
         enabled: current.enabled,
         permission: current.permission,
         target: "app" as const,
         availableTargets: ["app" as const],
+        browser,
         service,
         config,
       }
@@ -1570,6 +1666,8 @@ export const layer = Layer.effect(
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Patch) {
       const file = globalConfigFile()
       const before = (yield* readConfigFile(file)) ?? "{}"
+      const previousContextReviewEnabled = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file).context_review
+        ?.enabled ?? true
       const nullPaths = collectNullPaths(config)
       const cleaned = stripNulls(config)
 
@@ -1591,11 +1689,17 @@ export const layer = Layer.effect(
         yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
       }
 
+      if (previousContextReviewEnabled && !(next.context_review?.enabled ?? true)) {
+        yield* expireAllContextReviews()
+      }
+
       if (isModelSelectionPatch(config)) {
+        yield* Effect.promise(() => dispatchHooks({ event: "ConfigChange", payload: { file, scope: "global" } })).pipe(Effect.ignore)
         yield* invalidateModelSelection()
         return next
       }
 
+      yield* Effect.promise(() => dispatchHooks({ event: "ConfigChange", payload: { file, scope: "global" } })).pipe(Effect.ignore)
       yield* invalidate()
       return next
     })
@@ -1627,6 +1731,9 @@ export const layer = Layer.effect(
           scheduler_enabled: input.maintenance.schedulerEnabled,
           dream_enabled: input.maintenance.dreamEnabled,
           distill_enabled: input.maintenance.distillEnabled,
+        },
+        context_review: {
+          enabled: input.contextReview.enabled,
         },
       } satisfies Patch
 
@@ -1666,24 +1773,42 @@ export const layer = Layer.effect(
         throw error
       }
 
+      if ((current.context_review?.enabled ?? true) && !input.contextReview.enabled) {
+        yield* expireAllContextReviews()
+      }
       yield* invalidate(true)
       return yield* getGlobalPersonalization()
     })
 
     const saveGlobalAppControl = Effect.fn("Config.saveGlobalAppControl")(function* (input: GlobalAppControlSave) {
+      const existing = yield* getGlobal()
+      const browserConfig =
+        input.browser ??
+        (existing.browser_control
+          ? resolveGlobalBrowserControlConfig(existing)
+          : resolveGlobalBrowserControlConfig({
+              ...existing,
+              app_control: {
+                enabled: input.enabled,
+                permission: input.permission,
+              },
+            }))
       const next = yield* updateGlobal({
         app_control: {
           enabled: input.enabled,
-          permission: input.permission,
+          permission: input.permission === "browser_control" ? "session_control" : input.permission,
         },
+        browser_control: browserConfig,
       })
       const current = resolveGlobalAppControlConfig(next)
+      const browser = resolveGlobalBrowserControlConfig(next)
       const service = yield* Effect.promise(() => readGlobalAppControlService())
       return {
         enabled: current.enabled,
         permission: current.permission,
         target: "app" as const,
         availableTargets: ["app" as const],
+        browser,
         service,
         config: next,
       }
@@ -1735,6 +1860,9 @@ export const layer = Layer.effect(
       provider: ConfigProvider.Info,
       key?: string,
     ) {
+      if (providerID === A6Api.A6API_PROVIDER_ID) A6Api.assertConfiguration(provider)
+      if (providerID === OpenCode.PROVIDER_ID) OpenCode.assertConfiguration(provider)
+      if (providerID === OpenCodeGo.PROVIDER_ID) OpenCodeGo.assertConfiguration(provider)
       const target = yield* Effect.fn(function* () {
         for (const file of globalConfigFiles()) {
           const before = yield* readConfigFile(file)
@@ -1812,6 +1940,7 @@ export const layer = Layer.effect(
       updateMcpEnabled,
       updatePluginEnabled,
       invalidate,
+      invalidateAgentDefinitions,
       directories,
       waitForDependencies,
     })

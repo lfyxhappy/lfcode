@@ -157,7 +157,17 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       })
     }
 
-    function respondExternalDirectoryRequests(directory: string) {
+    function respondExternalDirectoryRequests(directory: string, requests?: PermissionRequest[]) {
+      if (requests) {
+        for (const perm of requests) {
+          if (!perm?.id) continue
+          if (perm.permission !== "external_directory") continue
+          if (!shouldAutoRespond(perm, directory)) continue
+          respondOnce(perm, directory)
+        }
+        return
+      }
+
       globalSDK.client.permission
         .list({ directory })
         .then((x) => {
@@ -180,7 +190,15 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       const directories = Array.from(pendingExternalDirectories)
       pendingExternalDirectories.clear()
       for (const directory of directories) {
-        respondExternalDirectoryRequests(directory)
+        const child = globalSync.child(directory)
+        if (!child[0].permission_ready) {
+          pendingExternalDirectories.add(directory)
+          continue
+        }
+        respondExternalDirectoryRequests(
+          directory,
+          child[0].permission_error ? undefined : Object.values(child[0].permission).flat(),
+        )
       }
     })
 

@@ -2,7 +2,7 @@ import { Context, Effect, Layer } from "effect"
 import { and, asc, desc, eq, gt, sql } from "drizzle-orm"
 import { Database } from "../storage"
 import { Config } from "../config"
-import { PartTable, SessionTable } from "../session/session.sql"
+import { MessageTable, PartTable, SessionTable } from "../session/session.sql"
 import { HistoryFtsTable } from "./fts.sql"
 import { extract, DEFAULT_KINDS, type Kind } from "./extract"
 import { makeResolver, type Resolver } from "./resolve"
@@ -21,6 +21,18 @@ const BATCH = 500
 export function backfillAll(enabled: ReadonlySet<Kind> = new Set(DEFAULT_KINDS)) {
   return Effect.gen(function* () {
     if (enabled.size === 0) return
+
+    // Purge entries created before context-reviewer became an internal-only
+    // actor. The read path also guards this boundary, but removing stale FTS
+    // rows prevents later index maintenance from retaining sensitive content.
+    Database.use((db) =>
+      db
+        .delete(HistoryFtsTable)
+        .where(
+          sql`${HistoryFtsTable.message_id} IN (SELECT ${MessageTable.id} FROM ${MessageTable} WHERE ${MessageTable.agent_id} = 'context-reviewer' OR ${MessageTable.agent_id} LIKE 'context-reviewer-%')`,
+        )
+        .run(),
+    )
 
     const resolver = makeResolver()
     const sessions = Database.use((db) =>
@@ -58,6 +70,7 @@ function scanSession(
           .where(
             and(
               eq(PartTable.session_id, session.id as any),
+              sql`NOT EXISTS (SELECT 1 FROM ${MessageTable} WHERE ${MessageTable.id} = ${PartTable.message_id} AND (${MessageTable.agent_id} = 'context-reviewer' OR ${MessageTable.agent_id} LIKE 'context-reviewer-%'))`,
               gt(PartTable.id, cursor as any),
               sql`NOT EXISTS (SELECT 1 FROM history_fts WHERE history_fts.part_id = ${PartTable.id})`,
             ),

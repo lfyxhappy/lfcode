@@ -20,7 +20,7 @@ export const ConfigRoutes = lazy(() =>
             description: "Get config info",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.PublicInfo),
               },
             },
           },
@@ -29,7 +29,7 @@ export const ConfigRoutes = lazy(() =>
       async (c) =>
         jsonRequest("ConfigRoutes.get", c, function* () {
           const cfg = yield* Config.Service
-          return yield* cfg.get()
+          return Config.withoutWorkflow(yield* cfg.get())
         }),
     )
     .patch(
@@ -43,14 +43,14 @@ export const ConfigRoutes = lazy(() =>
             description: "Successfully updated config",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.PublicInfo),
               },
             },
           },
           ...errors(400),
         },
       }),
-      validator("json", Config.Info),
+      validator("json", Config.PublicInfo),
       async (c) =>
         jsonRequest("ConfigRoutes.update", c, function* () {
           const config = c.req.valid("json")

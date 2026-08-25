@@ -1,9 +1,9 @@
 import fs from "fs/promises"
 import path from "path"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { type RuntimeManageItemID, type RuntimeOperationAction, type RuntimeOperationLog, type RuntimeOperationLogState } from "./types"
 
-const LOG_PATH = path.join(Global.Path.data, "runtime", "logs.jsonl")
+const LOG_PATH = path.join(PluginPath.data("runtime-manager"), "logs.jsonl")
 const MAX_ENTRIES = 200
 const DEFAULT_LIMIT = 20
 

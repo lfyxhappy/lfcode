@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import {
   ProviderProtocol,
   inferModelCapabilities,
+  inferModelLimits,
+  inferModelProfile,
   normalizeModelCapabilities,
   protocolPackage,
 } from "@lfcode-ai/shared/model-capabilities"
@@ -16,6 +18,15 @@ describe("protocolPackage", () => {
 })
 
 describe("inferModelCapabilities", () => {
+  test("uses model identity only and stays consistent across providers", () => {
+    const names = ["gpt-5.6", "o3", "claude-sonnet-4", "gemini-2.5-pro", "deepseek-reasoner", "qwen3-max", "kimi-k2.5", "glm-5", "mimo-v2.5", "hy3", "ox-alpha-free"]
+    for (const modelID of names) {
+      expect(inferModelCapabilities({ modelID })).toEqual(
+        inferModelCapabilities({ modelID, apiID: modelID }),
+      )
+    }
+  })
+
   test("infers GPT-5 web capabilities", () => {
     const capabilities = inferModelCapabilities({ modelID: "gpt-5-web" })
 
@@ -26,8 +37,8 @@ describe("inferModelCapabilities", () => {
     expect(capabilities.attachment).toBe(true)
     expect(capabilities.patch_editing).toBe(true)
     expect(capabilities.input.image).toBe(true)
-    expect(capabilities.input.audio).toBe(true)
-    expect(capabilities.input.video).toBe(true)
+    expect(capabilities.input.audio).toBe(false)
+    expect(capabilities.input.video).toBe(false)
     expect(capabilities.input.pdf).toBe(true)
   })
 
@@ -59,6 +70,35 @@ describe("inferModelCapabilities", () => {
     expect(capabilities.input.audio).toBe(true)
     expect(capabilities.input.video).toBe(true)
     expect(capabilities.input.pdf).toBe(true)
+  })
+})
+
+describe("inferModelProfile", () => {
+  test("provides limits, reasoning tiers, and modalities for OpenCode names", () => {
+    for (const modelID of ["gpt-5.6-luna", "deepseek-v4-pro", "qwen3.7-max", "mimo-v2-omni", "hy3"]) {
+      const profile = inferModelProfile({ modelID })
+      expect(profile.limit.context).toBeGreaterThan(0)
+      expect(profile.limit.output).toBeGreaterThan(0)
+      expect(profile.modalities.input).toContain("text")
+      expect(profile.modalities.output).toContain("text")
+      expect(profile.reasoningOptions.length + profile.reasoningModes.length).toBeGreaterThan(0)
+    }
+    expect(inferModelLimits({ modelID: "unknown-model" })).toEqual({ context: 128_000, output: 16_000 })
+  })
+
+  test("matches multimodal inputs and exact thinking modes by model name", () => {
+    const mimo = inferModelProfile({ modelID: "mimo-v2.5" })
+    expect(mimo.modalities.input).toEqual(["text", "audio", "image", "video"])
+    expect(mimo.reasoningOptions).toEqual([])
+    expect(mimo.reasoningModes).toEqual([{ type: "toggle" }])
+
+    const pro = inferModelProfile({ modelID: "mimo-v2.5-pro" })
+    expect(pro.modalities.input).toEqual(["text"])
+
+    expect(inferModelProfile({ modelID: "step-3.5-flash" }).reasoningOptions).toEqual(["low", "high"])
+    expect(inferModelProfile({ modelID: "deepseek-v4-pro" }).reasoningOptions).toEqual(["high", "max"])
+    expect(inferModelProfile({ modelID: "kimi-k3" }).reasoningOptions).toEqual(["low", "high", "max"])
+    expect(inferModelProfile({ modelID: "claude-opus-4-7" }).reasoningOptions).toEqual(["low", "medium", "high", "xhigh", "max"])
   })
 })
 

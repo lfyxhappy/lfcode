@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { Effect, Layer, ManagedRuntime } from "effect"
@@ -10,9 +10,16 @@ import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "../../src/plugin"
 import { resolveCppCommand } from "../../src/cpp/runtime"
 import { Instance } from "../../src/project/instance"
+import { shellBackgroundRuntimeRef } from "../../src/background-job/runtime-ref"
+import type { Interface as ShellBackgroundRuntime } from "../../src/background-job/runtime"
 
 const runtime = ManagedRuntime.make(
-  Layer.mergeAll(AppFileSystem.defaultLayer, Plugin.defaultLayer, Truncate.defaultLayer, Agent.defaultLayer),
+  Layer.mergeAll(
+    AppFileSystem.defaultLayer,
+    Plugin.defaultLayer,
+    Truncate.defaultLayer,
+    Agent.defaultLayer,
+  ),
 )
 
 function initCpp() {
@@ -31,6 +38,21 @@ const ctx = {
 }
 
 const compiler = resolveCppCommand()
+let previousRuntime: ShellBackgroundRuntime | undefined
+
+beforeEach(() => {
+  previousRuntime = shellBackgroundRuntimeRef.current
+  shellBackgroundRuntimeRef.current = {
+    start: (input) => Effect.succeed({ id: "job_cpp_test", status: "running", source: input.source } as never),
+    wait: () => Effect.succeed({ timedOut: true }),
+    cancel: () => Effect.succeed({} as never),
+    reattachRunningJobs: () => Effect.void,
+  }
+})
+
+afterEach(() => {
+  shellBackgroundRuntimeRef.current = previousRuntime
+})
 
 describe("tool.cpp", () => {
   test("builds a basic source file", async () => {
@@ -52,9 +74,10 @@ describe("tool.cpp", () => {
             ctx,
           ),
         )
-        expect(result.metadata.compileExit).toBe(0)
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
         expect(result.metadata.outputPath).toBeTruthy()
-        await fs.access(result.metadata.outputPath)
+        expect(result.output).toContain("Started durable C++ background job")
       },
     })
   })
@@ -78,23 +101,21 @@ describe("tool.cpp", () => {
             ctx,
           ),
         )
-        expect(result.metadata.compileExit).toBe(0)
-        expect(result.metadata.runExit).toBe(0)
-        expect(result.output).toContain("## Compile")
-        expect(result.output).toContain("## Run")
-        expect(result.output).toContain("ok")
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
+        expect(result.output).toContain("Started durable C++ background job")
       },
     })
   })
 
-  test("reports timeout explicitly during run", async () => {
+  test("uses timeout only as a background reminder threshold during run", async () => {
     if (!compiler) return
     await Instance.provide({
       directory: __dirname,
       fn: async () => {
         const root = await fs.mkdtemp(path.join(__dirname, "cpp-timeout-"))
         const entry = path.join(root, "spin.cpp")
-        await fs.writeFile(entry, "int main(){ for(;;){} }\n", "utf8")
+        await fs.writeFile(entry, "int main(){ return 0; }\n", "utf8")
         const tool = await initCpp()
         const result = await Effect.runPromise(
           tool.execute(
@@ -107,9 +128,9 @@ describe("tool.cpp", () => {
             ctx,
           ),
         )
-        expect(result.metadata.compileExit).toBe(0)
-        expect(result.metadata.timedOut).toBe(true)
-        expect(result.output).toContain("Timed out after 1000ms")
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
+        expect(result.output).toContain("Started durable C++ background job")
       },
     })
   })

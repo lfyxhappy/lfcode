@@ -12,7 +12,7 @@ import { Format } from "../format"
 import { AppFileSystem } from "@/filesystem"
 import { Instance } from "../project/instance"
 import { SessionCwd } from "./session-cwd"
-import { trimDiff } from "./edit"
+import { trimDiff } from "./diff"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import * as PatchRecovery from "./patch-recovery"
 

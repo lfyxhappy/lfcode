@@ -21,6 +21,8 @@ import {
 } from "./browser-reference"
 
 const BROWSER_REFERENCE_CHANNEL = "lfcode-browser-reference"
+const BROWSER_REFERENCE_REFRESH_EVENT = "lfcode:browser-reference-refresh"
+const BROWSER_REFERENCE_POLL_MS = 1_200
 
 export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey: string }) {
   const language = useLanguage()
@@ -390,12 +392,18 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         const current = state()
         const url = resolveStableURL(options?.event)
         if (url) lastLoadedURL = url
-        sessionView().browser.sync(id, {
+        const next = {
           url,
           input: options?.loading ? current?.input ?? url : url,
           title: ready && guestElementAttached(guest) ? guest.getTitle?.() || current?.title : current?.title,
           loading: options?.loading ?? current?.loading ?? false,
           error: options?.clearError ? undefined : options?.error ?? current?.error,
+        }
+        sessionView().browser.sync(id, next)
+        void platform.reportBrowserState?.({
+          sessionKey: currentSessionKey(),
+          tabID: id,
+          ...next,
         })
       }
 
@@ -405,6 +413,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         sessionView().browser.update(id, {
           loading: true,
           error: undefined,
+        })
+        void platform.reportBrowserState?.({
+          sessionKey: currentSessionKey(),
+          tabID: id,
+          loading: true,
         })
         ensureGuestRegistration()
       }
@@ -467,6 +480,12 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
           loading: true,
           error: undefined,
         })
+        void platform.reportBrowserState?.({
+          sessionKey: currentSessionKey(),
+          tabID: id,
+          input: next && next !== "about:blank" ? next : state()?.input,
+          loading: true,
+        })
       }
       const finishMainNavigation = (event?: Event) => {
         sync({
@@ -511,7 +530,9 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
       }
       const hydrateGuestState = () => {
         if (!guestElementAttached(guest)) return
-        if (!ready) return
+        // A cached webview can finish loading before this reactive listener attaches.
+        // Reuse the DOM-ready synchronization path so persisted loading state converges.
+        if (!ready) onReady()
         if (guest.isLoading?.()) {
           start()
           return
@@ -521,6 +542,8 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
       }
       let guestProbeFrame = 0
       let referencePollTimer: number | undefined
+      let referencePollPending = false
+      let referencePollingDisposed = false
       const probeGuestRegistration = (attempt = 0) => {
         if (!guestElementAttached(guest)) {
           if (attempt >= 12) return
@@ -539,23 +562,50 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         }
         guestProbeFrame = requestAnimationFrame(() => probeGuestRegistration(attempt + 1))
       }
+      const scheduleReferencePoll = () => {
+        if (referencePollingDisposed || referencePollTimer !== undefined || document.visibilityState !== "visible" || !untrack(visible)) return
+        referencePollTimer = window.setTimeout(() => {
+          referencePollTimer = undefined
+          pollReferenceState()
+        }, BROWSER_REFERENCE_POLL_MS)
+      }
       const pollReferenceState = () => {
         if (!guestElementAttached(guest) || !ready || !guestReady() || !untrack(visible)) return
-        void readReferenceStateFromGuest().then((next) => {
-          if (next) {
-            applyReferenceState(next)
-            return
-          }
-          const target = desktopTarget()
-          if (!target || !platform.getBrowserReferenceState) return
-          void platform
-            .getBrowserReferenceState(target)
-            .then((fallback) => {
+        if (document.visibilityState !== "visible" || referencePollPending) return
+        referencePollPending = true
+        void readReferenceStateFromGuest()
+          .then((next) => {
+            if (next) {
+              applyReferenceState(next)
+              return
+            }
+            const target = desktopTarget()
+            if (!target || !platform.getBrowserReferenceState) return
+            return platform.getBrowserReferenceState(target).then((fallback) => {
               if (!fallback || typeof fallback !== "object") return
               applyReferenceState(fallback as BrowserReferenceState)
             })
-            .catch(() => {})
-        })
+          })
+          .catch(() => {})
+          .finally(() => {
+            referencePollPending = false
+            scheduleReferencePoll()
+          })
+      }
+      const onReferenceRefresh = (event: Event) => {
+        const detail = (event as CustomEvent<{ tabID?: string }>).detail
+        if (detail?.tabID !== id) return
+        pollReferenceState()
+      }
+      const onDocumentVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+          pollReferenceState()
+          return
+        }
+        if (referencePollTimer !== undefined) {
+          window.clearTimeout(referencePollTimer)
+          referencePollTimer = undefined
+        }
       }
 
       guest.addEventListener("did-start-loading", start)
@@ -571,16 +621,16 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
       guest.addEventListener("ipc-message", onIpcMessage)
       guest.addEventListener("new-window", openWindow)
       window.addEventListener(BROWSER_COMMAND_EVENT, onCommand)
+      window.addEventListener(BROWSER_REFERENCE_REFRESH_EVENT, onReferenceRefresh)
+      document.addEventListener("visibilitychange", onDocumentVisibilityChange)
       requestAnimationFrame(hydrateGuestState)
       probeGuestRegistration()
       pollReferenceState()
-      if (platform.getBrowserReferenceState) {
-        referencePollTimer = window.setInterval(pollReferenceState, 400)
-      }
 
       onCleanup(() => {
+        referencePollingDisposed = true
         if (guestProbeFrame) cancelAnimationFrame(guestProbeFrame)
-        if (referencePollTimer !== undefined) clearInterval(referencePollTimer)
+        if (referencePollTimer !== undefined) window.clearTimeout(referencePollTimer)
         ready = false
         applyReferenceState({})
         guest.removeEventListener("did-start-loading", start)
@@ -596,6 +646,8 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         guest.removeEventListener("ipc-message", onIpcMessage)
         guest.removeEventListener("new-window", openWindow)
         window.removeEventListener(BROWSER_COMMAND_EVENT, onCommand)
+        window.removeEventListener(BROWSER_REFERENCE_REFRESH_EVENT, onReferenceRefresh)
+        document.removeEventListener("visibilitychange", onDocumentVisibilityChange)
         if (guestBindingKey === bindingKey) guestBindingKey = undefined
       })
     }),
@@ -661,6 +713,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
     if (ready) reportGuestReady()
     if (!visible()) return
     syncActiveBrowserTab()
+    window.dispatchEvent(new CustomEvent(BROWSER_REFERENCE_REFRESH_EVENT, { detail: { tabID: tabID() } }))
   })
 
   const currentFilePath = createMemo(() => {
@@ -814,6 +867,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
                 resetGuestBeforeDispose()
                 sessionView().browser.close(id)
                 layout.tabs(currentSessionKey).close(props.tab)
+                void platform.reportBrowserState?.({
+                  sessionKey: currentSessionKey(),
+                  tabID: id,
+                  closed: true,
+                })
               }}
               aria-label={language.t("common.closeTab")}
             />
@@ -844,7 +902,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
                 </div>
               </Show>
               <Show when={current().error}>
-                <div class="absolute inset-0 flex items-center justify-center px-6 text-center bg-background-base/70 backdrop-blur-[1px]">
+                <div class="absolute inset-0 flex items-center justify-center bg-background-base px-6 text-center">
                   <div class="max-w-96 rounded-md border border-border-weak-base bg-surface-raised-stronger-non-alpha px-4 py-3 shadow-sm space-y-2">
                     <div class="text-13-medium text-text-base">{language.t("browser.error.title")}</div>
                     <div class="text-12-regular text-text-weak break-words">{current().error}</div>
@@ -854,7 +912,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
               <div
                 ref={referenceOverlayRef}
                 data-browser-reference-active="true"
-                class="absolute right-3 top-3 z-10 max-w-[22rem] rounded-xl border border-border-weak-base bg-surface-raised-stronger-non-alpha/95 px-3 py-2 shadow-lg backdrop-blur"
+                class="absolute right-3 top-3 z-10 max-w-[22rem] rounded-lg border border-border-weak-base bg-surface-raised-stronger-non-alpha px-3 py-2 shadow-[var(--shadow-xs-border)]"
                 style={{ display: "none" }}
               >
                 <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">网页引用</div>

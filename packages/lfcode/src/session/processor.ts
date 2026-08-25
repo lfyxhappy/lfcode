@@ -25,7 +25,9 @@ import { Log } from "@/util"
 import { isRecord } from "@/util/record"
 import { redactSensitiveText } from "@/util/redact"
 import { classifyValidationError } from "@/tool/tool"
+import { nativeWebSearchToolOutput } from "@/tool/websearch/native-result"
 import { sameToolFailureCount } from "./part-helpers"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 const DOOM_LOOP_THRESHOLD = 3
 const REDACTION_TAIL_CHARS = 128
@@ -250,6 +252,7 @@ export const layer: Layer.Layer<
         pendingText: "",
       }
       let aborted = false
+      let activeAbortSignal: AbortSignal | undefined
       // Only the main agent owns session-level status. Subagents (explore,
       // general, checkpoint-writer, etc.) share the parent sessionID but their
       // run-state onIdle deliberately does NOT reset status (run-state.ts) — so
@@ -269,7 +272,7 @@ export const layer: Layer.Layer<
         })
 
       const syncResponseMetrics = () => {
-        if (!ctx.responseFirstTokenAt || tokenCount(ctx.responseTokens) <= 0) {
+        if (!ctx.responseFirstTokenAt) {
           delete ctx.assistantMessage.responseMetrics
           return
         }
@@ -278,6 +281,27 @@ export const layer: Layer.Layer<
           tokens: ctx.responseTokens,
         }
       }
+
+      const syncFirstResponseMetrics = Effect.fn("SessionProcessor.syncFirstResponseMetrics")(function* () {
+        if (!ctx.responseFirstTokenAt || ctx.assistantMessage.responseMetrics) return
+        syncResponseMetrics()
+        yield* session.updateMessage(ctx.assistantMessage)
+      })
+
+      const beginTextPart = Effect.fn("SessionProcessor.beginTextPart")(function* (providerMetadata?: Record<string, any>) {
+        ctx.pendingText = ""
+        ctx.currentText = {
+          id: PartID.ascending(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.assistantMessage.sessionID,
+          type: "text",
+          text: "",
+          time: { start: Date.now() },
+          metadata: providerMetadata,
+        }
+        yield* session.updatePart(ctx.currentText)
+        ctx.stepPartIds.push(ctx.currentText.id)
+      })
 
       const syncInteractiveWaiting = Effect.fn("SessionProcessor.syncInteractiveWaiting")(function* () {
         if (!isMain || ctx.assistantMessage.error) return
@@ -403,16 +427,20 @@ export const layer: Layer.Layer<
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return
+        const completed =
+          match.part.tool === "native_web_search"
+            ? nativeWebSearchToolOutput({ action: match.part.state.input, output })
+            : output
         yield* session.updatePart({
           ...match.part,
           state: {
             status: "completed",
             input: match.part.state.input,
-            output: output.output,
-            metadata: output.metadata,
-            title: output.title,
+            output: completed.output,
+            metadata: completed.metadata,
+            title: completed.title,
             time: { start: match.part.state.time.start, end: Date.now() },
-            attachments: output.attachments,
+            attachments: "attachments" in completed ? completed.attachments : undefined,
           },
         })
         yield* settleToolCall(toolCallID)
@@ -438,6 +466,10 @@ export const layer: Layer.Layer<
       })
 
       const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
+        // A provider can still yield buffered SSE chunks after its fetch has
+        // been aborted. Never let a detached runner append those chunks to the
+        // message selected by a later session run.
+        if (activeAbortSignal?.aborted) return
         switch (value.type) {
           case "start":
             ctx.streamStartedAt = Date.now()
@@ -466,6 +498,7 @@ export const layer: Layer.Layer<
             if (!ctx.firstDeltaAt) ctx.firstDeltaAt = Date.now()
             if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
             if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
+            yield* syncFirstResponseMetrics()
             if (!(value.id in ctx.reasoningMap)) return
             ctx.reasoningMap[value.id].text += value.text
             if (value.providerMetadata) ctx.reasoningMap[value.id].metadata = value.providerMetadata
@@ -590,18 +623,20 @@ export const layer: Layer.Layer<
                 ),
                 Effect.catch(() => Effect.succeed(0)),
               )
-            yield* bus
-              .publish(Metrics.ToolCall, {
-                sessionID: ctx.sessionID,
-                tool_name: value.toolName,
-                input_bytes: Metrics.jsonByteLength(value.input),
-                output_bytes: 0,
-                tool_call_id: value.toolCallId,
-                tool_call_status: "error",
-                error_category: classifyValidationError(value.error),
-                retry_count: retryCount,
-              })
-              .pipe(Effect.ignore)
+            if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+              yield* bus
+                .publish(Metrics.ToolCall, {
+                  sessionID: ctx.sessionID,
+                  tool_name: value.toolName,
+                  input_bytes: Metrics.jsonByteLength(value.input),
+                  output_bytes: 0,
+                  tool_call_id: value.toolCallId,
+                  tool_call_status: "error",
+                  error_category: classifyValidationError(value.error),
+                  retry_count: retryCount,
+                })
+                .pipe(Effect.ignore)
+            }
             return
           }
 
@@ -652,18 +687,20 @@ export const layer: Layer.Layer<
               overhead,
             })
             yield* session.updateMessage(ctx.assistantMessage)
-            yield* goal.addStats({
-              sessionID: ctx.sessionID,
-              usage: {
-                input: usage.tokens.input,
-                output: usage.tokens.output,
-                reasoning: usage.tokens.reasoning,
-                cache: {
-                  read: usage.tokens.cache.read,
-                  write: usage.tokens.cache.write,
+            if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+              yield* goal.addStats({
+                sessionID: ctx.sessionID,
+                usage: {
+                  input: usage.tokens.input,
+                  output: usage.tokens.output,
+                  reasoning: usage.tokens.reasoning,
+                  cache: {
+                    read: usage.tokens.cache.read,
+                    write: usage.tokens.cache.write,
+                  },
                 },
-              },
-            })
+              })
+            }
             const stepFilesChanged = 0
             const stepTokensIn = usage.tokens.input + usage.tokens.cache.read + usage.tokens.cache.write
             const stepTokensOut = usage.tokens.output + usage.tokens.reasoning
@@ -672,29 +709,33 @@ export const layer: Layer.Layer<
               ctx.agentMetrics.tokens_out += stepTokensOut
               ctx.agentMetrics.files_changed += stepFilesChanged
             }
-            yield* bus
-              .publish(Metrics.ModelCall, {
-                sessionID: ctx.sessionID,
-                finish_reason: value.finishReason,
-                ttft_ms:
-                  ctx.stepFirstTokenAt && ctx.stepStartedAt ? ctx.stepFirstTokenAt - ctx.stepStartedAt : undefined,
-                submit_to_first_delta_ms:
-                  ctx.submitAt && ctx.firstDeltaAt ? ctx.firstDeltaAt - ctx.submitAt : undefined,
-                pre_stream_ms: ctx.submitAt && ctx.streamStartedAt ? ctx.streamStartedAt - ctx.submitAt : undefined,
-                latency_ms: ctx.stepStartedAt ? Date.now() - ctx.stepStartedAt : 0,
-                cached_read_tokens: usage.tokens.cache.read,
-                model_id: ctx.model.id,
-                provider: ctx.model.providerID,
-                total_tokens_in: stepTokensIn,
-                total_tokens_out: stepTokensOut,
-              })
-              .pipe(Effect.ignore)
-            yield* summary
-              .summarize({
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.parentID,
-              })
-              .pipe(Effect.ignore, Effect.forkIn(scope))
+            if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+              yield* bus
+                .publish(Metrics.ModelCall, {
+                  sessionID: ctx.sessionID,
+                  finish_reason: value.finishReason,
+                  ttft_ms:
+                    ctx.stepFirstTokenAt && ctx.stepStartedAt ? ctx.stepFirstTokenAt - ctx.stepStartedAt : undefined,
+                  submit_to_first_delta_ms:
+                    ctx.submitAt && ctx.firstDeltaAt ? ctx.firstDeltaAt - ctx.submitAt : undefined,
+                  pre_stream_ms: ctx.submitAt && ctx.streamStartedAt ? ctx.streamStartedAt - ctx.submitAt : undefined,
+                  latency_ms: ctx.stepStartedAt ? Date.now() - ctx.stepStartedAt : 0,
+                  cached_read_tokens: usage.tokens.cache.read,
+                  model_id: ctx.model.id,
+                  provider: ctx.model.providerID,
+                  total_tokens_in: stepTokensIn,
+                  total_tokens_out: stepTokensOut,
+                })
+                .pipe(Effect.ignore)
+            }
+            if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+              yield* summary
+                .summarize({
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.assistantMessage.parentID,
+                })
+                .pipe(Effect.ignore, Effect.forkIn(scope))
+            }
             if (
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
@@ -705,36 +746,28 @@ export const layer: Layer.Layer<
           }
 
           case "text-start":
-            ctx.pendingText = ""
-            ctx.currentText = {
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.assistantMessage.sessionID,
-              type: "text",
-              text: "",
-              time: { start: Date.now() },
-              metadata: value.providerMetadata,
-            }
-            yield* session.updatePart(ctx.currentText)
-            ctx.stepPartIds.push(ctx.currentText.id)
+            yield* beginTextPart(value.providerMetadata)
             return
 
           case "text-delta":
             if (!ctx.firstDeltaAt) ctx.firstDeltaAt = Date.now()
             if (!ctx.stepFirstTokenAt) ctx.stepFirstTokenAt = Date.now()
             if (!ctx.responseFirstTokenAt) ctx.responseFirstTokenAt = ctx.stepFirstTokenAt
-            if (!ctx.currentText) return
+            yield* syncFirstResponseMetrics()
+            if (!ctx.currentText) yield* beginTextPart(value.providerMetadata)
+            const currentText = ctx.currentText
+            if (!currentText) return
             const combined = ctx.pendingText + value.text
             const emitted = combined.slice(0, Math.max(0, combined.length - REDACTION_TAIL_CHARS))
             ctx.pendingText = combined.slice(emitted.length)
             if (!emitted) return
             const safeDelta = redactSensitiveText(emitted)
-            ctx.currentText.text += safeDelta
-            if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
+            currentText.text += safeDelta
+            if (value.providerMetadata) currentText.metadata = value.providerMetadata
             yield* session.updatePartDelta({
-              sessionID: ctx.currentText.sessionID,
-              messageID: ctx.currentText.messageID,
-              partID: ctx.currentText.id,
+              sessionID: currentText.sessionID,
+              messageID: currentText.messageID,
+              partID: currentText.id,
               field: "text",
               delta: safeDelta,
             })
@@ -756,15 +789,17 @@ export const layer: Layer.Layer<
             }
             // oxlint-disable-next-line no-self-assign -- reactivity trigger
             ctx.currentText.text = ctx.currentText.text
-            ctx.currentText.text = (yield* plugin.trigger(
-              "experimental.text.complete",
-              {
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.id,
-                partID: ctx.currentText.id,
-              },
-              { text: ctx.currentText.text },
-            )).text
+            if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+              ctx.currentText.text = (yield* plugin.trigger(
+                "experimental.text.complete",
+                {
+                  sessionID: ctx.sessionID,
+                  messageID: ctx.assistantMessage.id,
+                  partID: ctx.currentText.id,
+                },
+                { text: ctx.currentText.text },
+              )).text
+            }
             {
               const end = Date.now()
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
@@ -845,7 +880,11 @@ export const layer: Layer.Layer<
             })
           }
           ctx.needsOverflowHandling = true
-          yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
+          yield* bus.publish(Session.Event.Error, {
+            sessionID: ctx.sessionID,
+            error,
+            visible: !isUserHiddenSystemActorID(ctx.assistantMessage.agentID),
+          })
           return
         }
         ctx.assistantMessage.error = error
@@ -856,9 +895,11 @@ export const layer: Layer.Layer<
             usage: { cost: 0, tokens: emptyResponseTokens() },
           })
         }
+        yield* session.updateMessage(ctx.assistantMessage)
         yield* bus.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
+          visible: !isUserHiddenSystemActorID(ctx.assistantMessage.agentID),
         })
         if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "idle" })
       })
@@ -883,6 +924,7 @@ export const layer: Layer.Layer<
         yield* bus.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
+          visible: !isUserHiddenSystemActorID(ctx.assistantMessage.agentID),
         })
         if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "idle" })
       })
@@ -894,6 +936,21 @@ export const layer: Layer.Layer<
 
         return yield* Effect.gen(function* () {
           const abortController = new AbortController()
+          const externalAbortSignal = streamInput.abortSignal
+          const abort = () => {
+            aborted = true
+            abortController.abort()
+          }
+          const removeExternalAbort = (() => {
+            if (!externalAbortSignal) return
+            if (externalAbortSignal.aborted) {
+              abort()
+              return
+            }
+            externalAbortSignal.addEventListener("abort", abort, { once: true })
+            return () => externalAbortSignal.removeEventListener("abort", abort)
+          })()
+          activeAbortSignal = abortController.signal
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
@@ -909,8 +966,7 @@ export const layer: Layer.Layer<
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
-                abortController.abort()
-                aborted = true
+                abort()
                 if (!ctx.assistantMessage.error) {
                   yield* halt(new DOMException("Aborted", "AbortError"))
                 }
@@ -936,7 +992,7 @@ export const layer: Layer.Layer<
               SessionRetry.policy({
                 parse,
                 set: (info) =>
-                  isMain
+                  isMain && manageSessionStatus
                     ? status.set(ctx.sessionID, {
                         type: "retry",
                         attempt: info.attempt,
@@ -947,9 +1003,24 @@ export const layer: Layer.Layer<
               }),
             ),
             Effect.catch(halt),
-            Effect.ensuring(cleanup()),
+            Effect.ensuring(
+              cleanup().pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    removeExternalAbort?.()
+                    if (activeAbortSignal === abortController.signal) activeAbortSignal = undefined
+                  }),
+                ),
+              ),
+            ),
           )
 
+          if (abortController.signal.aborted) {
+            if (!ctx.assistantMessage.error) {
+              yield* halt(new DOMException("Aborted", "AbortError"))
+            }
+            return "stop"
+          }
           yield* ensureTerminalStep()
           yield* syncInteractiveWaiting()
           if (ctx.needsOverflowHandling) return "overflow"
@@ -1116,18 +1187,20 @@ export const layer: Layer.Layer<
                 ctx.agentMetrics.tokens_in += input.overhead.tokensIn
                 ctx.agentMetrics.tokens_out += input.overhead.tokensOut
               }
-              yield* bus
-                .publish(Metrics.ModelCall, {
-                  sessionID: ctx.sessionID,
-                  finish_reason: "max-mode-overhead",
-                  latency_ms: 0,
-                  cached_read_tokens: 0,
-                  model_id: ctx.model.id,
-                  provider: ctx.model.providerID,
-                  total_tokens_in: input.overhead.tokensIn,
-                total_tokens_out: input.overhead.tokensOut,
-              })
-              .pipe(Effect.ignore)
+              if (!isUserHiddenSystemActorID(ctx.assistantMessage.agentID)) {
+                yield* bus
+                  .publish(Metrics.ModelCall, {
+                    sessionID: ctx.sessionID,
+                    finish_reason: "max-mode-overhead",
+                    latency_ms: 0,
+                    cached_read_tokens: 0,
+                    model_id: ctx.model.id,
+                    provider: ctx.model.providerID,
+                    total_tokens_in: input.overhead.tokensIn,
+                    total_tokens_out: input.overhead.tokensOut,
+                  })
+                  .pipe(Effect.ignore)
+              }
           }
           }).pipe(
             Effect.onInterrupt(() =>

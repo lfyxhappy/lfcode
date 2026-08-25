@@ -20,6 +20,8 @@ import { SessionCwd } from "./session-cwd"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import { AppFileSystem } from "@/filesystem"
 import * as PatchRecovery from "./patch-recovery"
+import { ApplyPatchTool } from "./apply_patch"
+import { trimDiff } from "./diff"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -47,11 +49,36 @@ function lock(filePath: string) {
 }
 
 const Parameters = z.object({
-  filePath: z.string().describe("The absolute or relative path to the file to modify. On Windows, prefer forward slashes like C:/repo/file.ts."),
-  oldString: z.string().describe("The text to replace"),
-  newString: z.string().describe("The text to replace it with (must be different from oldString)"),
-  replaceAll: z.boolean().optional().describe("Replace all occurrences of oldString (default false)"),
+  operation: z
+    .enum(["replace", "patch", "write"])
+    .optional()
+    .describe(
+      "replace changes one verified text block; patch applies structured multi-file edits; write intentionally replaces a whole file.",
+    ),
+  filePath: z
+    .string()
+    .optional()
+    .describe("The absolute or relative target path. On Windows, prefer forward slashes like C:/repo/file.ts."),
+  oldString: z.string().optional().describe("Exact current text for replace. Use empty only when creating a new file."),
+  newString: z.string().optional().describe("Replacement text for replace. It must differ from oldString."),
+  replaceAll: z
+    .boolean()
+    .optional()
+    .describe("Change every occurrence of oldString only when every match should change."),
+  patchText: z.string().optional().describe("Pure structured patch text wrapped in *** Begin Patch and *** End Patch."),
+  content: z
+    .string()
+    .optional()
+    .describe("Complete file contents for write. Use only for an intentional whole-file replacement or a new file."),
 })
+
+function toolError(code: string, message: string, recovery: string[]) {
+  return [`[tool_error] ${code}`, message, "Recovery:", ...recovery].join("\n")
+}
+
+function replaceExample() {
+  return '{"operation":"replace","filePath":"path/to/file.ts","oldString":"exact current text","newString":"replacement text"}'
+}
 
 export const EditTool = Tool.define(
   "edit",
@@ -60,17 +87,70 @@ export const EditTool = Tool.define(
     const afs = yield* AppFileSystem.Service
     const format = yield* Format.Service
     const bus = yield* Bus.Service
+    const patch = yield* ApplyPatchTool
+    const applyPatch = yield* Tool.init(patch)
 
     return {
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          if (!params.filePath) {
-            throw new Error("filePath is required")
+          const operation = params.operation ?? "replace"
+          if (operation === "patch") {
+            if (!params.patchText)
+              throw new Error(
+                toolError("edit_patch_missing", "patchText is required when operation is patch.", [
+                  'Retry with {"operation":"patch","patchText":"*** Begin Patch\\n...\\n*** End Patch"}.',
+                ]),
+              )
+            const result = yield* applyPatch.execute({ patchText: params.patchText }, ctx)
+            const first = result.metadata.files[0]
+            return {
+              title: result.title,
+              metadata: {
+                diagnostics: result.metadata.diagnostics,
+                diff: result.metadata.diff,
+                files: result.metadata.files,
+                filediff: {
+                  file: first?.filePath ?? "",
+                  patch: first?.patch ?? "",
+                  additions: first?.additions ?? 0,
+                  deletions: first?.deletions ?? 0,
+                },
+              },
+              output: result.output,
+            }
           }
 
-          if (params.oldString === params.newString) {
+          if (!params.filePath) {
+            throw new Error(
+              toolError("edit_path_missing", "filePath is required for replace and write.", [
+                `For an exact edit, use ${replaceExample()}.`,
+              ]),
+            )
+          }
+
+          if (operation === "write" && params.content === undefined) {
+            throw new Error(
+              toolError("edit_content_missing", "content is required when operation is write.", [
+                'Retry with {"operation":"write","filePath":"path/to/file.ts","content":"complete file contents"}.',
+              ]),
+            )
+          }
+
+          if (operation === "replace" && (params.oldString === undefined || params.newString === undefined)) {
+            throw new Error(
+              toolError(
+                "edit_replace_fields_missing",
+                "oldString and newString are required when operation is replace.",
+                [`Read the target file, then retry with ${replaceExample()}.`],
+              ),
+            )
+          }
+          const oldString = params.oldString ?? ""
+          const newString = params.newString ?? ""
+
+          if (operation === "replace" && oldString === newString) {
             throw new Error("No changes to apply: oldString and newString are identical.")
           }
 
@@ -80,7 +160,12 @@ export const EditTool = Tool.define(
           yield* assertWriteAllowed(ctx, filePath)
           const recoveryContent = yield* afs.readFile(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (recoveryContent) {
-            const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, recoveryContent)
+            const recoveryError = PatchRecovery.requireFreshRead(
+              ctx.sessionID,
+              ctx.messageID,
+              filePath,
+              recoveryContent,
+            )
             if (recoveryError) throw new Error(`edit recovery blocked: ${recoveryError}`)
           }
 
@@ -89,34 +174,31 @@ export const EditTool = Tool.define(
           let contentNew = ""
           yield* lock(filePath).withPermits(1)(
             Effect.gen(function* () {
-              if (params.oldString === "") {
-                const existed = yield* afs.existsSafe(filePath)
-                contentNew = params.newString
-                diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
-                yield* askEditUnlessMemory(ctx, filePath, {
-                  patterns: [path.relative(Instance.worktree, filePath)],
-                  diff,
-                })
-                yield* afs.writeWithDirs(filePath, params.newString)
-                yield* format.file(filePath)
-                yield* bus.publish(File.Event.Edited, { file: filePath })
-                yield* bus.publish(FileWatcher.Event.Updated, {
-                  file: filePath,
-                  event: existed ? "change" : "add",
-                })
-                return
+              const existed = yield* afs.existsSafe(filePath)
+              if (existed) {
+                const info = yield* afs.stat(filePath)
+                if (info.type === "Directory") throw new Error(`Path is a directory, not a file: ${filePath}`)
+                contentOld = yield* afs.readFileString(filePath)
               }
 
-              const info = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-              if (!info) throw new Error(`File ${filePath} not found`)
-              if (info.type === "Directory") throw new Error(`Path is a directory, not a file: ${filePath}`)
-              contentOld = yield* afs.readFileString(filePath)
-
-              const ending = detectLineEnding(contentOld)
-              const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
-              const next = convertToLineEnding(normalizeLineEndings(params.newString), ending)
-
-              contentNew = replace(contentOld, old, next, params.replaceAll)
+              if (operation === "write") {
+                contentNew = params.content!
+              } else if (oldString === "") {
+                if (existed)
+                  throw new Error(
+                    toolError("edit_create_target_exists", "oldString may be empty only when creating a new file.", [
+                      "Read the current file, then use replace with its exact oldString.",
+                      'For an intentional whole-file replacement, use {"operation":"write","filePath":"...","content":"..."}.',
+                    ]),
+                  )
+                contentNew = newString
+              } else {
+                if (!existed) throw new Error(`File ${filePath} not found`)
+                const ending = detectLineEnding(contentOld)
+                const old = convertToLineEnding(normalizeLineEndings(oldString), ending)
+                const next = convertToLineEnding(normalizeLineEndings(newString), ending)
+                contentNew = replace(contentOld, old, next, params.replaceAll)
+              }
 
               diff = trimDiff(
                 createTwoFilesPatch(
@@ -136,7 +218,7 @@ export const EditTool = Tool.define(
               yield* bus.publish(File.Event.Edited, { file: filePath })
               yield* bus.publish(FileWatcher.Event.Updated, {
                 file: filePath,
-                event: "change",
+                event: existed ? "change" : "add",
               })
               contentNew = yield* afs.readFileString(filePath)
               diff = trimDiff(
@@ -166,6 +248,7 @@ export const EditTool = Tool.define(
               diff,
               filediff,
               diagnostics: {},
+              files: [],
             },
           })
 
@@ -182,6 +265,7 @@ export const EditTool = Tool.define(
               diagnostics,
               diff,
               filediff,
+              files: [],
             },
             title: `${path.relative(Instance.worktree, filePath)}`,
             output,
@@ -616,42 +700,6 @@ export const ContextAwareReplacer: Replacer = function* (content, find) {
   }
 }
 
-export function trimDiff(diff: string): string {
-  const lines = diff.split("\n")
-  const contentLines = lines.filter(
-    (line) =>
-      (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) &&
-      !line.startsWith("---") &&
-      !line.startsWith("+++"),
-  )
-
-  if (contentLines.length === 0) return diff
-
-  let min = Infinity
-  for (const line of contentLines) {
-    const content = line.slice(1)
-    if (content.trim().length > 0) {
-      const match = content.match(/^(\s*)/)
-      if (match) min = Math.min(min, match[1].length)
-    }
-  }
-  if (min === Infinity || min === 0) return diff
-  const trimmedLines = lines.map((line) => {
-    if (
-      (line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) &&
-      !line.startsWith("---") &&
-      !line.startsWith("+++")
-    ) {
-      const prefix = line[0]
-      const content = line.slice(1)
-      return prefix + content.slice(min)
-    }
-    return line
-  })
-
-  return trimmedLines.join("\n")
-}
-
 export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
   if (oldString === newString) {
     throw new Error("No changes to apply: oldString and newString are identical.")
@@ -685,9 +733,18 @@ export function replace(content: string, oldString: string, newString: string, r
 
   if (notFound) {
     throw new Error(
-      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
+      toolError("edit_context_not_found", "oldString does not match the current file.", [
+        "Read the target again and copy the exact current text, including indentation and line endings.",
+        `Retry once with ${replaceExample()}.`,
+        "Do not bypass this failure through shell or Python.",
+      ]),
     )
   }
-  throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
+  throw new Error(
+    toolError("edit_context_ambiguous", "oldString matches more than one location.", [
+      "Include more unchanged surrounding text to identify one location.",
+      "Set replaceAll to true only when every match should change.",
+      `Retry once with ${replaceExample()}.`,
+    ]),
+  )
 }
-

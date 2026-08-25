@@ -4,10 +4,10 @@ import { nextVisitedSettingsTabs, shouldMountSettingsPanel, type SettingsTab } f
 describe("dialog settings loading logic", () => {
   test("marks a newly visited tab without mutating previous set", () => {
     const current = new Set<SettingsTab>(["general", "shortcuts"])
-    const next = nextVisitedSettingsTabs(current, "personalization")
+    const next = nextVisitedSettingsTabs(current, "research")
 
     expect([...current]).toEqual(["general", "shortcuts"])
-    expect([...next]).toEqual(["general", "shortcuts", "personalization"])
+    expect([...next]).toEqual(["general", "shortcuts", "research"])
     expect(next).not.toBe(current)
   })
 
@@ -18,14 +18,15 @@ describe("dialog settings loading logic", () => {
     expect(next).toBe(current)
   })
 
-  test("mounts eager tabs, current tab, and visited lazy tabs only", () => {
-    const visited = new Set<SettingsTab>(["general", "shortcuts", "browser", "mcp", "personalization", "appControl"])
+  test("mounts the current tab and visited tabs only", () => {
+    const visited = new Set<SettingsTab>(["browser", "mcp", "personalization", "appControl", "research"])
 
-    expect(shouldMountSettingsPanel({ tab: "general", selected: "models", visited })).toBe(true)
-    expect(shouldMountSettingsPanel({ tab: "shortcuts", selected: "models", visited })).toBe(true)
+    expect(shouldMountSettingsPanel({ tab: "general", selected: "models", visited })).toBe(false)
+    expect(shouldMountSettingsPanel({ tab: "shortcuts", selected: "models", visited })).toBe(false)
     expect(shouldMountSettingsPanel({ tab: "personalization", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "appControl", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "browser", selected: "models", visited })).toBe(true)
+    expect(shouldMountSettingsPanel({ tab: "research", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "mcp", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "models", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "usage", selected: "models", visited })).toBe(false)

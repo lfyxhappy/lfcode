@@ -8,7 +8,6 @@ import {
 describe("findAvailableToolByNormalizedName", () => {
   test("matches normalized punctuation variants", () => {
     expect(findAvailableToolByNormalizedName(["create_goal", "question"], "Create-Goal")).toBe("create_goal")
-    expect(findAvailableToolByNormalizedName(["compose_enter"], "compose enter")).toBe("compose_enter")
   })
 })
 
@@ -30,25 +29,6 @@ describe("repairToolCallAlias", () => {
           status: "open",
           include_terminal: true,
         },
-      }),
-    })
-  })
-
-  test("repairs legacy workflow aliases into the workflow operation envelope", () => {
-    const repaired = repairToolCallAlias({
-      requestedToolName: "workflow_wait_op",
-      toolInput: JSON.stringify({ run_id: "run_1", timeout_ms: 5000 }),
-      activeTools: ["workflow"],
-    })
-
-    expect(repaired).toEqual({
-      type: "repair",
-      toolName: "workflow",
-      reason: "legacy workflow alias workflow_wait_op",
-      input: JSON.stringify({
-        operation: "wait",
-        run_id: "run_1",
-        timeout_ms: 5000,
       }),
     })
   })
@@ -133,7 +113,8 @@ describe("repairToolCallAlias", () => {
           status: "open",
         },
       }),
-      error: 'Tool alias "task_list_op" maps to "task", but "task" is not available in this turn. Available tools: read, bash',
+      error:
+        'Tool alias "task_list_op" maps to "task", but "task" is not available in this turn. Available tools: read, bash',
     })
   })
 
@@ -150,6 +131,29 @@ describe("repairToolCallAlias", () => {
       reason: "shell alias pwsh",
       input: JSON.stringify({ command: "Get-Location", description: "Show cwd" }),
     })
+  })
+
+  test("repairs the obsolete process tool name without reintroducing it", () => {
+    expect(
+      repairToolCallAlias({
+        requestedToolName: "background_job",
+        toolInput: JSON.stringify({ operation: "get", job_id: "job_123" }),
+        activeTools: ["shell_process"],
+      }),
+    ).toEqual({
+      type: "repair",
+      toolName: "shell_process",
+      reason: "obsolete shell-process alias",
+      input: JSON.stringify({ operation: "get", job_id: "job_123" }),
+    })
+
+    expect(
+      repairToolCallAlias({
+        requestedToolName: "write",
+        toolInput: JSON.stringify({ filePath: "src/a.ts", content: "export {}" }),
+        activeTools: ["edit"],
+      }),
+    ).toBeUndefined()
   })
 
   test("repairs legacy glob calls into unified path search", () => {
@@ -201,9 +205,9 @@ describe("describeUnavailableTool", () => {
     )
   })
 
-  test("adds patch-first editing guidance for legacy write/edit calls", () => {
-    expect(describeUnavailableTool("write", ["read", "replace_range", "symbol_edit", "apply_patch"])).toBe(
-      'Tool "write" is not available in this turn. Available tools: read, replace_range, symbol_edit, apply_patch This turn uses patch-first editing; do not call legacy write/edit tools. Instead, use "replace_range" when you know the exact line/character span to change; use "symbol_edit" when replacing a whole function, class, or method; use "apply_patch" only with pure patch text wrapped in "*** Begin Patch" and "*** End Patch" (no explanation text outside the patch).',
+  test("guides hidden legacy edit tools to unified edit", () => {
+    expect(describeUnavailableTool("symbol_edit", ["read", "edit"])).toBe(
+      'Tool "symbol_edit" is not available in this turn. Available tools: read, edit Use "edit" only: operation="replace" for one exact current text block, operation="patch" for multiple hunks/files, or operation="write" for an intentional whole-file replacement.',
     )
   })
 

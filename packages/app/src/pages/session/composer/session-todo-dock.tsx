@@ -4,6 +4,7 @@ import { Checkbox } from "@lfcode-ai/ui/checkbox"
 import { DockTray } from "@lfcode-ai/ui/dock-surface"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { useSpring } from "@lfcode-ai/ui/motion-spring"
+import { useMotionEnabled } from "@lfcode-ai/ui/motion-presence"
 import { TextReveal } from "@lfcode-ai/ui/text-reveal"
 import { TextStrikethrough } from "@lfcode-ai/ui/text-strikethrough"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
@@ -14,7 +15,7 @@ import { useLanguage } from "@/context/language"
 const doneToken = "\u0000done\u0000"
 const totalToken = "\u0000total\u0000"
 
-function dot(status: Todo["status"]) {
+function dot(status: Todo["status"], motion: boolean) {
   if (status !== "in_progress") return undefined
   return (
     <svg
@@ -30,7 +31,7 @@ function dot(status: Todo["status"]) {
         cy="6"
         r="3"
         style={{
-          animation: "var(--animate-pulse-scale)",
+          animation: motion ? "var(--animate-pulse-scale)" : undefined,
           "transform-origin": "center",
           "transform-box": "fill-box",
         }}
@@ -47,6 +48,7 @@ export function SessionTodoDock(props: {
   dockProgress: number
 }) {
   const language = useLanguage()
+  const motion = useMotionEnabled()
   const [store, setStore] = createStore({
     collapsed: false,
     height: 320,
@@ -72,7 +74,13 @@ export function SessionTodoDock(props: {
   )
 
   const preview = createMemo(() => active()?.content ?? "")
-  const collapse = useSpring(() => (store.collapsed ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
+  const collapse = useSpring(
+    () => (store.collapsed ? 1 : 0),
+    () => ({
+      visualDuration: motion() ? undefined : 0,
+      bounce: 0,
+    }),
+  )
   const dock = createMemo(() => Math.max(0, Math.min(1, props.dockProgress)))
   const shut = createMemo(() => 1 - dock())
   const value = createMemo(() => Math.max(0, Math.min(1, collapse())))
@@ -149,11 +157,11 @@ export function SessionTodoDock(props: {
             <TextReveal
               class="text-14-regular text-text-base cursor-default"
               text={store.collapsed ? preview() : undefined}
-              duration={600}
-              travel={25}
+              duration="var(--motion-content-ms)"
+              travel={4}
               edge={17}
-              spring="cubic-bezier(0.34, 1, 0.64, 1)"
-              springSoft="cubic-bezier(0.34, 1, 0.64, 1)"
+              spring="var(--motion-ease-out)"
+              springSoft="var(--motion-ease-out)"
               growOnly
               truncate
             />
@@ -165,7 +173,10 @@ export function SessionTodoDock(props: {
               icon="chevron-down"
               size="normal"
               variant="ghost"
-              style={{ transform: `rotate(${turn() * 180}deg)` }}
+              style={{
+                transform: `rotate(${turn() * 180}deg)`,
+                transition: motion() ? "transform var(--motion-micro-ms) var(--motion-ease-out)" : undefined,
+              }}
               onMouseDown={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
@@ -190,14 +201,14 @@ export function SessionTodoDock(props: {
             opacity: `${Math.max(0, Math.min(1, 1 - hide()))}`,
           }}
         >
-          <TodoList todos={props.todos} />
+          <TodoList todos={props.todos} motion={motion()} />
         </div>
       </div>
     </DockTray>
   )
 }
 
-function TodoList(props: { todos: Todo[] }) {
+function TodoList(props: { todos: Todo[]; motion: boolean }) {
   const [store, setStore] = createStore({
     stuck: false,
   })
@@ -219,7 +230,7 @@ function TodoList(props: { todos: Todo[] }) {
               indeterminate={todo().status === "in_progress"}
               data-in-progress={todo().status === "in_progress" ? "" : undefined}
               data-state={todo().status}
-              icon={dot(todo().status)}
+              icon={dot(todo().status, props.motion)}
               style={{
                 "--checkbox-align": "flex-start",
                 "--checkbox-offset": "1px",
@@ -249,7 +260,7 @@ function TodoList(props: { todos: Todo[] }) {
       <div
         class="pointer-events-none absolute top-0 left-0 right-0 h-4 transition-opacity duration-150"
         style={{
-          background: "linear-gradient(to bottom, var(--background-base), transparent)",
+          background: "var(--background-base)",
           opacity: store.stuck ? 1 : 0,
         }}
       />

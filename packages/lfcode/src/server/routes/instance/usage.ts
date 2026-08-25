@@ -3,7 +3,7 @@ import { describeRoute, resolver, validator } from "hono-openapi"
 import z from "zod"
 import { errors } from "../../error"
 import { jsonRequest } from "./trace"
-import { SessionUsage } from "@/session/usage"
+import { SessionUsage, UsageHeatmapGranularity } from "@/session/usage"
 
 export const UsageRoutes = () =>
   new Hono().get(
@@ -28,6 +28,7 @@ export const UsageRoutes = () =>
       "query",
       z.object({
         range: z.enum(["today", "7d", "30d", "all"]).optional(),
+        heatmap_granularity: UsageHeatmapGranularity.optional(),
         provider: z.string().optional(),
         model: z.string().optional(),
         project: z.string().optional(),

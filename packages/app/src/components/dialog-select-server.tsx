@@ -17,6 +17,7 @@ import { usePlatform } from "@/context/platform"
 import { normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { formatServerError } from "@/utils/server-errors"
+import { startVisiblePolling } from "@/utils/visible-poll"
 
 const DEFAULT_USERNAME = "lfcode"
 
@@ -346,8 +347,8 @@ export function DialogSelectServer() {
   createEffect(() => {
     items()
     void refreshHealth()
-    const interval = setInterval(refreshHealth, 10_000)
-    onCleanup(() => clearInterval(interval))
+    const stopPolling = startVisiblePolling(refreshHealth, 10_000, { immediate: false })
+    onCleanup(stopPolling)
   })
 
   async function select(conn: ServerConnection.Any, persist?: boolean) {

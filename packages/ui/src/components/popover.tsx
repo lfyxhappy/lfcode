@@ -5,12 +5,16 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { useI18n } from "../context/i18n"
 import { IconButton } from "./icon-button"
 
+type PopoverTriggerProps<T extends ValidComponent> = ComponentProps<T> & {
+  [key: `data-${string}`]: string | undefined
+}
+
 export interface PopoverProps<T extends ValidComponent = "div">
   extends ParentProps,
     Omit<ComponentProps<typeof Kobalte>, "children"> {
   trigger?: JSXElement
   triggerAs?: T
-  triggerProps?: ComponentProps<T>
+  triggerProps?: PopoverTriggerProps<T>
   title?: JSXElement
   description?: JSXElement
   class?: ComponentProps<"div">["class"]
@@ -89,16 +93,8 @@ export function Popover<T extends ValidComponent = "div">(props: PopoverProps<T>
       close("outside")
     }
 
-    const onFocusIn = (event: FocusEvent) => {
-      const target = event.target
-      if (!(target instanceof Node)) return
-      if (inside(target)) return
-      close("outside")
-    }
-
     makeEventListener(window, "keydown", onKeyDown, { capture: true })
     makeEventListener(window, "pointerdown", onPointerDown, { capture: true })
-    makeEventListener(window, "focusin", onFocusIn, { capture: true })
   })
 
   const content = () => (
@@ -136,7 +132,13 @@ export function Popover<T extends ValidComponent = "div">(props: PopoverProps<T>
   )
 
   return (
-    <Kobalte gutter={4} {...rest} open={opened()} onOpenChange={onOpenChange} modal={local.modal ?? false}>
+    <Kobalte
+      gutter={4}
+      {...rest}
+      open={opened()}
+      onOpenChange={onOpenChange}
+      modal={local.modal ?? false}
+    >
       <Kobalte.Trigger
         ref={(el: HTMLElement) => setState("triggerRef", el)}
         as={local.triggerAs ?? "div"}

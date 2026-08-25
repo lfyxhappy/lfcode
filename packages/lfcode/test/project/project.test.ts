@@ -109,6 +109,33 @@ describe("Project.fromDirectory", () => {
     expect(project.id).toBe(ProjectID.global)
   })
 
+  test("recognizes a managed project from its root and descendants", async () => {
+    await using tmp = await tmpdir()
+    const managed = await run((svc) =>
+      svc.createManagedProject({
+        extension: { pluginID: "test-plugin", type: "test" },
+        worktree: tmp.path,
+      }),
+    )
+
+    const root = await run((svc) => svc.fromDirectory(tmp.path))
+    const child = await run((svc) => svc.fromDirectory(path.join(tmp.path, "child")))
+
+    expect(root.project.id).toBe(managed.id)
+    expect(root.project.extension).toEqual(managed.extension)
+    expect(child.project.id).toBe(managed.id)
+    expect(child.project.extension).toEqual(managed.extension)
+  })
+
+  test("removes only the requested managed project", async () => {
+    await using tmp = await tmpdir()
+    const extension = { pluginID: "test-plugin", type: "retired" }
+    await run((svc) => svc.createManagedProject({ extension, worktree: tmp.path }))
+
+    expect(await run((svc) => svc.removeManagedProject(extension))).toBe(true)
+    expect(await run((svc) => svc.getManagedProject(extension))).toBeUndefined()
+  })
+
   test("derives stable project ID from cached UUID", async () => {
     await using tmp = await tmpdir({ git: true })
     const { project: a } = await run((svc) => svc.fromDirectory(tmp.path))

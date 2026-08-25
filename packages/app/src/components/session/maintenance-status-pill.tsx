@@ -6,6 +6,7 @@ import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { createResource, createSignal, For, onCleanup, onMount, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { startVisiblePolling } from "@/utils/visible-poll"
 import { DialogSettings } from "../dialog-settings"
 
 type MaintenanceState = {
@@ -43,7 +44,7 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
       return undefined
     }
   })
-  const [candidates, { refetch: refetchCandidates }] = createResource(async () => {
+  const [candidates, { refetch: refetchCandidates }] = createResource(open, async () => {
     try {
       const result = await globalSDK.client.global.maintenance.candidates({ status: "new", limit: 6 })
       return result.data as MaintenanceCandidate[]
@@ -66,7 +67,6 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
     const bounds = trigger.getBoundingClientRect()
     setPosition({ top: Math.round(bounds.bottom + 6), right: Math.round(window.innerWidth - bounds.right) })
     setOpen(true)
-    void refetchCandidates()
   }
 
   const run = async (jobKind: "full" | "dream" | "distill") => {
@@ -91,7 +91,9 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
   }
 
   onMount(() => {
-    const timer = setInterval(() => void refetch(), 30_000)
+    const stopPolling = startVisiblePolling(async () => {
+      await refetch()
+    }, 30_000, { immediate: false })
     const close = (event: PointerEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
@@ -100,7 +102,7 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
     }
     window.addEventListener("pointerdown", close, true)
     onCleanup(() => {
-      clearInterval(timer)
+      stopPolling()
       window.removeEventListener("pointerdown", close, true)
     })
   })
@@ -118,7 +120,7 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
         ref={trigger}
         type="button"
         variant="ghost"
-        class="hidden xl:flex h-6 items-center gap-1.5 rounded-md border border-border-weak-base bg-surface-panel px-2 text-12-medium text-text-weak shadow-none"
+        class="hidden lg:flex h-6 items-center gap-1.5 rounded-md border border-border-weak-base bg-surface-panel px-2 text-12-medium text-text-weak shadow-none"
         aria-label="Memory maintenance"
         aria-expanded={open()}
         onPointerDown={(event: PointerEvent) => event.stopPropagation()}
@@ -136,7 +138,7 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
           present={open()}
           channel="surface"
           ref={(element) => (panel = element)}
-          class="fixed z-[10000] w-[280px] rounded-xl border border-border-base bg-surface-float-base/90 p-1.5 shadow-[var(--shadow-lg-border-base)] backdrop-blur-xl saturate-150"
+          class="fixed z-[10000] w-[280px] rounded-lg border border-border-base bg-surface-raised-stronger-non-alpha p-1.5 shadow-[var(--shadow-xs-border)]"
           style={{ top: `${position().top}px`, right: `${position().right}px` }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -171,7 +173,7 @@ export function MaintenanceStatusPill(props: { sessionID?: string }) {
                 class="w-full text-11-medium"
                 onClick={() => {
                   setOpen(false)
-                  dialog.show(() => <DialogSettings defaultValue="maintenance" />)
+                  dialog.show(() => <DialogSettings defaultValue="personalization" />)
                 }}
               >
                 打开维护诊断

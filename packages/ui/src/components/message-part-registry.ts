@@ -28,6 +28,7 @@ export interface ToolProps {
   metadata: Record<string, unknown>
   tool: string
   output?: string
+  attachments?: Array<{ mime: string; url: string; filename?: string }>
   status?: string
   hideDetails?: boolean
   defaultOpen?: boolean

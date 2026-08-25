@@ -2,9 +2,9 @@ import "@/index.css"
 import { I18nProvider } from "@lfcode-ai/ui/context"
 import { DialogProvider } from "@lfcode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@lfcode-ai/ui/context/file"
-import { MarkedProvider } from "@lfcode-ai/ui/context/marked"
-import { File } from "@lfcode-ai/ui/file"
 import { Font } from "@lfcode-ai/ui/font"
+import { Button } from "@lfcode-ai/ui/button"
+import { Logo } from "@lfcode-ai/ui/logo"
 import { ThemeProvider } from "@lfcode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router } from "@solidjs/router"
@@ -14,8 +14,11 @@ import {
   ErrorBoundary,
   type JSX,
   lazy,
+  onCleanup,
+  onMount,
   type ParentProps,
   Show,
+  createSignal,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { CommandProvider } from "@/context/command"
@@ -29,11 +32,9 @@ import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
 import { ServerConnection, ServerProvider, useServer } from "@/context/server"
 import { SettingsProvider } from "@/context/settings"
-import DirectoryLayout from "@/pages/directory-layout"
-import Layout from "@/pages/layout"
 import { ConnectionGate } from "@/components/connection-gate"
-import { LiquidGlassThemeBridge } from "@/components/liquid-glass-theme"
 import type {
+  UiDriverCatalogEntry,
   UiDriverEditorInput,
   UiDriverNodeSnapshot,
   UiDriverQueryInput,
@@ -41,20 +42,30 @@ import type {
   UiDriverTypeInput,
   UiDriverWaitInput,
 } from "@/automation/ui-driver"
+import { UiAutomationRegistry } from "@/automation/registry"
 import { ErrorPage } from "./pages/error"
+import AppLayout from "./pages/layout"
 import type { DetachedSidePanelContext } from "./pages/session/detached-side-panel"
 
 const HomeRoute = lazy(() => import("@/pages/home"))
+const loadDirectoryLayout = () => import("@/pages/directory-layout")
+const DirectoryLayout = lazy(loadDirectoryLayout)
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
+const File = lazy(() => import("@lfcode-ai/ui/file").then((mod) => ({ default: mod.File })))
 
-if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname)) {
+if (typeof location === "object" && [location.pathname, location.hash].some((route) => /\/session(?:\/|$)/.test(route))) {
+  void loadDirectoryLayout()
   void loadSession()
 }
 
 const SessionRoute = () => <Session />
 
 const SessionIndexRoute = () => <Navigate href="session" />
+
+function HomeLayout(props: ParentProps) {
+  return <AppLayout>{props.children}</AppLayout>
+}
 
 function UiI18nBridge(props: ParentProps) {
   const language = useLanguage()
@@ -215,6 +226,7 @@ declare global {
   }
 
   type LfcodeUiAutomationDriver = {
+    catalog: () => UiDriverCatalogEntry[]
     query: (input: UiDriverQueryInput) => UiDriverNodeSnapshot
     click: (input: UiDriverQueryInput) => Promise<UiDriverNodeSnapshot>
     type: (input: UiDriverTypeInput) => Promise<UiDriverNodeSnapshot>
@@ -229,6 +241,12 @@ declare global {
     ui?: LfcodeUiAutomationDriver
   }
 
+  type LfcodeSettingsAutomation = {
+    open: (tab?: string) => boolean
+    close: () => void
+    getState: () => { open: boolean; tab?: string }
+  }
+
   interface Window {
     __LFCODE__?: {
       updaterEnabled?: boolean
@@ -240,6 +258,8 @@ declare global {
       navigate?: (route: string) => void
       automation?: LfcodeRendererAutomation
       sessionAutomation?: LfcodeRendererAutomation
+      uiAutomation?: LfcodeUiAutomationDriver
+      settings?: LfcodeSettingsAutomation
       debugTimeline?: unknown
       debugSessionMessages?: unknown
       debugScrollRestore?: unknown
@@ -249,6 +269,8 @@ declare global {
       setTitlebar?: (theme: { mode: "light" | "dark" }) => Promise<void>
       openExternalLink?: (url: string) => void
       automationEvent?: (payload: { type: string; data?: unknown }) => Promise<void>
+      getWindowVisibility?: () => Promise<boolean>
+      onWindowVisibility?: (cb: (visible: boolean) => void) => () => void
     }
   }
 }
@@ -256,6 +278,7 @@ declare global {
 if (typeof window !== "undefined") {
   window.__LFCODE__ ??= {}
   window.__LFCODE__.appModuleSentinel = "app.tsx:loadSession->@/pages/session"
+  window.__LFCODE__.uiAutomation = UiAutomationRegistry
 }
 
 function QueryProvider(props: ParentProps) {
@@ -266,14 +289,13 @@ function QueryProvider(props: ParentProps) {
 function AppShellProviders(props: ParentProps) {
   return (
     <SettingsProvider>
-      <LiquidGlassThemeBridge />
       <PermissionProvider>
         <LayoutProvider>
           <NotificationProvider>
             <ModelsProvider>
               <CommandProvider>
                 <HighlightsProvider>
-                  <Layout>{props.children}</Layout>
+                  {props.children}
                 </HighlightsProvider>
               </CommandProvider>
             </ModelsProvider>
@@ -293,6 +315,30 @@ function RouterRoot(props: ParentProps<{ appChildren?: JSX.Element }>) {
   )
 }
 
+function LanPairingRecoveryGate(props: ParentProps) {
+  const language = useLanguage()
+  const [required, setRequired] = createSignal(false)
+
+  onMount(() => {
+    const listener = () => setRequired(true)
+    window.addEventListener("lfcode:lan-pairing-required", listener)
+    onCleanup(() => window.removeEventListener("lfcode:lan-pairing-required", listener))
+  })
+
+  return (
+    <Show when={required()} fallback={props.children}>
+      <div class="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background-base px-6 text-center font-sans">
+        <Logo class="w-40 opacity-20" />
+        <div class="max-w-md space-y-2">
+          <h1 class="text-lg font-medium text-text-strong">{language.t("lan.pairingRequired.title")}</h1>
+          <p class="text-sm text-text-weak">{language.t("lan.pairingRequired.description")}</p>
+        </div>
+        <Button size="large" onClick={() => window.location.reload()}>{language.t("lan.pairingRequired.reload")}</Button>
+      </div>
+    </Show>
+  )
+}
+
 export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
   return (
     <MetaProvider>
@@ -306,9 +352,7 @@ export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
           <UiI18nBridge>
             <ErrorBoundary fallback={(error) => <ErrorPage error={error} />}>
               <DialogProvider>
-                <MarkedProvider>
-                  <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                </MarkedProvider>
+                <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
               </DialogProvider>
             </ErrorBoundary>
           </UiI18nBridge>
@@ -342,14 +386,17 @@ export function AppInterface(props: {
     >
       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
         <ServerKey>
-          <QueryProvider>
+          <LanPairingRecoveryGate>
+            <QueryProvider>
             <GlobalSDKProvider>
               <GlobalSyncProvider>
                 <Dynamic
                   component={props.router ?? Router}
                   root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
                 >
-                  <Route path="/" component={HomeRoute} />
+                  <Route path="/" component={HomeLayout}>
+                    <Route path="/" component={HomeRoute} />
+                  </Route>
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />
                     <Route path="/session/:id?" component={SessionRoute} />
@@ -357,7 +404,8 @@ export function AppInterface(props: {
                 </Dynamic>
               </GlobalSyncProvider>
             </GlobalSDKProvider>
-          </QueryProvider>
+            </QueryProvider>
+          </LanPairingRecoveryGate>
         </ServerKey>
       </ConnectionGate>
     </ServerProvider>

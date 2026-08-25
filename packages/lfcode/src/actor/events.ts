@@ -13,6 +13,7 @@ export const ActorRegistered = BusEvent.define(
     description: z.string(),
     agent: z.string(),
     background: z.boolean(),
+    visible: z.boolean(),
   }),
 )
 
@@ -26,6 +27,9 @@ export const ActorStatusChanged = BusEvent.define(
     turnCount: z.number(),
     lastTurnTime: z.number(),
     error: z.string().optional(),
+    // User-facing event consumers must not infer internal actor identity from
+    // a status transition after its registration event was filtered.
+    visible: z.boolean(),
   }),
 )
 
@@ -34,6 +38,7 @@ export const ActorRemoved = BusEvent.define(
   z.object({
     sessionID: SessionID.zod,
     actorID: z.string(),
+    visible: z.boolean(),
   }),
 )
 
@@ -45,6 +50,7 @@ export const ActorStuck = BusEvent.define(
     description: z.string(),
     lastTurnTime: z.number(),
     stuckDuration: z.number(),
+    visible: z.boolean(),
   }),
 )
 

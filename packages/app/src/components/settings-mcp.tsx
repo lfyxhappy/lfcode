@@ -42,7 +42,7 @@ type McpConfig =
     }
 
 type ManagedManifest = {
-  adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+  adapter: "bundled-playwright" | "bundled-windows-computer-use" | "bundled-codegraph" | "minimax-token-plan" | "registry-remote"
   installedAt: string
 }
 
@@ -52,7 +52,7 @@ type ManageItem = {
   origin: { type: string; source: string } | null
   managed: boolean
   installable: boolean
-  installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+  installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "bundled-codegraph" | "minimax-token-plan" | "registry-remote" | null
   manifest: ManagedManifest | null
   config: McpConfig
 }
@@ -62,12 +62,12 @@ type CatalogItem = {
   serverName: string
   title: string
   description: string
-  source: "official-registry"
+  source: "official-registry" | "builtin"
   packageType: string
   transportType: string
   installable: boolean
   installed: boolean
-  installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+  installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "bundled-codegraph" | "minimax-token-plan" | "registry-remote" | null
   installReason?: string
   official: boolean
   version?: string
@@ -254,7 +254,7 @@ export const SettingsMcp: Component = () => {
 
   return (
     <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex max-w-[980px] flex-col gap-4 pb-6 pt-6">
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -368,6 +368,11 @@ export const SettingsMcp: Component = () => {
                           </Show>
                         </div>
                         <div class="pt-1 text-12-regular text-text-weak">{originLabel(item)}</div>
+                        <Show when={item.installAdapter === "minimax-token-plan"}>
+                          <div class="pt-1 text-12-regular text-text-weak">
+                            {language.t("settings.mcp.minimax.tools")}
+                          </div>
+                        </Show>
                         <Show when={statusError(item.status)}>
                           {(error) => <div class="pt-1 text-12-regular text-status-warning">{error()}</div>}
                         </Show>
@@ -439,6 +444,17 @@ export const SettingsMcp: Component = () => {
                         </div>
                         <div class="pt-1 text-12-regular text-text-weak">{item.serverName}</div>
                         <div class="pt-1 text-12-regular text-text-weak">{item.description}</div>
+                        <Show when={item.installAdapter === "minimax-token-plan"}>
+                          <div class="pt-1 text-12-regular text-text-weak">
+                            {language.t("settings.mcp.minimax.usage")}
+                          </div>
+                          <div class="pt-1 text-12-regular text-text-weak">
+                            {language.t("settings.mcp.minimax.requirements")}
+                          </div>
+                          <div class="pt-1 text-12-regular text-text-weak">
+                            {language.t("settings.mcp.minimax.tools")}
+                          </div>
+                        </Show>
                         <Show when={item.installReason}>
                           <div class="pt-1 text-12-regular text-status-warning">{item.installReason}</div>
                         </Show>

@@ -15,7 +15,7 @@ export const PromptGoalBanner: Component<{
   onResume: VoidFunction
   onDelete: VoidFunction
 }> = (props) => (
-  <div class="mb-2 rounded-[12px] border border-border-weak-base bg-background-base px-3 py-2">
+  <div class="mb-2 rounded-md border border-border-weak-base bg-background-base px-3 py-2">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-12-medium text-text-weak">
@@ -57,7 +57,7 @@ export const PromptWaitingBanner: Component<{
   onEnd: VoidFunction
 }> = (props) => (
   <div class="pointer-events-none absolute inset-x-0 bottom-11 px-3">
-    <div class="pointer-events-auto flex items-center justify-between gap-3 rounded-md border border-border-weak-base bg-background-base/92 px-3 py-2 shadow-xs">
+    <div class="pointer-events-auto flex items-center justify-between gap-3 rounded-md border border-border-weak-base bg-background-base px-3 py-2 shadow-xs">
       <div class="min-w-0">
         <div class="text-12-medium text-text-strong">{props.title}</div>
         <div class="text-11-regular text-text-weak">{props.description}</div>

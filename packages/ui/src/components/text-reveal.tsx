@@ -1,5 +1,6 @@
 import { createEffect, on, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
+import { useMotionEnabled } from "./motion-presence"
 
 const px = (value: number | string | undefined, fallback: number) => {
   if (typeof value === "number") return `${value}px`
@@ -41,6 +42,7 @@ export function TextReveal(props: {
   let outRef: HTMLSpanElement | undefined
   let rootRef: HTMLSpanElement | undefined
   let frame: number | undefined
+  const enabled = useMotionEnabled()
 
   const win = () => inRef?.scrollWidth ?? 0
   const wout = () => outRef?.scrollWidth ?? 0
@@ -59,6 +61,14 @@ export function TextReveal(props: {
       () => props.text,
       (next, prev) => {
         if (next === prev) return
+        if (!enabled()) {
+          if (frame !== undefined && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame)
+          frame = undefined
+          setState("old", undefined)
+          setState("cur", next)
+          setState("swapping", false)
+          return
+        }
         if (typeof next === "string" && typeof prev === "string" && next.startsWith(prev)) {
           setState("cur", next)
           widen(win())
@@ -84,6 +94,14 @@ export function TextReveal(props: {
       },
     ),
   )
+
+  createEffect(() => {
+    if (enabled()) return
+    if (frame !== undefined && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame)
+    frame = undefined
+    setState("old", undefined)
+    setState("swapping", false)
+  })
 
   onMount(() => {
     widen(win())
@@ -114,6 +132,7 @@ export function TextReveal(props: {
       data-ready={ready() ? "true" : "false"}
       data-swapping={swapping() ? "true" : "false"}
       data-truncate={props.truncate ? "true" : "false"}
+      data-motion={enabled() ? "enabled" : "off"}
       class={props.class}
       aria-label={props.text ?? ""}
       style={{

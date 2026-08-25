@@ -413,7 +413,9 @@ export function persisted<T>(
 
     const api: AsyncStorage = {
       getItem: async (key) => {
-        const raw = await current.getItem(key)
+        const raw = await Promise.resolve()
+          .then(() => current.getItem(key))
+          .catch(() => null)
         if (raw !== null) {
           const next = normalize(defaults, raw, config.migrate)
           if (next === undefined) {
@@ -427,7 +429,9 @@ export function persisted<T>(
         if (!legacyStore) return null
 
         for (const legacyKey of legacy) {
-          const legacyRaw = await legacyStore.getItem(legacyKey)
+          const legacyRaw = await Promise.resolve()
+            .then(() => legacyStore.getItem(legacyKey))
+            .catch(() => null)
           if (legacyRaw === null) continue
 
           const next = normalize(defaults, legacyRaw, config.migrate)
@@ -435,7 +439,9 @@ export function persisted<T>(
             await legacyStore.removeItem(legacyKey).catch(() => undefined)
             continue
           }
-          await current.setItem(key, next)
+          await Promise.resolve()
+            .then(() => current.setItem(key, next))
+            .catch(() => undefined)
           await legacyStore.removeItem(legacyKey)
           return next
         }
@@ -443,10 +449,14 @@ export function persisted<T>(
         return null
       },
       setItem: async (key, value) => {
-        await current.setItem(key, value)
+        await Promise.resolve()
+          .then(() => current.setItem(key, value))
+          .catch(() => undefined)
       },
       removeItem: async (key) => {
-        await current.removeItem(key)
+        await Promise.resolve()
+          .then(() => current.removeItem(key))
+          .catch(() => undefined)
       },
     }
 
@@ -481,4 +491,10 @@ export function normalizeWorkspacePath(directory: string) {
   if (drive) return `${drive[1]}/`
   if (/^\/+$/i.test(value)) return "/"
   return value.replace(/\/+$/, "")
+}
+
+export function isRetiredImageMakerProjectPath(directory: string) {
+  return normalizeWorkspacePath(directory)
+    .toLowerCase()
+    .endsWith("/plugins/lfcode-imagemaker/data/projects/imagemaker")
 }

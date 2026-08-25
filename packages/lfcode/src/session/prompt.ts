@@ -3,6 +3,7 @@ import os from "os"
 import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
+import { insertTavernContext } from "./tavern-context"
 import { classifyAssistantStep } from "./classify"
 import { Log } from "../util"
 import { SessionRevert } from "./revert"
@@ -17,9 +18,10 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
-import { pressureLevel, isOverflow as overflowCheck, shouldAutoCompact } from "./overflow"
+import { estimateRequestTokens, isOverflow as overflowCheck, shouldAutoCompact, usable } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
+import { Instance } from "@/project/instance"
 import { Bus } from "../bus"
 import { SystemPrompt } from "./system"
 import { Instruction } from "./instruction"
@@ -27,12 +29,12 @@ import { TuiEvent } from "@/cli/cmd/tui/event"
 import { Plugin } from "../plugin"
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
-import PROMPT_COMPOSE from "../session/prompt/compose.txt"
-import { composeSkillsBlock } from "@/skill/compose/extract"
 import { Skill } from "@/skill"
 import { ToolRegistry } from "../tool"
 import { transformedToolSchema } from "../tool/registry"
+import { nativeWebSearchTool } from "../tool/websearch/native"
 import { MCP } from "../mcp"
+import { shouldUseCodegraph } from "../mcp/codegraph-task"
 import { LSP } from "../lsp"
 import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
@@ -45,9 +47,10 @@ import { ConfigMarkdown } from "../config"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
-import { buildLLMRequestPrefix } from "./llm-request-prefix"
+import { buildLLMRequestPrefix, buildSkillCatalogEntries } from "./llm-request-prefix"
 import { prefixCaptureRef } from "./prefix-capture-ref"
 import { spawnRef } from "@/actor/spawn-ref"
+import type { SpawnResult } from "@/actor/spawn"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
@@ -60,65 +63,26 @@ import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util"
-import { Cause, Effect, Exit, Layer, Option, Scope, Context } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { EffectLogger } from "@/effect"
 import { InstanceState } from "@/effect"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { Goal } from "./goal"
 import { isRealUserPart, repeatedToolValidationFailure, stepSignature } from "./part-helpers"
-import { TaskGate, MAX_TASK_GATE_MAIN_REACT } from "@/task/gate"
-import { TaskGateState } from "@/task/gate-state"
-import { TaskRegistry } from "@/task/registry"
-import {
-  buildComposeGateReminder,
-  classifyComposeRoute,
-  collectComposeEvidence,
-  getLatestComposeUserMessage,
-  getMissingComposeStages,
-  shouldManageComposeRoute,
-} from "./compose-route"
-import { isComposeRuntimeToolAllowed, resolveComposeRuntimePolicy } from "./compose-runtime-policy"
-import { ComposeGateState } from "./compose-gate-state"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
 import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
-import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
-import {
-  AUTO_DISTILL_TITLE,
-  AUTO_DREAM_TITLE,
-  DISTILL_TASK,
-  DREAM_TASK,
-  claimAutomaticMaintenance,
-  maintenanceConfig,
-  parseDistillCandidates,
-} from "./auto-dream"
-import { Maintenance } from "@/maintenance"
+import { isExplicitMemoryRequest } from "@/memory/intent"
+import { ContextReview, ContextReviewFindingsOutput, type Record as ContextReviewRecord } from "@/context-review"
+import { dispatchHooks } from "@/hook/runtime"
+import { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
+import { nativeToolsForPresentation, resolvePresentation } from "@/tool/code-mode"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
-
-// Recall-reminder hints, rendered in each tool's configured invocation style so
-// shell-mode sessions never see a JSON-shaped example (which primes models to
-// emit JSON and crash the shell parser). `memory` has no shell form, so it is
-// always JSON. Exported for unit testing.
-export function recallHintLines(toolCfg: ToolStyleConfig | undefined): string[] {
-  const taskHint =
-    resolveInvocationStyle(toolCfg, "task") === "shell" ? "- task list" : `- task({ operation: "list" })`
-  const actorHint =
-    resolveInvocationStyle(toolCfg, "actor") === "shell"
-      ? "- actor status <actor_id>"
-      : `- actor({ operation: "status", actor_id: "<id>" })`
-  // memory has no shell form (no shell.parse) → always JSON.
-  return [taskHint, actorHint, `- memory({ operation: "search", query: "<keyword>" })`]
-}
-
-function composeGateRecoveryLine(missing: string[], count: number) {
-  if (count <= 1) return "Take the shortest valid path: fill only the missing stage evidence, then continue."
-  if (missing.length === 1) return `You are re-entering on the same single gap. Resolve just this missing stage now: ${missing[0]}.`
-  return "The same stage gaps are still open. Do not restart the whole flow; resolve the listed missing stages directly."
-}
 
 /**
  * Cap on goal-driven main-loop re-entries per turn — the safety valve against
@@ -127,7 +91,6 @@ function composeGateRecoveryLine(missing: string[], count: number) {
  * TODO: lift to lfcode.json config (e.g. session.maxGoalReact).
  */
 const MAX_GOAL_REACT = 12
-const MAX_COMPOSE_GATE_MAIN_REACT = 3
 
 /**
  * Number of consecutive finished assistant steps with an identical action
@@ -156,6 +119,19 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+export function codegraphFallbackReminder(reason?: string) {
+  const detail = reason?.replace(/\s+/g, " ").trim().slice(0, 240)
+  return [
+    "<system-reminder>",
+    "CodeGraph is unavailable for this request, so codegraph_explore is intentionally hidden.",
+    detail ? `Reason: ${detail}` : undefined,
+    "Do not retry codegraph_explore. Continue with Read, Grep, Glob, and the other available tools.",
+    "</system-reminder>",
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n")
+}
+
 const PREDICT_SYSTEM = `You predict the single most likely next message a user will send to a coding assistant, based on the conversation so far. Output only that next message as one short, natural first-person request (what the user would type). No preamble, no quotes, no explanation, no markdown. Keep it under 100 characters.`
 
 const PREDICT_NUDGE = `Based on the conversation above, write the user's most likely next message:`
@@ -165,6 +141,53 @@ const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.LFCODE_INVALID_OUTPUT_CONTINUATIO
 const INTERRUPTED_OUTPUT_CONTINUATION_LIMIT = INVALID_OUTPUT_CONTINUATION_LIMIT
 const STEER_MARKER = "lfcode:followup-steer"
 
+function formatContextReview(review: ContextReviewRecord) {
+  const findings = review.findings
+  if (!findings || (findings.skills.length === 0 && findings.memory.length === 0)) return
+  return [
+    `<context_review source_user_message_id="${escapeContextReview(String(review.sourceUserMessageID))}">`,
+    "A hidden reviewer found context that may have been omitted in the immediately preceding turn. This advice is only relevant if the current user request continues that topic.",
+    "If it remains relevant, you MUST load every listed Skill with the skill tool and/or search the listed Memory query with the memory tool before a substantive answer. If the current request is unrelated, ignore this review and do not load it.",
+    ...findings.skills.map((item) => `<skill name="${escapeContextReview(item.name)}" />`),
+    ...findings.memory.map((item) => `<memory query="${escapeContextReview(item.query)}" />`),
+    "</context_review>",
+  ].join("\n")
+}
+
+function escapeContextReview(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    if (char === "&") return "&amp;"
+    if (char === "<") return "&lt;"
+    if (char === ">") return "&gt;"
+    if (char === '"') return "&quot;"
+    return "&apos;"
+  })
+}
+
+/**
+ * Context review is strictly for a real user turn handled by the primary
+ * runner. Synthetic continuations and internal spawn, hook, or automation
+ * requests must never create advice for a later user request.
+ */
+function isReviewableMainUser(message: MessageV2.WithParts) {
+  if (message.info.role !== "user") return false
+  if (message.info.source && message.info.source !== "user") return false
+  return message.parts.some(isRealUserPart)
+}
+
+function loadedSkillNames(messages: MessageV2.WithParts[]) {
+  const loaded = new Set<string>()
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === "tool" && part.tool === "skill" && part.state.status === "completed") {
+        const name = part.state.metadata?.name
+        if (typeof name === "string") loaded.add(name)
+      }
+    }
+  }
+  return [...loaded].toSorted()
+}
+
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
 type SweepOrphanAssistantsOptions = {
@@ -172,9 +195,25 @@ type SweepOrphanAssistantsOptions = {
   message?: string
 }
 
+/**
+ * Per-execution controls used by trusted runtime callers. These deliberately
+ * stay out of PromptInput so an HTTP prompt request cannot change the durable
+ * session permission ruleset or grant itself elevated access.
+ */
+type PromptRunOptions = {
+  abortSignal?: AbortSignal
+  permission?: Permission.Ruleset
+  interactive?: boolean
+  onPermissionRequest?: () => void
+  onQuestionRequest?: () => void
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
+  readonly prompt: (
+    input: PromptInput,
+    options?: PromptRunOptions,
+  ) => Effect.Effect<MessageV2.WithParts>
   readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
   readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
@@ -211,9 +250,6 @@ export const layer = Layer.effect(
     const instruction = yield* Instruction.Service
     const state = yield* SessionRunState.Service
     const goal = yield* Goal.Service
-    const taskGateState = yield* TaskGateState.Service
-    const composeGateState = yield* ComposeGateState.Service
-    const taskRegistry = yield* TaskRegistry.Service
     const revert = yield* SessionRevert.Service
     const summary = yield* SessionSummary.Service
     const sys = yield* SystemPrompt.Service
@@ -221,10 +257,14 @@ export const layer = Layer.effect(
     const actorRegistry = yield* ActorRegistry.Service
     const inbox = yield* Inbox.Service
     const skill = yield* Skill.Service
+    const contextReview = yield* ContextReview.Service
 
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
+    const hookStarted = new Set<SessionID>()
+    const codegraphFallbackNotified = new Set<SessionID>()
+    const codegraphUnavailableRequests = new Set<MessageID>()
     const steerWakeups = new Set<SessionID>()
 
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
@@ -234,13 +274,40 @@ export const layer = Layer.effect(
     // only needs to pass string IDs.
     const capture: typeof prefixCaptureRef.current = (input) =>
       Effect.gen(function* () {
-        const empty = { system: [] as string[], tools: {} as Record<string, AITool>, inheritedMessages: [] as ModelMessage[], parentPermission: [] as Permission.Ruleset }
+        const empty = {
+          system: [] as string[],
+          tools: {} as Record<string, AITool>,
+          inheritedMessages: [] as ModelMessage[],
+          parentPermission: [] as Permission.Ruleset,
+        }
         const ag = yield* agents.get(input.agentName).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!ag) return empty
         const model = yield* provider
           .getModel(input.providerID as ProviderID, input.modelID as ModelID)
           .pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!model) return empty
+        const session = yield* sessions.get(input.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const tavern = session ? isTavernSession(session) : false
+        const effectivePermission = input.permission ?? Permission.merge(ag.permission, session?.permission ?? [])
+        if (tavern) {
+          const prefix = yield* buildLLMRequestPrefix({
+            sessionID: input.sessionID,
+            agent: ag,
+            model,
+            msgs: input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"],
+            additions: [],
+            permission: effectivePermission,
+            actorID: input.actorID,
+            includeSkills: false,
+            includeTools: false,
+          }).pipe(
+            Effect.provideService(LLM.Service, llm),
+            Effect.provideService(ToolRegistry.Service, registry),
+            Effect.provideService(Skill.Service, skill),
+            Effect.catch(() => Effect.succeed(empty)),
+          )
+          return { ...prefix, parentPermission: effectivePermission }
+        }
         const [skills, env, instructions] = yield* Effect.all([
           sys.skills(ag),
           Effect.sync(() => sys.environment(model)),
@@ -254,6 +321,8 @@ export const layer = Layer.effect(
           agent: ag,
           model,
           msgs: input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"],
+          permission: effectivePermission,
+          actorID: input.actorID,
           additions,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
@@ -261,7 +330,7 @@ export const layer = Layer.effect(
           Effect.provideService(Skill.Service, skill),
           Effect.catch(() => Effect.succeed(empty)),
         )
-        return { ...prefix, parentPermission: ag.permission }
+        return { ...prefix, parentPermission: effectivePermission }
       })
     prefixCaptureRef.current = capture
     yield* Effect.addFinalizer(() =>
@@ -272,6 +341,126 @@ export const layer = Layer.effect(
 
     const runner = Effect.fn("SessionPrompt.runner")(function* () {
       return yield* EffectBridge.make()
+    })
+    const scheduleContextReview = Effect.fn("SessionPrompt.scheduleContextReview")(function* (input: {
+      sessionID: SessionID
+      user: MessageV2.User
+      assistant: MessageV2.Assistant
+      agent: Agent.Info
+      model: Provider.Model
+      permission?: Permission.Ruleset
+      /** Frozen primary-session slice through sourceAssistantMessageID. */
+      messages: MessageV2.WithParts[]
+    }) {
+      if (!((yield* config.getGlobal()).context_review?.enabled ?? true)) return
+      const record = yield* contextReview.create({
+        sessionID: input.sessionID,
+        sourceUserMessageID: input.user.id,
+        sourceAssistantMessageID: input.assistant.id,
+      })
+      if (record.status !== "pending") return
+      // Config can change while the main response is finishing. Re-check after
+      // durable admission so a just-disabled reviewer cannot begin work.
+      if (!((yield* config.getGlobal()).context_review?.enabled ?? true)) {
+        yield* contextReview.expire({ sessionID: input.sessionID })
+        return
+      }
+      const spawn = spawnRef.current
+      if (!spawn) {
+        yield* contextReview.fail({ id: record.id, error: "Context reviewer spawn service is unavailable" })
+        return
+      }
+      // Everything after durable admission can fail while preparing the reviewer
+      // snapshot. A detached scheduling fiber must never strand a pending record.
+      const result: SpawnResult | undefined = yield* Effect.gen(function* () {
+        const catalogSkills = (yield* skill.available(input.agent, input.permission)).toSorted((a, b) =>
+          a.name.localeCompare(b.name),
+        )
+        const catalog = buildSkillCatalogEntries(catalogSkills, input.model)
+        const loadedSkills = loadedSkillNames(input.messages)
+        const prefix = yield* capture({
+          sessionID: input.sessionID,
+          agentName: "context-reviewer",
+          providerID: String(input.model.providerID),
+          modelID: String(input.model.id),
+          permission: input.permission,
+          actorID: "context-reviewer",
+          msgs: input.messages,
+        })
+        // Spawn is asynchronous and may fail after the durable review record is
+        // admitted (for example, while registering its in-memory fork context).
+        // Never leave that record pending until another user turn happens to
+        // expire it; failed work must become terminal immediately.
+        return yield* spawn.spawn({
+          mode: "subagent",
+          sessionID: input.sessionID,
+          agentType: "context-reviewer",
+          task: [
+            "Audit the completed main-agent turn now. The full primary conversation is inherited. Compare the completed turn with this exact current Skill catalog; identify only workflows that were materially relevant but omitted.",
+            "If continuity or durable user/project context was materially omitted, use the read-only memory tool with one or two distinctive search terms and return only the narrow follow-up query, never retrieved content.",
+            "Return the required structured result with empty arrays when nothing was omitted.",
+            loadedSkills.length > 0
+              ? `Do not recommend any already loaded Skill: ${loadedSkills.map((name) => JSON.stringify(name)).join(", ")}.`
+              : undefined,
+            "<available_skill_catalog>",
+            catalog,
+            "</available_skill_catalog>",
+          ].filter((item): item is string => Boolean(item)).join("\n"),
+          description: "Internal context omission review",
+          context: "full",
+          tools: ["memory"],
+          model: { providerID: input.model.providerID, modelID: input.model.id },
+          background: true,
+          immediate: true,
+          // Full-context reviewer work carries an in-memory fork snapshot and
+          // structured-output closure, so only this internal actor bypasses
+          // durable dispatch serialization.
+          bypassDispatch: true,
+          lifecycle: "ephemeral",
+          forkContext: {
+            ...prefix,
+            watermarkMsgID: input.assistant.id,
+            model: { providerID: input.model.providerID, modelID: input.model.id },
+          },
+          format: { type: "json_schema", schema: z.toJSONSchema(ContextReviewFindingsOutput), retryCount: 1 },
+        })
+      }).pipe(
+        Effect.catchCause(() =>
+          contextReview
+            .fail({ id: record.id, error: "Context reviewer could not be prepared or started" })
+            .pipe(Effect.as(undefined as SpawnResult | undefined)),
+        ),
+      )
+      if (!result) return
+      const started = yield* contextReview.start({ id: record.id, reviewerActorID: result.actorID })
+      // `expire()` may have won the race while spawn was registering. Do not
+      // let an obsolete reviewer consume model capacity after that transition.
+      if (!started) {
+        // A superseding user turn may already have admitted its own review.
+        // Only revoke this obsolete record; expiring the whole session here
+        // would silently discard that newer hand-off.
+        yield* contextReview.expireRecord({ id: record.id })
+        yield* spawn.cancel(input.sessionID, result.actorID, "forced").pipe(Effect.ignore)
+        return
+      }
+      if (!((yield* config.getGlobal()).context_review?.enabled ?? true)) {
+        yield* contextReview.expire({ sessionID: input.sessionID })
+        yield* spawn.cancel(input.sessionID, result.actorID, "forced").pipe(Effect.ignore)
+        return
+      }
+      yield* Deferred.await(result.outcome)
+        .pipe(
+          Effect.flatMap((outcome) => {
+            if (outcome.status === "success" && outcome.structured !== undefined)
+              return contextReview.complete({ id: record.id, findings: outcome.structured })
+            return contextReview.fail({
+              id: record.id,
+              error: outcome.status === "failure" ? outcome.error : "Context reviewer returned no structured result",
+            })
+          }),
+          Effect.asVoid,
+          Effect.forkIn(scope),
+        )
     })
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       const run = yield* runner()
@@ -285,6 +474,19 @@ export const layer = Layer.effect(
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* elog.info("cancel", { sessionID })
       yield* state.cancel(sessionID)
+      yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "Stop",
+          sessionID,
+          projectID: String(Instance.project.id),
+          cwd: Instance.worktree,
+          payload: { reason: "cancelled" },
+        }),
+      ).pipe(
+        Effect.timeout("2 seconds"),
+        Effect.catchCause((cause) => elog.warn("stop-hook-failed", { sessionID, cause: String(cause) })),
+        Effect.forkIn(scope),
+      )
     })
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -457,21 +659,6 @@ export const layer = Layer.effect(
       const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
       if (!userMessage) return input.messages
 
-      const composeModeMsg = input.messages.find(
-        (msg) => msg.info.role === "user" && msg.info.agent === "compose",
-      )
-      if (composeModeMsg) {
-        const composeModeBlock = composeSkillsBlock()
-        composeModeMsg.parts.unshift({
-          id: PartID.ascending(),
-          messageID: composeModeMsg.info.id,
-          sessionID: composeModeMsg.info.sessionID,
-          type: "text",
-          text: PROMPT_COMPOSE + (composeModeBlock ? "\n\n" + composeModeBlock : ""),
-          synthetic: true,
-        })
-      }
-
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
       if (input.agent.name !== "plan" && assistantMessage?.info.agent === "plan") {
         const plan = Session.plan(input.session)
@@ -502,7 +689,7 @@ export const layer = Layer.effect(
 Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
 ## Plan File Info:
-${exists ? `A plan file already exists at ${plan}. You can read it and make incremental edits using patch-first file tools such as apply_patch, replace_range, or symbol_edit.` : `No plan file exists yet. You should create your plan at ${plan} using apply_patch.`}
+${exists ? `A plan file already exists at ${plan}. Read it and make incremental changes with the edit tool.` : `No plan file exists yet. Create it at ${plan} with edit operation=write.`}
 You should build your plan incrementally using patch-first file tools on this file only. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
 
 ## Plan Workflow
@@ -578,22 +765,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       agent: Agent.Info
       model: Provider.Model
       session: Session.Info
-      composeRoute?: Session.Info["composeRoute"]
       tools?: Record<string, boolean>
       processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
       bypassAgentCheck: boolean
+      nativeWebSearchBlocked: boolean
       messages: MessageV2.WithParts[]
+      contextReviewMemory?: boolean
       agentID?: string
       task_id?: string
+      permission?: Permission.Ruleset
+      interactive?: boolean
+      onPermissionRequest?: () => void
+      onQuestionRequest?: () => void
     }) {
       using _ = log.time("resolveTools")
       const tools: Record<string, AITool> = {}
+      if (isTavernSession(input.session)) return tools
       const run = yield* runner()
       const promptOps = yield* ops()
-      const composeRuntimePolicy =
-        (input.agentID ?? "main") === "main" && shouldManageComposeRoute(input.agent.name) && input.composeRoute
-          ? resolveComposeRuntimePolicy(input.composeRoute)
-          : undefined
 
       // Per-tool runtime whitelist: when the LLM call is being made on behalf
       // of a registered actor (subagent or peer), look up the actor row and,
@@ -606,6 +795,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         return new Set(actor.tools)
       })
       const whitelist = yield* whitelistFor()
+      // Match LLM.resolveTools exactly: agent defaults are overridden by the
+      // session and then by this run's temporary rules. The same ruleset must
+      // drive catalog discovery, tool visibility, and exact Skill loading.
+      const effectivePermission = Permission.merge(
+        input.agent.permission,
+        input.session.permission ?? [],
+        input.permission ?? [],
+      )
+      const memoryEnabled =
+        input.agent.name === "dream" ||
+        input.agent.name === "context-reviewer" ||
+        input.contextReviewMemory === true ||
+        isExplicitMemoryRequest(input.messages)
+      const userExtensionsEnabled = input.agent.name !== "context-reviewer"
       const rejectionFor = (toolID: string) => ({
         title: "Tool not permitted",
         output: `The "${toolID}" tool is not in this actor's whitelist. Allowed tools: ${
@@ -619,7 +822,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         abort: options.abortSignal!,
         messageID: input.processor.message.id,
         callID: options.toolCallId,
-        extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps },
+        extra: {
+          model: input.model,
+          bypassAgentCheck: input.bypassAgentCheck,
+          contextReviewMemory: input.contextReviewMemory === true,
+          skillPermission: effectivePermission,
+          promptOps,
+          onQuestionRequest: input.onQuestionRequest,
+        },
         agent: input.agent.name,
         actorID: input.agentID,
         taskId: input.task_id,
@@ -639,29 +849,119 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }),
         ask: (req) =>
-          permission
-            .ask(
-              {
-                ...req,
+          Effect.gen(function* () {
+            const hook = yield* Effect.promise(() =>
+              dispatchHooks({
+                event: "PermissionRequest",
                 sessionID: input.session.id,
-                tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-                ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
-                // System-spawned background agents (checkpoint-writer, dream, distill)
-                // have no human to answer a permission prompt — fail clean, don't hang.
-                interactive: !SYSTEM_SPAWNED_AGENT_TYPES.has(input.agent.name),
-              },
-              options.abortSignal,
+                projectID: String(input.session.projectID),
+                cwd: input.session.directory,
+                tool: req.permission,
+                payload: { patterns: req.patterns, metadata: req.metadata },
+                promptEvaluator: (request) => evaluateHookPrompt(request),
+              }),
             )
-            .pipe(Effect.orDie),
+            if (hook.blocked) throw new Error("Permission request was blocked by a Hook")
+            const ruleset = effectivePermission
+            if (
+              input.onPermissionRequest &&
+              req.patterns.some((pattern) => Permission.evaluate(req.permission, pattern, ruleset).action === "ask")
+            ) {
+              yield* Effect.sync(input.onPermissionRequest)
+            }
+            return yield* permission
+              .ask(
+                {
+                  ...req,
+                  sessionID: input.session.id,
+                  tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+                  // A subagent has its own capability policy. Put it after the
+                  // parent session rules so an old session-wide tool deny cannot
+                  // disable the read/search tools that the selected subagent is
+                  // explicitly configured to use. Main-agent calls retain the
+                  // session override semantics.
+                  ruleset,
+                  // System-spawned background agents (checkpoint-writer, dream, distill)
+                  // have no human to answer a permission prompt — fail clean, don't hang.
+                  interactive: input.interactive ?? !SYSTEM_SPAWNED_AGENT_TYPES.has(input.agent.name),
+                },
+                options.abortSignal,
+              )
+              .pipe(Effect.orDie)
+          }),
       })
 
-      for (const item of yield* registry.tools({
+      const hookUser = input.messages.findLast(
+        (message): message is MessageV2.WithParts & { info: MessageV2.User } => message.info.role === "user",
+      )?.info
+      const evaluateHookPrompt = (request: { prompt: string; event: Record<string, unknown>; timeoutMs: number }) => {
+        const user = hookUser
+        if (!user) return Promise.reject(new Error("Hook prompt has no user context"))
+        return Effect.runPromise(
+          llm
+            .stream({
+              user,
+              sessionID: input.session.id,
+              model: input.model,
+              agent: input.agent,
+              agentID: input.agentID,
+              prebuiltSystem: [
+                'You are a Hook decision evaluator. Return JSON only: {"decision":"allow"|"block"|"ask","reason":string,"additional_context":string}. Do not call tools. ask is valid only for PermissionRequest.',
+              ],
+              system: [],
+              messages: [{ role: "user", content: `${request.prompt}\n\nEvent:\n${JSON.stringify(request.event)}` }],
+              tools: {},
+              toolChoice: "none",
+              retries: 0,
+            })
+            .pipe(
+              Stream.filter(
+                (event): event is Extract<LLM.Event, { type: "text-delta" }> => event.type === "text-delta",
+              ),
+              Stream.map((event) => event.text),
+              Stream.mkString,
+              Effect.map((text) => {
+                const parsed = JSON.parse(text) as {
+                  decision?: "allow" | "block" | "ask"
+                  reason?: string
+                  additional_context?: string
+                }
+                if (!parsed.decision || !["allow", "block", "ask"].includes(parsed.decision))
+                  throw new Error("Invalid Hook prompt response")
+                return {
+                  decision: parsed.decision,
+                  reason: parsed.reason,
+                  additionalContext: parsed.additional_context,
+                }
+              }),
+              Effect.timeout(`${request.timeoutMs} millis`),
+              Effect.flatMap((result) =>
+                result ? Effect.succeed(result) : Effect.fail(new Error("Hook prompt timed out")),
+              ),
+            ),
+        )
+      }
+
+      const visibleTools = (yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
         agent: input.agent,
         capabilities: input.model.capabilities,
-      })) {
-        if (composeRuntimePolicy && !isComposeRuntimeToolAllowed(composeRuntimePolicy, item.id)) continue
+        activeSkills: Skill.activeNames(input.messages),
+      })).filter((item) => {
+        if (item.id === ActorTool.id && input.agent.mode !== "primary" && input.agent.name !== "deep-research-coordinator") return false
+        if (item.id === "memory" && !memoryEnabled) return false
+        return true
+      })
+      const presentation = resolvePresentation({
+        // The context reviewer has a fixed read-only probe contract and must keep
+        // its native memory tool available for that internal protocol.
+        configured: input.agent.name === "context-reviewer" ? "native" : (yield* config.get()).tool?.presentation,
+        tools: visibleTools,
+      })
+      const nativeTools = nativeToolsForPresentation(presentation, visibleTools)
+
+      for (const item of nativeTools) {
         const schemaBuildStartedAt = Date.now()
         const schema = transformedToolSchema(input.model, item.parameters)
         const schemaBuildMs = Date.now() - schemaBuildStartedAt
@@ -689,12 +989,53 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   yield* input.processor.completeToolCall(options.toolCallId, output)
                   return output
                 }
-                yield* plugin.trigger(
-                  "tool.execute.before",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
-                  { args },
-                )
-                const result = yield* item.execute(args, ctx)
+                if (userExtensionsEnabled) {
+                  const beforeHook = yield* Effect.promise(() =>
+                    dispatchHooks({
+                      event: "PreToolUse",
+                      sessionID: ctx.sessionID,
+                      projectID: String(input.session.projectID),
+                      cwd: input.session.directory,
+                      tool: item.id,
+                      payload: { args, callID },
+                      promptEvaluator: (request) => evaluateHookPrompt(request),
+                    }),
+                  )
+                  if (beforeHook.blocked) {
+                    const output = {
+                      title: "Hook blocked tool",
+                      output: "Tool execution was blocked by a user Hook",
+                      metadata: {},
+                    }
+                    yield* input.processor.completeToolCall(options.toolCallId, output)
+                    return output
+                  }
+                }
+                if (userExtensionsEnabled) {
+                  yield* plugin.trigger(
+                    "tool.execute.before",
+                    { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
+                    { args },
+                  )
+                }
+                const execute = item.execute(args, ctx)
+                const result = yield* (userExtensionsEnabled
+                  ? execute.pipe(
+                      Effect.tapError(() =>
+                        Effect.promise(() =>
+                          dispatchHooks({
+                            event: "PostToolUseFailure",
+                            sessionID: ctx.sessionID,
+                            projectID: String(input.session.projectID),
+                            cwd: input.session.directory,
+                            tool: item.id,
+                            payload: { args, callID },
+                            promptEvaluator: (request) => evaluateHookPrompt(request),
+                          }),
+                        ),
+                      ),
+                    )
+                  : execute)
                 log.debug("tool execute done", {
                   tool: item.id,
                   callID,
@@ -710,26 +1051,41 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     messageID: input.processor.message.id,
                   })),
                 }
-                yield* plugin.trigger(
-                  "tool.execute.after",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
-                  output,
-                )
-                yield* bus
-                  .publish(Metrics.ToolCall, {
-                    sessionID: ctx.sessionID,
-                    tool_name: item.id,
-                    input_bytes: Metrics.jsonByteLength(args),
-                    output_bytes: Buffer.byteLength(output.output ?? "", "utf8"),
-                    tool_call_id: options.toolCallId,
-                    tool_call_status: "success",
-                    execute_ms: Date.now() - startTs,
-                    schema_build_ms: schemaBuildMs,
-                    kind: Tool.definitionMetadata(item).kind,
-                    namespace: Tool.definitionMetadata(item).namespace,
-                    latency_class: Tool.definitionMetadata(item).latencyClass,
-                  })
-                  .pipe(Effect.ignore)
+                if (userExtensionsEnabled) {
+                  yield* plugin.trigger(
+                    "tool.execute.after",
+                    { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
+                    output,
+                  )
+                  yield* Effect.promise(() =>
+                    dispatchHooks({
+                      event: "PostToolUse",
+                      sessionID: ctx.sessionID,
+                      projectID: String(input.session.projectID),
+                      cwd: input.session.directory,
+                      tool: item.id,
+                      payload: { args, output: output.output },
+                      promptEvaluator: (request) => evaluateHookPrompt(request),
+                    }),
+                  )
+                }
+                if (userExtensionsEnabled) {
+                  yield* bus
+                    .publish(Metrics.ToolCall, {
+                      sessionID: ctx.sessionID,
+                      tool_name: item.id,
+                      input_bytes: Metrics.jsonByteLength(args),
+                      output_bytes: Buffer.byteLength(output.output ?? "", "utf8"),
+                      tool_call_id: options.toolCallId,
+                      tool_call_status: "success",
+                      execute_ms: Date.now() - startTs,
+                      schema_build_ms: schemaBuildMs,
+                      kind: Tool.definitionMetadata(item).kind,
+                      namespace: Tool.definitionMetadata(item).namespace,
+                      latency_class: Tool.definitionMetadata(item).latencyClass,
+                    })
+                    .pipe(Effect.ignore)
+                }
                 if (options.abortSignal?.aborted) {
                   yield* input.processor.completeToolCall(options.toolCallId, output)
                 }
@@ -740,7 +1096,68 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
       }
 
-      const connectedMcpTools = yield* mcp.tools()
+      const nativeWebSearchAllowed =
+        input.tools?.websearch !== false &&
+        (!whitelist || whitelist.has("websearch") || whitelist.has("native_web_search"))
+      if (nativeWebSearchAllowed && !input.nativeWebSearchBlocked) {
+        const nativeWebSearch = yield* Effect.tryPromise({
+          try: () => nativeWebSearchTool(input.model),
+          catch: (error) => error,
+        }).pipe(
+          Effect.catch((error) => {
+            log.warn("provider-native web search is unavailable; keeping local fallback", {
+              providerID: input.model.providerID,
+              modelID: input.model.id,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            return Effect.succeed(undefined)
+          }),
+        )
+        if (nativeWebSearch) tools.native_web_search = nativeWebSearch
+      }
+
+      const codegraphUser = input.messages.findLast((message) => message.info.role === "user")
+      const codegraphText =
+        codegraphUser?.parts
+          .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.ignored && !part.synthetic)
+          .map((part) => part.text)
+          .join("\n") ?? ""
+      const codegraphRequested = shouldUseCodegraph(codegraphText)
+      const ensureCodegraph = mcp.ensureCodegraph
+      const codegraphReadiness =
+        codegraphRequested &&
+        ensureCodegraph &&
+        codegraphUser &&
+        !codegraphUnavailableRequests.has(codegraphUser.info.id)
+          ? yield* ensureCodegraph()
+          : undefined
+      const codegraphMode =
+        !codegraphRequested ||
+        (codegraphUser && codegraphUnavailableRequests.has(codegraphUser.info.id)) ||
+        codegraphReadiness?.status === "failed" ||
+        codegraphReadiness?.status === "unavailable"
+          ? "off"
+          : "auto"
+      const connectedMcpTools = yield* mcp.tools({ codegraph: codegraphMode })
+      if (
+        codegraphReadiness &&
+        (codegraphReadiness.status === "failed" || codegraphReadiness.status === "unavailable")
+      ) {
+        if (codegraphUser) codegraphUnavailableRequests.add(codegraphUser.info.id)
+        if (!codegraphFallbackNotified.has(input.session.id)) {
+          codegraphFallbackNotified.add(input.session.id)
+          codegraphUser?.parts.push({
+            id: PartID.ascending(),
+            messageID: codegraphUser.info.id,
+            sessionID: input.session.id,
+            type: "text",
+            synthetic: true,
+            text: codegraphFallbackReminder(
+              codegraphReadiness.status === "failed" ? codegraphReadiness.error : codegraphReadiness.reason,
+            ),
+          })
+        }
+      }
       const mcpSearchTool = tool({
         description:
           "Search connected MCP tools by name or keyword. The result includes the exact name and input schema required by mcp_use_tool.",
@@ -771,7 +1188,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           "Execute one exact MCP tool returned by mcp_search_tool. Search first when the tool name or arguments are uncertain.",
         inputSchema: z.object({
           name: z.string().min(1).describe("Exact MCP tool name returned by mcp_search_tool."),
-          arguments: z.record(z.string(), z.unknown()).default({}).describe("Arguments matching the discovered input schema."),
+          arguments: z
+            .record(z.string(), z.unknown())
+            .default({})
+            .describe("Arguments matching the discovered input schema."),
         }),
         execute: async ({ name, arguments: args }, options) => {
           const item = connectedMcpTools[name]
@@ -794,9 +1214,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           return item.execute(nextArgs, options)
         },
       })
+      const directCodegraph = connectedMcpTools.codegraph_explore
+      if (directCodegraph && tools.codegraph_explore) {
+        log.warn("CodeGraph direct tool name collides with a registered tool; keeping the registered tool", {
+          tool: "codegraph_explore",
+        })
+      }
       const mcpFacadeTools: Record<string, AITool> = {
         mcp_search_tool: mcpSearchTool,
         mcp_use_tool: mcpUseTool,
+        ...(directCodegraph && !tools.codegraph_explore ? { codegraph_explore: directCodegraph } : {}),
       }
       for (const [key, item] of Object.entries(mcpFacadeTools)) {
         const execute = item.execute
@@ -835,11 +1262,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 yield* input.processor.completeToolCall(opts.toolCallId, output)
                 return output
               }
-              yield* plugin.trigger(
-                "tool.execute.before",
-                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
-                { args },
-              )
+              if (userExtensionsEnabled) {
+                yield* plugin.trigger(
+                  "tool.execute.before",
+                  { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
+                  { args },
+                )
+              }
               yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
               const nextArgs =
                 key.startsWith("playwright_") && args && typeof args === "object" && !Array.isArray(args)
@@ -854,25 +1283,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 durationMs: Date.now() - startTs,
                 ok: true,
               })
-              yield* plugin.trigger(
-                "tool.execute.after",
-                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
-                result,
-              )
+              if (userExtensionsEnabled) {
+                yield* plugin.trigger(
+                  "tool.execute.after",
+                  { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
+                  result,
+                )
+              }
 
               const textParts: string[] = []
-              yield* bus
-                .publish(Metrics.ToolCall, {
-                  sessionID: ctx.sessionID,
-                  tool_name: key,
-                  input_bytes: Metrics.jsonByteLength(args),
-                  output_bytes: Metrics.jsonByteLength(result.content ?? ""),
-                  tool_call_id: opts.toolCallId,
-                  tool_call_status: "success",
-                  execute_ms: Date.now() - startTs,
-                  schema_build_ms: schemaBuildMs,
-                })
-                .pipe(Effect.ignore)
+              if (userExtensionsEnabled) {
+                yield* bus
+                  .publish(Metrics.ToolCall, {
+                    sessionID: ctx.sessionID,
+                    tool_name: key,
+                    input_bytes: Metrics.jsonByteLength(args),
+                    output_bytes: Metrics.jsonByteLength(result.content ?? ""),
+                    tool_call_id: opts.toolCallId,
+                    tool_call_status: "success",
+                    execute_ms: Date.now() - startTs,
+                    schema_build_ms: schemaBuildMs,
+                  })
+                  .pipe(Effect.ignore)
+              }
               const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
               for (const contentItem of result.content) {
                 if (contentItem.type === "text") textParts.push(contentItem.text)
@@ -939,7 +1372,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { actor: actorTool } = yield* registry.named()
-      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
+      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID, task.agent) : model
       const assistantMessage: MessageV2.Assistant = yield* sessions.updateMessage({
         id: MessageID.ascending(),
         role: "assistant",
@@ -956,13 +1389,31 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         providerID: taskModel.providerID,
         time: { created: Date.now() },
       })
+      const taskPrompt = [
+        task.prompt,
+        task.contextRefs.length > 0
+          ? [
+              "<subtask-context>",
+              "The parent explicitly attached these references. Read only the relevant ones from the shared workspace before acting:",
+              ...task.contextRefs.map((ref) => `- ${ref}`),
+              "</subtask-context>",
+            ].join("\n")
+          : undefined,
+      ]
+        .filter((value): value is string => !!value)
+        .join("\n\n")
       const taskArgs = {
         operation: {
-          action: "run" as const,
-          prompt: task.prompt,
+          action: task.execution === "background" ? ("spawn" as const) : ("run" as const),
+          prompt: taskPrompt,
           description: task.description,
           subagent_type: task.agent,
           command: task.command,
+          context: task.context,
+          context_refs: task.contextRefs,
+          declared_files: task.declaredFiles,
+          ...(task.model ? { model: `${task.model.providerID}/${task.model.modelID}` } : {}),
+          ...(task.research ? { research: task.research } : {}),
         },
       }
       let part: MessageV2.ToolPart = yield* sessions.updatePart({
@@ -1002,7 +1453,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID,
           abort: taskAbort.signal,
           callID: part.callID,
-          extra: { bypassAgentCheck: true, promptOps },
+          // This is a server-authored SubtaskPart, not an LLM tool call. The
+          // coordinator is intentionally hidden from normal actor discovery,
+          // so mark the call as internal while retaining the regular runtime
+          // delegation and permission checks for its child researchers.
+          extra: { bypassAgentCheck: true, internalSubtask: true, promptOps },
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
@@ -1312,6 +1767,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       providerID: ProviderID,
       modelID: ModelID,
       sessionID: SessionID,
+      agentName?: string,
     ) {
       const exit = yield* provider.getModel(providerID, modelID).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return exit.value
@@ -1320,6 +1776,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const hint = err.data.suggestions?.length ? ` Did you mean: ${err.data.suggestions.join(", ")}?` : ""
         yield* bus.publish(Session.Event.Error, {
           sessionID,
+          visible: agentName !== "context-reviewer",
           error: new NamedError.Unknown({
             message: `Model not found: ${err.data.providerID}/${err.data.modelID}.${hint}`,
           }).toObject(),
@@ -1329,11 +1786,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     })
 
     const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const match = yield* sessions.findMessage(
-        sessionID,
-        (m) => m.info.role === "user" && !!m.info.model,
-        { agentID: "*" },
-      )
+      const match = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model, {
+        agentID: "*",
+      })
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
       return yield* provider.defaultModel()
     })
@@ -1345,7 +1800,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
-        yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        yield* bus.publish(Session.Event.Error, {
+          sessionID: input.sessionID,
+          error: error.toObject(),
+          visible: input.agent !== "context-reviewer",
+        })
         throw error
       }
 
@@ -1381,7 +1840,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           variant,
         },
         system: input.system,
+        tavernContext: input.tavernContext,
         format: input.format,
+        source: input.source ?? "user",
         provenance: input.provenance,
       }
 
@@ -1392,6 +1853,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         ...part,
         id: part.id ? PartID.make(part.id) : PartID.ascending(),
       })
+      const explicitAgentPrompt = input.parts
+        .filter((part): part is Extract<PromptInput["parts"][number], { type: "text" }> => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim()
+      const explicitContextRefs = [
+        ...new Set(
+          input.parts.flatMap((part) => {
+            if (part.type !== "file") return []
+            if (part.source?.type === "resource") return [part.source.uri]
+            if (part.source?.type === "file" || part.source?.type === "symbol") return [part.source.path]
+            return []
+          }),
+        ),
+      ]
 
       const resolvePart: (part: PromptInput["parts"][number]) => Effect.Effect<Draft<MessageV2.Part>[]> = Effect.fn(
         "SessionPrompt.resolveUserPart",
@@ -1561,6 +2037,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   yield* bus.publish(Session.Event.Error, {
                     sessionID: input.sessionID,
                     error: new NamedError.Unknown({ message }).toObject(),
+                    visible: input.agent !== "context-reviewer",
                   })
                   pieces.push({
                     messageID: info.id,
@@ -1583,6 +2060,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   yield* bus.publish(Session.Event.Error, {
                     sessionID: input.sessionID,
                     error: new NamedError.Unknown({ message }).toObject(),
+                    visible: input.agent !== "context-reviewer",
                   })
                   return [
                     {
@@ -1639,19 +2117,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (part.type === "agent") {
-          const perm = Permission.evaluate("task", part.name, ag.permission)
-          const hint = perm.action === "deny" ? " . Invoked by user; guaranteed to exist." : ""
+          const target = yield* agents.get(part.name)
+          const context =
+            target?.defaultContext === "full" ? "full" : target?.defaultContext === "task" ? "none" : "state"
           return [
             { ...part, messageID: info.id, sessionID: input.sessionID },
             {
               messageID: info.id,
               sessionID: input.sessionID,
-              type: "text",
-              synthetic: true,
-              text:
-                " Use the above message and context to generate a prompt and call the actor tool with subagent: " +
-                part.name +
-                hint,
+              type: "subtask",
+              agent: part.name,
+              description: `@${part.name}`,
+              prompt: explicitAgentPrompt || `Handle the user's request as the ${part.name} specialist.`,
+              execution: target?.defaultExecution ?? "wait",
+              context,
+              contextRefs: explicitContextRefs,
+              declaredFiles: explicitContextRefs.filter((ref) => !ref.includes("://")),
             },
           ]
         }
@@ -1662,18 +2143,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const parts = yield* Effect.forEach(input.parts, resolvePart, { concurrency: "unbounded" }).pipe(
         Effect.map((x) => x.flat().map(assign)),
       )
-
-      yield* plugin.trigger(
-        "chat.message",
-        {
-          sessionID: input.sessionID,
-          agent: input.agent,
-          model: input.model,
-          messageID: input.messageID,
-          variant: input.variant,
-        },
-        { message: info, parts },
-      )
+      const requestText = parts
+        .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !part.ignored)
+        .map((part) => part.text)
+        .join("\n")
+        .trim()
+      if (input.agent !== "context-reviewer") {
+        yield* plugin.trigger(
+          "chat.message",
+          {
+            sessionID: input.sessionID,
+            agent: input.agent,
+            model: input.model,
+            messageID: input.messageID,
+            variant: input.variant,
+          },
+          { message: info, parts },
+        )
+      }
 
       const parsed = MessageV2.Info.safeParse(info)
       if (!parsed.success) {
@@ -1749,14 +2236,52 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       )
     })
 
-    const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
-      function* (input: PromptInput) {
+    const prompt: Interface["prompt"] = Effect.fn("SessionPrompt.prompt")(function* (
+      input: PromptInput,
+      options?: PromptRunOptions,
+    ) {
         const session = yield* sessions.get(input.sessionID)
+        const userExtensionsEnabled = input.agent !== "context-reviewer"
+        if (userExtensionsEnabled && !hookStarted.has(input.sessionID)) {
+          hookStarted.add(input.sessionID)
+          yield* Effect.promise(() =>
+            dispatchHooks({
+              event: "SessionStart",
+              sessionID: input.sessionID,
+              projectID: String(session.projectID),
+              cwd: session.directory,
+              payload: { source: input.source ?? "user" },
+            }),
+          )
+        }
+        if (userExtensionsEnabled) {
+          const submitted = yield* Effect.promise(() =>
+            dispatchHooks({
+              event: "UserPromptSubmit",
+              sessionID: input.sessionID,
+              projectID: String(session.projectID),
+              cwd: session.directory,
+              payload: { parts: input.parts },
+            }),
+          )
+          if (submitted.blocked) throw new Error("User prompt was blocked by a Hook")
+        }
         if (input.source !== "spawn" && input.source !== "hook") {
           yield* revert.cleanup(session)
           yield* sweepOrphanAssistants(input.sessionID)
         }
         const message = yield* createUserMessage(input)
+        // Completion wakes are intentionally bounded while an owner is idle.
+        // Only a real user admission re-arms that budget; spawned agents,
+        // hooks, and automations must not keep a dormant session waking forever.
+        if ((input.source ?? "user") === "user") {
+          if (inbox.resetCompletionWakeBudget) {
+            yield* inbox.resetCompletionWakeBudget({
+              sessionID: input.sessionID,
+              actorID: input.agentID ?? "main",
+            })
+          }
+        }
         if (input.delivery === "steer") {
           yield* sessions.updatePart({
             id: PartID.ascending(),
@@ -1788,7 +2313,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             return message
           }
         }
-        return yield* loop({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
+        const result = loop(
+          {
+            sessionID: input.sessionID,
+            agentID: input.agentID ?? "main",
+            task_id: input.task_id,
+            permission: options?.permission,
+            interactive: options?.interactive,
+            onPermissionRequest: options?.onPermissionRequest,
+            onQuestionRequest: options?.onQuestionRequest,
+          },
+          options?.abortSignal,
+        )
+        return yield* result
       },
     )
 
@@ -1812,16 +2349,38 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID, agentID?: string, task_id?: string) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
-      "SessionPrompt.run",
-    )(
-      function* (sessionID: SessionID, agentID?: string, task_id?: string) {
+    const interruptedAssistant = Effect.fnUntraced(function* (sessionID: SessionID, agentID?: string) {
+      const message = yield* lastAssistant(sessionID, agentID)
+      if (message.info.role !== "assistant" || message.info.error) return message
+      const info = {
+        ...message.info,
+        time: { ...message.info.time, completed: message.info.time.completed ?? Date.now() },
+        error: new MessageV2.AbortedError({ message: "User cancelled the response" }).toObject(),
+      }
+      yield* sessions.updateMessage(info)
+      return { ...message, info }
+    })
+
+    const runLoop: (
+      sessionID: SessionID,
+      agentID?: string,
+      task_id?: string,
+      abortSignal?: AbortSignal,
+      options?: PromptRunOptions,
+    ) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(function* (
+      sessionID: SessionID,
+      agentID?: string,
+      task_id?: string,
+      abortSignal?: AbortSignal,
+      options?: PromptRunOptions,
+    ) {
         const ctx = yield* InstanceState.context
         const slog = elog.with({ sessionID })
         let structured: unknown | undefined
         let step = 0
+        let reviewHandoff: ContextReviewRecord | undefined
+        let reviewSource: MessageV2.WithParts | undefined
         const session = yield* sessions.get(sessionID)
-        let composeRoute = session.composeRoute
         let lastFinishedForPrune: MessageV2.Assistant | undefined
         let lastModelForPrune: Provider.Model | undefined
         let outputLengthContinuations = 0
@@ -1834,6 +2393,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // died before emitting a completion event. Keep its retry budget
         // independent from invalid output so one class does not consume the other.
         let interruptedContinuations = 0
+        // A provider-executed native search has no local execute closure where
+        // the configured direct or browser route can run. Allow one synthetic
+        // re-entry when it returns no verifiable citations or an error.
+        let nativeWebSearchFallbacks = 0
         // structured-output 专用 retry：上限来自 lastUser.format.retryCount（默认 2），
         // 与 invalidContinuations（generic invalid）分离，互不污染。局部于 runLoop，
         // 新一轮用户 turn 自动归零。
@@ -1845,10 +2408,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const steerTextParts = (msg: MessageV2.WithParts) =>
           msg.parts.filter(
             (part): part is MessageV2.TextPart =>
-              part.type === "text" &&
-              !part.synthetic &&
-              !part.ignored &&
-              part.text.trim().length > 0,
+              part.type === "text" && !part.synthetic && !part.ignored && part.text.trim().length > 0,
           )
 
         const mergeSteerFollowups = (
@@ -1871,9 +2431,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           if (steer.length === 0) return
           const target = steer.at(-1)
           if (!target || target.info.role !== "user") return
-          const merged = steer
-            .flatMap((msg) => steerTextParts(msg).map((part) => part.text.trim()))
-            .filter(Boolean)
+          const merged = steer.flatMap((msg) => steerTextParts(msg).map((part) => part.text.trim())).filter(Boolean)
           if (merged.length === 0) return
           for (const msg of steer) {
             for (const part of msg.parts) {
@@ -1949,6 +2507,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
               error: input.assistant.error,
+              visible: !isUserHiddenSystemActorID(input.assistant.agentID),
             })
             return false
           }
@@ -2006,275 +2565,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             synthetic: true,
             text: input.text,
           } satisfies MessageV2.TextPart)
-        })
-
-        const ensureComposeRoute = Effect.fn("SessionPrompt.ensureComposeRoute")(function* (msgs: MessageV2.WithParts[]) {
-          if ((agentID ?? "main") !== "main") return composeRoute
-          const composeUser = getLatestComposeUserMessage(msgs)
-          if (!composeUser) return composeRoute
-          if (composeRoute?.sourceMessageID === composeUser.info.id) return composeRoute
-          const next = classifyComposeRoute({ message: composeUser })
-          const persisted = {
-            ...next,
-            time: {
-              created:
-                composeRoute?.sourceMessageID === composeUser.info.id ? composeRoute.time.created : next.time.created,
-              updated: Date.now(),
-            },
-          }
-          yield* sessions.setComposeRoute({ sessionID, composeRoute: persisted })
-          composeRoute = persisted
-          yield* slog.info("compose_route_selected", {
-            sessionID,
-            sourceMessageID: persisted.sourceMessageID,
-            strategy: persisted.strategy,
-            difficulty: persisted.difficulty,
-            taskType: persisted.taskType,
-            executionShape: persisted.executionShape,
-            reason: persisted.reason,
-            requiresTaskBoard: persisted.requiresTaskBoard,
-            requiresPlan: persisted.requiresPlan,
-            requiresReview: persisted.requiresReview,
-            requiresVerify: persisted.requiresVerify,
-          })
-          return composeRoute
-        })
-
-        // Task stop-condition gate (main agent only). Before honoring a stop,
-        // list non-terminal tasks in the session: if any remain, inject a
-        // nudge as a synthetic user turn and re-enter (return true) so the
-        // model closes them with `task done` / `task abandon`. ReAct cap +
-        // counter mirror the goal gate; cap-exceeded allows stop with a
-        // warn log (no reportedStatus on main). owner=undefined picks up
-        // tasks orphaned by subagent gates that hit their own cap. Runs
-        // BEFORE goalGate because task state is cheaper to settle and a
-        // pending-task board pollutes any goal verdict.
-        const taskGate = Effect.fn("SessionPrompt.taskGate")(function* (lastUser: MessageV2.User) {
-          if ((agentID ?? "main") !== "main") return false
-          const route = shouldManageComposeRoute(lastUser.agent) ? composeRoute : undefined
-          if (!route?.requiresTaskBoard) {
-            yield* taskGateState.clear(sessionID)
-            return false
-          }
-          // If the main agent has the `task` tool stripped (Permission.disabled),
-          // a nudge to call `task done` is unsatisfiable and would re-loop to
-          // cap. Skip the gate entirely. Mirrors the canWrite skip in
-          // actor/spawn.ts (Permission.disabled(["write"], ...) check on
-          // forkAgentInfo). Per-session resolution means this checks the
-          // agent's static permission only (good enough for v1; session-
-          // level overrides re-enabling task on a denied agent are
-          // pathological and out of scope).
-          const mainAgent = yield* agents.get("main").pipe(Effect.orElseSucceed(() => undefined))
-          if (mainAgent && Permission.disabled(["task"], mainAgent.permission).has("task")) return false
-          // Per-message `tools` is the second tool-strip layer (llm.ts:720
-          // `input.user.tools?.[k] !== false` filter), separate from
-          // Permission.disabled. A slash command pinning a narrow toolset for
-          // its turn can drop `task` even when permission allows it; nudging
-          // is then unsatisfiable. Same skip rationale, narrower window.
-          if (lastUser.tools?.["task"] === false) return false
-
-          const allTasks = yield* taskRegistry.list({
-            session_id: sessionID,
-            include_terminal: true,
-          })
-          const blockedTasks = allTasks.filter((task) => task.status === "blocked")
-          const hasTaskBoard = allTasks.length > 0
-          if (!hasTaskBoard || blockedTasks.length > 0) {
-            const count = yield* taskGateState.get(sessionID)
-            if (count >= MAX_TASK_GATE_MAIN_REACT) {
-              yield* slog.warn("compose task board gate hit cap; allowing stop", {
-                sessionID,
-                hasTaskBoard,
-                blockedTasks: blockedTasks.map((task) => task.id),
-              })
-              yield* taskGateState.clear(sessionID)
-              return false
-            }
-            yield* taskGateState.bump(sessionID)
-            yield* slog.info("compose_task_gate_blocked", {
-              sessionID,
-              sourceMessageID: route.sourceMessageID,
-              strategy: route.strategy,
-              difficulty: route.difficulty,
-              taskType: route.taskType,
-              hasTaskBoard,
-              blockedTasks: blockedTasks.map((task) => task.id),
-              missingStages: getMissingComposeStages({
-                route,
-                evidence: collectComposeEvidence({ messages: [], route }),
-                hasTaskBoard,
-                hasBlockedTasks: blockedTasks.length > 0,
-              }),
-            })
-            yield* reenterWithReminder({
-              lastUser,
-              text: buildComposeGateReminder({
-                route,
-                missing: getMissingComposeStages({
-                  route,
-                  evidence: collectComposeEvidence({ messages: [], route }),
-                  hasTaskBoard,
-                  hasBlockedTasks: blockedTasks.length > 0,
-                }),
-                hasTaskBoard,
-                hasBlockedTasks: blockedTasks.length > 0,
-              }),
-            })
-            return true
-          }
-
-          const count = yield* taskGateState.get(sessionID)
-          // runLoop is annotated `R = never`; TaskGate.decide raises a
-          // TaskRegistry.Service requirement that we close locally with the
-          // layer-resolved binding so it doesn't leak into runLoop's R-set.
-          const decision = yield* TaskGate.decide({
-            session_id: sessionID,
-            owner: undefined,
-            reactCount: count,
-            maxReact: MAX_TASK_GATE_MAIN_REACT,
-            mode: "main",
-          }).pipe(Effect.provideService(TaskRegistry.Service, taskRegistry))
-          if (!decision.needReentry) {
-            if (decision.capExceeded) {
-              yield* slog.warn("task gate hit cap; allowing stop", {
-                sessionID,
-                incompleteTasks: decision.incompleteTasks,
-              })
-            }
-            yield* taskGateState.clear(sessionID)
-            return false
-          }
-          yield* taskGateState.bump(sessionID)
-          yield* slog.info("compose_task_gate_blocked", {
-            sessionID,
-            sourceMessageID: route.sourceMessageID,
-            strategy: route.strategy,
-            difficulty: route.difficulty,
-            taskType: route.taskType,
-            incompleteTasks: decision.incompleteTasks,
-          })
-          yield* reenterWithReminder({
-            lastUser,
-            text: decision.reentryText,
-          })
-          return true
-        })
-
-        const composeGate = Effect.fn("SessionPrompt.composeGate")(function* (lastUser: MessageV2.User) {
-          if ((agentID ?? "main") !== "main") return false
-          if (!shouldManageComposeRoute(lastUser.agent)) {
-            yield* composeGateState.clear(sessionID)
-            return false
-          }
-          if (!composeRoute) {
-            const state = yield* composeGateState.get(sessionID)
-            if (state.count >= MAX_COMPOSE_GATE_MAIN_REACT) {
-              yield* slog.warn("compose route gate hit cap without a route; allowing stop", { sessionID })
-              yield* composeGateState.clear(sessionID)
-              return false
-            }
-            yield* composeGateState.bump(sessionID)
-            yield* reenterWithReminder({
-              lastUser,
-              text: [
-                "<system-reminder>",
-                "This compose session reached a stop point without a runtime route decision.",
-                "Classify the task first, then continue through the matching compose strategy before you stop.",
-                "</system-reminder>",
-              ].join("\n"),
-            })
-            return true
-          }
-
-          const transcriptContext = yield* MessageV2.loadContinuationContextEffect(sessionID, {
-            contextFrom: session.contextFrom,
-            contextWatermark: session.contextWatermark,
-            agentID: agentID ?? "main",
-          })
-          const transcriptMsgs = transcriptContext.messages
-          yield* slog.info("compose_gate_context_source", {
-            sessionID,
-            agentID: agentID ?? "main",
-            source: transcriptContext.own.source,
-            boundaryType: transcriptContext.own.boundary?.kind,
-            boundaryValid: transcriptContext.own.boundary?.valid ?? false,
-            fallbackReason: transcriptContext.own.fallbackReason,
-            messageCount: transcriptMsgs.length,
-            inherited: !!session.contextFrom,
-            inheritedSource: transcriptContext.parent?.source,
-            inheritedBoundaryType: transcriptContext.parent?.boundary?.kind,
-            inheritedBoundaryValid: transcriptContext.parent?.boundary?.valid ?? false,
-            inheritedFallbackReason: transcriptContext.parent?.fallbackReason,
-          })
-          const allTasks = composeRoute.requiresTaskBoard
-            ? yield* taskRegistry.list({
-                session_id: sessionID,
-                include_terminal: true,
-              })
-            : []
-          const evidence = collectComposeEvidence({ messages: transcriptMsgs, route: composeRoute })
-          const missing = getMissingComposeStages({
-            route: composeRoute,
-            evidence,
-            hasTaskBoard: allTasks.length > 0,
-            hasOpenTasks: allTasks.some((task) => task.status === "open" || task.status === "in_progress"),
-            hasBlockedTasks: allTasks.some((task) => task.status === "blocked"),
-          })
-          if (missing.length === 0) {
-            yield* slog.info("compose_route_completed", {
-              sessionID,
-              sourceMessageID: composeRoute.sourceMessageID,
-              strategy: composeRoute.strategy,
-              difficulty: composeRoute.difficulty,
-              taskType: composeRoute.taskType,
-            })
-            yield* composeGateState.clear(sessionID)
-            return false
-          }
-
-          const gateState = yield* composeGateState.get(sessionID)
-          if (gateState.count >= MAX_COMPOSE_GATE_MAIN_REACT) {
-            yield* slog.warn("compose gate hit cap; failing stop", {
-              sessionID,
-              missing,
-              strategy: composeRoute.strategy,
-            })
-            yield* composeGateState.clear(sessionID)
-            const assistant = yield* lastAssistant(sessionID, agentID)
-            if (assistant.info.role === "assistant") {
-              yield* writeModelError({
-                assistant: assistant.info,
-                reason:
-                  "Compose route requirements are still incomplete after repeated re-entry: " + missing.join("; "),
-              })
-            }
-            return false
-          }
-
-          const nextCount = yield* composeGateState.bump(sessionID, missing)
-          yield* slog.info("compose_gate_blocked", {
-            sessionID,
-            sourceMessageID: composeRoute.sourceMessageID,
-            strategy: composeRoute.strategy,
-            difficulty: composeRoute.difficulty,
-            taskType: composeRoute.taskType,
-            missingStages: missing,
-            reentryCount: nextCount,
-          })
-          yield* reenterWithReminder({
-            lastUser,
-            text:
-              buildComposeGateReminder({
-                route: composeRoute,
-                missing,
-                hasTaskBoard: allTasks.length > 0,
-                hasOpenTasks: allTasks.some((task) => task.status === "open" || task.status === "in_progress"),
-                hasBlockedTasks: allTasks.some((task) => task.status === "blocked"),
-              }) +
-              "\n" +
-              ["<system-reminder>", composeGateRecoveryLine(missing, nextCount), "</system-reminder>"].join("\n"),
-          })
-          return true
         })
 
         // Goal stop-condition gate (main agent only). Before honoring a stop,
@@ -2374,6 +2664,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
               error: input.assistant.error,
+              visible: !isUserHiddenSystemActorID(input.assistant.agentID),
             })
             return false
           }
@@ -2408,44 +2699,69 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           return true
         })
 
-        const autoContinueInterruptedOutput = Effect.fn("SessionPrompt.autoContinueInterruptedOutput")(function* (input: {
-          lastUser: MessageV2.User
-          assistant: MessageV2.Assistant
-          parts: MessageV2.Part[]
-        }) {
-          if (!isInterruptedStreamAssistant(input.assistant, input.parts)) return false
-          if (interruptedContinuations >= INTERRUPTED_OUTPUT_CONTINUATION_LIMIT) return false
+        const autoContinueInterruptedOutput = Effect.fn("SessionPrompt.autoContinueInterruptedOutput")(
+          function* (input: { lastUser: MessageV2.User; assistant: MessageV2.Assistant; parts: MessageV2.Part[] }) {
+            if (!isInterruptedStreamAssistant(input.assistant, input.parts)) return false
+            if (interruptedContinuations >= INTERRUPTED_OUTPUT_CONTINUATION_LIMIT) return false
 
-          interruptedContinuations++
-          yield* slog.info("auto-continuing interrupted output", { attempt: interruptedContinuations })
-          const msg = yield* sessions.updateMessage({
-            id: MessageID.ascending(),
-            role: "user" as const,
-            sessionID: input.lastUser.sessionID,
-            agentID: input.lastUser.agentID,
-            agent: input.lastUser.agent,
-            model: input.lastUser.model,
-            tools: input.lastUser.tools,
-            format: input.lastUser.format,
-            time: { created: Date.now() },
-          })
-          yield* sessions.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: msg.sessionID,
-            type: "text",
-            synthetic: true,
-            text: [
-              "<system-reminder>",
-              "Your previous step was interrupted before the model emitted a completion event.",
-              "Continue the same task from the interruption point.",
-              "Do not restart from scratch and do not repeat completed tool calls unless their prior result is missing or unusable.",
-              "First inspect any completed tool results already in the conversation, then continue.",
-              "</system-reminder>",
-            ].join("\n"),
-          } satisfies MessageV2.TextPart)
-          return true
-        })
+            interruptedContinuations++
+            yield* slog.info("auto-continuing interrupted output", { attempt: interruptedContinuations })
+            const msg = yield* sessions.updateMessage({
+              id: MessageID.ascending(),
+              role: "user" as const,
+              sessionID: input.lastUser.sessionID,
+              agentID: input.lastUser.agentID,
+              agent: input.lastUser.agent,
+              model: input.lastUser.model,
+              tools: input.lastUser.tools,
+              format: input.lastUser.format,
+              time: { created: Date.now() },
+            })
+            yield* sessions.updatePart({
+              id: PartID.ascending(),
+              messageID: msg.id,
+              sessionID: msg.sessionID,
+              type: "text",
+              synthetic: true,
+              text: [
+                "<system-reminder>",
+                "Your previous step was interrupted before the model emitted a completion event.",
+                "Continue the same task from the interruption point.",
+                "Do not restart from scratch and do not repeat completed tool calls unless their prior result is missing or unusable.",
+                "First inspect any completed tool results already in the conversation, then continue.",
+                "</system-reminder>",
+              ].join("\n"),
+            } satisfies MessageV2.TextPart)
+            return true
+          },
+        )
+
+        const autoContinueNativeWebSearchFallback = Effect.fn("SessionPrompt.autoContinueNativeWebSearchFallback")(
+          function* (input: { lastUser: MessageV2.User; parts: MessageV2.Part[] }) {
+            if (nativeWebSearchFallbacks >= 1 || input.lastUser.tools?.websearch === false) return false
+            const failed = input.parts.some(
+              (part) =>
+                part.type === "tool" &&
+                part.tool === "native_web_search" &&
+                part.metadata?.providerExecuted === true &&
+                part.state.status === "completed" &&
+                part.state.metadata?.fallbackRecommended === true,
+            )
+            if (!failed) return false
+            nativeWebSearchFallbacks++
+            yield* slog.info("provider-native web search needs local fallback", { attempt: nativeWebSearchFallbacks })
+            yield* reenterWithReminder({
+              lastUser: input.lastUser,
+              text: [
+                "<system-reminder>",
+                "The provider-native web search failed or returned no verifiable URL citations.",
+                "Use the local websearch tool now. It follows the configured direct or browser discovery route; use a legacy compatibility provider only when explicitly selected. Do not retry native_web_search.",
+                "</system-reminder>",
+              ].join("\n"),
+            })
+            return true
+          },
+        )
 
         // json_schema mode but the model never produced structured output (plain
         // text stop, empty, think-only, or any other non-tool terminal). Retry up
@@ -2468,6 +2784,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
               error: input.assistant.error,
+              visible: !isUserHiddenSystemActorID(input.assistant.agentID),
             })
             return false
           }
@@ -2519,6 +2836,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* bus.publish(Session.Event.Error, {
             sessionID: input.assistant.sessionID,
             error: input.assistant.error,
+            visible: !isUserHiddenSystemActorID(input.assistant.agentID),
           })
         })
 
@@ -2537,6 +2855,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* bus.publish(Session.Event.Error, {
             sessionID: input.assistant.sessionID,
             error: input.assistant.error,
+            visible: !isUserHiddenSystemActorID(input.assistant.agentID),
+          })
+        })
+
+        const writeAbortedError = Effect.fn("SessionPrompt.writeAbortedError")(function* (assistant: MessageV2.Assistant) {
+          if (assistant.error) return
+          assistant.time.completed = assistant.time.completed ?? Date.now()
+          assistant.error = new MessageV2.AbortedError({ message: "User cancelled the response" }).toObject()
+          yield* sessions.updateMessage(assistant)
+          yield* bus.publish(Session.Event.Error, {
+            sessionID: assistant.sessionID,
+            error: assistant.error,
+            visible: !isUserHiddenSystemActorID(assistant.agentID),
           })
         })
 
@@ -2544,7 +2875,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // F55: only main agent sets session status to busy; subagent runners
           // must not touch session-level status (Runner.onBusy is Effect.void
           // for non-main actors per F47).
-          if (!agentID || agentID === "main") yield* status.set(sessionID, { type: "busy" })
           yield* inbox.drain(sessionID, agentID ?? "main").pipe(Effect.ignore)
           yield* slog.info("loop", { step })
 
@@ -2575,45 +2905,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
-          const pendingSteerIDs =
-            !agentID || agentID === "main"
-              ? yield* state.takePendingSteer(sessionID)
-              : []
-          yield* ensureComposeRoute(msgs)
-
-          // Per-user-message active recall reminder. Once the session has
-          // any memory artifacts (memory dir populated OR tasks recorded),
-          // append a brief recall protocol so the agent's reflex to query
-          // memory.search / task / actor / Read stays warm across many
-          // post-rebuild turns. Cost ~120 tokens per turn, conditional on
-          // hasMemoryOrTasks.
-          const lastUserMsgForRecall = msgs.findLast((m) => m.info.role === "user")
-          if (lastUserMsgForRecall) {
-            const hasRecallTarget = yield* checkpoint
-              .hasMemoryOrTasks(sessionID)
-              .pipe(Effect.catch(() => Effect.succeed(false)))
-            if (hasRecallTarget) {
-              const [taskHint, actorHint, memoryHint] = recallHintLines((yield* config.get()).tool)
-              lastUserMsgForRecall.parts.push({
-                id: PartID.ascending(),
-                messageID: lastUserMsgForRecall.info.id,
-                sessionID,
-                type: "text" as const,
-                synthetic: true,
-                text: [
-                  "<system-reminder>",
-                  "This session may already have recorded state.",
-                  "Before asking the user to repeat prior context, check the existing session/task state with:",
-                  taskHint,
-                  actorHint,
-                  `${memoryHint} only if task/actor state still leaves a cross-turn gap.`,
-                  "",
-                  "Don't ask the user about something the session state may already record.",
-                  "</system-reminder>",
-                ].join("\n"),
-              })
-            }
+          if (!reviewSource && agentID === "main") {
+            const candidate = msgs.findLast((message) => message.info.id === lastUser?.id)
+            if (candidate && isReviewableMainUser(candidate)) reviewSource = candidate
           }
+          const pendingSteerIDs = !agentID || agentID === "main" ? yield* state.takePendingSteer(sessionID) : []
 
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
@@ -2636,6 +2932,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           if (lastAssistant && lastUser.id < lastAssistant.id) {
             const lastAssistantParts = lastAssistantMsg?.parts ?? []
+            if (yield* autoContinueNativeWebSearchFallback({ lastUser, parts: lastAssistantParts })) continue
             const classification = classifyAssistantStep({
               phase: "existing-assistant",
               lastUser,
@@ -2669,8 +2966,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             if (classification.type === "final" && classification.degraded)
               yield* slog.warn("degraded final on abnormal finish", { finish: lastAssistant.finish })
             if (classification.type !== "continue") {
-              if (yield* taskGate(lastUser)) continue
-              if (yield* composeGate(lastUser)) continue
               if (yield* goalGate(lastUser)) continue
               yield* slog.info("exiting loop", { classification: classification.type })
               break
@@ -2681,6 +2976,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             repeatedToolValidationFailure({
               messages: msgs,
               threshold: REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD,
+              userID: lastUser.id,
             })
           ) {
             yield* slog.warn("stopping repeated tool validation failure", {
@@ -2697,7 +2993,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           step++
-          if (step === 1)
+          if (step === 1 && !isUserHiddenSystemActorID(lastUser.agentID))
             yield* title({
               session,
               modelID: lastUser.model.modelID,
@@ -2705,67 +3001,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          if (step === 1 && !session.parentID) {
-            const cfg = yield* config.get()
-            const maintenance = maintenanceConfig(cfg)
-            const run = yield* claimAutomaticMaintenance({ cfg, projectID: session.projectID }).pipe(
-              Effect.catch(() => Effect.succeed(undefined)),
-            )
-            const mdl = { providerID: lastUser.model.providerID, modelID: lastUser.model.modelID }
-            if (run) {
-              yield* Effect.gen(function* () {
-                if (run.jobKind !== "distill" && maintenance.dreamEnabled) {
-                  Maintenance.updateStage({ runID: run.id, stage: "dream", status: "running" })
-                  const dream = yield* sessions.create({ title: AUTO_DREAM_TITLE })
-                  yield* prompt({ sessionID: dream.id, agent: "dream", model: mdl, parts: [{ type: "text", text: DREAM_TASK }] })
-                  Maintenance.updateStage({ runID: run.id, stage: "dream", status: "completed" })
-                }
-
-                if (run.jobKind !== "dream" && maintenance.distillEnabled) {
-                  Maintenance.updateStage({ runID: run.id, stage: "distill", status: "running" })
-                  const distill = yield* sessions.create({ title: AUTO_DISTILL_TITLE })
-                  const result = yield* prompt({
-                    sessionID: distill.id,
-                    agent: "distill",
-                    model: mdl,
-                    parts: [{ type: "text", text: DISTILL_TASK }],
-                  })
-                  const candidates = parseDistillCandidates(
-                    result.parts
-                      .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.synthetic && !part.ignored)
-                      .map((part) => part.text)
-                      .join("\n"),
-                  ).map((candidate) => ({
-                    candidateKind: candidate.candidate_kind,
-                    targetKind: candidate.target_kind,
-                    targetPath: candidate.target_path,
-                    evidence: candidate.evidence,
-                    confidence: candidate.confidence,
-                    proposedSummary: candidate.proposed_summary,
-                    proposedPatchPreview: candidate.proposed_patch_preview,
-                  }))
-                  Maintenance.insertCandidates(run.id, candidates)
-                  Maintenance.updateStage({ runID: run.id, stage: "distill", status: "completed" })
-                }
-
-                Maintenance.complete({
-                  runID: run.id,
-                  status: "completed",
-                  summary: "Dream and Distill maintenance completed.",
-                })
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() => {
-                    Maintenance.fail(run.id, Cause.squash(cause))
-                    log.error("memory maintenance failed", { runID: run.id, error: Cause.squash(cause) })
-                  }),
-                ),
-                Effect.forkIn(scope),
-              )
-            }
-          }
-
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID, lastUser.agent)
           lastModelForPrune = model
           lastFinishedForPrune = lastFinished
           const task = tasks.pop()
@@ -2795,35 +3031,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
 
-          // Memory flush nudge at high context pressure
-          if (lastFinished && lastFinished.summary !== true && model) {
-            const cfg = yield* config.get()
-            const pressure = pressureLevel({ cfg, tokens: lastFinished.tokens, model })
-            if (pressure >= 2) {
-              // Inject nudge as a synthetic text part on the last user message
-              const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-              if (
-                lastUserMsg &&
-                !lastUserMsg.parts.some((p) => p.type === "text" && p.text?.includes("Context is filling up"))
-              ) {
-                lastUserMsg.parts.push({
-                  id: PartID.ascending(),
-                  messageID: lastUserMsg.info.id,
-                  sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: [
-                    "<system-reminder>",
-                    `Context is filling up (${pressure >= 3 ? ">85%" : ">70%"}).`,
-                    "If you have important learnings or decisions from this session,",
-                    "consider writing them to memory now before context may be reset.",
-                    "</system-reminder>",
-                  ].join("\n"),
-                })
-              }
-            }
-          }
-
           // Repeated-step nudge: if the last REPEATED_STEP_THRESHOLD finished
           // assistant steps made an identical tool call, the model is likely
           // stuck looping. Inject a reminder on the last user message asking it
@@ -2845,9 +3052,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
               if (
                 lastUserMsg &&
-                !lastUserMsg.parts.some(
-                  (p) => p.type === "text" && p.text?.includes("repeating the same action"),
-                )
+                !lastUserMsg.parts.some((p) => p.type === "text" && p.text?.includes("repeating the same action"))
               ) {
                 lastUserMsg.parts.push({
                   id: PartID.ascending(),
@@ -2876,23 +3081,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // summary, checkpoint-writer) are exempt from context management;
           // see docs/superpowers/specs/2026-04-28-bounded-computation-agents-design.md
           const agent = yield* agents.get(lastUser.agent)
-          const isBoundedComputation =
-            agent?.native === true && agent?.hidden === true
+          const isBoundedComputation = agent?.native === true && agent?.hidden === true
 
           const cfg = yield* config.get()
-          const overflowed =
-            !!lastFinished &&
-            overflowCheck({ cfg, tokens: lastFinished.tokens, model })
+          if (!isBoundedComputation && lastFinished && cfg.compaction?.auto !== false) {
+            const promptOps = yield* ops()
+            yield* prune
+              .fireCheckpoints({
+                sessionID,
+                model,
+                tokens: lastFinished.tokens,
+                promptOps,
+                agentID: lastUser.agentID,
+              })
+              .pipe(Effect.ignore, Effect.forkIn(scope))
+          }
+          const overflowed = !!lastFinished && overflowCheck({ cfg, tokens: lastFinished.tokens, model })
           const shouldCompact =
             !!lastFinished &&
             lastFinished.summary !== true &&
             (overflowed || shouldAutoCompact({ cfg, tokens: lastFinished.tokens, model }))
 
-          if (
-            !skipOverflowCheck &&
-            !isBoundedComputation &&
-            shouldCompact
-          ) {
+          if (!skipOverflowCheck && !isBoundedComputation && shouldCompact) {
             // Subagent overflow → per-actor compaction (lossy LLM summarization
             // scoped to the actor's (sessionID, agent_id) slice). Subagents
             // don't have checkpoints, so checkpoint+discard does not apply.
@@ -2914,6 +3124,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // slice begins at the boundary marker — context is freed for the
               // next iteration's stream. Skip the next overflow check so the
               // model can respond on the trimmed context.
+              skipOverflowCheck = true
+              continue
+            }
+
+            const rebuilt =
+              cfg.compaction?.strategy !== "legacy" && (yield* prune.maxThresholdCrossed(sessionID))
+                ? yield* Effect.gen(function* () {
+                    const boundary = yield* checkpoint.lastBoundary(sessionID)
+                    if (!boundary) return false
+                    const didInsert = yield* checkpoint.insertRebuildBoundary({
+                      sessionID,
+                      boundary,
+                      agentID: lastUser.agentID,
+                      agent: lastUser.agent,
+                      model: { providerID: model.providerID, modelID: model.id },
+                      boundaryCreatedAt: msgs.find((message) => message.info.id === boundary)?.info.time.created,
+                    })
+                    return didInsert
+                  }).pipe(Effect.catch(() => Effect.succeed(false)))
+                : false
+            if (rebuilt) {
+              yield* prune.resetThresholds(sessionID)
               skipOverflowCheck = true
               continue
             }
@@ -2976,7 +3208,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-            if (step === 1)
+            if (step === 1 && !isUserHiddenSystemActorID(lastUser.agentID))
               yield* summary.summarize({ sessionID, messageID: lastUser.id }).pipe(Effect.ignore, Effect.forkIn(scope))
 
             if (step > 1 && lastFinished) {
@@ -2999,20 +3231,70 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               }
             }
 
-            yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+            if (agent?.name !== "context-reviewer") {
+              yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+            }
 
             const format = lastUser.format ?? { type: "text" as const }
+            const contextReviewEnabled = (yield* config.getGlobal()).context_review?.enabled ?? true
+            if (step === 1 && agentID === "main" && !contextReviewEnabled) {
+              // A disabled reviewer must not leave an old hand-off available to
+              // a later re-enable. Reviews are intentionally one-turn advice.
+              yield* contextReview.expire({ sessionID })
+            }
+            const currentUser = msgs.findLast((message) => message.info.id === lastUser.id)
+            if (step === 1 && agentID === "main" && contextReviewEnabled && currentUser && isReviewableMainUser(currentUser)) {
+              const previousUser = msgs
+                .filter(
+                  (message) =>
+                    message.info.role === "user" &&
+                    message.info.id < lastUser.id &&
+                    isReviewableMainUser(message),
+                )
+                .at(-1)
+              if (previousUser && isReviewableMainUser(previousUser)) {
+                const claimedReview = yield* contextReview.claimForNextUser({
+                  sessionID,
+                  sourceUserMessageID: previousUser.info.id,
+                  consumingUserMessageID: lastUser.id,
+                })
+                if (claimedReview?.findings) {
+                  const availableSkills = new Set(
+                    (yield* skill.available(
+                      agent,
+                      Permission.merge(agent.permission, session.permission ?? [], options?.permission ?? []),
+                    )).map((item) => item.name),
+                  )
+                  reviewHandoff = {
+                    ...claimedReview,
+                    findings: {
+                      ...claimedReview.findings,
+                      // Review output is untrusted structured model output. A
+                      // hand-off may mention a Skill that was removed, hidden,
+                      // or denied after the review ran; never expose it to the
+                      // next turn as a mandatory action.
+                      skills: claimedReview.findings.skills.filter((item) => availableSkills.has(item.name)),
+                    },
+                  }
+                }
+              }
+            }
             const loadActiveTools = resolveTools({
               agent,
               session,
               model,
-              composeRoute: shouldManageComposeRoute(lastUser.agent) ? composeRoute : undefined,
               tools: lastUser.tools,
               processor: handle,
               bypassAgentCheck,
+              nativeWebSearchBlocked: nativeWebSearchFallbacks > 0,
               messages: msgs,
+              contextReviewMemory: (reviewHandoff?.findings?.memory.length ?? 0) > 0,
               agentID: lastUser.agentID,
               task_id,
+              permission: options?.permission,
+              interactive: options?.interactive,
+              onPermissionRequest: options?.onPermissionRequest,
+              onQuestionRequest: options?.onQuestionRequest,
             }).pipe(
               Effect.tap((tools) =>
                 Effect.sync(() => {
@@ -3033,16 +3315,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // agent identity — which would diverge from the parent and break the
             // prefix cache.
             const actorRecord = lastUser.agentID
-              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(
-                  Effect.orElseSucceed(() => undefined),
-                )
+              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(Effect.orElseSucceed(() => undefined))
               : undefined
             // v9 registers main as `mode: "main"` with `contextMode: "full"`.
             // Only spawned actors (subagent/peer) carry a frozen ForkContext;
             // main is the captor, never the captured.
             const isForkAgent =
-              actorRecord?.contextMode === "full" &&
-              (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
+              actorRecord?.contextMode === "full" && (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
 
             // Fork path: read frozen ForkContext from Actor service (late-bound via
             // spawnRef to break the Actor → SessionPrompt → Actor layer cycle).
@@ -3058,7 +3337,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   agentID: lastUser.agentID,
                 })
                 yield* actorRegistry
-                  .updateStatus(sessionID, lastUser.agentID!, { status: "idle", lastOutcome: "failure", lastError: "missing fork context" })
+                  .updateStatus(sessionID, lastUser.agentID!, {
+                    status: "idle",
+                    lastOutcome: "failure",
+                    lastError: "missing fork context",
+                  })
                   .pipe(Effect.ignore)
                 return "break" as const
               }
@@ -3099,17 +3382,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 parentSessionID: session.parentID,
                 system: additions,
                 prebuiltSystem,
-                messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+                messages: [...insertTavernContext(modelMsgs, lastUser.tavernContext), ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
                 tools,
                 model,
-                toolChoice: format.type === "json_schema" ? "required" : undefined,
-                agentID: lastUser.agentID,
-              })
+              toolChoice:
+                format.type === "json_schema" && ProviderTransform.supportsRequiredToolChoice(model)
+                  ? "required"
+                  : format.type === "json_schema"
+                    ? "auto"
+                    : undefined,
+              agentID: lastUser.agentID,
+              abortSignal,
+            })
 
-              if (
-                result === "continue" &&
-                (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))
-              ) {
+              if (abortSignal?.aborted) {
+                yield* writeAbortedError(handle.message)
+                return "break" as const
+              }
+
+              if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
                 return "continue" as const
               }
 
@@ -3133,8 +3424,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 return "break" as const
               }
               const forkBudgetReset = resetContinuationBudgets(handle.message, forkParts)
-              if (forkBudgetReset)
-                yield* slog.info("reset continuation budgets after usable progress", forkBudgetReset)
+              if (forkBudgetReset) yield* slog.info("reset continuation budgets after usable progress", forkBudgetReset)
               if (forkClassification.type === "failed") {
                 if (
                   yield* autoContinueInterruptedOutput({
@@ -3157,8 +3447,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 (forkClassification.type === "think-only" || forkClassification.type === "invalid") &&
                 format.type !== "json_schema"
               ) {
-                const reason =
-                  forkClassification.type === "invalid" ? forkClassification.reason : "think-only"
+                const reason = forkClassification.type === "invalid" ? forkClassification.reason : "think-only"
                 if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
                   return "continue" as const
                 return "break" as const
@@ -3192,6 +3481,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 step,
                 agent: agent.name,
               })
+              if (isTavernSession(session)) {
+                return { skills: undefined, env: [], instructions: { content: [], paths: new Set<string>() } }
+              }
               const [skills, env, instructions] = yield* Effect.all([
                 sys.skills(agent),
                 Effect.sync(() => sys.environment(model)),
@@ -3210,10 +3502,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               concurrency: 2,
             })
             const { skills, env, instructions } = systemInputs
-            const composeSystem =
-              shouldManageComposeRoute(lastUser.agent) && composeRoute
-                ? resolveComposeRuntimePolicy(composeRoute).memoryPreface
-                : undefined
             // Surface which instruction files (CLAUDE.md, AGENTS.md, ...) were loaded.
             // Only for primary sessions (subagents would be noisy) and once per session.
             if (!session.parentID && !instructionsNotified.has(sessionID)) {
@@ -3227,8 +3515,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const additions = [
               ...env,
               ...(skills ? [skills] : []),
+              ...(reviewHandoff ? [formatContextReview(reviewHandoff)].filter((item): item is string => Boolean(item)) : []),
               ...instructions.content,
-              ...(composeSystem ? [composeSystem] : []),
               ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
             ]
             // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
@@ -3249,23 +3537,67 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               step,
               agent: agent.name,
             })
+            const contextCfg = yield* config.get()
+            const activeContext = MessageV2.projectActiveContext(msgs, {
+              tailTurns: contextCfg.compaction?.tail_turns,
+              maxTailTokens: Math.min(64_000, Math.max(4_000, Math.floor(usable({ cfg: contextCfg, model }) * 0.35))),
+            })
             const { system: prebuiltSystem, inheritedMessages: modelMsgs } = yield* buildLLMRequestPrefix({
               sessionID,
               agent,
               model,
-              msgs,
+              msgs: activeContext.messages,
+              permission: Permission.merge(agent.permission, session.permission ?? [], options?.permission ?? []),
+              includeSkills: !isTavernSession(session),
               additions,
+              includeTools: !isTavernSession(session),
             }).pipe(
               Effect.provideService(LLM.Service, llm),
               Effect.provideService(ToolRegistry.Service, registry),
               Effect.provideService(Skill.Service, skill),
             )
+
+            // The assistant usage field only reflects the previous provider turn.
+            // Admit the actual request envelope as well, because large tool schemas,
+            // system instructions, or the current user message can overflow before
+            // the next assistant usage is available.
+            const requestTokens = estimateRequestTokens({
+              system: prebuiltSystem,
+              messages: modelMsgs,
+              tools,
+            })
+            const requestLimit = usable({ cfg: contextCfg, model })
+            if (!skipOverflowCheck && !isBoundedComputation && requestLimit > 0 && requestTokens >= requestLimit) {
+              yield* slog.warn("request admission triggered compaction", {
+                sessionID,
+                step,
+                requestTokens,
+                requestLimit,
+                toolCount: Object.keys(tools).length,
+              })
+              yield* compaction
+                .create({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: { providerID: model.providerID, modelID: model.id },
+                  auto: true,
+                  overflow: true,
+                  agentID: lastUser.agentID,
+                })
+                .pipe(Effect.ignore)
+              handle.message.finish = "stop"
+              handle.message.time.completed = Date.now()
+              yield* sessions.updateMessage(handle.message)
+              skipOverflowCheck = true
+              return "continue" as const
+            }
             yield* slog.info("buildLLMRequestPrefix", {
               status: "completed",
               duration: Date.now() - buildLLMRequestPrefixAt,
               sessionID,
               step,
               agent: agent.name,
+              activeContext: activeContext.stats,
             })
             const maxModeCfg = (yield* config.get()).experimental?.maxMode
             const useMaxMode =
@@ -3274,7 +3606,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const processArgs = {
               user: lastUser,
               agent,
-              permission: session.permission,
+              permission: Permission.merge(session.permission ?? [], options?.permission ?? []),
               sessionID,
               parentSessionID: session.parentID,
               submitAt: lastUser.time.created,
@@ -3282,11 +3614,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // MessageV2.User.system for logging/replay); llm.stream itself uses prebuiltSystem.
               system: additions,
               prebuiltSystem,
-              messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+              messages: [...insertTavernContext(modelMsgs, lastUser.tavernContext), ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
               tools,
               model,
-              toolChoice: format.type === "json_schema" ? ("required" as const) : undefined,
+              toolChoice:
+                format.type === "json_schema" && ProviderTransform.supportsRequiredToolChoice(model)
+                  ? ("required" as const)
+                  : format.type === "json_schema"
+                    ? ("auto" as const)
+                    : undefined,
               agentID: lastUser.agentID,
+              abortSignal,
             }
 
             const llmProcessAt = Date.now()
@@ -3299,14 +3637,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             })
             const result = useMaxMode
               ? yield* MaxMode.runMaxStep({
-                  // runMaxStep reuses the identical per-step args as handle.process,
-                  // plus the orchestration handles it needs.
+                  // runMaxStep reuses the identical per-step args as handle.process
+                  // and selects a single candidate before continuing the session.
                   ...processArgs,
                   handle,
                   llm,
                   candidates: maxModeCfg?.candidates,
-                  setStatus: (message) =>
-                    status.set(sessionID, message ? { type: "busy", message } : { type: "busy" }),
+                  setStatus: () => Effect.void,
                 })
               : yield* handle.process(processArgs)
             yield* slog.info("llmProcess", {
@@ -3317,11 +3654,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               agent: agent.name,
               toolCount: Object.keys(tools).length,
             })
+            if (abortSignal?.aborted) {
+              yield* writeAbortedError(handle.message)
+              return "break" as const
+            }
 
-            if (
-              result === "continue" &&
-              (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))
-            ) {
+            if (result === "continue" && (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))) {
               return "continue" as const
             }
 
@@ -3345,8 +3683,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return "break" as const
             }
             const budgetReset = resetContinuationBudgets(handle.message, parts)
-            if (budgetReset)
-              yield* slog.info("reset continuation budgets after usable progress", budgetReset)
+            if (budgetReset) yield* slog.info("reset continuation budgets after usable progress", budgetReset)
             if (classification.type === "failed") {
               if (
                 yield* autoContinueInterruptedOutput({
@@ -3413,8 +3750,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }).pipe(Effect.ensuring(instruction.clear(handle.message.id)))
           if (outcome === "break") {
             if ((!agentID || agentID === "main") && (yield* state.hasPendingSteer(sessionID))) continue
-            if (yield* taskGate(lastUser)) continue
-            if (yield* composeGate(lastUser)) continue
             if (yield* goalGate(lastUser)) continue
             break
           }
@@ -3422,7 +3757,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         const promptOps = yield* ops()
-        if (lastModelForPrune && lastFinishedForPrune) {
+        if (lastModelForPrune && lastFinishedForPrune && !isUserHiddenSystemActorID(lastFinishedForPrune.agentID)) {
           yield* prune
             .prune({
               sessionID,
@@ -3435,28 +3770,64 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
         const final = yield* lastAssistant(sessionID, agentID)
         const finalIsError = final.info.role === "assistant" && !!final.info.error
-        const lastUserForMetrics = yield* sessions.findMessage(
-          sessionID,
-          (m) => m.info.role === "user",
-          { agentID: "*" },
-        )
-        yield* publishAgentRequest(
-          finalIsError ? "error" : "completed",
-          Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
-        )
+        const lastUserForMetrics = yield* sessions.findMessage(sessionID, (m) => m.info.role === "user", {
+          agentID: "*",
+        })
+        if (
+          agentID === "main" &&
+          !session.parentID &&
+          !isTavernSession(session) &&
+          !finalIsError &&
+          lastModelForPrune &&
+          reviewSource?.info.role === "user"
+        ) {
+          const reviewAgent = yield* agents.get(reviewSource.info.agent)
+          const primarySnapshot = yield* MessageV2.filterCompactedEffect(sessionID, {
+            contextFrom: session.contextFrom,
+            contextWatermark: session.contextWatermark,
+            agentID: "main",
+          })
+          const watermark = primarySnapshot.findIndex((message) => message.info.id === final.info.id)
+          if (reviewAgent && watermark >= 0) {
+            yield* scheduleContextReview({
+              sessionID,
+              user: reviewSource.info,
+              assistant: final.info as MessageV2.Assistant,
+              agent: reviewAgent,
+              model: lastModelForPrune,
+              permission: Permission.merge(reviewAgent.permission, session.permission ?? [], options?.permission ?? []),
+              messages: primarySnapshot.slice(0, watermark + 1),
+            }).pipe(Effect.ignore, Effect.forkIn(scope))
+          }
+        }
+        if (!isUserHiddenSystemActorID(final.info.agentID)) {
+          yield* publishAgentRequest(
+            finalIsError ? "error" : "completed",
+            Option.isSome(lastUserForMetrics) ? lastUserForMetrics.value.info.agent : final.info.agent,
+          )
+        }
         return final
-      },
-    )
+    })
 
-    const loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
+    const loop: (
+      input: z.infer<typeof LoopInput> & Omit<PromptRunOptions, "abortSignal">,
+      abortSignal?: AbortSignal,
+    ) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
       "SessionPrompt.loop",
-    )(function* (input: z.infer<typeof LoopInput>) {
+    )(function* (input: z.infer<typeof LoopInput> & Omit<PromptRunOptions, "abortSignal">, abortSignal?: AbortSignal) {
       const agentID = input.agentID ?? "main"
       return yield* state.ensureRunning(
         input.sessionID,
         agentID,
-        lastAssistant(input.sessionID, agentID),
-        runLoop(input.sessionID, agentID, input.task_id),
+        interruptedAssistant(input.sessionID, agentID),
+        (signal) =>
+          runLoop(input.sessionID, agentID, input.task_id, signal, {
+            permission: input.permission,
+            interactive: input.interactive,
+            onPermissionRequest: input.onPermissionRequest,
+            onQuestionRequest: input.onQuestionRequest,
+          }),
+        abortSignal,
       )
     })
 
@@ -3470,7 +3841,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       yield* elog.info("command", { sessionID: input.sessionID, command: input.command, agent: input.agent })
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
-        const available = (yield* commands.list()).map((c) => c.name)
+        const available = Command.unknownCommandHints(yield* commands.list())
         const hint = available.length ? ` Available commands: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
         yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
@@ -3529,7 +3900,49 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templateCommand = yield* Effect.promise(async () => cmd.template)
+      // Skill bodies are not read until the current session/agent rules have
+      // allowed the exact name below. This also avoids retaining a stale body
+      // from a command lookup across Skill.refresh().
+      let templateCommand = cmd.source === "skill" ? "" : yield* Effect.promise(async () => cmd.template)
+
+      const taskModel = yield* Effect.gen(function* () {
+        if (cmd.model) return Provider.parseModel(cmd.model)
+        if (cmd.agent) {
+          const cmdAgent = yield* agents.get(cmd.agent)
+          if (cmdAgent?.model) return cmdAgent.model
+        }
+        if (input.model) return Provider.parseModel(input.model)
+        return yield* lastModel(input.sessionID)
+      })
+
+      yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID, input.agent)
+
+      const agent = yield* agents.get(agentName)
+      if (!agent) {
+        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
+        yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        throw error
+      }
+
+      if (cmd.source === "skill") {
+        const session = yield* sessions.get(input.sessionID)
+        const allowed = yield* skill.available(
+          agent,
+          Permission.merge(agent.permission, session.permission ?? []),
+        )
+        const current = allowed.find((item) => item.name === input.command)
+        if (!current) {
+          // Do not distinguish a deleted Skill from one denied by the current
+          // session/agent rules. Slash commands must not disclose either its
+          // metadata or retained body after access is revoked.
+          const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".` })
+          yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+          throw error
+        }
+        templateCommand = current.content
+      }
 
       let template: string
       if (cmd.source === "skill") {
@@ -3570,35 +3983,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }
       template = template.trim()
 
-      const taskModel = yield* Effect.gen(function* () {
-        if (cmd.model) return Provider.parseModel(cmd.model)
-        if (cmd.agent) {
-          const cmdAgent = yield* agents.get(cmd.agent)
-          if (cmdAgent?.model) return cmdAgent.model
-        }
-        if (input.model) return Provider.parseModel(input.model)
-        return yield* lastModel(input.sessionID)
-      })
-
-      yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
-
-      const agent = yield* agents.get(agentName)
-      if (!agent) {
-        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
-        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
-        const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
-        yield* bus.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
-        throw error
-      }
-
       const templateParts = yield* resolvePromptParts(template)
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
+      const subtaskContext =
+        agent.defaultContext === "full" ? "full" : agent.defaultContext === "task" ? "none" : "state"
+      const subtaskRefs = templateParts.flatMap((part) => {
+        if (part.type !== "file") return []
+        if (part.source?.type === "resource") return [part.source.uri]
+        if (part.source?.type === "file" || part.source?.type === "symbol") return [part.source.path]
+        return []
+      })
 
       let parts: PromptInput["parts"]
       if (isSubtask) {
-        const promptText = cmd.source === "skill"
-          ? templateCommand + (input.arguments.trim() ? "\n\n" + input.arguments : "")
-          : (templateParts.find((y): y is typeof y & { type: "text"; text: string } => y.type === "text"))?.text ?? ""
+        const promptText =
+          cmd.source === "skill"
+            ? templateCommand + (input.arguments.trim() ? "\n\n" + input.arguments : "")
+            : (templateParts.find((y): y is typeof y & { type: "text"; text: string } => y.type === "text")?.text ?? "")
         parts = [
           {
             type: "subtask" as const,
@@ -3607,12 +4008,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             command: input.command,
             model: { providerID: taskModel.providerID, modelID: taskModel.modelID },
             prompt: promptText,
+            execution: agent.defaultExecution ?? "wait",
+            context: subtaskContext,
+            contextRefs: [...new Set(subtaskRefs)],
+            declaredFiles: [...new Set(subtaskRefs.filter((ref) => !ref.includes("://")))],
+            ...(input.command === "deep-research"
+              ? {
+                  research: ResearchDispatchSnapshot.parse({
+                    kind: "deep-research",
+                    ...(input.arguments.trim()
+                      ? { title: input.arguments.replace(/\s+/g, " ").trim().slice(0, 240) }
+                      : {}),
+                    depth: /(?:\bdeep\b|深入|深度|全面|详尽)/i.test(input.arguments)
+                      ? "deep"
+                      : /(?:\bquick\b|快速|简要|速查)/i.test(input.arguments)
+                        ? "quick"
+                        : "standard",
+                    phase: "planning",
+                  }),
+                }
+              : {}),
           },
         ]
       } else if (cmd.source === "skill") {
-        const visibleText = input.arguments.trim()
-          ? `/${input.command} ${input.arguments}`
-          : `/${input.command}`
+        const visibleText = input.arguments.trim() ? `/${input.command} ${input.arguments}` : `/${input.command}`
         const skillPart = {
           type: "text" as const,
           text: `<skill_content name="${input.command}">\n${templateCommand}\n</skill_content>`,
@@ -3672,7 +4091,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     )
     return impl
   }),
-)
+).pipe(Layer.provide(ContextReview.layer))
 
 export const defaultLayer = Layer.suspend(() =>
   layer.pipe(
@@ -3708,9 +4127,6 @@ export const defaultLayer = Layer.suspend(() =>
         CrossSpawnSpawner.defaultLayer,
         Inbox.defaultLayer,
         Goal.defaultLayer,
-        TaskGateState.defaultLayer,
-        ComposeGateState.defaultLayer,
-        TaskRegistry.defaultLayer,
       ),
     ),
   ),
@@ -3732,9 +4148,13 @@ export const PromptInput = z.object({
     ),
   agent: z.string().optional(),
   agentID: z.string().optional(),
-  task_id: z.string().optional()
-    .describe("If the spawning caller bound this prompt to a specific user-task (T4 etc), pass its TID. Propagates to Tool.Context.taskId so memory-path-guard allows writes to tasks/<task_id>/*.md."),
-  source: z.enum(["user", "spawn", "hook"]).optional(),
+  task_id: z
+    .string()
+    .optional()
+    .describe(
+      "If the spawning caller bound this prompt to a specific user-task (T4 etc), pass its TID. Propagates to Tool.Context.taskId so memory-path-guard allows writes to tasks/<task_id>/*.md.",
+    ),
+  source: z.enum(["user", "spawn", "hook", "automation"]).optional(),
   provenance: MessageV2.Provenance.optional(),
   noReply: z.boolean().optional(),
   tools: z
@@ -3743,6 +4163,7 @@ export const PromptInput = z.object({
     .describe("@deprecated tools and permissions have been merged, you can set permissions on the session itself now"),
   format: MessageV2.Format.optional(),
   system: z.string().optional(),
+  tavernContext: MessageV2.TavernContext.optional(),
   variant: z.string().optional(),
   delivery: z.enum(["default", "steer"]).optional(),
   parts: z.array(
@@ -3882,11 +4303,13 @@ function hasUsableAssistantProgress(assistant: MessageV2.Assistant, parts: Messa
 function isInterruptedStreamAssistant(assistant: MessageV2.Assistant, parts: MessageV2.Part[]) {
   if (assistant.error?.name !== "ModelError" && assistant.error?.name !== "MessageAbortedError") return false
   if (assistant.summary || assistant.structured !== undefined) return false
-  const stepFinish = [...parts]
-    .reverse()
-    .find((part): part is MessageV2.StepFinishPart => part.type === "step-finish")
+  const stepFinish = [...parts].reverse().find((part): part is MessageV2.StepFinishPart => part.type === "step-finish")
   if (stepFinish?.reason === "missing-finish-step") return true
   return hasUsableAssistantProgress(assistant, parts)
+}
+
+function isTavernSession(session: Pick<Session.Info, "extension">) {
+  return session.extension?.pluginID === "lfcode-tavern" && session.extension.type === "tavern"
 }
 
 const bashRegex = /!`([^`]+)`/g
@@ -3896,4 +4319,3 @@ const placeholderRegex = /\$(\d+)/g
 const quoteTrimRegex = /^["']|["']$/g
 
 export * as SessionPrompt from "./prompt"
-

@@ -183,14 +183,17 @@ describe("tool.registry", () => {
         expect(ids).toContain("search")
         expect(ids).toContain("tree")
         expect(ids).toContain("archive_inspect")
-        expect(ids).toContain("replace_range")
-        expect(ids).toContain("symbol_edit")
+        expect(ids).toContain("edit")
+        expect(ids).not.toContain("replace_range")
+        expect(ids).not.toContain("symbol_edit")
+        expect(ids).not.toContain("apply_patch")
+        expect(ids).not.toContain("write")
         expect(ids).toContain("edit_history")
       }),
     ),
   )
 
-  it.live("all models expose the same patch-first public file tools", () =>
+  it.live("all models expose edit as the only public file-editing tool", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
@@ -212,16 +215,116 @@ describe("tool.registry", () => {
         })
 
         for (const tools of [patchTools, legacyTools]) {
-          expect(tools.find((tool) => tool.id === "apply_patch")).toBeDefined()
-          expect(tools.find((tool) => tool.id === "replace_range")).toBeDefined()
-          expect(tools.find((tool) => tool.id === "symbol_edit")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "edit")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "shell_process")).toBeDefined()
           expect(tools.find((tool) => tool.id === "edit_history")).toBeDefined()
           expect(tools.find((tool) => tool.id === "search")).toBeDefined()
+          expect(tools.find((tool) => tool.id === "apply_patch")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "replace_range")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "symbol_edit")).toBeUndefined()
           expect(tools.find((tool) => tool.id === "write")).toBeUndefined()
-          expect(tools.find((tool) => tool.id === "edit")).toBeUndefined()
+          expect(tools.find((tool) => tool.id === "background_job")).toBeUndefined()
           expect(tools.find((tool) => tool.id === "glob")).toBeUndefined()
           expect(tools.find((tool) => tool.id === "grep")).toBeUndefined()
         }
+
+        expect(patchTools.find((tool) => tool.id === "edit")?.description).toContain("only file-editing tool")
+        expect(legacyTools.find((tool) => tool.id === "edit")?.description).toContain("only file-editing tool")
+      }),
+    ),
+  )
+
+  it.live("exposes actor dispatch to the primary agent but not a subagent", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const general = yield* agents.get("general")
+        const build = yield* agents.get("build")
+        if (!general) throw new Error("no general agent")
+        if (!build) throw new Error("no build agent")
+
+        const subagentTools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: general,
+        })
+        const primaryTools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: build,
+        })
+        expect(subagentTools.find((tool) => tool.id === "actor")).toBeUndefined()
+        expect(primaryTools.find((tool) => tool.id === "actor")).toBeDefined()
+      }),
+    ),
+  )
+
+  it.live("keeps browser verification tools visible for narrow read-only agents", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const explore = yield* agents.get("explore")
+        if (!explore) throw new Error("no explore agent")
+
+        const tools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: explore,
+        })
+        const ids = new Set(tools.map((tool) => tool.id))
+        expect(ids.has("browser")).toBe(true)
+        expect(ids.has("app_open_browser")).toBe(true)
+        expect(ids.has("app_browser_snapshot")).toBe(true)
+      }),
+    ),
+  )
+
+  it.live("hides management tools from normal Build agents but honors an explicit allowlist", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agents = yield* Agent.Service
+        const build = yield* agents.get("build")
+        if (!build) throw new Error("no build agent")
+
+        const normal = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: build,
+        })
+        const normalIDs = new Set(normal.map((tool) => tool.id))
+        for (const id of ["read", "search", "edit", "shell", "shell_process", "task", "question"]) {
+          expect(normalIDs.has(id)).toBe(true)
+        }
+        for (const id of [
+          "plugin_author",
+          "plugin_manage",
+          "skill_manage",
+          "hook_manage",
+          "mcp_manage",
+          "provider_manage",
+          "credential_manage",
+          "context_broker",
+          "capability_manage",
+        ]) {
+          expect(normalIDs.has(id)).toBe(false)
+        }
+
+        const management = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: {
+            ...build,
+            name: "management-fixture",
+            toolAllowlist: ["plugin_manage", "credential_manage"],
+          },
+        })
+        const managementIDs = new Set(management.map((tool) => tool.id))
+        expect(managementIDs.has("plugin_manage")).toBe(true)
+        expect(managementIDs.has("credential_manage")).toBe(true)
+        expect(managementIDs.has("skill_manage")).toBe(false)
       }),
     ),
   )

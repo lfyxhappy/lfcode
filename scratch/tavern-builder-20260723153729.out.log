@@ -1,0 +1,15 @@
+  • electron-builder  version=26.8.1 os=10.0.26200
+  • loaded configuration  file=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop\electron-builder.config.ts
+  • description is missed in the package.json  appPackageFile=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop\package.json
+  • skipped dependencies rebuild  reason=npmRebuild is set to false
+  • packaging       platform=win32 arch=x64 electron=41.2.1 appOutDir=dist\win-unpacked
+  • packageManager not detected by file, falling back to environment detection  resolvedPackageManager=bun detected=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop
+  • detected workspace root for project using packageManager field  pm=bun config=bun@1.3.11 resolved=C:\算法\小应用\知识库\10_Projects\Lfcode projectDir=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop
+  • searching for node modules  pm=bun searchDir=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop
+  • note: bun does not support any CLI for dependency tree extraction, utilizing file traversal collector instead
+  • using manual traversal of node_modules to build dependency tree
+  • missing optional dependencies  dependencies=["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4","@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.4","@msgpackr-extract/msgpackr-extract-linux-arm@3.0.4","@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.4","@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4","@lydell/node-pty-darwin-arm64@1.2.0-beta.10","@lydell/node-pty-darwin-x64@1.2.0-beta.10","@lydell/node-pty-linux-arm64@1.2.0-beta.10","@lydell/node-pty-linux-x64@1.2.0-beta.10","@lydell/node-pty-win32-arm64@1.2.0-beta.10","@parcel/watcher-win32-arm64@2.5.1"]
+  • file source doesn't exist  from=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop\native
+  • updating asar integrity executable resource  executablePath=dist\win-unpacked\LfcodePre.exe
+  • file source doesn't exist  from=C:\算法\小应用\知识库\10_Projects\Lfcode\packages\desktop\native
+  • file signing skipped via signExts configuration  file=dist\win-unpacked\LfcodePre.exe

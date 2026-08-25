@@ -1,4 +1,4 @@
-Execute a Python script with the preferred project/runtime interpreter.
+Execute a Python script with the preferred project/runtime interpreter as a durable background job.
 
 Use this when Python is the natural tool for the job:
 - parsing or transforming structured data
@@ -13,3 +13,4 @@ Notes:
 - Lfcode maintains a writable managed Python environment for this tool.
 - Common packages such as `httpx`, `beautifulsoup4`, `lxml`, `pydantic`, `openpyxl`, `python-docx`, `pypdf`, `pillow`, `PyYAML`, and `tenacity` are preinstalled there.
 - Install or upgrade Python dependencies with the dedicated `pip` tool instead of shelling out manually.
+- `timeout` is an optional reminder threshold and never terminates the script. Completion is reported automatically; use `shell_process` only to inspect or wait. Cancel only after the user explicitly requests it.

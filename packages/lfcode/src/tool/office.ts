@@ -4,27 +4,43 @@ import { Effect } from "effect"
 import * as Tool from "./tool"
 import DESCRIPTION from "./office.txt"
 import { AppFileSystem } from "@/filesystem"
-import { startForegroundJob } from "@/background-job/foreground"
+import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
 import { installManagedOfficeCli, resolveOfficeCliCommand } from "@/runtime-registry/officecli"
-import { Process } from "@/util"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { SessionCwd } from "./session-cwd"
 
-const DEFAULT_TIMEOUT = 2 * 60 * 1000
 const OFFICE_EXTENSIONS = new Set([".docx", ".xlsx", ".pptx"])
 
 const Parameters = z.object({
   action: z.enum(["inspect", "query", "create", "edit", "render", "validate", "merge"]),
   file: z.string().describe("Document path. Relative paths resolve from the session working directory."),
   selector: z.string().optional().describe("OfficeCLI selector for query or edit operations."),
-  operation: z.enum(["set", "add", "remove", "move", "swap", "batch"]).optional().describe("Edit operation. Required for edit."),
+  operation: z
+    .enum(["set", "add", "remove", "move", "swap", "batch"])
+    .optional()
+    .describe("Edit operation. Required for edit."),
   type: z.string().optional().describe("Element type for an add operation."),
-  properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional().describe("Properties passed as repeated --prop key=value arguments."),
-  destination: z.string().optional().describe("Destination selector for move or swap, or output document path for merge."),
+  properties: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional()
+    .describe("Properties passed as repeated --prop key=value arguments."),
+  destination: z
+    .string()
+    .optional()
+    .describe("Destination selector for move or swap, or output document path for merge."),
   data: z.string().optional().describe("JSON object for merge or JSON command list for batch."),
-  render: z.enum(["html", "screenshot", "svg", "pdf"]).optional().describe("Render output for render. Defaults to html."),
-  view: z.enum(["outline", "text", "annotated", "stats", "issues"]).optional().describe("View mode for inspect. Defaults to outline."),
-  timeout: z.number().optional().describe("Timeout in milliseconds. Defaults to 120000."),
+  render: z
+    .enum(["html", "screenshot", "svg", "pdf"])
+    .optional()
+    .describe("Render output for render. Defaults to html."),
+  view: z
+    .enum(["outline", "text", "annotated", "stats", "issues"])
+    .optional()
+    .describe("View mode for inspect. Defaults to outline."),
+  timeout: z
+    .number()
+    .optional()
+    .describe("Optional reminder threshold in milliseconds. It never terminates OfficeCLI."),
   description: z.string().describe("Clear, concise description of what this office operation does in 5-10 words."),
 })
 
@@ -39,7 +55,8 @@ export const OfficeTool = Tool.define<typeof Parameters, Tool.Metadata, AppFileS
         Effect.gen(function* () {
           const cwd = SessionCwd.get(ctx.sessionID)
           const file = normalizeDocumentPath(params.file, cwd)
-          const destination = params.action === "merge" && params.destination ? normalizeDocumentPath(params.destination, cwd) : undefined
+          const destination =
+            params.action === "merge" && params.destination ? normalizeDocumentPath(params.destination, cwd) : undefined
           const mutates = params.action === "create" || params.action === "edit" || params.action === "merge"
 
           if (params.action !== "create") {
@@ -66,53 +83,37 @@ export const OfficeTool = Tool.define<typeof Parameters, Tool.Metadata, AppFileS
             },
           })
 
-          const timeout = params.timeout ?? DEFAULT_TIMEOUT
-          const timeoutAbort = AbortSignal.timeout(timeout)
-          const abort = AbortSignal.any([ctx.abort, timeoutAbort])
-          const job = startForegroundJob({
+          const runtime = shellBackgroundRuntimeRef.current
+          if (!runtime) throw new Error("Shell background runtime is not available in this process.")
+          const job = yield* runtime.start({
             sessionID: ctx.sessionID,
             source: "officecli",
             title: params.description,
             cwd,
-            payload: {
-              command: [command.path, ...args],
-              tool: "office",
-              action: params.action,
-              file,
-            },
+            env: Object.fromEntries(
+              Object.entries({ ...process.env, OFFICECLI_SKIP_UPDATE: "1" }).filter(
+                (entry): entry is [string, string] => typeof entry[1] === "string",
+              ),
+            ),
+            shell: "",
+            shellName: "argv",
+            argv: [command.path, ...args],
+            ...(params.timeout !== undefined ? { remindAfterMs: params.timeout } : {}),
             ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
             ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
-          })
-          const result = yield* Effect.promise(() =>
-            Process.run([command.path, ...args], {
-              cwd,
-              env: { ...process.env, OFFICECLI_SKIP_UPDATE: "1" },
-              abort,
-              nothrow: true,
-              onSpawn: (process) => job.attach(process.pid),
-              onOutput: (entry) => job.append(entry.stream, entry.chunk.toString("utf8")),
-            }),
-          )
-          const stdout = result.stdout.toString("utf8").trimEnd()
-          const stderr = result.stderr.toString("utf8").trimEnd()
-          const timedOut = timeoutAbort.aborted && !ctx.abort.aborted
-          job.complete({
-            status: ctx.abort.aborted ? "cancelled" : timedOut || result.code !== 0 ? "failed" : "completed",
-            exitCode: result.code,
-            ...(timedOut ? { error: `OfficeCLI timed out after ${timeout}ms.` } : {}),
           })
 
           return {
             title: params.description,
-            output: renderOfficeOutput(stdout, stderr, result.code, timedOut, timeout),
+            output: `Started tracked OfficeCLI shell process.\n<job_id>${job.id}</job_id>\n<status>${job.status}</status>\nCompletion is reported automatically; use shell_process only when inspection is needed. Only shell_process.cancel after an explicit user request can terminate it.`,
             metadata: {
               action: params.action,
               file,
               ...(destination ? { destination } : {}),
               command: command.path,
               source: command.source,
-              exit: result.code,
-              timedOut,
+              jobID: job.id,
+              status: job.status,
             },
           }
         }).pipe(Effect.orDie),
@@ -188,7 +189,8 @@ function buildOfficeArgs(params: z.infer<typeof Parameters>, file: string, desti
 
 function renderOfficeOutput(stdout: string, stderr: string, exit: number, timedOut: boolean, timeout: number) {
   const output = [stdout, stderr].filter(Boolean).join(stdout && stderr ? "\n\n" : "")
-  if (timedOut) return output ? `${output}\n\nOfficeCLI timed out after ${timeout}ms.` : `OfficeCLI timed out after ${timeout}ms.`
+  if (timedOut)
+    return output ? `${output}\n\nOfficeCLI timed out after ${timeout}ms.` : `OfficeCLI timed out after ${timeout}ms.`
   if (output) return output
   return exit === 0 ? "OfficeCLI completed with no output." : `OfficeCLI failed with exit code ${exit} and no output.`
 }

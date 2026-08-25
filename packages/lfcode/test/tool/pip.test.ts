@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { PipTool } from "../../src/tool/pip"
 import { Agent } from "../../src/agent/agent"
@@ -8,9 +8,16 @@ import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "../../src/plugin"
 import { resolveBasePythonCommand } from "../../src/python/runtime"
 import { Instance } from "../../src/project/instance"
+import { shellBackgroundRuntimeRef } from "../../src/background-job/runtime-ref"
+import type { Interface as ShellBackgroundRuntime } from "../../src/background-job/runtime"
 
 const runtime = ManagedRuntime.make(
-  Layer.mergeAll(AppFileSystem.defaultLayer, Plugin.defaultLayer, Truncate.defaultLayer, Agent.defaultLayer),
+  Layer.mergeAll(
+    AppFileSystem.defaultLayer,
+    Plugin.defaultLayer,
+    Truncate.defaultLayer,
+    Agent.defaultLayer,
+  ),
 )
 
 function initPip() {
@@ -29,6 +36,21 @@ const ctx = {
 }
 
 const python = resolveBasePythonCommand()
+let previousRuntime: ShellBackgroundRuntime | undefined
+
+beforeEach(() => {
+  previousRuntime = shellBackgroundRuntimeRef.current
+  shellBackgroundRuntimeRef.current = {
+    start: (input) => Effect.succeed({ id: "job_pip_test", status: "running", source: input.source } as never),
+    wait: () => Effect.succeed({ timedOut: true }),
+    cancel: () => Effect.succeed({} as never),
+    reattachRunningJobs: () => Effect.void,
+  }
+})
+
+afterEach(() => {
+  shellBackgroundRuntimeRef.current = previousRuntime
+})
 
 describe("tool.pip", () => {
   test(
@@ -48,8 +70,10 @@ describe("tool.pip", () => {
             ctx,
           ),
         )
-          expect(result.metadata.exit).toBe(0)
+          expect(result.metadata.jobID).toBeTruthy()
+          expect(result.metadata.status).toBe("running")
           expect(result.metadata.python).toBeTruthy()
+          expect(result.output).toContain("Started durable pip background job")
         },
       })
     },

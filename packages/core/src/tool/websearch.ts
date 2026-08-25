@@ -13,6 +13,7 @@ import {
   extractWebSearchSources,
   getWebSearchProviderOrder,
   isRetryableWebSearchFailure,
+  normalizeWebSearchQuery,
   type WebSearchFailureClass,
   type WebSearchProvider,
   type WebSearchSource,
@@ -86,7 +87,11 @@ export const defaultConfigLayer = Layer.sync(ConfigService, () =>
   }),
 )
 
-export function selectProvider(_sessionID: string, _flags?: Pick<Config, "enableExa" | "enableParallel">, override?: Provider): Provider {
+export function selectProvider(
+  _sessionID: string,
+  _flags?: Pick<Config, "enableExa" | "enableParallel">,
+  override?: Provider,
+): Provider {
   return getWebSearchProviderOrder(override)[0] ?? "exa"
 }
 
@@ -165,7 +170,8 @@ const callMcp = <F extends Schema.Struct.Fields>(
     return yield* Effect.gen(function* () {
       const response = yield* HttpClient.filterStatusOk(http).execute(request)
       const body = yield* response.text
-      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES) return yield* Effect.fail(new Error("response_too_large"))
+      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES)
+        return yield* Effect.fail(new Error("response_too_large"))
       return yield* parseResponse(body)
     }).pipe(
       Effect.timeoutOrElse({
@@ -176,7 +182,11 @@ const callMcp = <F extends Schema.Struct.Fields>(
   })
 
 const Output = Schema.Struct({
+  route: Provider,
   provider: Provider,
+  queryOriginal: Schema.String,
+  querySent: Schema.String,
+  queryFidelity: Schema.Literals(["exact", "normalized", "suspect"]),
   text: Schema.String,
   attemptedProviders: Schema.Array(Provider),
   sources: Schema.Array(
@@ -190,6 +200,12 @@ const Output = Schema.Struct({
     }),
   ),
   warnings: Schema.Array(Schema.String),
+  limits: Schema.optional(
+    Schema.Struct({
+      maxResults: Schema.optional(Schema.Number),
+      maxContextCharacters: Schema.optional(Schema.Number),
+    }),
+  ),
 })
 
 type SearchFailure = {
@@ -216,15 +232,16 @@ function classifySearchFailure(provider: WebSearchProvider, error: unknown): Sea
     return { provider, classification, retryable: isRetryableWebSearchFailure(classification), status }
   }
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  const classification: WebSearchFailureClass = message.includes("timed_out") || message.includes("timeout")
-    ? "timeout"
-    : message.includes("credential") || message.includes("unauthorized") || message.includes("forbidden")
-      ? "missing_credentials"
-      : message.includes("parse")
-        ? "parse_failure"
-        : message.includes("empty")
-          ? "empty_response"
-          : "transport"
+  const classification: WebSearchFailureClass =
+    message.includes("timed_out") || message.includes("timeout")
+      ? "timeout"
+      : message.includes("credential") || message.includes("unauthorized") || message.includes("forbidden")
+        ? "missing_credentials"
+        : message.includes("parse")
+          ? "parse_failure"
+          : message.includes("empty")
+            ? "empty_response"
+            : "transport"
   return { provider, classification, retryable: isRetryableWebSearchFailure(classification) }
 }
 
@@ -239,31 +256,32 @@ const callSearchProvider = (input: {
   sessionID: string
   query: typeof Input.Type
 }) => {
-  const result = input.provider === "exa"
-    ? callMcp(input.http, exaUrl(input.config.exaApiKey), "web_search_exa", ExaArgs, {
-        query: input.query.query,
-        type: input.query.type || "auto",
-        numResults: input.query.numResults || 8,
-        livecrawl: input.query.livecrawl || "fallback",
-        contextMaxCharacters: input.query.contextMaxCharacters,
-      })
-    : callMcp(
-        input.http,
-        PARALLEL_URL,
-        "web_search",
-        ParallelArgs,
-        {
-          objective: input.query.query,
-          search_queries: [input.query.query],
-          session_id: input.sessionID,
-        },
-        {
-          "User-Agent": `lfcode/${InstallationVersion}`,
-          ...(input.config.parallelApiKey ? { Authorization: `Bearer ${input.config.parallelApiKey}` } : {}),
-        },
-      )
+  const result =
+    input.provider === "exa"
+      ? callMcp(input.http, exaUrl(input.config.exaApiKey), "web_search_exa", ExaArgs, {
+          query: input.query.query,
+          type: input.query.type || "auto",
+          numResults: input.query.numResults || 8,
+          livecrawl: input.query.livecrawl || "fallback",
+          contextMaxCharacters: input.query.contextMaxCharacters,
+        })
+      : callMcp(
+          input.http,
+          PARALLEL_URL,
+          "web_search",
+          ParallelArgs,
+          {
+            objective: input.query.query,
+            search_queries: [input.query.query],
+            session_id: input.sessionID,
+          },
+          {
+            "User-Agent": `lfcode/${InstallationVersion}`,
+            ...(input.config.parallelApiKey ? { Authorization: `Bearer ${input.config.parallelApiKey}` } : {}),
+          },
+        )
   return result.pipe(
-    Effect.flatMap((text) => text?.trim() ? Effect.succeed(text) : Effect.fail(new Error("empty_response"))),
+    Effect.flatMap((text) => (text?.trim() ? Effect.succeed(text) : Effect.fail(new Error("empty_response")))),
     Effect.mapError((error) => classifySearchFailure(input.provider, error)),
   )
 }
@@ -274,14 +292,16 @@ export const runSearchWithFallback = Effect.fn("WebSearchTool.runSearchWithFallb
   sessionID: string
   query: typeof Input.Type
 }) {
+  const fidelity = normalizeWebSearchQuery(input.query.query)
+  const query = { ...input.query, query: fidelity.querySent }
   return yield* Effect.gen(function* () {
     const providers = getWebSearchProviderOrder(input.config.provider)
     const attemptedProviders: WebSearchProvider[] = []
-    const warnings: string[] = []
+    const warnings: string[] = [...fidelity.warnings]
 
     for (const provider of providers) {
       attemptedProviders.push(provider)
-      const attempt = yield* callSearchProvider({ ...input, provider }).pipe(
+      const attempt = yield* callSearchProvider({ ...input, query, provider }).pipe(
         Effect.match({
           onFailure: (failure) => ({ ok: false as const, failure }),
           onSuccess: (text) => ({ ok: true as const, text }),
@@ -289,11 +309,19 @@ export const runSearchWithFallback = Effect.fn("WebSearchTool.runSearchWithFallb
       )
       if (attempt.ok) {
         return {
+          route: provider,
           provider,
+          queryOriginal: fidelity.queryOriginal,
+          querySent: fidelity.querySent,
+          queryFidelity: fidelity.queryFidelity,
           text: attempt.text,
           attemptedProviders,
           sources: extractWebSearchSources(attempt.text),
           warnings,
+          limits: {
+            maxResults: query.numResults ?? 8,
+            maxContextCharacters: query.contextMaxCharacters,
+          },
         }
       }
       warnings.push(formatSearchFailure(attempt.failure))
@@ -304,7 +332,8 @@ export const runSearchWithFallback = Effect.fn("WebSearchTool.runSearchWithFallb
   }).pipe(
     Effect.timeoutOrElse({
       duration: Duration.seconds(45),
-      orElse: () => Effect.fail({ provider: "exa", classification: "timeout", retryable: true } satisfies SearchFailure),
+      orElse: () =>
+        Effect.fail({ provider: "exa", classification: "timeout", retryable: true } satisfies SearchFailure),
     }),
   )
 })
@@ -339,22 +368,30 @@ export const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [{ type: "text", text: formatWebSearchModelOutput(output) }],
           execute: (input, context) => {
             return Effect.gen(function* () {
+              const fidelity = normalizeWebSearchQuery(input.query)
               const provider = selectProvider(context.sessionID, config, config.provider)
               yield* permission.assert({
                 action: name,
-                resources: [input.query],
+                resources: [fidelity.querySent],
                 save: ["*"],
-                metadata: { ...input, provider },
+                metadata: {
+                  ...input,
+                  query: fidelity.querySent,
+                  provider,
+                  queryOriginal: fidelity.queryOriginal,
+                  queryFidelity: fidelity.queryFidelity,
+                },
                 sessionID: context.sessionID,
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
 
               return yield* runSearchWithFallback({ http, config, sessionID: context.sessionID, query: input }).pipe(
-                Effect.mapError((failure) =>
-                  new ToolFailure({
-                    message: `Unable to search the web for ${input.query} (${formatSearchFailure(failure)})`,
-                  }),
+                Effect.mapError(
+                  (failure) =>
+                    new ToolFailure({
+                      message: `Unable to search the web for ${fidelity.querySent} (${formatSearchFailure(failure)})`,
+                    }),
                 ),
               )
             }).pipe(

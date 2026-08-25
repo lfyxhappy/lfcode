@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
-import type { ElectronAPI, InitStep, NativeFileTransfer, SqliteMigrationProgress } from "./types"
+import type { ElectronAPI, InitStep, NativeFileTransfer, SqliteMigrationProgress, WindowVisibility } from "./types"
 
 const nativeFileTransferListeners = new Set<(transfer: NativeFileTransfer) => void>()
 
@@ -21,6 +21,14 @@ const api: ElectronAPI = {
   setWslConfig: (config) => ipcRenderer.invoke("set-wsl-config", config),
   getDisplayBackend: () => ipcRenderer.invoke("get-display-backend"),
   setDisplayBackend: (backend) => ipcRenderer.invoke("set-display-backend", backend),
+  getMobileAccessStatus: () => ipcRenderer.invoke("get-mobile-access-status"),
+  enableMobileAccess: () => ipcRenderer.invoke("enable-mobile-access"),
+  disableMobileAccess: () => ipcRenderer.invoke("disable-mobile-access"),
+  applyMobileAccessNetworkChange: () => ipcRenderer.invoke("apply-mobile-access-network-change"),
+  revokeMobileDevice: (deviceID) => ipcRenderer.invoke("revoke-mobile-device", deviceID),
+  listMobileDevices: () => ipcRenderer.invoke("list-mobile-devices"),
+  createLanBrowserPairing: () => ipcRenderer.invoke("create-lan-browser-pairing"),
+  resetMobileAccessCertificate: () => ipcRenderer.invoke("reset-mobile-access-certificate"),
   parseMarkdownCommand: (markdown) => ipcRenderer.invoke("parse-markdown", markdown),
   checkAppExists: (appName) => ipcRenderer.invoke("check-app-exists", appName),
   wslPath: (path, mode) => ipcRenderer.invoke("wsl-path", path, mode),
@@ -39,6 +47,7 @@ const api: ElectronAPI = {
 
   getWindowCount: () => ipcRenderer.invoke("get-window-count"),
   getWindowID: () => ipcRenderer.invoke("get-window-id"),
+  getWindowVisibility: () => ipcRenderer.invoke("get-window-visibility"),
   getRendererMemoryInfo: () => ipcRenderer.invoke("get-renderer-memory-info"),
   onSqliteMigrationProgress: (cb) => {
     const handler = (_: unknown, progress: SqliteMigrationProgress) => cb(progress)
@@ -55,6 +64,11 @@ const api: ElectronAPI = {
     ipcRenderer.on("deep-link", handler)
     return () => ipcRenderer.removeListener("deep-link", handler)
   },
+  onWindowVisibility: (cb) => {
+    const handler = (_: unknown, visible: WindowVisibility) => cb(visible)
+    ipcRenderer.on("window-visibility", handler)
+    return () => ipcRenderer.removeListener("window-visibility", handler)
+  },
   onBrowserWindowOpen: (cb) => {
     const handler = (_: unknown, detail: any) => cb(detail)
     ipcRenderer.on("browser-window-open", handler)
@@ -64,6 +78,11 @@ const api: ElectronAPI = {
     const handler = (_: unknown, event: any) => cb(event)
     ipcRenderer.on("browser-password-capture", handler)
     return () => ipcRenderer.removeListener("browser-password-capture", handler)
+  },
+  onBrowserState: (cb) => {
+    const handler = (_: unknown, event: any) => cb(event)
+    ipcRenderer.on("browser-state", handler)
+    return () => ipcRenderer.removeListener("browser-state", handler)
   },
   onDetachedSidePanelEvent: (cb) => {
     const handler = (_: unknown, event: any) => cb(event)
@@ -100,7 +119,9 @@ const api: ElectronAPI = {
   markBrowserGuestReady: (target) => ipcRenderer.invoke("mark-browser-guest-ready", target),
   unregisterBrowserGuest: (target) => ipcRenderer.invoke("unregister-browser-guest", target),
   setActiveBrowserTab: (target) => ipcRenderer.invoke("set-active-browser-tab", target),
+  reportBrowserState: (input) => ipcRenderer.invoke("report-browser-state", input),
   openPath: (path, app) => ipcRenderer.invoke("open-path", path, app),
+  statPath: (path) => ipcRenderer.invoke("stat-path", path),
   readClipboardImage: () => ipcRenderer.invoke("read-clipboard-image"),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   readDroppedImage: (path) => ipcRenderer.invoke("read-dropped-image", path),
@@ -129,24 +150,22 @@ function emitNativeFileTransfer(transfer: NativeFileTransfer) {
   for (const listener of nativeFileTransferListeners) listener(transfer)
 }
 
-async function forwardNativeTransfer(event: ClipboardEvent | DragEvent, type: "lfcode:native-file-drop" | "lfcode:native-file-paste") {
+function forwardNativeDrop(event: DragEvent) {
   const target = event.target
   if (!(target instanceof Element)) return
   const root = target.closest<HTMLElement>("[data-session-dropzone]")
   if (!root) return
 
-  const transfer = "clipboardData" in event ? event.clipboardData : event.dataTransfer
+  const transfer = event.dataTransfer
   const files = transfer ? Array.from(transfer.files) : []
   const transferTypes = transfer ? Array.from(transfer.types) : []
   if (files.length === 0) {
     ipcRenderer.send("automation-event", {
       type: "session.native-transfer.empty",
-      data: { type, transferTypes },
+      data: { type: "lfcode:native-file-drop", transferTypes },
     })
     return
   }
-  event.preventDefault()
-  event.stopImmediatePropagation()
 
   const filesByKind = files.reduce(
     (result, file) => {
@@ -158,27 +177,23 @@ async function forwardNativeTransfer(event: ClipboardEvent | DragEvent, type: "l
     },
     { paths: [] as string[], images: [] as string[] },
   )
-  if (type === "lfcode:native-file-paste" && filesByKind.paths.length + filesByKind.images.length < files.length) {
-    const clipboardPaths = await ipcRenderer.invoke("read-clipboard-file-paths").catch(() => [] as string[])
-    for (const path of clipboardPaths) {
-      if (droppedImage(path)) filesByKind.images.push(path)
-      else filesByKind.paths.push(path)
-    }
-  }
   filesByKind.paths = [...new Set(filesByKind.paths)]
   filesByKind.images = [...new Set(filesByKind.images)]
   if (filesByKind.paths.length === 0 && filesByKind.images.length === 0) {
     ipcRenderer.send("automation-event", {
       type: "session.native-transfer.unresolved",
-      data: { type, transferTypes, files: files.length },
+      data: { type: "lfcode:native-file-drop", transferTypes, files: files.length },
     })
     return
   }
 
+  event.preventDefault()
+  event.stopImmediatePropagation()
+
   ipcRenderer.send("automation-event", {
     type: "session.native-transfer.accepted",
     data: {
-      type,
+      type: "lfcode:native-file-drop",
       transferTypes,
       files: files.length,
       paths: filesByKind.paths.length,
@@ -192,7 +207,6 @@ async function forwardNativeTransfer(event: ClipboardEvent | DragEvent, type: "l
   })
 }
 
-window.addEventListener("drop", (event) => void forwardNativeTransfer(event, "lfcode:native-file-drop"), true)
-window.addEventListener("paste", (event) => void forwardNativeTransfer(event, "lfcode:native-file-paste"), true)
+window.addEventListener("drop", (event) => void forwardNativeDrop(event), true)
 
 contextBridge.exposeInMainWorld("api", api)

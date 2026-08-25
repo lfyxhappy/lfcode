@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { getWebSearchProviderOrder } from "@lfcode-ai/shared/web-search"
 import { runLegacyWebSearchWithFallback } from "../../src/tool/websearch/fallback"
 
 const payload = (text: string) =>
@@ -11,7 +10,7 @@ const payload = (text: string) =>
     result: { content: [{ type: "text", text }] },
   })
 
-const run = (responses: Record<string, Response>) => {
+const run = (responses: Record<string, Response>, compatProvider?: "exa" | "parallel") => {
   const requested: string[] = []
   const http = HttpClient.make((request) =>
     Effect.sync(() => {
@@ -26,54 +25,51 @@ const run = (responses: Record<string, Response>) => {
       runLegacyWebSearchWithFallback({
         http,
         sessionID: "ses_websearch_fallback",
-        query: { query: "Lfcode search" },
+        query: { query: "Lfcode search", compatProvider },
       }),
     ),
   }
 }
 
 describe("legacy websearch fallback", () => {
-  test("keeps the deterministic Exa then Parallel policy", () => {
-    expect(getWebSearchProviderOrder()).toEqual(["exa", "parallel"])
-    expect(getWebSearchProviderOrder("parallel")).toEqual(["parallel"])
+  test("requires an explicit compatibility provider", async () => {
+    const search = run({})
+    await expect(search.result).rejects.toMatchObject({ classification: "missing_credentials" })
+    expect(search.requested).toHaveLength(0)
   })
 
   test("stops after a successful Exa response and emits structured sources", async () => {
     const search = run({
       exa: new Response(payload("[RFC](https://www.rfc-editor.org/rfc/rfc9110.html)"), { status: 200 }),
-    })
+    }, "exa")
 
     await expect(search.result).resolves.toMatchObject({
       provider: "exa",
+      route: "compat",
       attemptedProviders: ["exa"],
       sources: [{ domain: "www.rfc-editor.org", sourceTier: "primary" }],
     })
     expect(search.requested).toHaveLength(1)
   })
 
-  test("falls back after an Exa 5xx response", async () => {
+  test("does not fall back from an explicitly selected Exa provider", async () => {
     const search = run({
       exa: new Response("unavailable", { status: 503 }),
       parallel: new Response(payload("[Example](https://example.com/research)"), { status: 200 }),
-    })
+    }, "exa")
 
-    await expect(search.result).resolves.toMatchObject({
-      provider: "parallel",
-      attemptedProviders: ["exa", "parallel"],
-      warnings: ["exa:http_5xx (503)"],
-    })
-    expect(search.requested).toHaveLength(2)
+    await expect(search.result).rejects.toMatchObject({ provider: "exa", classification: "http_5xx" })
+    expect(search.requested).toHaveLength(1)
   })
 
-  test("treats an empty provider payload as retryable", async () => {
+  test("keeps an explicitly selected Parallel provider independent", async () => {
     const search = run({
-      exa: new Response(payload(""), { status: 200 }),
       parallel: new Response(payload("[Docs](https://docs.example.com/guide)"), { status: 200 }),
-    })
+    }, "parallel")
 
     await expect(search.result).resolves.toMatchObject({
       provider: "parallel",
-      warnings: ["exa:empty_response"],
+      attemptedProviders: ["parallel"],
     })
   })
 })

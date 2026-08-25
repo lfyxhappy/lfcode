@@ -23,6 +23,15 @@ function supportsImageInput(model: Provider.Model): boolean {
 
 export const OUTPUT_TOKEN_MAX = Flag.LFCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
 
+/**
+ * OpenCode Go rejects `tool_choice=required` for reasoning/thinking turns.
+ * Keep this transport quirk isolated here so structured-output callers can
+ * choose `auto` without weakening tool selection for other providers.
+ */
+export function supportsRequiredToolChoice(model: Provider.Model) {
+  return !(model.providerID === "opencode-go" && model.capabilities.reasoning)
+}
+
 // Maps npm package to the key the AI SDK expects for providerOptions
 function sdkKey(npm: string): string | undefined {
   switch (npm) {
@@ -407,7 +416,7 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
   }
 
   // Remap providerOptions keys from stored providerID to expected SDK key
-  const key = sdkKey(model.api.npm)
+  const key = sdkKey(model.api.npm) ?? (model.providerID === "opencode" ? "lfcode" : undefined)
   if (key && key !== model.providerID) {
     const remap = (opts: Record<string, any> | undefined) => {
       if (!opts) return opts
@@ -497,6 +506,12 @@ export function variants(
   const id = model.id.toLowerCase()
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
 
+  if (model.reasoning_options) {
+    const efforts = model.reasoning_options.find((mode) => mode.type === "effort")?.values ?? []
+    if (efforts.length > 0) return Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+    return {}
+  }
+
   // see: https://docs.x.ai/docs/guides/reasoning#control-how-hard-the-model-thinks
   if (id.includes("grok") && id.includes("grok-3-mini")) {
     if (model.api.npm === "@openrouter/ai-sdk-provider") {
@@ -510,7 +525,12 @@ export function variants(
       high: { reasoningEffort: "high" },
     }
   }
-  if (id.includes("grok")) return {}
+  if (id.includes("grok")) {
+    if (model.providerID === "opencode" || model.providerID === "opencode-go") {
+      return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+    }
+    return {}
+  }
 
   switch (model.api.npm) {
     case "@openrouter/ai-sdk-provider":
@@ -958,7 +978,11 @@ export function options(input: {
     result["enable_thinking"] = true
   }
 
-  if (input.model.api.id.includes("gpt-5") && !input.model.api.id.includes("gpt-5-chat")) {
+  if (
+    input.model.capabilities.reasoning &&
+    input.model.api.id.includes("gpt-5") &&
+    !input.model.api.id.includes("gpt-5-chat")
+  ) {
     if (!input.model.api.id.includes("gpt-5-pro")) {
       result["reasoningEffort"] = "medium"
       // Only inject reasoningSummary for providers that support it natively.
@@ -1079,7 +1103,7 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
     return result
   }
 
-  const key = sdkKey(model.api.npm) ?? model.providerID
+  const key = sdkKey(model.api.npm) ?? (model.providerID === "opencode" ? "lfcode" : model.providerID)
   // @ai-sdk/azure delegates to OpenAIChatLanguageModel which reads from
   // providerOptions["openai"], but OpenAIResponsesLanguageModel checks
   // "azure" first. Pass both so model options work on either code path.
@@ -1090,6 +1114,7 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
 }
 
 export function maxOutputTokens(model: Provider.Model): number {
+  if (model.providerID === "mimo" || model.providerID === "xiaomi") return 128_000
   return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
 }
 
@@ -1225,8 +1250,8 @@ export function schema(model: Provider.Model, schema: JSONSchema.BaseSchema | JS
   // - OpenAI/Azure: "schema must have type 'object' and not have 'oneOf'/'anyOf'"
   // - Bedrock: "input_schema.type: Field required"
   // - Anthropic proxies to Bedrock: same Bedrock error
-  // Flatten unconditionally — all providers accept a flat `type: "object"` schema,
-  // and zod's runtime parse still enforces per-variant required fields strictly.
+  // Flatten discriminated unions at any nesting depth. Non-discriminated unions
+  // remain unchanged, preserving valid nested operation envelopes.
   schema = flattenDiscriminatedUnions(schema)
 
   // Convert integer enums to string enums for Google/Gemini

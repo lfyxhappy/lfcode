@@ -39,6 +39,10 @@ export type PrefixCaptureFn = (input: {
   agentName: string
   providerID: string
   modelID: string
+  /** Complete effective rules for this fork, when the caller has temporary rules. */
+  permission?: Permission.Ruleset
+  /** Actor that owns the captured prefix when inherited messages belong to another actor. */
+  actorID?: string
   // Typed as `unknown[]` to break the import cycle — caller passes
   // `MessageV2.WithParts[]` but importing that type here would
   // re-introduce the SessionCheckpoint↔ToolRegistry cycle.

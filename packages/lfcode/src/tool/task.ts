@@ -135,10 +135,18 @@ function normalizeTaskArgs(input: unknown) {
   const root = input as Record<string, unknown>
   if (!root.operation || typeof root.operation !== "object" || Array.isArray(root.operation)) return input
   const operation = root.operation as Record<string, unknown>
-  if (operation.action !== "create" || !("id" in operation)) return input
-  // Create IDs are allocated by TaskRegistry. Dropping this harmless field
-  // keeps strict validation while accepting models that copy the T1 shape.
-  const { id: _ignored, ...normalizedOperation } = operation
+  if (operation.action !== "create") return input
+  // The create shape is often inferred from a task-list item. Its bookkeeping
+  // fields cannot affect task creation, so drop only those harmless echoes.
+  const {
+    id: _ignoredID,
+    event_summary: _ignoredEventSummary,
+    include_archived: _ignoredIncludeArchived,
+    include_terminal: _ignoredIncludeTerminal,
+    status: _ignoredStatus,
+    ...normalizedOperation
+  } = operation
+  if (normalizedOperation.parent_id === "unused") delete normalizedOperation.parent_id
   return { ...root, operation: normalizedOperation }
 }
 
@@ -375,7 +383,6 @@ export const TaskTool = Tool.define<typeof taskParameters, Metadata, TaskRegistr
     const run = Effect.fn("TaskTool.execute")(function* (input: TaskInput, ctx: Tool.Context<Metadata>) {
       const op = input.operation
       const sessionID = (op.session_id || ctx.sessionID) as SessionID
-
       if (op.action === "create") {
         const t = yield* reg.create({
           session_id: sessionID,

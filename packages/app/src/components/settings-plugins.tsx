@@ -3,7 +3,8 @@ import { Icon } from "@lfcode-ai/ui/icon"
 import { Switch } from "@lfcode-ai/ui/switch"
 import { Tag } from "@lfcode-ai/ui/tag"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { useParams } from "@solidjs/router"
+import { useNavigate, useParams } from "@solidjs/router"
+import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import { type Component, For, Show, createMemo, createResource, createSignal } from "solid-js"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
@@ -67,8 +68,21 @@ type PluginInspect = {
     runtimeDependencies?: { id: string; version?: string; required?: boolean }[]
     skillRequirements?: { id: string; purpose?: string; required?: boolean }[]
     uiContributions?: {
-      slot: "tui-slot" | "desktop-settings-panel" | "desktop-session-toolbar"
+      slot: "tui-slot" | "desktop-settings-panel" | "desktop-session-toolbar" | "desktop-session-composer"
       title?: string
+      sessionComposer?: {
+        type: string
+        mode: "replace" | "append"
+        renderer: "conversation"
+        placeholder?: string
+        submitLabel?: string
+        description?: string
+      }
+      managedSession?: {
+        type: string
+        title?: string
+        label?: string
+      }
     }[]
   }
   compatible: boolean
@@ -97,6 +111,8 @@ type PluginInspect = {
     purpose?: string
   }[]
 }
+
+type PluginUIContribution = NonNullable<NonNullable<PluginInspect["manifest"]>["uiContributions"]>[number]
 
 type ManagedPlugin = {
   id: string
@@ -131,6 +147,7 @@ export const SettingsPlugins: Component = () => {
   const platform = usePlatform()
   const server = useServer()
   const params = useParams()
+  const navigate = useNavigate()
   const directory = createMemo(() => decode64(params.dir))
   const sdk = createMemo(() => globalSDK.createClient({ directory: directory(), throwOnError: true }))
   const [revision, setRevision] = createSignal(0)
@@ -146,6 +163,7 @@ export const SettingsPlugins: Component = () => {
   )
 
   const [toggling, setToggling] = createSignal<string>()
+  const [launching, setLaunching] = createSignal<string>()
   const [runtimeBusy, setRuntimeBusy] = createSignal<string>()
   const [selectedRuntimeLog, setSelectedRuntimeLog] = createSignal<RuntimeManageItemID>()
   const [libraryRevision, setLibraryRevision] = createSignal(0)
@@ -286,6 +304,41 @@ export const SettingsPlugins: Component = () => {
     }
   }
 
+  const launchManagedSession = async (plugin: PluginInspect, contribution: PluginUIContribution) => {
+    const launcher = contribution.managedSession
+    const pluginID = plugin.manifest?.id
+    if (!launcher || !pluginID || launching()) return
+    setLaunching(`${plugin.spec}:${launcher.type}`)
+    try {
+      const project = await sdk().project.getManaged({ pluginID, type: launcher.type })
+      if (!project.data) throw new Error("受管项目尚未初始化，请先启用插件后重试")
+      const extension = { pluginID, type: launcher.type }
+      const sessions = await sdk().session.list({ directory: project.data.worktree, roots: true })
+      const existing = sessions.data?.find(
+        (session) => session.extension?.pluginID === extension.pluginID && session.extension.type === extension.type,
+      )
+      const result = existing
+        ? existing
+        : (
+            await sdk().session.createManaged({
+              projectID: project.data.id,
+              extension,
+              title: launcher.title ?? contribution.title ?? plugin.manifest?.name ?? pluginID,
+            })
+          ).data
+      if (!result?.id) throw new Error("酒馆会话创建失败")
+      navigate(`/${base64Encode(result.directory)}/session/${result.id}`)
+    } catch (error) {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: formatServerError(error, language.t, language.t("common.requestFailed")),
+      })
+    } finally {
+      setLaunching(undefined)
+    }
+  }
+
   const runRuntimeAction = async (id: RuntimeManageItemID, action: "install" | "repair" | "update") => {
     if (runtimeBusy()) return
     setRuntimeBusy(`${action}:${id}`)
@@ -352,8 +405,11 @@ export const SettingsPlugins: Component = () => {
   const installRuntimeDependency = (id: RuntimeManageItemID) => runRuntimeAction(id, "install")
 
   return (
-    <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+    <div
+      class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10"
+      data-automation-id="settings-plugins"
+    >
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex max-w-[980px] items-start justify-between gap-4 pb-6 pt-6">
           <div class="flex flex-col gap-1">
             <h2 class="text-16-medium text-text-strong">{language.t("settings.plugins.title")}</h2>
@@ -371,7 +427,7 @@ export const SettingsPlugins: Component = () => {
       </div>
 
       <div class="mx-auto flex w-full max-w-[980px] flex-col gap-4">
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-[20px] bg-surface-base p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface-base p-4">
           <div>
             <div class="text-14-medium text-text-strong">{language.t("settings.plugins.library.title")}</div>
             <div class="mt-1 text-12-regular text-text-weak">{language.t("settings.plugins.library.description")}</div>
@@ -440,17 +496,17 @@ export const SettingsPlugins: Component = () => {
           </div>
         </Show>
         <Show when={!directory()}>
-          <div class="rounded-[20px] bg-surface-base px-4 py-4 text-13-regular text-text-weak">
+          <div class="rounded-lg bg-surface-base px-4 py-4 text-13-regular text-text-weak">
             {language.t("settings.plugins.projectRequired")}
           </div>
         </Show>
         <Show when={plugins.error}>
-          <div class="rounded-[20px] bg-surface-base px-4 py-4 text-13-regular text-status-warning">
+          <div class="rounded-lg bg-surface-base px-4 py-4 text-13-regular text-status-warning">
             {formatServerError(plugins.error, language.t, language.t("common.requestFailed"))}
           </div>
         </Show>
         <Show when={library.error}>
-          <div class="rounded-[20px] bg-surface-base px-4 py-4 text-13-regular text-status-warning">
+          <div class="rounded-lg bg-surface-base px-4 py-4 text-13-regular text-status-warning">
             {formatServerError(library.error, language.t, language.t("common.requestFailed"))}
           </div>
         </Show>
@@ -458,7 +514,7 @@ export const SettingsPlugins: Component = () => {
           <Show
             when={(plugins.latest ?? []).length > 0}
             fallback={
-              <div class="rounded-[20px] bg-surface-base px-4 py-8 text-center text-13-regular text-text-weak">
+              <div class="rounded-lg bg-surface-base px-4 py-8 text-center text-13-regular text-text-weak">
                 {language.t("settings.plugins.empty")}
               </div>
             }
@@ -480,6 +536,8 @@ export const SettingsPlugins: Component = () => {
                     plugin={plugin}
                     toggling={toggling() === plugin.spec}
                     onToggle={toggle}
+                    launching={launching()}
+                    onLaunchManagedSession={launchManagedSession}
                     runtimeBusy={runtimeBusy()}
                     onInstallRuntime={installRuntimeDependency}
                   />
@@ -515,7 +573,7 @@ const ImportReview: Component<{
   const language = useLanguage()
   const report = () => props.preview.report
   return (
-    <section class="rounded-[20px] border border-border-warning-base bg-surface-base p-4">
+    <section class="rounded-lg border border-border-warning-base bg-surface-base p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div class="text-14-medium text-text-strong">{language.t("settings.plugins.review.title")}</div>
@@ -529,7 +587,7 @@ const ImportReview: Component<{
           <Tag>{report().trust}</Tag>
         </div>
       </div>
-      <div class="mt-3 grid gap-1 rounded-xl bg-surface-raised-base px-3 py-2 font-mono text-11-regular text-text-weak">
+      <div class="mt-3 grid gap-1 rounded-md bg-surface-raised-base px-3 py-2 font-mono text-11-regular text-text-weak">
         <div>id: {report().id}</div>
         <div>
           source: {report().source.type} · {report().source.label}
@@ -571,7 +629,7 @@ const ManagedPluginCard: Component<{
   onUninstall: (plugin: ManagedPlugin) => Promise<void>
   onExport: (plugin: ManagedPlugin) => Promise<void>
 }> = (props) => (
-  <section class="rounded-[20px] bg-surface-base p-4 shadow-sm">
+  <section class="rounded-lg bg-surface-base p-4">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <div class="text-14-medium text-text-strong">{props.plugin.name}</div>
@@ -661,7 +719,7 @@ const RuntimePluginCard: Component<{
   }
 
   return (
-    <section class="rounded-[20px] bg-surface-base p-4 shadow-sm">
+    <section class="rounded-lg bg-surface-base p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -694,7 +752,7 @@ const RuntimePluginCard: Component<{
         </Show>
       </div>
       <Show when={props.item.path ?? props.item.detail}>
-        <div class="mt-3 grid gap-1 rounded-xl bg-surface-raised-base px-3 py-2 text-11-regular text-text-weak">
+        <div class="mt-3 grid gap-1 rounded-md bg-surface-raised-base px-3 py-2 text-11-regular text-text-weak">
           <Show when={props.item.path}>{(value) => <div class="break-all font-mono">{value()}</div>}</Show>
           <Show when={props.item.detail}>{(value) => <div>{value()}</div>}</Show>
         </div>
@@ -749,7 +807,7 @@ const RuntimePluginCard: Component<{
 }
 
 const RuntimePluginField: Component<{ title: string; value: string }> = (props) => (
-  <div class="rounded-xl bg-surface-raised-base px-3 py-2">
+  <div class="rounded-md bg-surface-raised-base px-3 py-2">
     <div class="text-11-medium text-text-weak">{props.title}</div>
     <div class="mt-1 line-clamp-2 break-all text-11-regular text-text-strong">{props.value}</div>
   </div>
@@ -764,7 +822,7 @@ const RuntimePluginLogs: Component<{
   onClose: () => void
   onRefresh: () => void
 }> = (props) => (
-  <section class="rounded-[20px] bg-surface-base p-4 shadow-sm">
+  <section class="rounded-lg bg-surface-base p-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-14-medium text-text-strong">{props.language.t("settings.runtimes.logs.title")}</h3>
@@ -791,7 +849,7 @@ const RuntimePluginLogs: Component<{
       <div class="mt-3 grid gap-2">
         <For each={props.entries}>
           {(entry) => (
-            <div class="rounded-xl bg-surface-raised-base px-3 py-2">
+            <div class="rounded-md bg-surface-raised-base px-3 py-2">
               <div class="flex items-center justify-between gap-3">
                 <span class="text-12-medium text-text-strong">{entry.title}</span>
                 <Tag>{entry.status}</Tag>
@@ -810,13 +868,18 @@ const PluginCard: Component<{
   plugin: PluginInspect
   toggling: boolean
   onToggle: (plugin: PluginInspect) => Promise<void>
+  launching?: string
+  onLaunchManagedSession: (
+    plugin: PluginInspect,
+    contribution: PluginUIContribution,
+  ) => Promise<void>
   runtimeBusy?: string
   onInstallRuntime: (id: RuntimeManageItemID) => Promise<void>
 }> = (props) => {
   const language = useLanguage()
   const plugin = () => props.plugin
   return (
-    <section class="rounded-[20px] bg-surface-base p-4 shadow-sm">
+    <section class="rounded-lg bg-surface-base p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -875,10 +938,23 @@ const PluginCard: Component<{
         </div>
       </Show>
       <Show when={plugin().manifest?.uiContributions?.length}>
-        <div class="mt-3 flex flex-wrap gap-1">
+        <div class="mt-3 flex flex-wrap items-center gap-1">
           <For each={plugin().manifest?.uiContributions ?? []}>
             {(contribution) => (
-              <Tag>{`ui:${contribution.slot} ${contribution.slot === "tui-slot" ? "guarded" : "declared"}${contribution.title ? ` ${contribution.title}` : ""}`}</Tag>
+              <>
+                <Tag>{`ui:${contribution.slot} ${contribution.slot === "tui-slot" ? "guarded" : "declared"}${contribution.title ? ` ${contribution.title}` : ""}`}</Tag>
+                <Show when={contribution.managedSession && plugin().enabled && plugin().compatible}>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    data-automation-id={`plugin-managed-session:${plugin().manifest?.id ?? plugin().spec}:${contribution.managedSession?.type ?? "session"}`}
+                    disabled={Boolean(props.launching)}
+                    onClick={() => void props.onLaunchManagedSession(plugin(), contribution)}
+                  >
+                    {contribution.managedSession?.label ?? contribution.title ?? "打开会话"}
+                  </Button>
+                </Show>
+              </>
             )}
           </For>
         </div>
@@ -893,7 +969,7 @@ const PluginCard: Component<{
       </div>
 
       <Show when={canTogglePlugin(plugin())}>
-        <div class="mt-4 flex items-center justify-between gap-3 rounded-xl bg-surface-raised-base px-3 py-2">
+        <div class="mt-4 flex items-center justify-between gap-3 rounded-md bg-surface-raised-base px-3 py-2">
           <div>
             <div class="text-12-medium text-text-strong">
               {plugin().enabled
@@ -919,7 +995,7 @@ const PluginCard: Component<{
         <summary class="cursor-pointer select-none hover:text-text-strong">
           {plugin().manifest?.id ?? "Plugin diagnostics"}
         </summary>
-        <div class="mt-2 grid gap-1 rounded-xl bg-surface-raised-base px-3 py-2">
+        <div class="mt-2 grid gap-1 rounded-md bg-surface-raised-base px-3 py-2">
           <div>declared in: {plugin().declaredIn}</div>
           <Show when={plugin().packageName}>
             <div>package: {plugin().packageName}</div>
@@ -938,7 +1014,7 @@ const PluginCard: Component<{
 
 const PluginTarget: Component<{ title: string; status: TargetStatus }> = (props) => {
   return (
-    <div class="rounded-xl bg-surface-raised-base px-3 py-2">
+    <div class="rounded-md bg-surface-raised-base px-3 py-2">
       <div class="flex items-center justify-between gap-2">
         <span class="text-12-medium text-text-strong">{props.title}</span>
         <span class={`text-11-medium ${targetTone(props.status.status)}`}>{props.status.status}</span>

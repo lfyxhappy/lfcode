@@ -78,6 +78,19 @@ type LspRuntimeStatus = {
 }
 
 const LSP_DOWNLOAD_REMINDER_PREFIX = "lfcode.editor.lsp.download-reminder.v1:"
+const automationNavigationRequests = new Map<string, CodeEditorNavigationSelection>()
+
+function queueAutomationNavigationRequest(input: { path: string; selection: CodeEditorNavigationSelection }) {
+  automationNavigationRequests.set(normalizeCodeEditorNavigationPath(input.path), input.selection)
+}
+
+function consumeAutomationNavigationRequest(path: string) {
+  const normalizedPath = normalizeCodeEditorNavigationPath(path)
+  const selection = automationNavigationRequests.get(normalizedPath)
+  if (!selection) return
+  automationNavigationRequests.delete(normalizedPath)
+  return selection
+}
 
 function getRenderFinalNewlineOption(enabled: boolean): "off" | "on" {
   return enabled ? "on" : "off"
@@ -137,6 +150,7 @@ export function CodeEditorHost(props: {
   let documentLease: Awaited<ReturnType<typeof acquireEditorDocument>> | undefined
   let editorPath: string | undefined
   let pendingNavigationSelection: CodeEditorNavigationSelection | undefined
+  let pendingNavigationFocus = true
   let markersSubscription: import("monaco-editor").IDisposable | undefined
   let navigationCleanup: VoidFunction | undefined
   let releaseServerLspProviders: VoidFunction | undefined
@@ -437,6 +451,38 @@ export function CodeEditorHost(props: {
     applyCodeEditorNavigationSelection(editor, selection)
   }
 
+  const revealAutomationSelection = (selection: CodeEditorNavigationSelection) => {
+    if (!editor) return
+    if (typeof selection.endLineNumber === "number" && typeof selection.endColumn === "number") {
+      const range = {
+        startLineNumber: selection.startLineNumber,
+        startColumn: selection.startColumn,
+        endLineNumber: selection.endLineNumber,
+        endColumn: selection.endColumn,
+      }
+      editor.setSelection(range)
+      editor.revealRangeInCenter(range)
+      return
+    }
+    const position = {
+      lineNumber: selection.startLineNumber,
+      column: selection.startColumn,
+    }
+    editor.setPosition(position)
+    editor.revealPositionInCenter(position)
+  }
+
+  const revealAutomationCurrentSelection = () => {
+    if (!editor) return
+    const selection = editor.getSelection()
+    if (selection) {
+      editor.revealRangeInCenter(selection)
+      return
+    }
+    const position = editor.getPosition()
+    if (position) editor.revealPositionInCenter(position)
+  }
+
   const getCurrentNavigationSelection = (): CodeEditorNavigationSelection | undefined => {
     const selection = editor?.getSelection()
     if (selection) {
@@ -465,17 +511,17 @@ export function CodeEditorHost(props: {
     }
   }
 
-  const runEditorAction = async (actionID: string) => {
+  const runEditorAction = async (actionID: string, options?: { focus?: boolean }) => {
     if (!editor) return
-    editor.focus()
+    if (options?.focus !== false) editor.focus()
     const action = editor.getAction(actionID)
     if (!action) return
     await action.run()
   }
 
-  const saveEditor = async () => {
+  const saveEditor = async (options?: { focus?: boolean }) => {
     if (settings.editor.formatOnSave() && editor) {
-      await runEditorAction("editor.action.formatDocument")
+      await runEditorAction("editor.action.formatDocument", options)
     }
     const lease = documentLease
     const stamp = lease?.stamp()
@@ -680,74 +726,111 @@ export function CodeEditorHost(props: {
     await openNavigationTarget(target, { recordHistory: false })
   }
 
-  const sharedEditorHandle = (): CodeEditorCommandHandle => ({
-    focus: () => {
-      editor?.focus()
-    },
-    save: saveEditor,
-    undo: () => runEditorAction("undo"),
-    redo: () => runEditorAction("redo"),
-    navigateBack: () => navigateHistory("back"),
-    navigateForward: () => navigateHistory("forward"),
-    openCommandPalette: () => runEditorAction("editor.action.quickCommand"),
-    openQuickOutline: () => runEditorAction("editor.action.quickOutline"),
-    openFind: () => runEditorAction("actions.find"),
-    openReplace: () => runEditorAction("editor.action.startFindReplaceAction"),
-    findPrevious: () => runEditorAction("editor.action.previousMatchFindAction"),
-    findNext: () => runEditorAction("editor.action.nextMatchFindAction"),
-    openGoToLine: () => runEditorAction("editor.action.gotoLine"),
-    openQuickFix: () => runEditorAction("editor.action.quickFix"),
-    renameSymbol: () => runEditorAction("editor.action.rename"),
-    showHover: () => runEditorAction("editor.action.showHover"),
-    triggerSuggest: () => runEditorAction("editor.action.triggerSuggest"),
-    triggerParameterHints: () => runEditorAction("editor.action.triggerParameterHints"),
-    openProblems: () => {
-      setDiagnosticsOpen(true)
-    },
-    nextProblem: () => runEditorAction("editor.action.marker.next"),
-    previousProblem: () => runEditorAction("editor.action.marker.prev"),
-    organizeImports: () => runEditorAction("editor.action.organizeImports"),
-    expandSelection: () => runEditorAction("editor.action.smartSelect.expand"),
-    shrinkSelection: () => runEditorAction("editor.action.smartSelect.shrink"),
-    moveLineUp: () => runEditorAction("editor.action.moveLinesUpAction"),
-    moveLineDown: () => runEditorAction("editor.action.moveLinesDownAction"),
-    copyLineUp: () => runEditorAction("editor.action.copyLinesUpAction"),
-    copyLineDown: () => runEditorAction("editor.action.copyLinesDownAction"),
-    deleteLine: () => runEditorAction("editor.action.deleteLines"),
-    addNextMatchToSelection: () => runEditorAction("editor.action.addSelectionToNextFindMatch"),
-    duplicateSelection: () => runEditorAction("editor.action.duplicateSelection"),
-    insertCursorAbove: () => runEditorAction("editor.action.insertCursorAbove"),
-    insertCursorBelow: () => runEditorAction("editor.action.insertCursorBelow"),
-    joinLines: () => runEditorAction("editor.action.joinLines"),
-    trimTrailingWhitespace: () => runEditorAction("editor.action.trimTrailingWhitespace"),
-    toggleWordWrap: () => runEditorAction("editor.action.toggleWordWrap"),
-    foldCurrent: () => runEditorAction("editor.fold"),
-    unfoldCurrent: () => runEditorAction("editor.unfold"),
-    foldAll: () => runEditorAction("editor.foldAll"),
-    unfoldAll: () => runEditorAction("editor.unfoldAll"),
-    peekDeclaration: () => runEditorAction("editor.action.peekDeclaration"),
-    peekDefinition: () => runEditorAction("editor.action.peekDefinition"),
-    peekTypeDefinition: () => runEditorAction("editor.action.peekTypeDefinition"),
-    peekImplementation: () => runEditorAction("editor.action.peekImplementation"),
-    peekReferences: () => runEditorAction("editor.action.referenceSearch.trigger"),
-    formatDocument: () => runEditorAction("editor.action.formatDocument"),
-    formatSelection: () => runEditorAction("editor.action.formatSelection"),
-    toggleLineComment: () => runEditorAction("editor.action.commentLine"),
-    toggleBlockComment: () => runEditorAction("editor.action.blockComment"),
-    getHover: loadHover,
-    getDocumentSymbols: loadDocumentSymbols,
-    getWorkspaceSymbols: loadWorkspaceSymbols,
-    getIncomingCalls: () => loadCallHierarchyTargets("incoming"),
-    getOutgoingCalls: () => loadCallHierarchyTargets("outgoing"),
-    getDeclarations: () => loadNavigationTargets("_executeDeclarationProvider"),
-    getDefinitions: () => loadNavigationTargets("_executeDefinitionProvider"),
-    getTypeDefinitions: () => loadNavigationTargets("_executeTypeDefinitionProvider"),
-    getImplementations: () => loadNavigationTargets("_executeImplementationProvider"),
-    getReferences: () => loadNavigationTargets("_executeReferenceProvider"),
-    getDocumentHighlights: loadDocumentHighlights,
-    openNavigationTarget: (target) => openNavigationTarget(target),
-    revealSelection,
-  })
+  const openAutomationNavigationTarget = async (
+    input: { path: string; selection: CodeEditorNavigationSelection },
+    options?: { recordHistory?: boolean },
+  ) => {
+    if (options?.recordHistory !== false) {
+      const current = getCurrentNavigationSnapshot()
+      if (current) pushCodeEditorNavigationHistory({ from: current, to: input })
+    }
+    if (normalizeCodeEditorNavigationPath(input.path) === normalizeCodeEditorNavigationPath(props.path)) {
+      revealAutomationSelection(input.selection)
+      return
+    }
+    if (!props.onOpenPath) return
+    queueAutomationNavigationRequest(input)
+    await props.onOpenPath({ path: input.path })
+  }
+
+  const navigateAutomationHistory = async (direction: "back" | "forward") => {
+    const current = getCurrentNavigationSnapshot()
+    if (!current) return
+    const target = consumeCodeEditorNavigationHistory(direction, current)
+    if (!target) return
+    await openAutomationNavigationTarget(target, { recordHistory: false })
+  }
+
+  const sharedEditorHandle = (options?: {
+    focus?: () => void
+    save?: () => Promise<void> | void
+    runAction?: (actionID: string) => Promise<void> | void
+    navigateHistory?: (direction: "back" | "forward") => Promise<void> | void
+    openNavigationTarget?: typeof openNavigationTarget
+    revealSelection?: typeof revealSelection
+  }): CodeEditorCommandHandle => {
+    const runAction = options?.runAction ?? runEditorAction
+    const save = options?.save ?? saveEditor
+    const navigate = options?.navigateHistory ?? navigateHistory
+    const openTarget = options?.openNavigationTarget ?? openNavigationTarget
+    const reveal = options?.revealSelection ?? revealSelection
+    return {
+      focus: options?.focus ?? (() => editor?.focus()),
+      save,
+      undo: () => runAction("undo"),
+      redo: () => runAction("redo"),
+      navigateBack: () => navigate("back"),
+      navigateForward: () => navigate("forward"),
+      openCommandPalette: () => runAction("editor.action.quickCommand"),
+      openQuickOutline: () => runAction("editor.action.quickOutline"),
+      openFind: () => runAction("actions.find"),
+      openReplace: () => runAction("editor.action.startFindReplaceAction"),
+      findPrevious: () => runAction("editor.action.previousMatchFindAction"),
+      findNext: () => runAction("editor.action.nextMatchFindAction"),
+      openGoToLine: () => runAction("editor.action.gotoLine"),
+      openQuickFix: () => runAction("editor.action.quickFix"),
+      renameSymbol: () => runAction("editor.action.rename"),
+      showHover: () => runAction("editor.action.showHover"),
+      triggerSuggest: () => runAction("editor.action.triggerSuggest"),
+      triggerParameterHints: () => runAction("editor.action.triggerParameterHints"),
+      openProblems: () => {
+        setDiagnosticsOpen(true)
+      },
+      nextProblem: () => runAction("editor.action.marker.next"),
+      previousProblem: () => runAction("editor.action.marker.prev"),
+      organizeImports: () => runAction("editor.action.organizeImports"),
+      expandSelection: () => runAction("editor.action.smartSelect.expand"),
+      shrinkSelection: () => runAction("editor.action.smartSelect.shrink"),
+      moveLineUp: () => runAction("editor.action.moveLinesUpAction"),
+      moveLineDown: () => runAction("editor.action.moveLinesDownAction"),
+      copyLineUp: () => runAction("editor.action.copyLinesUpAction"),
+      copyLineDown: () => runAction("editor.action.copyLinesDownAction"),
+      deleteLine: () => runAction("editor.action.deleteLines"),
+      addNextMatchToSelection: () => runAction("editor.action.addSelectionToNextFindMatch"),
+      duplicateSelection: () => runAction("editor.action.duplicateSelection"),
+      insertCursorAbove: () => runAction("editor.action.insertCursorAbove"),
+      insertCursorBelow: () => runAction("editor.action.insertCursorBelow"),
+      joinLines: () => runAction("editor.action.joinLines"),
+      trimTrailingWhitespace: () => runAction("editor.action.trimTrailingWhitespace"),
+      toggleWordWrap: () => runAction("editor.action.toggleWordWrap"),
+      foldCurrent: () => runAction("editor.fold"),
+      unfoldCurrent: () => runAction("editor.unfold"),
+      foldAll: () => runAction("editor.foldAll"),
+      unfoldAll: () => runAction("editor.unfoldAll"),
+      peekDeclaration: () => runAction("editor.action.peekDeclaration"),
+      peekDefinition: () => runAction("editor.action.peekDefinition"),
+      peekTypeDefinition: () => runAction("editor.action.peekTypeDefinition"),
+      peekImplementation: () => runAction("editor.action.peekImplementation"),
+      peekReferences: () => runAction("editor.action.referenceSearch.trigger"),
+      formatDocument: () => runAction("editor.action.formatDocument"),
+      formatSelection: () => runAction("editor.action.formatSelection"),
+      toggleLineComment: () => runAction("editor.action.commentLine"),
+      toggleBlockComment: () => runAction("editor.action.blockComment"),
+      getHover: loadHover,
+      getDocumentSymbols: loadDocumentSymbols,
+      getWorkspaceSymbols: loadWorkspaceSymbols,
+      getIncomingCalls: () => loadCallHierarchyTargets("incoming"),
+      getOutgoingCalls: () => loadCallHierarchyTargets("outgoing"),
+      getDeclarations: () => loadNavigationTargets("_executeDeclarationProvider"),
+      getDefinitions: () => loadNavigationTargets("_executeDefinitionProvider"),
+      getTypeDefinitions: () => loadNavigationTargets("_executeTypeDefinitionProvider"),
+      getImplementations: () => loadNavigationTargets("_executeImplementationProvider"),
+      getReferences: () => loadNavigationTargets("_executeReferenceProvider"),
+      getDocumentHighlights: loadDocumentHighlights,
+      openNavigationTarget: (target) => openTarget(target),
+      revealSelection: reveal,
+    }
+  }
 
   const commandHandle = (): CodeEditorCommandHandle => sharedEditorHandle()
 
@@ -760,20 +843,21 @@ export function CodeEditorHost(props: {
       props.onInput(change?.value ?? value)
     },
     setSelection: (selection: LfcodeCodeEditorAutomationSelection) => {
-      if (!editor) return
-      editor.setSelection({
+      revealAutomationSelection({
         startLineNumber: selection.startLineNumber,
         startColumn: selection.startColumn,
         endLineNumber: selection.endLineNumber ?? selection.startLineNumber,
         endColumn: selection.endColumn ?? selection.startColumn,
       })
-      editor.revealPositionInCenter({
-        lineNumber: selection.startLineNumber,
-        column: selection.startColumn,
-      })
-      editor.focus()
     },
-    ...sharedEditorHandle(),
+    ...sharedEditorHandle({
+      focus: revealAutomationCurrentSelection,
+      save: () => saveEditor({ focus: false }),
+      runAction: (actionID) => runEditorAction(actionID, { focus: false }),
+      navigateHistory: navigateAutomationHistory,
+      openNavigationTarget: openAutomationNavigationTarget,
+      revealSelection: revealAutomationSelection,
+    }),
     setDiagnosticsOpen: (open: boolean) => {
       setDiagnosticsOpen(open)
     },
@@ -1038,7 +1122,12 @@ export function CodeEditorHost(props: {
         updateDiagnostics()
       })
       if (props.onOpenPath) {
-        navigationCleanup = registerCodeEditorOpenHandler(activeEditor, props.onOpenPath)
+        const cleanup = await registerCodeEditorOpenHandler(activeEditor, props.onOpenPath)
+        if (!isCurrentCodeEditorSetup({ token, currentToken: setupToken, path: input.path, currentPath: props.path })) {
+          cleanup()
+          return
+        }
+        navigationCleanup = cleanup
       }
       await refreshServerLspProviders({ runtime, path: input.path, language: input.language, value: input.value })
       releaseSnippetProvider = registerCodeEditorSnippetProvider({
@@ -1050,8 +1139,12 @@ export function CodeEditorHost(props: {
       })
       const viewState = loadCodeEditorViewState(input.path)
       if (viewState) activeEditor.restoreViewState(viewState)
-      pendingNavigationSelection = consumeCodeEditorNavigationRequest(input.path)?.selection
-      applyCodeEditorNavigationSelection(activeEditor, pendingNavigationSelection)
+      const automationSelection = consumeAutomationNavigationRequest(input.path)
+      const navigationSelection = consumeCodeEditorNavigationRequest(input.path)?.selection
+      pendingNavigationSelection = automationSelection ?? navigationSelection
+      pendingNavigationFocus = !automationSelection
+      if (pendingNavigationFocus) applyCodeEditorNavigationSelection(activeEditor, pendingNavigationSelection)
+      else if (pendingNavigationSelection) revealAutomationSelection(pendingNavigationSelection)
       const position = activeEditor.getPosition()
       if (position) {
         setCursor({
@@ -1163,7 +1256,8 @@ export function CodeEditorHost(props: {
     const model = editor.getModel()
     controller.applyExternalValue(change.value)
     if (pendingNavigationSelection) {
-      applyCodeEditorNavigationSelection(editor, pendingNavigationSelection)
+      if (pendingNavigationFocus) applyCodeEditorNavigationSelection(editor, pendingNavigationSelection)
+      else revealAutomationSelection(pendingNavigationSelection)
       pendingNavigationSelection = undefined
       return
     }

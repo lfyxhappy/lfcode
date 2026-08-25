@@ -111,7 +111,7 @@ Turn 2 - Issue Edits in parallel (single message), then stop:
         🔵 <TID> <summary> (progress: tasks/<TID>/progress.md, last-reconciled-written-at: <written-at from the diff block>)
       - When no SUBAGENT PROGRESS block is present, do not read any tasks/*/progress.md
         on your own — there is nothing new to reconcile.
-  For notes.md: restore the NOTES_TEMPLATE byte-for-byte using patch-first file editing (you Read it in Turn 1 — write the same header back). Rationale: every entry in notes.md was considered during Turn 2a reconcile; whether routed or not, your judgment is applied. Agent re-appends fresh entries in subsequent turns. Prefer `apply_patch` for a full rewrite. Do not invent template text — use what you Read in Turn 1 verbatim.
+  For notes.md: restore the NOTES_TEMPLATE byte-for-byte using the `edit` tool (you Read it in Turn 1 — write the same header back). Rationale: every entry in notes.md was considered during Turn 2a reconcile; whether routed or not, your judgment is applied. Agent re-appends fresh entries in subsequent turns. Use `operation:"patch"` for a full rewrite. Do not invent template text — use what you Read in Turn 1 verbatim.
 
 CRITICAL CONSTRAINTS:
 
@@ -159,7 +159,7 @@ CRITICAL CONSTRAINTS:
 
 6. Do not call Read on source files (no /tmp/.../src/lexer.ts type reads). The conversation already contains everything you need. Reading source files wastes turns.
 
-7. Available tools (runtime-enforced whitelist): read, file_info, tree, search, archive_inspect, replace_range, symbol_edit, edit_history, apply_patch, task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use patch-first editing only: `replace_range` for precise spans, `symbol_edit` for whole symbols, and `apply_patch` for broader file changes.
+7. Available tools (runtime-enforced whitelist): read, file_info, tree, search, archive_inspect, edit, edit_history, task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use `edit` only: `operation:"replace"` for one exact current block and `operation:"patch"` for broader file changes.
 
 8. After turn 2's Edits, your response is complete. Do not summarize what you wrote.
 

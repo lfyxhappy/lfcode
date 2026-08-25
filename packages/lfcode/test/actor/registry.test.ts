@@ -63,6 +63,7 @@ describe("ActorRegistry", () => {
         expect(entry.status).toBe("pending")
         expect(entry.agent).toBe("explore")
         expect(entry.description).toBe("Research authentication")
+        expect(entry.visible).toBe(true)
         expect(entry.contextMode).toBe("none")
         expect(entry.background).toBe(false)
         expect(entry.turnCount).toBe(0)
@@ -134,6 +135,28 @@ describe("ActorRegistry", () => {
         const result = await rt.runPromise(ActorRegistry.Service.use((svc) => svc.get(parent.id, unknown)))
         expect(result).toBeUndefined()
       })
+    })
+  })
+
+  test("marks system-spawned agents as not visible", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withRegistry(tmp.path, async (rt) => {
+      const parent = await rt.runPromise(Session.Service.use((svc) => svc.create()))
+      const entry = await rt.runPromise(
+        ActorRegistry.Service.use((svc) =>
+          svc.register({
+            sessionID: parent.id,
+            actorID: "checkpoint-writer-1",
+            mode: "subagent",
+            agent: "checkpoint-writer",
+            description: "internal",
+            contextMode: "none",
+            background: true,
+            lifecycle: "ephemeral",
+          }),
+        ),
+      )
+      expect(entry.visible).toBe(false)
     })
   })
 

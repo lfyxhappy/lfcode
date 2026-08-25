@@ -1,7 +1,8 @@
-import { Component, For, Show, createMemo, createResource, onMount, type JSX } from "solid-js"
+import { Component, Show, createMemo, createResource, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@lfcode-ai/ui/button"
 import { Icon } from "@lfcode-ai/ui/icon"
+import { RadioGroup } from "@lfcode-ai/ui/radio-group"
 import { Select } from "@lfcode-ai/ui/select"
 import { Switch } from "@lfcode-ai/ui/switch"
 import { TextField } from "@lfcode-ai/ui/text-field"
@@ -27,28 +28,13 @@ import {
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
-import { Link } from "./link"
 import { SettingsPageShell, SettingsRow, SettingsSection } from "./settings-page-shell"
 import { SettingsList } from "./settings-list"
-import { isLiquidGlassTheme } from "./liquid-glass-theme"
 
 let demoSoundState = {
   cleanup: undefined as (() => void) | undefined,
   timeout: undefined as NodeJS.Timeout | undefined,
   run: 0,
-}
-
-type ThemeOption = {
-  id: string
-  name: string
-}
-
-type LiquidGlassControl = {
-  key: "blur" | "opacity" | "highlight" | "tint" | "saturation"
-  min: number
-  max: number
-  step: number
-  suffix: string
 }
 
 // To prevent audio from overlapping/playing very quickly when navigating the settings menus,
@@ -85,10 +71,6 @@ export const SettingsGeneral: Component = () => {
   const platform = usePlatform()
   const params = useParams()
   const settings = useSettings()
-
-  onMount(() => {
-    void theme.loadThemes()
-  })
 
   const [store, setStore] = createStore({
     checking: false,
@@ -178,15 +160,9 @@ export const SettingsGeneral: Component = () => {
       .finally(() => setStore("checking", false))
   }
 
-  const themeOptions = createMemo<ThemeOption[]>(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
-  const liquidGlassEnabled = createMemo(() => isLiquidGlassTheme(theme.themeId()))
-  const liquidGlassControls = createMemo<LiquidGlassControl[]>(() => [
-    { key: "blur", min: 0, max: 32, step: 1, suffix: "px" },
-    { key: "opacity", min: 28, max: 96, step: 1, suffix: "%" },
-    { key: "highlight", min: 0, max: 100, step: 1, suffix: "%" },
-    { key: "tint", min: 0, max: 100, step: 1, suffix: "%" },
-    { key: "saturation", min: 80, max: 160, step: 1, suffix: "%" },
-  ])
+  const extensionThemeOptions = createMemo(() =>
+    theme.extensionIDs().map((id) => ({ id, name: theme.name(id) })),
+  )
 
   const colorSchemeOptions = createMemo((): { value: ColorScheme; label: string }[] => [
     { value: "system", label: language.t("theme.scheme.system") },
@@ -295,29 +271,6 @@ export const SettingsGeneral: Component = () => {
           </div>
         </SettingsRow>
 
-        <SettingsRow
-          title={language.t("settings.general.row.shellToolPartsExpanded.title")}
-          description={language.t("settings.general.row.shellToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-shell-tool-parts-expanded">
-            <Switch
-              checked={settings.general.shellToolPartsExpanded()}
-              onChange={(checked) => settings.general.setShellToolPartsExpanded(checked)}
-            />
-          </div>
-        </SettingsRow>
-
-        <SettingsRow
-          title={language.t("settings.general.row.editToolPartsExpanded.title")}
-          description={language.t("settings.general.row.editToolPartsExpanded.description")}
-        >
-          <div data-action="settings-feed-edit-tool-parts-expanded">
-            <Switch
-              checked={settings.general.editToolPartsExpanded()}
-              onChange={(checked) => settings.general.setEditToolPartsExpanded(checked)}
-            />
-          </div>
-        </SettingsRow>
       </SettingsList>
     </SettingsSection>
   )
@@ -395,22 +348,14 @@ export const SettingsGeneral: Component = () => {
           title={language.t("settings.general.row.colorScheme.title")}
           description={language.t("settings.general.row.colorScheme.description")}
         >
-          <Select
+          <RadioGroup
             data-action="settings-color-scheme"
             options={colorSchemeOptions()}
             current={colorSchemeOptions().find((o) => o.value === theme.colorScheme())}
             value={(o) => o.value}
             label={(o) => o.label}
             onSelect={(option) => option && theme.setColorScheme(option.value)}
-            onHighlight={(option) => {
-              if (!option) return
-              theme.previewColorScheme(option.value)
-              return () => theme.cancelPreview()
-            }}
-            variant="secondary"
             size="small"
-            triggerVariant="settings"
-            triggerStyle={{ "min-width": "220px" }}
           />
         </SettingsRow>
 
@@ -431,112 +376,37 @@ export const SettingsGeneral: Component = () => {
           />
         </SettingsRow>
 
-        <SettingsRow
-          title={language.t("settings.general.row.theme.title")}
-          description={
-            <>
-              {language.t("settings.general.row.theme.description")}{" "}
-              <Link href="https://github.com/lfyxhappy/lfcode/releases">{language.t("common.learnMore")}</Link>
-            </>
-          }
-        >
-          <Select
-            data-action="settings-theme"
-            options={themeOptions()}
-            current={themeOptions().find((o) => o.id === theme.themeId())}
-            value={(o) => o.id}
-            label={(o) => o.name}
-            onSelect={(option) => {
-              if (!option) return
-              theme.setTheme(option.id)
-            }}
-            onHighlight={(option) => {
-              if (!option) return
-              theme.previewTheme(option.id)
-              return () => theme.cancelPreview()
-            }}
-            variant="secondary"
-            size="small"
-            triggerVariant="settings"
-          />
-        </SettingsRow>
-
-        <Show when={liquidGlassEnabled()}>
+        <Show when={extensionThemeOptions().length > 0}>
           <SettingsRow
-            title={language.t("settings.general.row.liquidGlass.title")}
-            description={language.t("settings.general.row.liquidGlass.description")}
+            title={language.t("settings.general.row.extensionTheme.title")}
+            description={language.t("settings.general.row.extensionTheme.description")}
           >
-            <div class="flex w-full max-w-[420px] flex-col gap-3">
-              <div class="flex justify-end">
-                <Button size="small" variant="secondary" onClick={() => settings.appearance.liquidGlass.reset()}>
-                  {language.t("settings.general.action.resetLiquidGlass")}
-                </Button>
-              </div>
-              <For each={liquidGlassControls()}>
-                {(control) => {
-                  const label = () => language.t(`settings.general.row.liquidGlass.${control.key}` as any)
-                  const value = () => {
-                    switch (control.key) {
-                      case "blur":
-                        return settings.appearance.liquidGlass.blur()
-                      case "opacity":
-                        return settings.appearance.liquidGlass.opacity()
-                      case "highlight":
-                        return settings.appearance.liquidGlass.highlight()
-                      case "tint":
-                        return settings.appearance.liquidGlass.tint()
-                      case "saturation":
-                        return settings.appearance.liquidGlass.saturation()
-                    }
-                  }
-                  const setValue = (next: number) => {
-                    switch (control.key) {
-                      case "blur":
-                        settings.appearance.liquidGlass.setBlur(next)
-                        return
-                      case "opacity":
-                        settings.appearance.liquidGlass.setOpacity(next)
-                        return
-                      case "highlight":
-                        settings.appearance.liquidGlass.setHighlight(next)
-                        return
-                      case "tint":
-                        settings.appearance.liquidGlass.setTint(next)
-                        return
-                      case "saturation":
-                        settings.appearance.liquidGlass.setSaturation(next)
-                        return
-                    }
-                  }
-
-                  return (
-                    <label
-                      class="rounded-[18px] px-4 py-3"
-                      data-action={`settings-liquid-glass-${control.key}`}
-                      data-component="settings-liquid-slider-row"
-                    >
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="text-13-medium text-text-strong">{label()}</span>
-                        <span class="text-12-medium text-text-subtle">
-                          {value()}
-                          {control.suffix}
-                        </span>
-                      </div>
-                      <div class="pt-3">
-                        <input
-                          class="settings-liquid-slider"
-                          type="range"
-                          min={control.min}
-                          max={control.max}
-                          step={control.step}
-                          value={value()}
-                          onInput={(event) => setValue(Number(event.currentTarget.value))}
-                        />
-                      </div>
-                    </label>
-                  )
+            <div class="flex items-center gap-2">
+              <Select
+                data-action="settings-extension-theme"
+                options={extensionThemeOptions()}
+                current={extensionThemeOptions().find((option) => option.id === theme.themeId())}
+                value={(option) => option.id}
+                label={(option) => option.name}
+                onSelect={(option) => option && theme.setTheme(option.id)}
+                onHighlight={(option) => {
+                  if (!option) return
+                  theme.previewTheme(option.id)
+                  return () => theme.cancelPreview()
                 }}
-              </For>
+                variant="secondary"
+                size="small"
+                triggerVariant="settings"
+              />
+              <Button
+                data-action="settings-extension-theme-reset"
+                size="small"
+                variant="secondary"
+                disabled={theme.themeId() === "lfcode"}
+                onClick={() => theme.setTheme("lfcode")}
+              >
+                {language.t("settings.general.action.restoreLfcode")}
+              </Button>
             </div>
           </SettingsRow>
         </Show>
@@ -749,7 +619,7 @@ export const SettingsGeneral: Component = () => {
   )
 
   return (
-    <SettingsPageShell title={language.t("settings.tab.general")}>
+    <SettingsPageShell title={language.t("settings.tab.general")} density="compact">
         <GeneralSection />
         <AppearanceSection />
         <NotificationsSection />

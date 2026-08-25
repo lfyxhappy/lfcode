@@ -260,6 +260,56 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
     expect(result).toBe(204)
   })
 
+  test("a cancelled async reservation cannot start a delayed model request", async () => {
+    let requests = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests += 1
+        return new Response("unexpected model request", { status: 500 })
+      },
+    })
+
+    try {
+      await using tmp = await tmpdir({ git: true })
+      await writeProviderConfig(tmp.path, server.url.origin)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () =>
+          AppRuntime.runPromise(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const state = yield* SessionRunState.Service
+              const prompt = yield* SessionPrompt.Service
+              const sess = yield* sessions.create({ title: "async reservation cancellation" })
+
+              // This is the precise prompt_async window: the route already
+              // returned 204, but its detached SessionPrompt work has not yet
+              // reached ensureRunning.
+              const signal = yield* state.reserveAsync(sess.id)
+              yield* state.cancel(sess.id)
+
+              yield* prompt.prompt(
+                {
+                  sessionID: sess.id,
+                  agent: "build",
+                  model: { providerID: ProviderID.make("alibaba"), modelID: ModelID.make("qwen-plus") },
+                  parts: [{ type: "text", text: "must not reach the provider" }],
+                },
+                { abortSignal: signal },
+              )
+
+              expect(requests).toBe(0)
+              expect(Exit.isSuccess(yield* state.assertNotBusy(sess.id).pipe(Effect.exit))).toBe(true)
+            }),
+          ),
+      })
+    } finally {
+      await server.stop(true)
+    }
+  })
+
   test("prompt_async steer waits for the next safe boundary instead of starting a concurrent main run", async () => {
     const firstStarted = Promise.withResolvers<void>()
     const firstReleased = Promise.withResolvers<void>()

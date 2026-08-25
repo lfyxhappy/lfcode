@@ -142,6 +142,38 @@ describe("ActorWaiter — lifecycle predicate (Plan 3 / Task 3)", () => {
     ),
   )
 
+  it.live(
+    "after_turn_count waits for a fresh follow-up turn even when the actor is already idle",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionNs.Service
+        const registry = yield* ActorRegistry.Service
+        const waiter = yield* ActorWaiter.Service
+        const parent = yield* sessions.create({ title: "parent" })
+        yield* registry.register({
+          sessionID: parent.id,
+          actorID: "explore-followup",
+          mode: "subagent",
+          agent: "explore",
+          description: "follow-up target",
+          contextMode: "none",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+        yield* registry.updateStatus(parent.id, "explore-followup", { status: "idle", lastOutcome: "success" })
+        const before = yield* registry.get(parent.id, "explore-followup")
+        expect(before).toBeDefined()
+        const snap = yield* waiter.wait({
+          sessionID: parent.id,
+          actor_id: "explore-followup",
+          after_turn_count: before!.turnCount,
+          timeout_ms: 20,
+        })
+        expect(snap.status).toBe("timeout")
+      }),
+    ),
+  )
+
   // Test 3: persistent idle/failure → resolves
   it.live(
     "persistent idle/failure resolves with error in snapshot",

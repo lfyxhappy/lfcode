@@ -1,5 +1,5 @@
 import { createStore, produce } from "solid-js/store"
-import { batch, createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from "solid-js"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useGlobalSync } from "./global-sync"
@@ -58,7 +58,7 @@ type SessionTabs = {
   all: string[]
 }
 
-type DetachedPanelKind = "file" | "browser" | "review" | "context"
+type DetachedPanelKind = "file" | "browser" | "review"
 
 type DetachedPanelPlacement = {
   afterTab?: string
@@ -166,7 +166,6 @@ export function pruneSessionKeys(input: {
 function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): SessionTabs {
   const all = current?.all ?? []
   if (tab === "review") return { all: all.filter((x) => x !== "review"), active: tab }
-  if (tab === "context") return { all: [tab, ...all.filter((x) => x !== tab)], active: tab }
   if (!all.includes(tab)) return { all: [...all, tab], active: tab }
   return { all, active: tab }
 }
@@ -342,6 +341,7 @@ const normalizeSessionTab = (path: ReturnType<typeof createPathHelpers> | undefi
 const normalizeSessionTabList = (path: ReturnType<typeof createPathHelpers> | undefined, all: string[]) => {
   const seen = new Set<string>()
   return all.flatMap((tab) => {
+    if (tab === "context") return []
     const value = isBrowserTab(tab) || isSideChatTab(tab) ? tab : normalizeSessionTab(path, tab)
     if (seen.has(value)) return []
     seen.add(value)
@@ -359,7 +359,7 @@ const normalizeStoredSessionTabs = (key: string, tabs: SessionTabs) => {
     : undefined
   return {
     all,
-    active: active && all.includes(active) ? active : all[0],
+    active: active && active !== "context" && all.includes(active) ? active : all[0],
   }
 }
 
@@ -573,11 +573,16 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       const fileTree = value.fileTree
       const migratedFileTree = (() => {
         if (!isRecord(fileTree)) return fileTree
-        if (fileTree.tab === "changes" || fileTree.tab === "all") return fileTree
+        const { referencePath: _, ...withoutReferencePath } = fileTree
+        const tab = withoutReferencePath.tab === "folder" ? "all" : withoutReferencePath.tab
+        if (tab === "changes" || tab === "all") {
+          if (_ === undefined && tab === fileTree.tab) return fileTree
+          return { ...withoutReferencePath, tab }
+        }
 
-        const width = typeof fileTree.width === "number" ? fileTree.width : DEFAULT_FILE_TREE_WIDTH
+        const width = typeof withoutReferencePath.width === "number" ? withoutReferencePath.width : DEFAULT_FILE_TREE_WIDTH
         return {
-          ...fileTree,
+          ...withoutReferencePath,
           opened: true,
           width: width === 260 ? DEFAULT_FILE_TREE_WIDTH : width,
           tab: "changes",
@@ -1026,7 +1031,55 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       })
     })
 
-    const enriched = createMemo(() => server.projects.list().map(enrich))
+    createEffect(() => {
+      if (!globalSync.ready) return
+      for (const project of globalSync.data.project) {
+        if (!project.extension) continue
+        if (project.extension.pluginID === "lfcode-automation" && project.extension.type === "global") continue
+        const root = rootFor(project.worktree)
+        if (server.projects.list().some((item) => workspaceKey(item.worktree) === workspaceKey(root))) continue
+        server.projects.open(root)
+      }
+    })
+
+    // Project records are server-owned, while the old sidebar list lived only in
+    // each client's local storage.  A fresh web client therefore saw only the
+    // managed plugin projects it had opened itself.  Hydrate the ordinary
+    // projects from the same registry once so desktop and web expose the same
+    // conversations; subsequent close/reorder actions remain client-local.
+    let hydratedRegisteredProjects = false
+    createEffect(() => {
+      if (hydratedRegisteredProjects || !globalSync.ready) return
+
+      const registered = globalSync.data.project
+        .filter((project) => project.id !== "global")
+        .filter((project) => project.extension?.pluginID !== "lfcode-automation" || project.extension.type !== "global")
+        .map((project) => rootFor(project.worktree))
+        .filter((root, index, projects) => projects.findIndex((item) => workspaceKey(item) === workspaceKey(root)) === index)
+
+      const ordinaryRegistered = globalSync.data.project
+        .filter((project) => project.id !== "global" && !project.extension)
+        .map((project) => workspaceKey(rootFor(project.worktree)))
+      const hasOrdinaryProject = server.projects
+        .list()
+        .some((project) => ordinaryRegistered.includes(workspaceKey(project.worktree)))
+      if (!hasOrdinaryProject) {
+        batch(() => {
+          setStore("sidebar", "opened", true)
+          for (const root of registered) server.projects.open(root)
+        })
+      }
+
+      hydratedRegisteredProjects = true
+    })
+
+    const enriched = createMemo(() =>
+      server.projects
+        .list()
+        .map(enrich)
+        .filter((project) => project.extension?.pluginID !== "lfcode-automation" || project.extension.type !== "global"),
+    )
+    const [referencePath, setReferencePath] = createSignal<string>()
     const list = createMemo(() => {
       const projects = enriched()
         .map((project, index) => ({ project, index }))
@@ -1222,13 +1275,26 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       fileTree: {
         opened: createMemo(() => store.fileTree?.opened ?? true),
         width: createMemo(() => store.fileTree?.width ?? DEFAULT_FILE_TREE_WIDTH),
-        tab: createMemo(() => store.fileTree?.tab ?? "changes"),
-        setTab(tab: "changes" | "all") {
+        tab: createMemo(() => (referencePath() ? "folder" : (store.fileTree?.tab ?? "changes"))),
+        referencePath,
+        setTab(tab: "changes" | "all" | "folder") {
+          if (tab === "folder") return
           if (!store.fileTree) {
             setStore("fileTree", { opened: true, width: DEFAULT_FILE_TREE_WIDTH, tab })
             return
           }
           setStore("fileTree", "tab", tab)
+        },
+        openReference(path: string) {
+          setReferencePath(path)
+          if (!store.fileTree) {
+            setStore("fileTree", { opened: true, width: DEFAULT_FILE_TREE_WIDTH, tab: "all" })
+            return
+          }
+          setStore("fileTree", { ...store.fileTree, opened: true, tab: "all" })
+        },
+        clearReference() {
+          setReferencePath()
         },
         open() {
           if (!store.fileTree) {
@@ -1477,7 +1543,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             get(tabID: string) {
               return store.sessionView[key()]?.browser?.[tabID]
             },
-            open(tabID: string, url: string, title?: string, options?: { activate?: boolean }) {
+            open(tabID: string, url: string, title?: string, options?: { activate?: boolean; background?: boolean }) {
               const session = key()
               browserState(session)
               const current = store.sessionView[session]?.browser?.[tabID]
@@ -1485,6 +1551,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
               if (!next) return
               const tab = browserTab(tabID)
               const currentTabs = store.sessionTabs[session]
+              if (options?.background) {
+                setStore("sessionView", session, "browser", tabID, createBrowserState(next, title, current))
+                return
+              }
               const nextTabs =
                 currentTabs?.all.includes(tab)
                   ? options?.activate === false && currentTabs

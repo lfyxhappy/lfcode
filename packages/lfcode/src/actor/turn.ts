@@ -13,6 +13,7 @@ export const runTurn = <A, E>(
   Effect.uninterruptible(
     Effect.gen(function* () {
       const reg = yield* ActorRegistry.Service
+      yield* reg.updateTurn(sessionID, actorID).pipe(Effect.ignore)
       yield* reg.updateStatus(sessionID, actorID, { status: "running" }).pipe(Effect.ignore)
       // Run work interruptibly so it can be cancelled by Fiber.interrupt.
       // Effect.exit captures the outcome without re-raising, letting us

@@ -14,13 +14,14 @@ import {
 const DEFAULT_PROMPT: Prompt = [{ type: "text", content: "", start: 0, end: 0 }]
 
 const text = (value: string): Prompt => [{ type: "text", content: value, start: 0, end: value.length }]
-const selected = (value: string, messageID = "msg_1"): Prompt => [
+const selected = (value: string, messageID = "msg_1", comment?: string): Prompt => [
   {
     type: "selected-text",
     text: value,
     content: value,
     start: 0,
     end: value.length,
+    comment,
     messageID,
     selection: { startLine: 1, startChar: 1, endLine: 1, endChar: value.length },
   },
@@ -74,6 +75,13 @@ describe("prompt-input history", () => {
     expect(withDifferent).toHaveLength(2)
     expect(normalizePromptHistoryEntry(withDifferent[0]).prompt[0]).toMatchObject({ type: "selected-text", text: "beta" })
     expect(normalizePromptHistoryEntry(withDifferent[1]).prompt[0]).toMatchObject({ type: "selected-text", text: "alpha" })
+  })
+
+  test("prependHistoryEntry distinguishes selected-text comments", () => {
+    const withOne = prependHistoryEntry([], selected("alpha", "msg_1", "first note"))
+    const withDifferent = prependHistoryEntry(withOne, selected("alpha", "msg_1", "second note"))
+
+    expect(withDifferent).toHaveLength(2)
   })
 
   test("prependHistoryEntry distinguishes different web references", () => {

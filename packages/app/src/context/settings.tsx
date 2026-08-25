@@ -37,8 +37,6 @@ export interface Settings {
     showStatus: boolean
     showTerminal: boolean
     showReasoningSummaries: boolean
-    shellToolPartsExpanded: boolean
-    editToolPartsExpanded: boolean
     motionMode: MotionMode
   }
   updates: {
@@ -49,13 +47,6 @@ export interface Settings {
     mono: string
     sans: string
     terminal: string
-    liquidGlass: {
-      blur: number
-      opacity: number
-      highlight: number
-      tint: number
-      saturation: number
-    }
   }
   editor: {
     fontSize: number
@@ -145,14 +136,6 @@ export type MotionMode = "full" | "standard" | "off"
 export const monoDefault = "System Mono"
 export const sansDefault = "System Sans"
 export const terminalDefault = "JetBrainsMono Nerd Font Mono"
-export const liquidGlassDefaults = {
-  blur: 24,
-  opacity: 68,
-  highlight: 76,
-  tint: 44,
-  saturation: 126,
-} as const
-
 const monoFallback =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 const sansFallback = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
@@ -214,8 +197,6 @@ const defaultSettings: Settings = {
     showStatus: false,
     showTerminal: false,
     showReasoningSummaries: false,
-    shellToolPartsExpanded: false,
-    editToolPartsExpanded: false,
     motionMode: "full",
   },
   updates: {
@@ -226,7 +207,6 @@ const defaultSettings: Settings = {
     mono: "",
     sans: "",
     terminal: "",
-    liquidGlass: { ...liquidGlassDefaults },
   },
   editor: {
     fontSize: 13,
@@ -420,20 +400,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setShowReasoningSummaries(value: boolean) {
           setStore("general", "showReasoningSummaries", value)
         },
-        shellToolPartsExpanded: withFallback(
-          () => store.general?.shellToolPartsExpanded,
-          defaultSettings.general.shellToolPartsExpanded,
-        ),
-        setShellToolPartsExpanded(value: boolean) {
-          setStore("general", "shellToolPartsExpanded", value)
-        },
-        editToolPartsExpanded: withFallback(
-          () => store.general?.editToolPartsExpanded,
-          defaultSettings.general.editToolPartsExpanded,
-        ),
-        setEditToolPartsExpanded(value: boolean) {
-          setStore("general", "editToolPartsExpanded", value)
-        },
         motionMode: withFallback(() => store.general?.motionMode, defaultSettings.general.motionMode),
         setMotionMode(value: MotionMode) {
           setStore("general", "motionMode", value)
@@ -461,40 +427,6 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         terminalFont: withFallback(() => store.appearance?.terminal, defaultSettings.appearance.terminal),
         setTerminalFont(value: string) {
           setStore("appearance", "terminal", value.trim() ? value : "")
-        },
-        liquidGlass: {
-          blur: withFallback(() => store.appearance?.liquidGlass?.blur, defaultSettings.appearance.liquidGlass.blur),
-          opacity: withFallback(
-            () => store.appearance?.liquidGlass?.opacity,
-            defaultSettings.appearance.liquidGlass.opacity,
-          ),
-          highlight: withFallback(
-            () => store.appearance?.liquidGlass?.highlight,
-            defaultSettings.appearance.liquidGlass.highlight,
-          ),
-          tint: withFallback(() => store.appearance?.liquidGlass?.tint, defaultSettings.appearance.liquidGlass.tint),
-          saturation: withFallback(
-            () => store.appearance?.liquidGlass?.saturation,
-            defaultSettings.appearance.liquidGlass.saturation,
-          ),
-          setBlur(value: number) {
-            setStore("appearance", "liquidGlass", "blur", value)
-          },
-          setOpacity(value: number) {
-            setStore("appearance", "liquidGlass", "opacity", value)
-          },
-          setHighlight(value: number) {
-            setStore("appearance", "liquidGlass", "highlight", value)
-          },
-          setTint(value: number) {
-            setStore("appearance", "liquidGlass", "tint", value)
-          },
-          setSaturation(value: number) {
-            setStore("appearance", "liquidGlass", "saturation", value)
-          },
-          reset() {
-            setStore("appearance", "liquidGlass", { ...defaultSettings.appearance.liquidGlass })
-          },
         },
       },
       editor: {

@@ -279,7 +279,7 @@ edit.text 都是操作后的完整结果。
 追加（current_text: ""）："帮我写一个快速排序" → [edit:"帮我写一个快速排序"]
 追加（current_text: "帮我写一个快速排序"）："用 TypeScript" → [edit:"帮我写一个快速排序，用 TypeScript"]
 追加+发送（current_text: ""）："写个快排，发送" → [edit:"写个快排", send]
-切换+追加（current_text: "review this PR"）："切到compose，再加上 focus on error handling" → [agent:"compose", edit:"review this PR, focus on error handling"]
+切换+追加（current_text: "review this PR"）：“切到build，再加上 focus on error handling” → [agent:"build", edit:"review this PR, focus on error handling"]
 仅发送："发送" / "就这样发送吧" → [send]
 仅切换："切换到plan模式" → [agent:"plan"]
 纯内容："help me refactor this function to use async await" → [edit:"help me refactor this function to use async await"]

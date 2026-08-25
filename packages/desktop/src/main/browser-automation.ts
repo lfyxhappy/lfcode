@@ -33,6 +33,7 @@ import {
   listBrowserNetworkForSession,
 } from "./browser-runtime"
 import { callRendererAutomation } from "./automation-renderer"
+import { AutomationHttpError, browserAutomationError } from "../automation-security"
 
 const SNAPSHOT_LIMIT = 200
 const PAGE_TEXT_LIMIT = 8_000
@@ -104,7 +105,9 @@ export function registerBrowserAutomationBridge() {
     },
     navigate: async (input) => {
       const url = normalizeURL(input.url)
-      const target = (await ensureSessionTarget(input.sessionKey, input.sessionID, url)) ?? (await requireTargetForSession(input.sessionKey))
+      const target =
+        (await ensureSessionTarget(input.sessionKey, input.sessionID, url, input.title, input.presentation)) ??
+        (await requireTargetForSession(input.sessionKey))
       if (target.guest.getURL() !== url) {
         await target.guest.loadURL(url)
       }
@@ -264,15 +267,11 @@ export function registerBrowserAutomationBridge() {
       })
       return serializeTarget(target)
     },
-    hover: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
-      await runHoverAction(target.guest, resolveElementSelector(target, input.ref, input.selector, "hover"))
-      return serializeTarget(target)
+    hover: async () => {
+      throw nonPreemptiveBrowserInteractionError("hover")
     },
-    focus: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
-      await runFocusAction(target.guest, resolveElementSelector(target, input.ref, input.selector, "focus"))
-      return serializeTarget(target)
+    focus: async () => {
+      throw nonPreemptiveBrowserInteractionError("focus")
     },
     clear: async (input) => {
       const target = await requireTargetForSession(input.sessionKey)
@@ -303,10 +302,8 @@ export function registerBrowserAutomationBridge() {
       await runTypeAction(target.guest, ref.selector, input.text, input.submit === true)
       return serializeTarget(target)
     },
-    pressKey: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
-      sendKey(target.guest, input.key)
-      return serializeTarget(target)
+    pressKey: async () => {
+      throw nonPreemptiveBrowserInteractionError("press_key")
     },
     back: async (input) => {
       const target = await requireTargetForSession(input.sessionKey)
@@ -337,6 +334,7 @@ export function registerBrowserAutomationBridge() {
       }
       await callRendererAutomation(win, "browser.close", { tabID: target.tabID })
       await delay(100)
+      if (isBackgroundDetachedBrowserWindow(win)) win.destroy()
       const next = getReadyTargetForSession(input.sessionKey)
       return next ? serializeTarget(next) : undefined
     },
@@ -422,10 +420,16 @@ async function requireTargetForSession(sessionKey: string) {
   const target = getReadyTargetForSession(sessionKey)
   if (target) return target
   if (hasBrowserTargetForSession(sessionKey)) return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS)
-  throw new Error(`No active side browser tab for session ${sessionKey}`)
+  throw browserAutomationError("browser_target_missing")
 }
 
-async function ensureSessionTarget(sessionKey: string, sessionID: string | undefined, url: string) {
+async function ensureSessionTarget(
+  sessionKey: string,
+  sessionID: string | undefined,
+  url: string,
+  title: string | undefined,
+  presentation: "headless" | "detached" | "sidebar" | undefined,
+) {
   const existing = getReadyTargetForSession(sessionKey)
   if (existing) return existing
 
@@ -436,6 +440,8 @@ async function ensureSessionTarget(sessionKey: string, sessionID: string | undef
     sessionKey,
     sessionID,
     url,
+    title,
+    presentation,
     reason: "tool",
   })
   return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS)
@@ -451,6 +457,10 @@ function getBrowserOpenWindow(sessionKey: string) {
 
 function isDetachedSidePanelWindow(win: BrowserWindow) {
   return win.webContents.getURL().includes("detachedWindowID=")
+}
+
+function isBackgroundDetachedBrowserWindow(win: BrowserWindow) {
+  return isDetachedSidePanelWindow(win) && !win.isVisible() && !win.isMinimized()
 }
 
 function findWindowForSession(sessionKey: string) {
@@ -470,7 +480,7 @@ async function waitForReadyTarget(sessionKey: string, timeoutMs: number) {
     if (target) return target
     await delay(100)
   }
-  throw new Error(`Timed out waiting for the side browser tab to become ready for session ${sessionKey}`)
+  throw browserAutomationError("browser_target_not_ready")
 }
 
 function requireSnapshotRef(target: ActiveBrowserAutomationTarget, ref: string) {
@@ -522,8 +532,23 @@ function normalizeURL(input: string) {
   return url.toString()
 }
 
+function nonPreemptiveBrowserInteractionError(action: "focus" | "hover" | "press_key") {
+  return new AutomationHttpError(
+    409,
+    "browser_input_injection_disabled",
+    `Browser ${action} is disabled because desktop automation does not inject mouse or keyboard input.`,
+    {
+      recovery: "Use semantic browser actions such as click, type, clear, select_option, scroll, upload_file, or navigation instead.",
+    },
+  )
+}
+
 async function executeJSON<T>(guest: WebContents, script: string) {
-  return guest.executeJavaScript(script, true) as Promise<T>
+  try {
+    return (await guest.executeJavaScript(script, true)) as T
+  } catch {
+    throw browserAutomationError("browser_renderer_unavailable")
+  }
 }
 
 async function runSelectorAction(guest: WebContents, selector: string, action: "click") {
@@ -552,7 +577,6 @@ async function runTypeAction(guest: WebContents, selector: string, text: string,
         element.dispatchEvent(new Event("change", { bubbles: true }))
       }
       element.scrollIntoView({ block: "center", inline: "center" })
-      element.focus()
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
         element.value = ${JSON.stringify(text)}
         commit()
@@ -575,8 +599,7 @@ async function runTypeAction(guest: WebContents, selector: string, text: string,
         if (form instanceof HTMLFormElement && typeof form.requestSubmit === "function") {
           form.requestSubmit()
         } else {
-          element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
-          element.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }))
+          return { ok: false, error: "Semantic submit requires a form" }
         }
       }
       return { ok: true }
@@ -620,42 +643,6 @@ async function runScrollAction(
   throw new Error(result.error ?? "Failed to scroll browser page")
 }
 
-async function runHoverAction(guest: WebContents, selector: string) {
-  const result = await executeJSON<{ ok: boolean; error?: string }>(
-    guest,
-    `(() => {
-      const element = document.querySelector(${JSON.stringify(selector)})
-      if (!(element instanceof HTMLElement)) return { ok: false, error: "Element not found" }
-      element.scrollIntoView({ block: "center", inline: "center" })
-      const rect = element.getBoundingClientRect()
-      const init = { bubbles: true, cancelable: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }
-      element.dispatchEvent(new PointerEvent("pointerover", init))
-      element.dispatchEvent(new PointerEvent("pointerenter", init))
-      element.dispatchEvent(new MouseEvent("mouseover", init))
-      element.dispatchEvent(new MouseEvent("mouseenter", init))
-      element.dispatchEvent(new MouseEvent("mousemove", init))
-      return { ok: true }
-    })()`,
-  )
-  if (result.ok) return
-  throw new Error(result.error ?? "Failed to hover browser element")
-}
-
-async function runFocusAction(guest: WebContents, selector: string) {
-  const result = await executeJSON<{ ok: boolean; error?: string }>(
-    guest,
-    `(() => {
-      const element = document.querySelector(${JSON.stringify(selector)})
-      if (!(element instanceof HTMLElement)) return { ok: false, error: "Element not found" }
-      element.scrollIntoView({ block: "center", inline: "center" })
-      element.focus()
-      return { ok: document.activeElement === element }
-    })()`,
-  )
-  if (result.ok) return
-  throw new Error("Failed to focus browser element")
-}
-
 async function runClearAction(guest: WebContents, selector: string) {
   const result = await executeJSON<{ ok: boolean; error?: string }>(
     guest,
@@ -667,7 +654,6 @@ async function runClearAction(guest: WebContents, selector: string) {
         element.dispatchEvent(new Event("change", { bubbles: true }))
       }
       element.scrollIntoView({ block: "center", inline: "center" })
-      element.focus()
       if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
         element.value = ""
         commit()
@@ -747,7 +733,6 @@ async function runUploadFileAction(guest: WebContents, selector: string, files: 
         if (!(element instanceof HTMLInputElement) || element.type !== "file") {
           return { ok: false, error: "Target element is not <input type=file>" }
         }
-        element.focus()
         return { ok: true }
       })()`,
     )
@@ -759,24 +744,6 @@ async function runUploadFileAction(guest: WebContents, selector: string, files: 
   } finally {
     debuggerController.detachIfNeeded()
   }
-}
-
-function sendKey(guest: WebContents, key: string) {
-  guest.focus()
-  guest.sendInputEvent({
-    type: "keyDown",
-    keyCode: key,
-  })
-  if (key.length === 1) {
-    guest.sendInputEvent({
-      type: "char",
-      keyCode: key,
-    })
-  }
-  guest.sendInputEvent({
-    type: "keyUp",
-    keyCode: key,
-  })
 }
 
 async function waitForText(

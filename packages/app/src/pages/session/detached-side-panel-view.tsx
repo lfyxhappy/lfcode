@@ -1,4 +1,5 @@
 import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { MarkedProvider } from "@lfcode-ai/ui/context/marked"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import type { JSX } from "solid-js"
@@ -9,10 +10,20 @@ import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { BrowserPanel } from "@/pages/session/browser-panel"
 import { FileTabContent } from "@/pages/session/file-tabs"
-import { SessionContextTab } from "@/components/session"
 import type { DetachedSidePanelContext } from "./detached-side-panel"
 
 export function DetachedSidePanelView(props: {
+  context: DetachedSidePanelContext
+  reviewPanel: () => JSX.Element
+}) {
+  return (
+    <MarkedProvider>
+      <DetachedSidePanelViewContent {...props} />
+    </MarkedProvider>
+  )
+}
+
+function DetachedSidePanelViewContent(props: {
   context: DetachedSidePanelContext
   reviewPanel: () => JSX.Element
 }) {
@@ -71,11 +82,6 @@ export function DetachedSidePanelView(props: {
       <div data-slot="detached-side-panel-body" class="flex-1 min-h-0">
         <Show when={record()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("session.detached.missing")}</div>}>
           <Show when={props.context.kind === "review"}>{props.reviewPanel()}</Show>
-          <Show when={props.context.kind === "context"}>
-            <div class="size-full overflow-hidden">
-              <SessionContextTab />
-            </div>
-          </Show>
           <Show when={props.context.kind === "browser"}>
             <BrowserPanel sessionKey={props.context.sessionKey} tab={props.context.tab} visible />
           </Show>

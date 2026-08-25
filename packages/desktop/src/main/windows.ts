@@ -9,6 +9,7 @@ import type { DetachedSidePanelKind, TitlebarTheme } from "../preload/types"
 import { browserPartition, clearBrowserWindow, getBrowserGuestOwner, recordBrowserNetwork } from "./browser-runtime"
 import { wireBrowserGuest } from "./browser-management"
 import { downloadNeedsOpenConfirmation, isManagedAutomationDownload } from "./download-security"
+import { appRouteFromRendererNavigation } from "./renderer-route"
 
 const root = dirname(fileURLToPath(import.meta.url))
 const rendererRoot = join(root, "../renderer")
@@ -151,13 +152,15 @@ export function createDetachedSidePanelWindow(input: {
   route: string
   title?: string
   kind: DetachedSidePanelKind
+  background?: boolean
 }) {
   const win = createAppWindow({
     width: 980,
     height: 720,
     minWidth: 560,
     minHeight: 360,
-    show: true,
+    show: !input.background,
+    skipTaskbar: input.background,
     title: input.title ?? "Lfcode",
     webviewTag: input.kind === "browser",
   })
@@ -269,7 +272,7 @@ function createAppWindow(
   const headless = isHeadlessWindowMode()
   const mode = tone()
   const icon = iconPath()
-  return new BrowserWindow({
+  const win = new BrowserWindow({
     ...input,
     show: input.show ?? !headless,
     ...(icon ? { icon } : {}),
@@ -296,6 +299,17 @@ function createAppWindow(
       webviewTag: input.webviewTag ?? false,
     },
   })
+  const emitVisibility = () => {
+    if (win.isDestroyed()) return
+    if (win.webContents.isDestroyed()) return
+    win.webContents.send("window-visibility", win.isVisible() && !win.isMinimized())
+  }
+  win.on("show", emitVisibility)
+  win.on("hide", emitVisibility)
+  win.on("minimize", emitVisibility)
+  win.on("restore", emitVisibility)
+  win.webContents.once("did-finish-load", emitVisibility)
+  return win
 }
 
 function wireBrowserEvents(win: BrowserWindow) {
@@ -355,6 +369,12 @@ function wireBrowserEvents(win: BrowserWindow) {
     return { action: "deny" }
   })
   win.webContents.on("will-navigate", (event, url) => {
+    const route = appRouteFromRendererNavigation(url)
+    if (route) {
+      event.preventDefault()
+      loadWindow(win, "index.html", "renderer-route-recovery", route)
+      return
+    }
     if (!isExternalMainWindowNavigation(url)) return
     event.preventDefault()
     win.webContents.send("browser-window-open", { url, reason: "human" })

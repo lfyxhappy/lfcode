@@ -123,6 +123,7 @@ export function resolveInlineImageUrl(input: { sessionID: string; messageID: str
   if (direct) {
     return peekInlineImageUrl(direct)
   }
+  if (input.url) return input.url
   const partID = input.partID ?? input.id
   if (!partID) return
   const key = partKey({ sessionID: input.sessionID, messageID: input.messageID, partID })

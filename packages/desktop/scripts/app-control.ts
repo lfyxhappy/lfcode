@@ -1,13 +1,66 @@
 #!/usr/bin/env bun
 
 import { createAutomationClient } from "./automation-client"
+import { resolveAppControlTarget } from "./app-control-target"
+import { readAutomationDiscovery } from "../src/automation-discovery"
+import { existsSync } from "node:fs"
+import { spawn } from "node:child_process"
 
-const client = await createAutomationClient()
-const args = process.argv.slice(2)
+const target = resolveAppControlTarget(process.argv.slice(2))
+const args = target.args
 const command = args[0] ?? "health"
+const client = command === "launch" ? undefined : await createAutomationClient(undefined, target.env)
+
+if (command === "launch") {
+  if (target.channel !== "pre") throw new Error("launch is only available with --pre")
+  const discovery = await readAutomationDiscovery(target.env).catch(() => undefined)
+  if (discovery) {
+    const response = await fetch(`http://${discovery.host}:${discovery.port}/health`).catch(() => undefined)
+    if (response?.ok) {
+      print({ status: "already-running", pid: discovery.pid, port: discovery.port })
+      process.exit(0)
+    }
+  }
+
+  const executable = process.env.LFCODE_PRE_EXECUTABLE ?? "C:/算法/小应用/Lfcodepre/LfcodePre.exe"
+  if (!existsSync(executable)) throw new Error(`Pre-release executable not found: ${executable}`)
+  spawn(executable, [], { cwd: "C:/算法/小应用/Lfcodepre", detached: true, stdio: "ignore" }).unref()
+
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    const next = await readAutomationDiscovery(target.env).catch(() => undefined)
+    if (next) {
+      const response = await fetch(`http://${next.host}:${next.port}/health`).catch(() => undefined)
+      if (response?.ok) {
+        print({ status: "started", pid: next.pid, port: next.port })
+        process.exit(0)
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  throw new Error("Pre-release app did not become automation-ready within 20 seconds")
+}
+
+if (!client) throw new Error("Automation client is unavailable")
 
 if (command === "health") {
   print(await client.get("/health"))
+  process.exit(0)
+}
+
+if (command === "meta") {
+  print(await client.getMetadata())
+  process.exit(0)
+}
+
+if (command === "events-next") {
+  const query = new URLSearchParams()
+  appendQueryArg(query, "after", args[1])
+  appendQueryArg(query, "limit", args[2])
+  appendQueryArg(query, "waitMs", args[3])
+  appendQueryArg(query, "scope", args[4])
+  appendQueryArg(query, "type", args[5])
+  print(await client.get(`/diagnostics/events/next${query.size > 0 ? `?${query}` : ""}`))
   process.exit(0)
 }
 
@@ -23,24 +76,26 @@ if (command === "state") {
   process.exit(0)
 }
 
-if (command === "window-type") {
+if (command === "window-manage") {
+  const action = requiredArg(args[1], "action")
+  const bounds = args[3] ? JSON.parse(args[3]) : undefined
   print(
-    await client.post("/window/type", {
+    await client.post("/window/manage", {
       windowID: numberArg(args[2]),
-      text: requiredArg(args[1], "text"),
+      action,
+      ...(bounds === undefined ? {} : { bounds }),
     }),
   )
   process.exit(0)
 }
 
-if (command === "window-click") {
-  print(
-    await client.post("/window/click", {
-      windowID: numberArg(args[3]),
-      x: requiredNumberArg(args[1], "x"),
-      y: requiredNumberArg(args[2], "y"),
-    }),
-  )
+if (command === "clipboard-get") {
+  print(await client.get("/clipboard"))
+  process.exit(0)
+}
+
+if (command === "clipboard-set") {
+  print(await client.post("/clipboard/set", { text: args[1] ?? "" }))
   process.exit(0)
 }
 
@@ -249,14 +304,14 @@ if (command === "editor-state") {
   process.exit(0)
 }
 
-if (command === "editor-focus") {
+if (command === "editor-reveal") {
   const token = requiredArg(args[1], "token")
   print(
     await client.post("/ui/editor", {
       windowID: numberArg(args[2]),
       blockKey: args[3],
       token,
-      action: "focus",
+      action: "reveal",
     }),
   )
   process.exit(0)
@@ -386,6 +441,11 @@ function print(value: unknown) {
   console.log(JSON.stringify(value, null, 2))
 }
 
+function appendQueryArg(query: URLSearchParams, key: string, value: string | undefined) {
+  if (value === undefined || value === "") return
+  query.set(key, value)
+}
+
 function requiredArg(value: string | undefined, key: string) {
   if (value) return value
   throw new Error(`Missing ${key}`)
@@ -395,12 +455,6 @@ function numberArg(value: string | undefined) {
   if (!value) return
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function requiredNumberArg(value: string | undefined, key: string) {
-  const parsed = numberArg(value)
-  if (parsed !== undefined) return parsed
-  throw new Error(`Missing ${key}`)
 }
 
 function parseVisibleArg(value: string | undefined) {

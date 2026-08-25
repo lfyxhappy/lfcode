@@ -47,6 +47,8 @@ describe("automation discovery", () => {
         token: "secret",
         userData: "C:/lfcode/userData",
         version: "1.2.3",
+        protocolVersion: 2,
+        instanceID: "instance-123",
       },
       env,
     )
@@ -58,6 +60,8 @@ describe("automation discovery", () => {
     expect(await readAutomationDiscovery(env)).toMatchObject({
       port: 7777,
       token: "secret",
+      protocolVersion: 2,
+      instanceID: "instance-123",
     })
     expect((await readdir(join(directory, "automation"))).filter((entry) => entry.endsWith(".tmp"))).toEqual([])
     if (process.platform !== "win32") {

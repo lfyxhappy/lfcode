@@ -1,4 +1,4 @@
-import { type Component, type JSX, For, Show, createEffect, createMemo, createResource, createSignal } from "solid-js"
+import { type Component, type JSX, For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js"
 import { Button } from "@lfcode-ai/ui/button"
 import { Select } from "@lfcode-ai/ui/select"
 import { Switch } from "@lfcode-ai/ui/switch"
@@ -7,6 +7,13 @@ import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { formatServerError } from "@/utils/server-errors"
+import { UiAutomationRegistry } from "@/automation/registry"
+import {
+  appControlUiDriverTokens,
+  isAppControlUiDriverToken,
+  resolveAppControlUiDriverElement,
+  snapshotUiDriverElement,
+} from "@/automation/ui-driver"
 import { SettingsList } from "./settings-list"
 import {
   appControlDirty,
@@ -22,6 +29,7 @@ import {
   type AppControlEventKindFilter,
   type AppControlEventScopeFilter,
   type AppControlPermission,
+  type BrowserControlPermission,
   type AppControlDraft,
   type AppControlEvent,
   type AppControlState,
@@ -34,8 +42,9 @@ export const SettingsAppControl: Component = () => {
   const platform = usePlatform()
   const [saved, setSaved] = createSignal<AppControlDraft>()
   const [draft, setDraft] = createSignal<AppControlDraft>({
-    enabled: false,
-    permission: "session_control",
+    enabled: true,
+    permission: "full_app_control",
+    browser: { enabled: true, permission: "interactive" },
   })
   const [saveError, setSaveError] = createSignal<string>()
   const [saving, setSaving] = createSignal(false)
@@ -84,8 +93,11 @@ export const SettingsAppControl: Component = () => {
   const permissionOptions = createMemo<{ value: AppControlPermission; label: string }[]>(() => [
     { value: "read_only", label: language.t("settings.appControl.permission.readOnly") },
     { value: "session_control", label: language.t("settings.appControl.permission.sessionControl") },
-    { value: "browser_control", label: language.t("settings.appControl.permission.browserControl") },
     { value: "full_app_control", label: language.t("settings.appControl.permission.fullAppControl") },
+  ])
+  const browserPermissionOptions = createMemo<{ value: BrowserControlPermission; label: string }[]>(() => [
+    { value: "read_only", label: language.t("settings.appControl.browser.permission.readOnly") },
+    { value: "interactive", label: language.t("settings.appControl.browser.permission.interactive") },
   ])
   const targets = createMemo(() => normalizeAppControlTargets(state.latest).targets)
   const service = createMemo(() => state.latest?.service)
@@ -122,6 +134,7 @@ export const SettingsAppControl: Component = () => {
         globalAppControlSave: {
           enabled: draft().enabled,
           permission: draft().permission,
+          browser: draft().browser,
         },
       })
       const next = result.data as AppControlState
@@ -246,17 +259,53 @@ export const SettingsAppControl: Component = () => {
     return language.t("settings.appControl.diagnostics.events.filter.kind.errors")
   }
 
+  onMount(() => {
+    const snapshot = (token: Parameters<LfcodeUiAutomationDriver["query"]>[0]["token"]) =>
+      snapshotUiDriverElement(token, isAppControlUiDriverToken(token) ? resolveAppControlUiDriverElement(token) : undefined)
+    const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    const unregister = UiAutomationRegistry.register({
+      id: "settings.app-control",
+      tokens: appControlUiDriverTokens,
+      query: (input) => snapshot(input.token),
+      click: async (input) => {
+        if (!isAppControlUiDriverToken(input.token)) throw new Error(`UI token was not found: ${input.token}`)
+        const node = resolveAppControlUiDriverElement(input.token)
+        if (!node) throw new Error(`UI token was not found: ${input.token}`)
+        const target = node.matches('button, a, input, [role="button"]')
+          ? node
+          : node.querySelector('button, a, input, [role="button"]')
+        ;(target instanceof HTMLElement ? target : node).click()
+        await nextFrame()
+        return snapshot(input.token)
+      },
+      readText: (input) => snapshot(input.token).text ?? "",
+      wait: async (input) => {
+        const timeoutMs = input.timeoutMs ?? 10_000
+        const intervalMs = input.intervalMs ?? 120
+        const startedAt = Date.now()
+        while (Date.now() - startedAt <= timeoutMs) {
+          const current = snapshot(input.token)
+          if (current.found && (input.visible === undefined || current.visible === input.visible)) return current
+          await new Promise((resolve) => setTimeout(resolve, intervalMs))
+        }
+        return snapshot(input.token)
+      },
+    })
+    onCleanup(unregister)
+  })
+
   return (
     <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex max-w-[980px] items-start justify-between gap-4 pb-6 pt-6">
-          <div class="flex flex-col gap-1">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
+        <div class="flex max-w-[980px] items-start justify-between gap-4 pb-4 pt-4">
+          <div class="min-w-0 flex flex-col gap-1">
             <h2 class="text-16-medium text-text-strong">{language.t("settings.tab.appControl")}</h2>
             <p class="text-14-regular text-text-weak">{language.t("settings.appControl.description")}</p>
           </div>
           <Button
             size="large"
             variant="secondary"
+            class="shrink-0"
             data-action="settings-app-control-save"
             disabled={saveDisabled()}
             onClick={() => void save()}
@@ -275,18 +324,18 @@ export const SettingsAppControl: Component = () => {
           </div>
         </Show>
 
-        <div class="flex flex-col gap-8">
+        <div class="flex flex-col gap-6">
           <SettingsSection
             title={language.t("settings.appControl.section.targets.title")}
             description={language.t("settings.appControl.section.targets.description")}
           >
-            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
               <For each={targets()}>
                 {(target) => (
                   <button
                     type="button"
                     data-action={`settings-app-control-target-${target}`}
-                    class={`flex min-h-[132px] flex-col rounded-[20px] border px-4 py-4 text-left transition-colors ${
+                    class={`flex min-h-[132px] min-w-0 flex-col rounded-lg border px-4 py-4 text-left transition-colors ${
                       selectedTarget() === target
                         ? "border-border-strong bg-surface-base shadow-[0_0_0_1px_var(--border-strong)]"
                         : "border-border-weak-base bg-surface-elevated hover:bg-surface-base"
@@ -298,7 +347,7 @@ export const SettingsAppControl: Component = () => {
                         <span class="text-14-medium text-text-strong">{targetMeta()[target].title}</span>
                         <span class="text-12-regular text-text-weak">{targetMeta()[target].description}</span>
                       </div>
-                      <div class="flex flex-col items-end gap-2">
+                      <div class="flex max-w-[48%] shrink-0 flex-wrap items-center justify-end gap-1.5">
                         <span
                           class={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
                             selectedTarget() === target
@@ -381,77 +430,145 @@ export const SettingsAppControl: Component = () => {
               </SettingsSection>
 
               <SettingsSection
-                title={language.t("settings.appControl.section.status.title")}
-                description={language.t("settings.appControl.section.status.description")}
+                title={language.t("settings.appControl.browser.title")}
+                description={language.t("settings.appControl.browser.description")}
               >
                 <SettingsList>
                   <SettingsRow
-                    title={language.t("settings.appControl.status.connection.title")}
-                    description={
-                      service()?.detected
-                        ? language.t("settings.appControl.status.connection.detected")
-                        : language.t("settings.appControl.status.connection.missing")
-                    }
+                    title={language.t("settings.appControl.browser.enabled.title")}
+                    description={language.t("settings.appControl.browser.enabled.description")}
                   >
-                    <div
-                      class={`rounded-full px-3 py-1 text-12-medium ${
-                        service()?.detected
-                          ? "bg-status-success/10 text-status-success"
-                          : "bg-status-warning/10 text-status-warning"
-                      }`}
-                    >
-                      {service()?.detected
-                        ? language.t("settings.appControl.status.badge.connected")
-                        : language.t("settings.appControl.status.badge.waiting")}
+                    <div data-action="settings-browser-control-enabled">
+                      <Switch
+                        checked={draft().browser.enabled}
+                        onChange={(checked) =>
+                          setDraft((current) => ({
+                            ...current,
+                            browser: { ...current.browser, enabled: checked },
+                          }))
+                        }
+                      />
                     </div>
                   </SettingsRow>
-
                   <SettingsRow
-                    title={language.t("settings.appControl.status.discoveryFile.title")}
-                    description={language.t("settings.appControl.status.discoveryFile.description")}
+                    title={language.t("settings.appControl.browser.permission.title")}
+                    description={language.t("settings.appControl.browser.permission.description")}
                   >
-                    <span class="max-w-[460px] break-all font-mono text-[11px] text-text-subtle">
-                      {service()?.discoveryFile ?? ""}
-                    </span>
+                    <Select
+                      data-action="settings-browser-control-permission"
+                      options={browserPermissionOptions()}
+                      current={browserPermissionOptions().find((item) => item.value === draft().browser.permission)}
+                      value={(item) => item.value}
+                      label={(item) => item.label}
+                      onSelect={(item) =>
+                        item &&
+                        setDraft((current) => ({
+                          ...current,
+                          browser: { ...current.browser, permission: item.value },
+                        }))
+                      }
+                      variant="secondary"
+                      size="small"
+                      triggerVariant="settings"
+                    />
                   </SettingsRow>
-
-                  <Show when={service()?.detected}>
-                    <SettingsRow
-                      title={language.t("settings.appControl.status.endpoint.title")}
-                      description={language.t("settings.appControl.status.endpoint.description")}
-                    >
-                      <span class="font-mono text-[11px] text-text-subtle">
-                        {service()?.host}:{service()?.port}
-                      </span>
-                    </SettingsRow>
-                    <SettingsRow
-                      title={language.t("settings.appControl.status.process.title")}
-                      description={language.t("settings.appControl.status.process.description")}
-                    >
-                      <span class="font-mono text-[11px] text-text-subtle">
-                        PID {service()?.pid ?? "-"} · {service()?.version ?? "-"}
-                      </span>
-                    </SettingsRow>
-                    <Show when={service()?.startedAt}>
-                      {(value) => (
-                        <SettingsRow
-                          title={language.t("settings.appControl.status.startedAt.title")}
-                          description={language.t("settings.appControl.status.startedAt.description")}
-                        >
-                          <span class="text-12-regular text-text-weak">{new Date(value()).toLocaleString()}</span>
-                        </SettingsRow>
-                      )}
-                    </Show>
-                  </Show>
                 </SettingsList>
               </SettingsSection>
+
+              <div
+                data-action="settings-app-control-metadata"
+                data-service-detected={service()?.detected ? "true" : "false"}
+                data-service-host={service()?.host}
+                data-service-port={service()?.port}
+                data-service-version={service()?.version}
+                data-service-protocol-version={service()?.protocolVersion}
+                data-service-instance-id={service()?.instanceID}
+              >
+                <SettingsSection
+                  title={language.t("settings.appControl.section.status.title")}
+                  description={language.t("settings.appControl.section.status.description")}
+                >
+                  <SettingsList>
+                    <SettingsRow
+                      title={language.t("settings.appControl.status.connection.title")}
+                      description={
+                        service()?.detected
+                          ? language.t("settings.appControl.status.connection.detected")
+                          : language.t("settings.appControl.status.connection.missing")
+                      }
+                    >
+                      <div
+                        class={`rounded-full px-3 py-1 text-12-medium ${
+                          service()?.detected
+                            ? "bg-status-success/10 text-status-success"
+                            : "bg-status-warning/10 text-status-warning"
+                        }`}
+                      >
+                        {service()?.detected
+                          ? language.t("settings.appControl.status.badge.connected")
+                          : language.t("settings.appControl.status.badge.waiting")}
+                      </div>
+                    </SettingsRow>
+
+                    <SettingsRow
+                      title={language.t("settings.appControl.status.discoveryFile.title")}
+                      description={language.t("settings.appControl.status.discoveryFile.description")}
+                    >
+                      <span class="max-w-[460px] break-all font-mono text-[11px] text-text-subtle">
+                        {service()?.discoveryFile ?? ""}
+                      </span>
+                    </SettingsRow>
+
+                    <Show when={service()?.detected}>
+                      <SettingsRow
+                        title={language.t("settings.appControl.status.endpoint.title")}
+                        description={language.t("settings.appControl.status.endpoint.description")}
+                      >
+                        <span class="font-mono text-[11px] text-text-subtle">
+                          {service()?.host}:{service()?.port}
+                        </span>
+                      </SettingsRow>
+                      <SettingsRow
+                        title={language.t("settings.appControl.status.process.title")}
+                        description={language.t("settings.appControl.status.process.description")}
+                      >
+                        <span class="font-mono text-[11px] text-text-subtle">
+                          PID {service()?.pid ?? "-"} · {service()?.version ?? "-"}
+                        </span>
+                      </SettingsRow>
+                      <Show when={service()?.startedAt}>
+                        {(value) => (
+                          <SettingsRow
+                            title={language.t("settings.appControl.status.startedAt.title")}
+                            description={language.t("settings.appControl.status.startedAt.description")}
+                          >
+                            <span class="text-12-regular text-text-weak">{new Date(value()).toLocaleString()}</span>
+                          </SettingsRow>
+                        )}
+                      </Show>
+                    </Show>
+                  </SettingsList>
+                </SettingsSection>
+              </div>
 
               <SettingsSection
                 title={language.t("settings.appControl.section.diagnostics.title")}
                 description={language.t("settings.appControl.section.diagnostics.description")}
               >
-                <div class="flex flex-col gap-4 rounded-[20px] border border-border-weak-base bg-surface-elevated p-4">
-                  <div class="flex flex-wrap items-center justify-between gap-3">
+                <div
+                  class="flex flex-col gap-4"
+                  data-action="settings-app-control-diagnostics"
+                  data-diagnostics-loading={diagnosticsLoading() ? "true" : "false"}
+                  data-diagnostics-path={diagnosticsPath()}
+                  data-diagnostics-capture-path={diagnosticsCapturePath()}
+                >
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-3"
+                    data-action="settings-app-control-events"
+                    data-event-count={events().length}
+                    data-events-loading={eventsLoading() ? "true" : "false"}
+                    data-events-error={eventsError()}
+                  >
                     <div class="min-w-0">
                       <div class="text-14-medium text-text-strong">
                         {language.t("settings.appControl.diagnostics.events.title")}
@@ -477,7 +594,7 @@ export const SettingsAppControl: Component = () => {
                     {(message) => <SettingsMessage>{message()}</SettingsMessage>}
                   </Show>
 
-                  <div class="flex flex-col gap-3 rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
+                  <div class="flex flex-col gap-3 border-b border-border-weak-base pb-4">
                     <div>
                       <div class="text-12-medium text-text-strong">
                         {language.t("settings.appControl.diagnostics.requests.title")}
@@ -494,7 +611,7 @@ export const SettingsAppControl: Component = () => {
                         </div>
                       }
                     >
-                      <div class="overflow-hidden rounded-lg border border-border-weak-base bg-surface-elevated">
+                  <div class="max-h-64 overflow-y-auto rounded-lg border border-border-weak-base bg-surface-elevated">
                         <For each={requestLogs()}>
                           {(item) => (
                             <div class="flex flex-wrap items-start gap-3 border-b border-border-weak-base px-3 py-2 text-[11px] last:border-none">
@@ -532,7 +649,7 @@ export const SettingsAppControl: Component = () => {
                     </Show>
                   </div>
 
-                  <div class="flex flex-col gap-3 rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
+                  <div class="flex flex-col gap-3 border-b border-border-weak-base pb-4">
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="text-[11px] font-medium uppercase tracking-[0.08em] text-text-subtle">
                         {language.t("settings.appControl.diagnostics.events.filter.scope.title")}
@@ -578,7 +695,7 @@ export const SettingsAppControl: Component = () => {
                   <Show
                     when={filteredEvents().length > 0}
                     fallback={
-                      <div class="rounded-xl border border-border-weak-base bg-surface-base px-4 py-3 text-12-regular text-text-weak">
+                      <div class="rounded-md border border-border-weak-base bg-surface-base px-4 py-3 text-12-regular text-text-weak">
                         {!service()?.detected
                           ? language.t("settings.appControl.status.connection.missing")
                           : events().length === 0
@@ -587,7 +704,7 @@ export const SettingsAppControl: Component = () => {
                       </div>
                     }
                   >
-                    <div class="overflow-hidden rounded-xl border border-border-weak-base bg-surface-base">
+                    <div class="max-h-80 overflow-y-auto rounded-md border border-border-weak-base bg-surface-base">
                       <For each={filteredEvents()}>
                         {(event) => (
                           <div class="flex flex-wrap items-start gap-3 border-b border-border-weak-base px-4 py-3 text-12-regular last:border-none">
@@ -630,7 +747,12 @@ export const SettingsAppControl: Component = () => {
                     </Show>
 
                     <Show when={diagnosticsJson()}>
-                      <Button size="small" variant="ghost" onClick={() => void copyDiagnosticsJson()}>
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        data-action="settings-app-control-copy-diagnostics"
+                        onClick={() => void copyDiagnosticsJson()}
+                      >
                         {language.t("settings.appControl.diagnostics.copyJson")}
                       </Button>
                     </Show>
@@ -642,7 +764,7 @@ export const SettingsAppControl: Component = () => {
 
                   <Show when={diagnosticsPath()}>
                     {(path) => (
-                      <div class="rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
+                      <div class="rounded-md border border-border-weak-base bg-surface-base px-4 py-3">
                         <div class="text-12-medium text-text-strong">{language.t("settings.appControl.diagnostics.exportedPath")}</div>
                         <div class="break-all pt-1 font-mono text-[11px] text-text-weak">{path()}</div>
                       </div>
@@ -651,7 +773,7 @@ export const SettingsAppControl: Component = () => {
 
                   <Show when={diagnosticsJson()}>
                     {(json) => (
-                      <div class="rounded-xl border border-border-weak-base bg-surface-base px-4 py-3">
+                      <div class="rounded-md border border-border-weak-base bg-surface-base px-4 py-3">
                         <div class="pb-2 text-12-medium text-text-strong">{language.t("settings.appControl.diagnostics.preview")}</div>
                         <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-text-weak">
                           {json()}

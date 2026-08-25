@@ -23,6 +23,7 @@ function buildCtx(): ProjectSidebarContext {
     openSidebar: () => {},
     toggleExpanded: () => {},
     isExpanded: () => true,
+    projectExpansionActivated: () => false,
     setExpanded: () => {},
     isProjectPinned: () => false,
     toggleProjectPinned: () => {},
@@ -35,11 +36,14 @@ function buildCtx(): ProjectSidebarContext {
     projectEditorID: () => "project:/demo",
     renameProject: async () => {},
     openProjectInExplorer: () => {},
+    canCreateScheduledAutomation: () => true,
+    createScheduledAutomation: () => {},
+    canCreateTemporarySession: () => true,
+    createTemporarySession: async () => {},
     archiveProjectSessions: async () => {},
     clearProjectNotifications: () => {},
     canOpenProjectPath: () => true,
-    editorOpen: () => false,
-    InlineEditor: () => null,
+    RenameTrigger: () => null,
     sessionProps: {
       navList: accessor([]),
       sidebarExpanded: accessor(true),
@@ -49,9 +53,8 @@ function buildCtx(): ProjectSidebarContext {
       renameSession: async () => {},
       archiveSession: async () => {},
       showDeleteSessionDialog: () => {},
-      editorOpen: () => false,
       openEditor: () => {},
-      InlineEditor: () => null,
+      RenameTrigger: () => null,
     },
   }
 }
@@ -62,7 +65,6 @@ describe("resolveProjectSidebarCtx", () => {
     expect(
       resolveProjectSidebarCtx({
         project,
-        sortNow: accessor(0),
         ctx,
       }),
     ).toBe(ctx)
@@ -72,12 +74,27 @@ describe("resolveProjectSidebarCtx", () => {
     const ctx = buildCtx()
     const resolved = resolveProjectSidebarCtx({
       project,
-      sortNow: accessor(0),
       ...ctx,
     })
 
     expect(resolved.workspaceIds(project)).toEqual(["/demo"])
     expect(resolved.currentDir()).toBe("/demo")
     expect(resolved.currentSessionID()).toBe("ses_1")
+  })
+
+  test("preserves the session selection callback", () => {
+    let selected = false
+    const ctx = buildCtx()
+    ctx.sessionProps.onSelect = () => {
+      selected = true
+    }
+
+    const resolved = resolveProjectSidebarCtx({
+      project,
+      ...ctx,
+    })
+
+    resolved.sessionProps.onSelect?.()
+    expect(selected).toBe(true)
   })
 })

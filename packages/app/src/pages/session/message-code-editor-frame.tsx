@@ -39,7 +39,7 @@ export function MessageCodeEditorFrame(props: MessageCodeEditorFrameProps) {
   const language = useLanguage()
   const toolbarButtonClass = "size-8 min-w-8 rounded-lg p-0"
   const toolbarIconClass = "size-4"
-  const moreMenuContentClass = "min-w-[220px] rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl"
+  const moreMenuContentClass = "min-w-[220px] rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md"
   const moreMenuItemClass = "rounded-lg"
   const currentModeIcon = () => (props.mode === "edit" ? "edit" : props.mode === "diff" ? "code" : "eye")
   const currentModeLabel = () => (props.mode === "edit" ? props.editLabel : props.mode === "diff" ? props.diffLabel : props.previewLabel)
@@ -63,7 +63,7 @@ export function MessageCodeEditorFrame(props: MessageCodeEditorFrameProps) {
       data-editor-mode={props.mode}
       data-external-changed={props.externalChanged ? "true" : "false"}
       data-save-conflict={props.saveConflict ? "true" : "false"}
-      class="my-3 overflow-hidden rounded-xl border border-border-weak-base bg-background-base"
+      class="my-3 overflow-hidden rounded-lg border border-border-weak-base bg-background-base"
     >
       <div class="sr-only">
         <Show when={props.onReload && props.reloadLabel}>

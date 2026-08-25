@@ -1,11 +1,13 @@
 import path from "path"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { Hono } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { Effect } from "effect"
+import { readLfcodePluginManifest } from "@lfcode-ai/plugin"
 import z from "zod"
 import { Config } from "@/config"
 import { ConfigPlugin } from "@/config/plugin"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { InstallationVersion } from "@/installation/version"
 import { Npm } from "@/npm"
 import {
@@ -20,6 +22,7 @@ import {
 } from "@/plugin/shared"
 import { Filesystem } from "@/util"
 import { lazy } from "@/util/lazy"
+import { errors } from "../../error"
 import { jsonRequest } from "./trace"
 import { Plugin } from "@/plugin"
 import { Instance } from "@/project/instance"
@@ -88,6 +91,43 @@ const PluginToggle = z
     enabled: z.boolean(),
   })
   .meta({ ref: "PluginToggle" })
+
+const PluginData = z.object({ value: z.unknown() }).meta({ ref: "PluginData" })
+const PluginDataParams = z.object({ pluginID: z.string().min(1).max(128) }).meta({ ref: "PluginDataParams" })
+const PluginActionParams = z.object({ pluginID: z.string().min(1).max(128), action: z.string().min(1).max(128) }).meta({ ref: "PluginActionParams" })
+const PluginActionInput = z.object({ input: z.unknown() }).meta({ ref: "PluginActionInput" })
+const PluginActionResult = z.object({ value: z.unknown() }).meta({ ref: "PluginActionResult" })
+
+function pluginDataDirectory(pluginID: string) {
+  return Effect.gen(function* () {
+    const runtime = yield* Plugin.Service
+    const registered = yield* runtime.data(pluginID)
+    if (registered) return registered
+
+    const config = yield* Config.Service
+    const info = yield* config.get()
+    for (const origin of info.plugin_origins ?? []) {
+      const spec = ConfigPlugin.pluginSpecifier(origin.spec)
+      const target = yield* Effect.tryPromise(() => resolvePluginTarget(spec)).pipe(Effect.option)
+      if (target._tag === "None") continue
+      const pkg = yield* Effect.tryPromise(() => readPluginPackage(target.value)).pipe(Effect.option)
+      if (pkg._tag === "None") continue
+      const manifest = readLfcodePluginManifest(pkg.value.json.lfcode, spec)
+      if (manifest?.id !== pluginID || !manifest.storage?.data) continue
+      const directory = path.join(pkg.value.dir, "data")
+      yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+      return directory
+    }
+  })
+}
+const PluginDataFile = z
+  .object({
+    kind: z.enum(["characters", "worldbooks"]),
+    filename: z.string().min(1).max(256),
+    base64: z.string().min(1).max(64_000_000),
+  })
+  .meta({ ref: "PluginDataFile" })
+const PluginDataFileResult = z.object({ path: z.string(), bytes: z.number().int().nonnegative() }).meta({ ref: "PluginDataFileResult" })
 
 const PluginLibraryPreviewInput = z
   .object({ source: z.enum(["npm", "directory", "zip"]), path: z.string().min(1) })
@@ -188,7 +228,24 @@ const PluginManifestSummary = z
       .array(z.object({ id: z.string(), purpose: z.string().optional(), required: z.boolean().optional() }))
       .optional(),
     uiContributions: z
-      .array(z.object({ slot: z.enum(["tui-slot", "desktop-settings-panel", "desktop-session-toolbar"]), title: z.string().optional() }))
+      .array(
+        z.object({
+          slot: z.enum(["tui-slot", "desktop-settings-panel", "desktop-session-toolbar", "desktop-session-composer"]),
+          title: z.string().optional(),
+          sessionComposer: z
+            .object({
+              type: z.string(),
+              mode: z.enum(["replace", "append"]),
+              renderer: z.literal("conversation"),
+              placeholder: z.string().optional(),
+              submitLabel: z.string().optional(),
+              description: z.string().optional(),
+              hiddenComponents: z.array(z.enum(["summary", "jobs-rail", "side-panel"])).optional(),
+            })
+            .optional(),
+          managedSession: z.object({ type: z.string(), title: z.string().optional(), label: z.string().optional() }).optional(),
+        }),
+      )
       .optional(),
   })
   .meta({ ref: "PluginManifestSummary" })
@@ -334,7 +391,7 @@ async function resolveInspectTarget(spec: string, source: "file" | "npm" | "mana
     return resolvePluginTarget(spec).catch(() => undefined)
   }
   if (!packageName) return
-  const root = path.join(Global.Path.cache, "packages", Npm.sanitize(spec))
+  const root = path.join(PluginPath.data("runtime-node"), Npm.sanitize(spec))
   const target = path.join(root, "node_modules", packageName)
   if (!(await Filesystem.exists(target))) return
   return target
@@ -359,6 +416,115 @@ async function inspectCompatibility(
 
 export const PluginRoutes = lazy(() =>
   new Hono()
+    .post(
+      "/:pluginID/action/:action",
+      describeRoute({
+        summary: "Run a declared plugin action",
+        description: "Runs only an action registered by the active plugin after host-side schema validation.",
+        operationId: "plugin.action",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["input"], properties: { input: {} } },
+            },
+          },
+        },
+        responses: { 200: { description: "Plugin action result", content: { "application/json": { schema: resolver(PluginActionResult) } } }, ...errors(400, 404) },
+      }),
+      validator("param", PluginActionParams),
+      validator("json", PluginActionInput),
+      async (c) =>
+        jsonRequest("PluginRoutes.action", c, function* () {
+          const params = c.req.valid("param")
+          const runtime = yield* Plugin.Service
+          return { value: yield* runtime.action(params.pluginID, params.action, c.req.valid("json").input) }
+        }),
+    )
+    .get(
+      "/:pluginID/data",
+      describeRoute({
+        summary: "Read plugin UI data",
+        operationId: "plugin.dataGet",
+        responses: {
+          200: { description: "Plugin UI data", content: { "application/json": { schema: resolver(PluginData) } } },
+          ...errors(404),
+        },
+      }),
+      validator("param", PluginDataParams),
+      async (c) =>
+        jsonRequest("PluginRoutes.dataGet", c, function* () {
+          const directory = yield* pluginDataDirectory(c.req.valid("param").pluginID)
+          if (!directory) throw new Error("Plugin does not expose private UI data")
+          const value = yield* Effect.promise(async () => {
+            try {
+              return JSON.parse(await readFile(path.join(directory, "ui.json"), "utf8"))
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+              throw error
+            }
+          })
+          return { value }
+        }),
+    )
+    .post(
+      "/:pluginID/data",
+      describeRoute({
+        summary: "Write plugin UI data",
+        operationId: "plugin.dataSet",
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/PluginData" } } } },
+        responses: {
+          200: { description: "Saved plugin UI data", content: { "application/json": { schema: resolver(PluginData) } } },
+          ...errors(404),
+        },
+      }),
+      validator("param", PluginDataParams),
+      validator("json", PluginData),
+      async (c) =>
+        jsonRequest("PluginRoutes.dataSet", c, function* () {
+          const directory = yield* pluginDataDirectory(c.req.valid("param").pluginID)
+          if (!directory) throw new Error("Plugin does not expose private UI data")
+          const value = c.req.valid("json").value
+          yield* Effect.promise(async () => {
+            const target = path.join(directory, "ui.json")
+            const temp = path.join(directory, `ui.${process.pid}.${Date.now()}.tmp`)
+            await writeFile(temp, JSON.stringify(value, null, 2) + "\n", "utf8")
+            await rename(temp, target)
+          })
+          return { value }
+        }),
+    )
+    .post(
+      "/:pluginID/data/file",
+      describeRoute({
+        summary: "Store a plugin-private imported file",
+        operationId: "plugin.dataFilePut",
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/PluginDataFile" } } } },
+        responses: {
+          200: { description: "Stored plugin file", content: { "application/json": { schema: resolver(PluginDataFileResult) } } },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", PluginDataParams),
+      validator("json", PluginDataFile),
+      async (c) =>
+        jsonRequest("PluginRoutes.dataFilePut", c, function* () {
+          const directory = yield* pluginDataDirectory(c.req.valid("param").pluginID)
+          if (!directory) throw new Error("Plugin does not expose private UI data")
+          const input = c.req.valid("json")
+          const filename = path.basename(input.filename).replace(/[^\\w.()\-\u4e00-\u9fff]/g, "_")
+          if (!filename || filename === ".") throw new Error("Invalid plugin file name")
+          const bytes = Buffer.from(input.base64, "base64")
+          if (!bytes.length) throw new Error("Plugin file is empty")
+          const relative = path.join("imports", input.kind, filename)
+          yield* Effect.promise(async () => {
+            const target = path.join(directory, relative)
+            await mkdir(path.dirname(target), { recursive: true })
+            await writeFile(target, bytes)
+          })
+          return { path: relative.replaceAll("\\\\", "/"), bytes: bytes.length }
+        }),
+    )
     .get(
       "/",
       describeRoute({

@@ -2,6 +2,10 @@ import { Context, Effect, Layer } from "effect"
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm"
 import { Database } from "../storage"
 import { MessageTable, PartTable, SessionTable } from "../session/session.sql"
+import { ActorRegistryTable } from "../actor/actor.sql"
+import { ActorDispatchTable } from "../actor/dispatch.sql"
+import { BackgroundJobTable } from "../background-job/background-job.sql"
+import { EventTable } from "../sync/event.sql"
 import type { MessageID, SessionID } from "../session/schema"
 import { Config } from "../config"
 import { Bus } from "../bus"
@@ -11,6 +15,9 @@ import type { Kind } from "./extract"
 import { layer as writerLayer, Service as WriterService } from "./writer"
 import { layer as backfillLayer, Service as BackfillService } from "./backfill"
 import { Log } from "../util"
+import { userVisibleActorClause } from "../actor/visibility"
+
+const HIDDEN_REVIEWER_SQL = userVisibleActorClause(MessageTable.agent_id)
 
 export type SearchHit = {
   part_id: string
@@ -38,6 +45,41 @@ export type MessageContext = {
   matched: boolean
   time_created: number
   parts: MessagePart[]
+}
+
+export type SessionTrace = {
+  session_found: boolean
+  session_id: string
+  project_id?: string
+  parent_id?: string
+  context_from?: string
+  children: { session_id: string; title: string; time_created: number }[]
+  actors: { actor_id: string; parent_actor_id?: string; agent: string; status: string; last_outcome?: string }[]
+  dispatches: { id: string; actor_id: string; parent_actor_id?: string; description: string; status: string; unread: boolean }[]
+  jobs: { id: string; kind: string; title: string; status: string; completed_at?: number }[]
+}
+
+export type SessionEvent = {
+  event_id: string
+  session_id: string
+  sequence: number
+  type: string
+  data: Record<string, unknown>
+}
+
+export type EventSearch = {
+  session_found: boolean
+  session_id: string
+  project_id?: string
+  events: SessionEvent[]
+}
+
+export type EventRead = {
+  session_found: boolean
+  event_found: boolean
+  session_id: string
+  project_id?: string
+  event?: SessionEvent
 }
 
 export interface Interface {
@@ -70,12 +112,26 @@ export interface Interface {
     project_id?: string
     messages: MessageContext[]
   }>
+
+  readonly trace: (input: { session_id: string }) => Effect.Effect<SessionTrace>
+
+  readonly eventSearch: (input: {
+    session_id: string
+    query?: string
+    type?: string
+    limit?: number
+  }) => Effect.Effect<EventSearch>
+
+  readonly eventRead: (input: { session_id: string; sequence: number }) => Effect.Effect<EventRead>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/History") {}
 
 const HARD_CAP = 50
+const EVENT_HARD_CAP = 100
 const log = Log.create({ service: "history" })
+
+const SENSITIVE_EVENT_KEY = /token|secret|authorization|cookie|password/i
 
 type Row = {
   part_id: string
@@ -106,6 +162,11 @@ export const layer = Layer.effect(
       const limit = Math.min(input.limit ?? 10, HARD_CAP)
       const conditions: string[] = []
       const params: (string | number)[] = []
+
+      // FTS rows predate the hidden-actor boundary in existing profiles. Keep
+      // this join-time guard even after backfill cleanup so stale rows can
+      // never be returned while an upgrade is in progress.
+      conditions.push("NOT EXISTS (SELECT 1 FROM message WHERE message.id = history_fts.message_id AND (message.agent_id = 'context-reviewer' OR message.agent_id LIKE 'context-reviewer-%'))")
 
       const scope = input.scope ?? "project"
       if (scope === "project") {
@@ -174,7 +235,7 @@ export const layer = Layer.effect(
             time_created: MessageTable.time_created,
           })
           .from(MessageTable)
-          .where(eq(MessageTable.id, input.message_id as MessageID))
+          .where(and(eq(MessageTable.id, input.message_id as MessageID), HIDDEN_REVIEWER_SQL))
           .get(),
       )
       if (!anchor) return { session_id: "", messages: [] }
@@ -193,6 +254,7 @@ export const layer = Layer.effect(
           .where(
             and(
               eq(MessageTable.session_id, anchor.session_id),
+              HIDDEN_REVIEWER_SQL,
               sql`(${MessageTable.time_created} < ${anchor.time_created} OR (${MessageTable.time_created} = ${anchor.time_created} AND ${MessageTable.id} <= ${anchor.id}))`,
             ),
           )
@@ -207,6 +269,7 @@ export const layer = Layer.effect(
           .where(
             and(
               eq(MessageTable.session_id, anchor.session_id),
+              HIDDEN_REVIEWER_SQL,
               sql`(${MessageTable.time_created} > ${anchor.time_created} OR (${MessageTable.time_created} = ${anchor.time_created} AND ${MessageTable.id} > ${anchor.id}))`,
             ),
           )
@@ -279,6 +342,168 @@ export const layer = Layer.effect(
       return { session_id: anchor.session_id, project_id: session?.project_id, messages: out }
     })
 
+    const trace = Effect.fn("History.trace")(function* (input: Parameters<Interface["trace"]>[0]) {
+      const session = Database.use((db) =>
+        db
+          .select({
+            id: SessionTable.id,
+            project_id: SessionTable.project_id,
+            parent_id: SessionTable.parent_id,
+            context_from: SessionTable.context_from,
+          })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, input.session_id as SessionID))
+          .get(),
+      )
+      if (!session) {
+        return {
+          session_found: false,
+          session_id: input.session_id,
+          children: [],
+          actors: [],
+          dispatches: [],
+          jobs: [],
+        }
+      }
+      const children = Database.use((db) =>
+        db
+          .select({ session_id: SessionTable.id, title: SessionTable.title, time_created: SessionTable.time_created })
+          .from(SessionTable)
+          .where(eq(SessionTable.parent_id, session.id))
+          .orderBy(asc(SessionTable.time_created))
+          .all(),
+      )
+      const actors = Database.use((db) =>
+        db
+          .select({
+            actor_id: ActorRegistryTable.actor_id,
+            parent_actor_id: ActorRegistryTable.parent_actor_id,
+            agent: ActorRegistryTable.agent,
+            status: ActorRegistryTable.status,
+            last_outcome: ActorRegistryTable.last_outcome,
+          })
+          .from(ActorRegistryTable)
+          .where(eq(ActorRegistryTable.session_id, session.id))
+          .all()
+          .map(({ parent_actor_id, last_outcome, ...item }) => ({
+            ...item,
+            ...(parent_actor_id ? { parent_actor_id } : {}),
+            ...(last_outcome ? { last_outcome } : {}),
+          })),
+      )
+      const dispatches = Database.use((db) =>
+        db
+          .select({
+            id: ActorDispatchTable.id,
+            actor_id: ActorDispatchTable.actor_id,
+            parent_actor_id: ActorDispatchTable.parent_actor_id,
+            description: ActorDispatchTable.description,
+            status: ActorDispatchTable.status,
+            unread: ActorDispatchTable.unread,
+          })
+          .from(ActorDispatchTable)
+          .where(eq(ActorDispatchTable.session_id, session.id))
+          .orderBy(desc(ActorDispatchTable.time_created))
+          .all()
+          .map(({ parent_actor_id, ...item }) => ({ ...item, ...(parent_actor_id ? { parent_actor_id } : {}) })),
+      )
+      const jobs = Database.use((db) =>
+        db
+          .select({
+            id: BackgroundJobTable.id,
+            kind: BackgroundJobTable.kind,
+            title: BackgroundJobTable.title,
+            status: BackgroundJobTable.status,
+            completed_at: BackgroundJobTable.completed_at,
+          })
+          .from(BackgroundJobTable)
+          .where(eq(BackgroundJobTable.session_id, session.id))
+          .orderBy(desc(BackgroundJobTable.time_created))
+          .all()
+          .map(({ completed_at, ...item }) => ({ ...item, ...(completed_at ? { completed_at } : {}) })),
+      )
+      return {
+        session_found: true,
+        session_id: session.id,
+        project_id: session.project_id,
+        ...(session.parent_id ? { parent_id: session.parent_id } : {}),
+        ...(session.context_from ? { context_from: session.context_from } : {}),
+        children,
+        actors,
+        dispatches,
+        jobs,
+      }
+    })
+
+    const eventSearch = Effect.fn("History.eventSearch")(function* (input: Parameters<Interface["eventSearch"]>[0]) {
+      const session = findSession(input.session_id)
+      if (!session) return { session_found: false, session_id: input.session_id, events: [] }
+
+      const rows = Database.use((db) =>
+        db
+          .select({
+            event_id: EventTable.id,
+            session_id: EventTable.aggregate_id,
+            sequence: EventTable.seq,
+            type: EventTable.type,
+            data: EventTable.data,
+          })
+          .from(EventTable)
+          .where(
+            and(
+              eq(EventTable.aggregate_id, input.session_id),
+              ...(input.type ? [eq(EventTable.type, input.type)] : []),
+              ...(input.query
+                ? [sql`lower(CAST(${EventTable.data} AS TEXT)) LIKE lower(${`%${escapeLike(input.query)}%`}) ESCAPE '\\'`]
+                : []),
+            ),
+          )
+          .orderBy(asc(EventTable.seq))
+          .limit(Math.min(input.limit ?? EVENT_HARD_CAP, EVENT_HARD_CAP))
+          .all(),
+      )
+      return {
+        session_found: true,
+        session_id: input.session_id,
+        project_id: session.project_id,
+        events: rows.map(sanitizeEvent),
+      }
+    })
+
+    const eventRead = Effect.fn("History.eventRead")(function* (input: Parameters<Interface["eventRead"]>[0]) {
+      const session = findSession(input.session_id)
+      if (!session) return { session_found: false, event_found: false, session_id: input.session_id }
+
+      const event = Database.use((db) =>
+        db
+          .select({
+            event_id: EventTable.id,
+            session_id: EventTable.aggregate_id,
+            sequence: EventTable.seq,
+            type: EventTable.type,
+            data: EventTable.data,
+          })
+          .from(EventTable)
+          .where(and(eq(EventTable.aggregate_id, input.session_id), eq(EventTable.seq, input.sequence)))
+          .get(),
+      )
+      if (!event) {
+        return {
+          session_found: true,
+          event_found: false,
+          session_id: input.session_id,
+          project_id: session.project_id,
+        }
+      }
+      return {
+        session_found: true,
+        event_found: true,
+        session_id: input.session_id,
+        project_id: session.project_id,
+        event: sanitizeEvent(event),
+      }
+    })
+
     const session = Effect.fn("History.session")(function* (input: Parameters<Interface["session"]>[0]) {
       const limit = Math.min(input.limit ?? 200, 500)
       const sessionID = input.session_id as SessionID
@@ -311,7 +536,7 @@ export const layer = Layer.effect(
         }
       }
 
-      const base = [eq(MessageTable.session_id, sessionID)]
+      const base = [eq(MessageTable.session_id, sessionID), HIDDEN_REVIEWER_SQL]
       const scope = input.agent_scope ?? "main"
       if (scope === "main") base.push(eq(MessageTable.agent_id, "main"))
       const rows = Database.use((db) =>
@@ -424,6 +649,43 @@ export const layer = Layer.effect(
       }
     })
 
-    return Service.of({ search, around, session })
+    return Service.of({ search, around, session, trace, eventSearch, eventRead })
   }),
 )
+
+function findSession(sessionID: string) {
+  return Database.use((db) =>
+    db
+      .select({ project_id: SessionTable.project_id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID as SessionID))
+      .get(),
+  )
+}
+
+function escapeLike(query: string) {
+  return query.replace(/[\\%_]/g, "\\$&")
+}
+
+function sanitizeEvent(event: {
+  event_id: string
+  session_id: string
+  sequence: number
+  type: string
+  data: Record<string, unknown>
+}): SessionEvent {
+  return {
+    ...event,
+    data: sanitizeEventData(event.data) as Record<string, unknown>,
+  }
+}
+
+function sanitizeEventData(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") return Number.isFinite(value) ? value : null
+  if (Array.isArray(value)) return value.map(sanitizeEventData)
+  if (typeof value !== "object") return null
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, SENSITIVE_EVENT_KEY.test(key) ? "[REDACTED]" : sanitizeEventData(item)]),
+  )
+}

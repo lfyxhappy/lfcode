@@ -197,4 +197,102 @@ describe("actor tool — send action", () => {
       }),
     ),
   )
+
+  it.live(
+    "run with actor_id delivers a follow-up to the existing actor without creating another one",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const actorID = yield* registry.allocateActorID(chat.id, "explore")
+        yield* registry.register({
+          sessionID: chat.id,
+          actorID,
+          mode: "subagent",
+          agent: "explore",
+          description: "initial scan",
+          contextMode: "none",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "run",
+              subagent_type: "explore",
+              description: "follow up scan",
+              prompt: "请补充第一轮没有覆盖的恢复逻辑。",
+              actor_id: actorID,
+              timeout_ms: 1,
+            },
+          },
+          ctxFor(chat.id),
+        )
+
+        const actors = yield* registry.listBySession(chat.id)
+        const rows = yield* Effect.sync(() =>
+          Database.use((db) =>
+            db
+              .select()
+              .from(InboxTable)
+              .where(and(eq(InboxTable.receiver_session_id, chat.id), eq(InboxTable.receiver_actor_id, actorID)))
+              .all(),
+          ),
+        )
+        expect(actors.filter((actor) => actor.mode === "subagent")).toHaveLength(1)
+        expect(rows).toHaveLength(1)
+        expect(rows[0].content).toEqual({ text: "请补充第一轮没有覆盖的恢复逻辑。" })
+        expect(rows[0].type).toBe("actor_followup")
+        expect(result.metadata.actorId).toBe(actorID)
+        expect(result.metadata.action).toBe("send")
+        expect(result.output).toContain('<actor_result status="timeout">')
+      }),
+    ),
+  )
+
+  it.live(
+    "clear follow-up wording reuses the most recent same-type actor",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const actorID = yield* registry.allocateActorID(chat.id, "explore")
+        yield* registry.register({
+          sessionID: chat.id,
+          actorID,
+          mode: "subagent",
+          agent: "explore",
+          description: "initial scan",
+          contextMode: "none",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "run",
+              subagent_type: "explore",
+              description: "追问首次扫描",
+              prompt: "刚才已经完成第一轮扫描，现在主 agent 要追问遗漏的恢复逻辑。",
+              timeout_ms: 1,
+            },
+          },
+          ctxFor(chat.id),
+        )
+
+        const actors = yield* registry.listBySession(chat.id)
+        expect(actors.filter((actor) => actor.mode === "subagent")).toHaveLength(1)
+        expect(result.metadata.actorId).toBe(actorID)
+        expect(result.metadata.action).toBe("send")
+      }),
+    ),
+  )
 })

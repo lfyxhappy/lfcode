@@ -432,7 +432,7 @@ export const SettingsBrowser: Component = () => {
                 {(value) => <EmptyState>{value()}</EmptyState>}
               </Show>
               <Show when={!cacheState.error}>
-                <div class="rounded-[20px] border border-border-weak-base bg-surface-base px-4 py-3">
+                <div class="rounded-lg border border-border-weak-base bg-surface-base px-4 py-3">
                   <div class="grid gap-2 text-12-regular text-text-weak sm:grid-cols-3">
                     <div>
                       <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">{language.t("settings.browser.cache.field.size")}</div>
@@ -491,7 +491,7 @@ export const SettingsBrowser: Component = () => {
                       <div class="space-y-2">
                         <For each={group.items}>
                           {(cookie) => (
-                            <div class="rounded-xl border border-border-weak-base px-3 py-2">
+                            <div class="rounded-md border border-border-weak-base bg-surface-base px-3 py-2">
                               <div class="flex flex-wrap items-center justify-between gap-2">
                                 <div class="text-13-medium text-text-strong">{cookie.name}</div>
                                 <Button size="small" variant="secondary" onClick={() => void deleteCookie(cookie)}>
@@ -643,7 +643,7 @@ const SettingsRow: Component<{
 
 const UnavailableCard: Component<{ children: JSX.Element }> = (props) => {
   return (
-    <div class="rounded-[24px] border border-border-weak-base bg-surface-base px-5 py-4 text-12-regular text-text-weak">
+    <div class="rounded-lg border border-border-weak-base bg-surface-base px-5 py-4 text-12-regular text-text-weak">
       {props.children}
     </div>
   )

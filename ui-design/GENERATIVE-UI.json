@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "protocol_version": "agent-ui.v1",
+  "enabled": false,
+  "adapters": {
+    "a2ui": {
+      "enabled": false,
+      "adapter_version": 1,
+      "supported_versions": [
+        "v0.9",
+        "v0.9.1",
+        "v1.0"
+      ],
+      "v1_status": "candidate"
+    }
+  },
+  "surfaces": []
+}

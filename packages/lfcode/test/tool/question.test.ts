@@ -86,6 +86,38 @@ describe("tool.question", () => {
     ),
   )
 
+  it.live("notifies unattended callers before waiting for a question reply", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const question = yield* Question.Service
+        const toolInfo = yield* QuestionTool
+        const tool = yield* toolInfo.init()
+        const calls = { count: 0 }
+        const requestCtx = {
+          ...ctx,
+          extra: {
+            onQuestionRequest: () => {
+              calls.count++
+            },
+          },
+        }
+        const questions = [
+          {
+            question: "Should the unattended run continue?",
+            header: "Continue",
+            options: [{ label: "Yes", description: "Continue the run" }],
+          },
+        ]
+
+        const fiber = yield* tool.execute({ questions }, requestCtx).pipe(Effect.forkScoped)
+        const item = yield* pending(question)
+        expect(calls.count).toBe(1)
+        yield* question.reply({ requestID: item.id, answers: [["Yes"]] })
+        expect((yield* Fiber.join(fiber)).title).toBe("Asked 1 question")
+      }),
+    ),
+  )
+
   it.live("should auto-resolve to a [Never-Ask] directive when never-ask is on", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

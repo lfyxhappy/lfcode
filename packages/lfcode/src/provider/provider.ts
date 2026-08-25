@@ -9,12 +9,16 @@ import { Npm } from "../npm"
 import { Hash } from "@lfcode-ai/shared/util/hash"
 import {
   inferModelCapabilities,
+  inferModelLimits,
+  inferModelProfile,
   normalizeModelCapabilities,
   normalizeProtocol,
   protocolPackage,
   ProviderProtocol,
   type ModelCapabilityConfig,
 } from "@lfcode-ai/shared/model-capabilities"
+import { OPENCODE_PROVIDER_ID } from "@lfcode-ai/shared/opencode"
+import { OPENCODE_GO_PROVIDER_ID } from "@lfcode-ai/shared/opencode-go"
 import { Plugin } from "../plugin"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
@@ -246,6 +250,50 @@ type CustomDep = {
 
 function useLanguageModel(sdk: any) {
   return sdk.responses === undefined && sdk.chat === undefined
+}
+
+// Some Anthropic-compatible gateways omit the final usage object. The SDK
+// requires output_tokens there, so synthesize a zero-usage terminal delta only
+// for that legacy wire format; Responses streams do not pass through here.
+export function normalizeAnthropicMessageDeltaUsage(res: Response) {
+  if (!res.body || !res.headers.get("content-type")?.includes("text/event-stream")) return res
+
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+  let pending = ""
+  const normalize = (event: string) => {
+    const lines = event.split(/\r?\n/)
+    const index = lines.findIndex((line) => line.startsWith("data:"))
+    if (index === -1) return event
+    const data = lines[index].slice("data:".length).trimStart()
+    if (data === "[DONE]") return event
+    try {
+      const value = JSON.parse(data) as { type?: string; usage?: unknown }
+      if (value.type !== "message_delta" || value.usage !== undefined) return event
+      value.usage = { output_tokens: 0 }
+      lines[index] = `data: ${JSON.stringify(value)}`
+      return lines.join("\n")
+    } catch {
+      return event
+    }
+  }
+  const stream = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      pending += decoder.decode(chunk, { stream: true })
+      const events = pending.split(/\r?\n\r?\n/)
+      pending = events.pop() ?? ""
+      for (const event of events) controller.enqueue(encoder.encode(normalize(event) + "\n\n"))
+    },
+    flush(controller) {
+      pending += decoder.decode()
+      if (pending) controller.enqueue(encoder.encode(normalize(pending)))
+    },
+  })
+  return new Response(res.body.pipeThrough(stream), {
+    headers: new Headers(res.headers),
+    status: res.status,
+    statusText: res.statusText,
+  })
 }
 
 const MODEL_VARIANT_PRESET_VALUES = {
@@ -1036,6 +1084,16 @@ export const Model = Schema.Struct({
   options: Schema.Record(Schema.String, Schema.Any),
   headers: Schema.Record(Schema.String, Schema.String),
   release_date: Schema.String,
+  reasoning_options: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        type: Schema.String,
+        values: Schema.optional(Schema.Array(Schema.String)),
+        min: Schema.optional(Schema.Number),
+        max: Schema.optional(Schema.Number),
+      }),
+    ),
+  ),
   variants: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
   cacheTTL: Schema.optional(Schema.Number),
   cachePromptTTL: Schema.optional(Schema.Literals(["5m", "1h"])),
@@ -1130,8 +1188,15 @@ function runtimeCapabilities(input: {
   legacy?: ModelCapabilityConfig
   explicit?: ModelCapabilityConfig
   interleaved?: Model["capabilities"]["interleaved"]
+  inferredLast?: Partial<ReturnType<typeof normalizeModelCapabilities>>
 }): Model["capabilities"] {
-  const capabilities = normalizeModelCapabilities(input)
+  const capabilities = normalizeModelCapabilities({
+    base: input.base,
+    inferred: input.inferred,
+    legacy: input.legacy,
+    explicit: input.explicit,
+    inferredLast: input.inferredLast,
+  })
   return {
     temperature: capabilities.temperature,
     reasoning: capabilities.reasoning,
@@ -1175,13 +1240,27 @@ function legacyCapabilityConfig(model: {
   }
 }
 
+export function resolveModelReasoningOptions(
+  declared: Model["reasoning_options"] | undefined,
+  existing: Model["reasoning_options"] | undefined,
+  profile: ReturnType<typeof inferModelProfile>,
+) {
+  if (declared?.length) return declared
+  if (profile.reasoningModes.length) return profile.reasoningModes
+  if (existing?.length) return existing
+  return declared ?? existing
+}
+
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
+  const modelProtocol = model.protocol ?? model.provider?.protocol
   const protocol = inferProtocol({
     providerID: provider.id,
     modelID: model.id,
     apiID: model.id,
-    npm: model.provider?.npm ?? provider.npm,
+    protocol: modelProtocol,
+    npm: model.provider?.npm ?? (modelProtocol ? protocolPackage(modelProtocol) : provider.npm),
   })
+  const profile = inferModelProfile({ modelID: model.id, apiID: model.id })
   const base: Model = {
     id: ModelID.make(model.id),
     providerID: ProviderID.make(provider.id),
@@ -1191,16 +1270,24 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
     api: {
       id: model.id,
       url: model.provider?.api ?? provider.api ?? "",
-      npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
+      npm:
+        // A model-level protocol is authoritative for both the wire format
+        // and the SDK package. Do not let a stale nested provider npm value
+        // select a different protocol implementation.
+        (modelProtocol ? protocolPackage(protocol) : undefined) ??
+        model.provider?.npm ??
+        provider.npm ??
+        "@ai-sdk/openai-compatible",
     },
     status: model.status ?? "active",
     headers: {},
     options: {},
+    reasoning_options: resolveModelReasoningOptions(model.reasoning_options, undefined, profile),
     cost: cost(model.cost),
     limit: {
-      context: model.limit.context,
+      context: model.limit.context > 0 ? model.limit.context : profile.limit.context,
       input: model.limit.input,
-      output: model.limit.output,
+      output: model.limit.output > 0 ? model.limit.output : profile.limit.output,
     },
     capabilities: runtimeCapabilities({
       base: {
@@ -1212,7 +1299,10 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
         input: { text: false, audio: false, image: false, video: false, pdf: false },
         output: { text: false, audio: false, image: false, video: false, pdf: false },
       },
-      inferred: inferModelCapabilities({ providerID: provider.id, modelID: model.id, apiID: model.id, protocol }),
+      // Explicit catalog/config capabilities are applied after this inferred
+      // layer. This keeps model-name inference useful for gateway providers
+      // while preserving authoritative declarations.
+      inferred: inferModelCapabilities({ modelID: model.id, apiID: model.id }),
       legacy: legacyCapabilityConfig(model),
       interleaved: model.interleaved ?? false,
     }),
@@ -1346,17 +1436,31 @@ const layer: Layer.Layer<
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
             const existingModel = parsed.models[model.id ?? modelID]
             const apiID = model.id ?? existingModel?.api.id ?? modelID
+            const minimaxResponses =
+              providerID === "minimax-cn-coding-plan" && ModelsDev.isMiniMaxResponsesModelID(apiID)
+            const configuredProtocol = minimaxResponses
+              ? "openai-responses"
+              : model.protocol ?? model.provider?.protocol ?? provider.protocol ?? existingModel?.protocol
             const protocol = inferProtocol({
               providerID,
               modelID,
               apiID,
-              protocol: model.provider?.protocol ?? model.protocol ?? provider.protocol ?? existingModel?.protocol,
-              npm: model.provider?.npm ?? provider.npm ?? existingModel?.api.npm ?? modelsDev[providerID]?.npm,
+              protocol: configuredProtocol,
+              npm: minimaxResponses
+                ? "@ai-sdk/openai"
+                : configuredProtocol
+                  ? protocolPackage(configuredProtocol)
+                  : model.provider?.npm ?? provider.npm ?? existingModel?.api.npm ?? modelsDev[providerID]?.npm,
             })
             const apiNpm =
+              (minimaxResponses ? "@ai-sdk/openai" : undefined) ??
+              // A configured model/provider protocol selects its matching SDK
+              // before any legacy npm override. The wire format and SDK must
+              // remain model-scoped and cannot drift apart.
+              (configuredProtocol ? protocolPackage(protocol) : undefined) ??
               model.provider?.npm ??
               provider.npm ??
-              (model.provider?.protocol || model.protocol || provider.protocol ? protocolPackage(protocol) : undefined) ??
+              (provider.protocol ? protocolPackage(protocol) : undefined) ??
               existingModel?.api.npm ??
               modelsDev[providerID]?.npm ??
               "@ai-sdk/openai-compatible"
@@ -1371,10 +1475,21 @@ const layer: Layer.Layer<
               api: {
                 id: apiID,
                 npm: apiNpm,
-                url: model.provider?.api ?? provider?.api ?? existingModel?.api.url ?? modelsDev[providerID]?.api ?? "",
+                url:
+                  (minimaxResponses ? ModelsDev.MINIMAX_API_URL : undefined) ??
+                  model.provider?.api ??
+                  provider?.api ??
+                  existingModel?.api.url ??
+                  modelsDev[providerID]?.api ??
+                  "",
               },
               status: model.status ?? existingModel?.status ?? "active",
               name,
+              reasoning_options: resolveModelReasoningOptions(
+                model.reasoning_options,
+                existingModel?.reasoning_options,
+                inferModelProfile({ modelID, apiID }),
+              ),
               providerID: ProviderID.make(providerID),
               capabilities: runtimeCapabilities({
                 base:
@@ -1388,9 +1503,13 @@ const layer: Layer.Layer<
                     input: { text: true, audio: false, image: false, video: false, pdf: false },
                     output: { text: true, audio: false, image: false, video: false, pdf: false },
                   } satisfies Partial<ReturnType<typeof normalizeModelCapabilities>>),
-                inferred: inferModelCapabilities({ providerID, modelID, apiID, protocol }),
+                inferred: inferModelCapabilities({ modelID, apiID }),
                 legacy: legacyCapabilityConfig(model),
                 explicit: model.capabilities as ModelCapabilityConfig | undefined,
+                inferredLast:
+                  providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID
+                    ? inferModelCapabilities({ modelID, apiID })
+                    : undefined,
                 interleaved:
                   model.interleaved ??
                   existingModel?.capabilities.interleaved ??
@@ -1409,8 +1528,11 @@ const layer: Layer.Layer<
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {
                 context: (() => {
+                  const inferred = inferModelLimits({ modelID, apiID })
+                  if (providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID) return inferred.context
                   const explicit = model.limit?.context ?? existingModel?.limit?.context
-                  if (explicit !== undefined) return explicit
+                  if (explicit !== undefined && explicit > 0) return explicit
+                  if (inferred.context !== undefined) return inferred.context
                   const key = `${providerID}/${modelID}`
                   if (!warnedContextDefaults.has(key)) {
                     warnedContextDefaults.add(key)
@@ -1424,7 +1546,10 @@ const layer: Layer.Layer<
                   return DEFAULT_CONTEXT_WINDOW
                 })(),
                 input: model.limit?.input ?? existingModel?.limit?.input,
-                output: model.limit?.output ?? existingModel?.limit?.output ?? 0,
+                output:
+                  providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID
+                    ? inferModelLimits({ modelID, apiID }).output
+                    : [model.limit?.output, existingModel?.limit?.output].find((value) => value !== undefined && value > 0) ?? inferModelLimits({ modelID, apiID }).output,
               },
               headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
               family: model.family ?? existingModel?.family ?? "",
@@ -1729,8 +1854,9 @@ const layer: Layer.Layer<
             timeout: false,
           })
 
-          if (!chunkAbortCtl) return res
-          return wrapSSE(res, chunkTimeout, chunkAbortCtl, combined)
+          const normalized = model.api.npm === "@ai-sdk/anthropic" ? normalizeAnthropicMessageDeltaUsage(res) : res
+          if (!chunkAbortCtl) return normalized
+          return wrapSSE(normalized, chunkTimeout, chunkAbortCtl, combined)
         }
 
         const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
@@ -1788,7 +1914,11 @@ const layer: Layer.Layer<
         throw new ModelNotFoundError({ providerID, modelID, suggestions: matches.map((m) => m.target) })
       }
 
-      const info = provider.models[modelID]
+      const info =
+        provider.models[modelID] ??
+        (providerID === ModelsDev.MINIMAX_PROVIDER_ID
+          ? provider.models[ModelsDev.resolveMiniMaxModelID(modelID) ?? ""]
+          : undefined)
       if (!info) {
         const available = Object.keys(provider.models)
         const matches = fuzzysort.go(modelID, available, { limit: 3, threshold: -10000 })

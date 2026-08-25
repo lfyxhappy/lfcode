@@ -15,9 +15,7 @@ import { shellWrap } from "../../src/tool/shell-wrap"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-afterEach(async () => {
-  await Instance.disposeAll()
-})
+afterEach(() => Instance.disposeAll())
 
 const it = testEffect(
   Layer.mergeAll(
@@ -164,6 +162,35 @@ describe("task tool", () => {
         )
         expect(result.metadata.id).toBe("T1")
         expect(result.output).toContain("Created T1")
+      }),
+    ),
+  )
+
+  it.live("create accepts harmless fields copied from a task-list item", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const sess = yield* session.create({ title: "Test" })
+        const info = yield* TaskTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute(
+          {
+            operation: {
+              action: "create",
+              id: "unused",
+              parent_id: "unused",
+              summary: "Implement the kanban board",
+              event_summary: "prepare implementation",
+              include_archived: false,
+              include_terminal: false,
+              status: "open",
+              session_id: sess.id,
+            },
+          } as any,
+          ctx(sess.id),
+        )
+        expect(result.metadata.id).toBe("T1")
+        expect(result.output).toContain("Implement the kanban board")
       }),
     ),
   )

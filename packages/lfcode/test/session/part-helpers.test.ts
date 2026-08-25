@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   isRealUserPart,
+  isRetryableToolValidationFailure,
   repeatedToolValidationFailure,
   sameToolFailureCount,
   stableStringify,
@@ -99,6 +100,65 @@ describe("session part helpers", () => {
     expect(repeatedToolValidationFailure({ messages, threshold: 3 })).toBe(true)
     messages[2].parts[0] = toolPart("task", { operation: { action: "list" } })
     expect(repeatedToolValidationFailure({ messages, threshold: 3 })).toBe(false)
+  })
+
+  test("PowerShell syntax guard is retryable validation", () => {
+    expect(
+      isRetryableToolValidationFailure(
+        "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax. Bash heredocs are not supported here.",
+      ),
+    ).toBe(true)
+  })
+
+  test("does not carry repeated validation failures into a new user turn", () => {
+    const error = "The background_job tool was called with invalid arguments: operation is required"
+    const assistants = ["m1", "m2", "m3"].map((id) => ({
+      info: {
+        id: MessageID.make(id),
+        sessionID: SessionID.make("s"),
+        role: "assistant" as const,
+        parentID: MessageID.make("u1"),
+        mode: "build",
+        agent: "build",
+        path: { cwd: ".", root: "." },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ModelID.make("grok-4.5"),
+        providerID: ProviderID.make("jws"),
+        time: { created: 1 },
+        finish: "tool-calls" as const,
+      },
+      parts: [
+        {
+          id: PartID.make(`p-${id}`),
+          sessionID: SessionID.make("s"),
+          messageID: MessageID.make(id),
+          type: "tool" as const,
+          tool: "background_job",
+          callID: `call-${id}`,
+          state: { status: "error" as const, input: { operation: {} }, error, time: { start: 1, end: 2 } },
+        },
+      ],
+    }))
+    const nextUser = {
+      info: {
+        id: MessageID.make("u2"),
+        sessionID: SessionID.make("s"),
+        role: "user" as const,
+        agent: "build",
+        model: { providerID: ProviderID.make("jws"), modelID: ModelID.make("grok-4.5") },
+        time: { created: 2 },
+      },
+      parts: [textPart("try a different request")],
+    }
+    expect(repeatedToolValidationFailure({ messages: [...assistants, nextUser] as MessageV2.WithParts[], threshold: 3 })).toBe(true)
+    expect(
+      repeatedToolValidationFailure({
+        messages: [...assistants, nextUser] as MessageV2.WithParts[],
+        threshold: 3,
+        userID: nextUser.info.id,
+      }),
+    ).toBe(false)
   })
 
   test("sameToolFailureCount groups structured failures despite volatile task input", () => {

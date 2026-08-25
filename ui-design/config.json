@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "strict_context": true,
+  "ignore_rules": [],
+  "ignore_files": [],
+  "required_reports": [],
+  "baseline": {
+    "max_changed_ratio": 0.01
+  },
+  "report_contract": {
+    "enabled": true,
+    "check_stale_reports": true
+  },
+  "evidence_manifest": {
+    "enabled": false,
+    "path": "ui-design/reports/evidence-manifest.json"
+  }
+}

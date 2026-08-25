@@ -4,7 +4,7 @@ import { tool, type ModelMessage } from "ai"
 import { Cause, Effect, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
-import { gateProviderStreamChunks, LLM } from "../../src/session/llm"
+import { gateProviderStreamChunks, LLM, normalizeTextLifecycle, repairToolInputJSON } from "../../src/session/llm"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider"
 import { ProviderTransform } from "../../src/provider"
@@ -42,6 +42,36 @@ async function collect(input: LLM.StreamInput) {
     ),
   )
 }
+
+describe("session.llm.normalizeTextLifecycle", () => {
+  test("creates a complete text lifecycle for delta-only provider streams", async () => {
+    const events = [] as LLM.Event[]
+    for await (const event of normalizeTextLifecycle(
+      (async function* () {
+        yield { type: "text-delta", id: "txt-minimax", text: "final answer" } as LLM.Event
+        yield { type: "finish-step", finishReason: "stop", usage: { inputTokens: 1, outputTokens: 2 } } as LLM.Event
+      })(),
+    )) {
+      events.push(event)
+    }
+
+    expect(events.map((event) => event.type)).toEqual(["text-start", "text-delta", "text-end", "finish-step"])
+  })
+})
+
+describe("session.llm.repairToolInputJSON", () => {
+  test("repairs valid JSON without changing its shape", () => {
+    expect(repairToolInputJSON('{"code":"return 1"}')).toBe('{"code":"return 1"}')
+  })
+
+  test("returns undefined for truncated run_code JSON instead of inventing a tool payload", () => {
+    expect(repairToolInputJSON('{"code":"for (var g = 1')).toBeUndefined()
+  })
+
+  test("repairs JSON wrapped in a markdown fence", () => {
+    expect(repairToolInputJSON('```json\n{"code":"return 1"}\n```')).toBe('{"code":"return 1"}')
+  })
+})
 
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
@@ -864,6 +894,91 @@ describe("session.llm.stream", () => {
 
         const maxTokens = body.max_output_tokens as number | undefined
         expect(maxTokens).toBe(undefined) // match codex cli behavior
+      },
+    })
+  })
+
+  test("MiniMax M3 uses Responses SSE and preserves function-call history", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const first = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          { type: "response.created", response: { id: "resp-m3-1", created_at: 1, model: "MiniMax-M3", service_tier: null } },
+          { type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "reason-1", encrypted_content: "encrypted" } },
+          { type: "response.reasoning_summary_part.added", item_id: "reason-1", summary_index: 0 },
+          { type: "response.reasoning_summary_text.delta", item_id: "reason-1", summary_index: 0, delta: "Plan" },
+          { type: "response.reasoning_summary_part.done", item_id: "reason-1", summary_index: 0 },
+          { type: "response.output_item.added", output_index: 1, item: { type: "function_call", id: "fc-1", call_id: "call-1", name: "lookup", arguments: "" } },
+          { type: "response.function_call_arguments.delta", item_id: "fc-1", output_index: 1, delta: "{}" },
+          { type: "response.output_item.done", output_index: 1, item: { type: "function_call", id: "fc-1", call_id: "call-1", name: "lookup", arguments: "{}", status: "completed" } },
+          { type: "response.completed", response: { incomplete_details: null, usage: { input_tokens: 3, input_tokens_details: null, output_tokens: 5, output_tokens_details: { reasoning_tokens: 2 } }, service_tier: null } },
+        ],
+        true,
+      ),
+    )
+    const second = waitRequest(
+      "/responses",
+      createEventResponse(
+        [
+          { type: "response.created", response: { id: "resp-m3-2", created_at: 2, model: "MiniMax-M3", service_tier: null } },
+          { type: "response.output_text.delta", item_id: "msg-2", delta: "done", logprobs: null },
+          { type: "response.completed", response: { incomplete_details: null, usage: { input_tokens: 4, input_tokens_details: null, output_tokens: 1, output_tokens_details: null }, service_tier: null } },
+        ],
+        true,
+      ),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "lfcode.json"),
+          JSON.stringify({
+            enabled_providers: ["minimax"],
+            provider: { minimax: { options: { apiKey: "test-key", baseURL: `${server.url.origin}/v1` } } },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const model = await getModel(ProviderID.make("minimax"), ModelID.make("MiniMax-M3"))
+        const sessionID = SessionID.make("session-minimax-m3-responses")
+        const agent = { name: "test", mode: "primary", options: {}, permission: [{ permission: "*", pattern: "*", action: "allow" }] } satisfies Agent.Info
+        const user = { id: MessageID.make("user-minimax-m3-responses"), sessionID, role: "user", time: { created: Date.now() }, agent: agent.name, model: { providerID: model.providerID, modelID: model.id } } satisfies MessageV2.User
+        const tools = {
+          lookup: tool({ description: "Lookup a value", inputSchema: z.object({}), execute: async () => "ok" }),
+        }
+
+        const events = await collect({ user, sessionID, model, agent, system: ["test"], messages: [{ role: "user", content: "lookup" }], tools })
+        const firstCapture = await first
+        expect(firstCapture.url.pathname.endsWith("/responses")).toBe(true)
+        expect(firstCapture.body.input).toBeDefined()
+        expect(events.some((event) => event.type === "reasoning-delta")).toBe(true)
+        expect(events.some((event) => event.type === "tool-call")).toBe(true)
+        expect(events.some((event) => event.type === "finish-step")).toBe(true)
+
+        await drain({
+          user: { ...user, id: MessageID.make("user-minimax-m3-history") },
+          sessionID,
+          model,
+          agent,
+          system: ["test"],
+          messages: [
+            { role: "user", content: "lookup" },
+            { role: "assistant", content: [{ type: "tool-call", toolCallId: "call-1", toolName: "lookup", input: {} }] },
+            { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "lookup", output: { type: "text", value: "ok" } }] },
+          ] as ModelMessage[],
+          tools,
+        })
+        const secondCapture = await second
+        const history = secondCapture.body.input as Array<{ type?: string; call_id?: string }>
+        expect(history.some((item) => item.type === "function_call" && item.call_id === "call-1")).toBe(true)
+        expect(history.some((item) => item.type === "function_call_output" && item.call_id === "call-1")).toBe(true)
       },
     })
   })

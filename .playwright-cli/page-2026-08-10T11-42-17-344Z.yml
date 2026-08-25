@@ -1,0 +1,27 @@
+- generic [ref=f8e1]:
+  - generic [ref=f8e3]:
+    - banner [ref=f8e4]:
+      - button "切换菜单" [ref=f8e7]
+    - generic [ref=f8e13]:
+      - navigation "项目和会话" [ref=f8e14]:
+        - generic [ref=f8e16]:
+          - generic [ref=f8e18]:
+            - button "ImageMaker 新建会话 更多选项" [ref=f8e21]:
+              - generic [ref=f8e22]: ImageMaker
+              - generic [ref=f8e31]:
+                - button "新建会话" [ref=f8e32]
+                - button "更多选项" [ref=f8e37]
+            - button "酒馆 新建会话 更多选项" [ref=f8e54]:
+              - generic [ref=f8e55]: 酒馆
+              - generic [ref=f8e64]:
+                - button "新建会话" [ref=f8e65]
+                - button "更多选项" [ref=f8e70]
+          - generic [ref=f8e79]:
+            - button "打开项目" [ref=f8e82]
+            - generic [ref=f8e86]:
+              - button "设置" [ref=f8e88]
+              - button "帮助" [ref=f8e94]
+      - main [ref=f8e99]
+  - generic:
+    - region "Notifications (alt+T)":
+      - list

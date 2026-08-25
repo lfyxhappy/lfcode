@@ -51,11 +51,11 @@
   opacity: 0;
 }
 
-[data-component="text-shimmer"][data-active="true"] [data-slot="text-shimmer-char-shimmer"] {
+[data-component="text-shimmer"][data-running="true"] [data-slot="text-shimmer-char-shimmer"] {
   opacity: 1;
 }
 
-[data-component="text-shimmer"] [data-slot="text-shimmer-char-shimmer"][data-run="true"] {
+[data-component="text-shimmer"][data-running="true"] [data-slot="text-shimmer-char-shimmer"] {
   animation-name: text-shimmer-sweep;
   animation-duration: var(--text-shimmer-duration);
   animation-iteration-count: infinite;
@@ -95,7 +95,7 @@
     background-clip: text;
   }
 
-  [data-component="text-shimmer"][data-active="true"] [data-slot="text-shimmer-char-base"] {
+  [data-component="text-shimmer"][data-running="true"] [data-slot="text-shimmer-char-base"] {
     opacity: 0;
   }
 }

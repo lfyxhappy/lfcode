@@ -1,3 +1,6 @@
+// The file renderer can mount before the conversation's MarkedProvider. Ensure
+// its custom Shiki theme is registered before WorkerPoolManager initializes.
+import "../context/marked"
 import { WorkerPoolManager } from "@pierre/diffs/worker"
 import ShikiWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url"
 

@@ -8,7 +8,8 @@ export type LocalSkillItem = {
   description: string
   location: string
   content: string
-  hidden?: boolean
+  displayName?: string
+  shortDescription?: string
 }
 
 export const skillImportSources = [

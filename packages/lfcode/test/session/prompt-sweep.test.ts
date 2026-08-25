@@ -1,6 +1,7 @@
 import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import path from "path"
+import { Bus } from "../../src/bus"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -40,6 +41,37 @@ const makeAssistant = (
 })
 
 describe("sweepOrphanAssistants", () => {
+  it.live("updates hidden reviewer orphans without publishing their contents", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({})
+        const user = yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "default",
+          model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") },
+          time: { created: Date.now() - 10_000 },
+        })
+        const reviewer = yield* sessions.updateMessage({
+          ...makeAssistant(session.id, user.id, dir, { created: Date.now() - 5_000 }),
+          agentID: "context-reviewer-1",
+        })
+        const published: MessageV2.Info[] = []
+        const unsub = Bus.subscribe(MessageV2.Event.Updated, (event) => published.push(event.properties.info))
+
+        yield* Effect.sync(() => Session.clearOrphanAssistants({ sessionID: session.id, minAgeMs: 0 }))
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 25)))
+        unsub()
+
+        const stored = yield* sessions.messages({ sessionID: session.id, agentID: "*" })
+        expect((stored.find((item) => item.info.id === reviewer.id)?.info as MessageV2.Assistant | undefined)?.time.completed).toBeDefined()
+        expect(published.map((info) => info.id)).not.toContain(reviewer.id)
+      }),
+    ),
+  )
+
   it.live("marks an assistant message older than 60s as completed with AbortedError", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {

@@ -40,7 +40,7 @@ export const dict: Record<string, string> = {
   "tui.tips.shell_prefix":
     "Start a message with {highlight}!{/highlight} to run shell commands directly (e.g., {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Press {highlight}Tab{/highlight} or {highlight}Shift+Tab{/highlight} to cycle between Build, Plan, and Compose agents",
+    "Press {highlight}Tab{/highlight} or {highlight}Shift+Tab{/highlight} to cycle between Build and Plan agents",
   "tui.tips.theme_mode":
     "Run {highlight}/dark{/highlight} for dark mode or {highlight}/light{/highlight} for light mode",
   "tui.tips.doc": "Run {highlight}/doc{/highlight} to open the user documentation",
@@ -188,7 +188,6 @@ export const dict: Record<string, string> = {
   // App-level commands
   "tui.command.session.list.title": "Switch session",
   "tui.command.session.new.title": "New session",
-  "tui.command.workflow.list.title": "Workflows",
   "tui.command.model.list.title": "Switch model",
   "tui.command.model.cycle_recent.title": "Model cycle",
   "tui.command.model.cycle_recent_reverse.title": "Model cycle reverse",

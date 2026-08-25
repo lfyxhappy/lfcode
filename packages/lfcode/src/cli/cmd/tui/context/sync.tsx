@@ -7,7 +7,7 @@ import type {
   Config,
   Todo,
   SessionTaskResponse,
-  Command,
+  CommandListResponse,
   PermissionRequest,
   QuestionRequest,
   LspStatus,
@@ -39,29 +39,6 @@ import { emptyConsoleState, type ConsoleState } from "@/config/console-state"
  * plugin API stay in lockstep with the server's `GET /:sessionID/task` shape.
  */
 export type Task = SessionTaskResponse[number]
-
-/**
- * TUI-side view of a dynamic-workflow run (server route `GET /workflows`, bus
- * events `workflow.started/phase/finished`). The list route serializes the
- * runtime's `RunSummary` but is described as `z.array(z.any())`, so the SDK gen
- * surfaces it as `Array<unknown>` rather than a named export — mirror the
- * server's `RunSummary` shape here so the store and the dialog stay in lockstep.
- */
-export type WorkflowRun = {
-  runID: string
-  sessionID: string
-  name: string
-  status: string
-  running: number
-  succeeded: number
-  failed: number
-  currentPhase?: string
-  parentActorID?: string
-  args?: unknown
-  error?: string
-  createdAt?: number
-  updatedAt?: number
-}
 
 /**
  * TUI-side view of a session's stop-condition goal (server event `session.goal`).
@@ -134,7 +111,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       console_state: ConsoleState
       provider_auth: Record<string, ProviderAuthMethod[]>
       agent: Agent[]
-      command: Command[]
+      command: CommandListResponse
       permission: {
         [sessionID: string]: PermissionRequest[]
       }
@@ -182,9 +159,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       actor: {
         [sessionID: string]: ActorEntry[]
       }
-      workflow: {
-        [runID: string]: WorkflowRun
-      }
     }>({
       provider_next: {
         all: [],
@@ -217,7 +191,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       formatter: [],
       vcs: undefined,
       actor: {},
-      workflow: {},
     })
 
     const event = useEvent()
@@ -560,6 +533,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "actor.registered": {
+          if (event.properties.visible === false) break
           const sid = event.properties.sessionID
           const list = store.actor[sid] ?? []
           if (list.find((a) => a.actor_id === event.properties.actorID)) break
@@ -581,6 +555,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "actor.status": {
+          if (event.properties.visible === false) break
           const sid = event.properties.sessionID
           const list = store.actor[sid] ?? []
           const idx = list.findIndex((a) => a.actor_id === event.properties.actorID)
@@ -598,6 +573,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
 
         case "actor.removed": {
+          if (event.properties.visible === false) break
           const sid = event.properties.sessionID
           const actorID = event.properties.actorID
           const bucket = store.message[sid]?.[actorID]
@@ -615,32 +591,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
 
-        case "workflow.started": {
-          // Upsert a fresh run row; counters stay zero until loadWorkflows /
-          // the dialog's poll (T7) refreshes them from the list route.
-          setStore("workflow", event.properties.runID, {
-            runID: event.properties.runID,
-            sessionID: event.properties.sessionID,
-            name: event.properties.name,
-            status: "running",
-            running: 0,
-            succeeded: 0,
-            failed: 0,
-          })
-          break
-        }
-
-        case "workflow.phase": {
-          if (!store.workflow[event.properties.runID]) break
-          setStore("workflow", event.properties.runID, "currentPhase", event.properties.title)
-          break
-        }
-
-        case "workflow.finished": {
-          if (!store.workflow[event.properties.runID]) break
-          setStore("workflow", event.properties.runID, "status", event.properties.status)
-          break
-        }
       }
     })
 
@@ -832,14 +782,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
       },
       bootstrap,
-      loadWorkflows(sessionID: string) {
-        void sdk.client.workflow.list({ sessionID }).then((res) => {
-          for (const run of (res.data ?? []) as WorkflowRun[]) setStore("workflow", run.runID, reconcile(run))
-        })
-      },
-      resumeWorkflow(runID: string) {
-        return sdk.client.workflow.resume({ runID })
-      },
     }
     return result
   },

@@ -4,6 +4,9 @@ import {
   personalizationDirty,
   personalizationMessages,
   personalizationSaveDisabled,
+  extractPersonalizationTone,
+  serializePersonalizationInstructions,
+  stripPersonalizationTone,
   type PersonalizationState,
 } from "./settings-personalization-helpers"
 
@@ -20,12 +23,16 @@ const state = (): PersonalizationState => ({
     dreamEnabled: true,
     distillEnabled: true,
   },
+  contextReview: {
+    enabled: true,
+  },
 })
 
 describe("settings personalization helpers", () => {
   test("creates an editable draft without instruction metadata", () => {
     expect(createPersonalizationDraft(state())).toEqual({
       customInstructions: "Be concise.",
+      tone: "friendly",
       memory: {
         ccIndex: false,
         autoConsolidation: true,
@@ -35,6 +42,9 @@ describe("settings personalization helpers", () => {
         schedulerEnabled: true,
         dreamEnabled: true,
         distillEnabled: true,
+      },
+      contextReview: {
+        enabled: true,
       },
     })
   })
@@ -50,6 +60,12 @@ describe("settings personalization helpers", () => {
           ...saved.memory,
           ccIndex: true,
         },
+      }),
+    ).toBe(true)
+    expect(
+      personalizationDirty(saved, {
+        ...saved,
+        contextReview: { enabled: false },
       }),
     ).toBe(true)
     expect(
@@ -122,5 +138,11 @@ describe("settings personalization helpers", () => {
     expect(personalizationMessages("load failed")).toEqual(["load failed"])
     expect(personalizationMessages(undefined, "save failed")).toEqual(["save failed"])
     expect(personalizationMessages("load failed", "save failed")).toEqual(["load failed", "save failed"])
+  })
+
+  test("stores tone as a managed global prompt block", () => {
+    const serialized = serializePersonalizationInstructions("Be concise.", "professional")
+    expect(extractPersonalizationTone(serialized)).toBe("professional")
+    expect(stripPersonalizationTone(serialized)).toBe("Be concise.")
   })
 })

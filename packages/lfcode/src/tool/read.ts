@@ -24,13 +24,25 @@ const SAMPLE_BYTES = 4096
 const MAX_ARCHIVE_INSPECT_BYTES = 20 * 1024 * 1024
 
 function versionAnchor(version: string) {
-  return `<version>${version}</version>\nUse this version as replace_range.expected_version when editing this file.`
+  return `<version>${version}</version>\nUse the returned current text as the source context for edit.`
 }
 
 const parameters = z.object({
   filePath: z.string().describe("The absolute or relative path to the file or directory to read."),
   offset: z.coerce.number().describe("The line number to start reading from (1-indexed)").optional(),
   limit: z.coerce.number().describe("The maximum number of lines to read (defaults to 2000)").optional(),
+  startChar: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .describe("For a single requested line, the first character to return (1-indexed, inclusive).")
+    .optional(),
+  endChar: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .describe("For a single requested line, the character just after the returned range (1-indexed, exclusive).")
+    .optional(),
 })
 
 type ReadMetadata = {
@@ -121,6 +133,14 @@ export const ReadTool = Tool.define(
     const run = Effect.fn("ReadTool.execute")(function* (params: z.infer<typeof parameters>, ctx: Tool.Context) {
       if (params.offset !== undefined && params.offset < 1) {
         return yield* Effect.fail(new Error("offset must be greater than or equal to 1"))
+      }
+      if (
+        (params.startChar !== undefined || params.endChar !== undefined) &&
+        (params.offset === undefined || params.limit !== 1)
+      ) {
+        return yield* Effect.fail(
+          new Error("startChar and endChar require offset and limit=1 so the requested line is unambiguous"),
+        )
       }
 
       let filepath = params.filePath
@@ -272,9 +292,7 @@ export const ReadTool = Tool.define(
             versionAnchor(version),
             `<mime>${mime}</mime>`,
             "<content>\n",
-          ].join(
-            "\n",
-          )
+          ].join("\n")
           output += document.raw.map((line, i) => `${i + document.offset}: ${line}`).join("\n")
           const last = document.offset + document.raw.length - 1
           const next = last + 1
@@ -295,9 +313,7 @@ export const ReadTool = Tool.define(
               truncated: document.more,
               totalLines: document.count,
               nextOffset: document.more ? next : undefined,
-              resolvedSelection: document.raw.length
-                ? { startLine: document.offset, endLine: last }
-                : undefined,
+              resolvedSelection: document.raw.length ? { startLine: document.offset, endLine: last } : undefined,
               preview: document.raw.slice(0, 20).join("\n"),
               loaded: loaded.map((item) => item.filepath),
             },
@@ -359,7 +375,12 @@ export const ReadTool = Tool.define(
       }
 
       const file = yield* Effect.promise(() =>
-        lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset ?? 1 }),
+        lines(filepath, {
+          limit: params.limit ?? DEFAULT_READ_LIMIT,
+          offset: params.offset ?? 1,
+          startChar: params.startChar,
+          endChar: params.endChar,
+        }),
       )
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
         return yield* Effect.fail(
@@ -367,12 +388,7 @@ export const ReadTool = Tool.define(
         )
       }
 
-      let output = [
-        `<path>${filepath}</path>`,
-        `<type>file</type>`,
-        versionAnchor(version),
-        "<content>\n",
-      ].join("\n")
+      let output = [`<path>${filepath}</path>`, `<type>file</type>`, versionAnchor(version), "<content>\n"].join("\n")
       output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 
       const last = file.offset + file.raw.length - 1
@@ -420,7 +436,7 @@ export const ReadTool = Tool.define(
   }),
 )
 
-async function lines(filepath: string, opts: { limit: number; offset: number }) {
+async function lines(filepath: string, opts: { limit: number; offset: number; startChar?: number; endChar?: number }) {
   const stream = createReadStream(filepath, { encoding: "utf8" })
   const rl = createInterface({
     input: stream,
@@ -445,7 +461,7 @@ async function lines(filepath: string, opts: { limit: number; offset: number }) 
         continue
       }
 
-      const line = text.length > MAX_LINE_LENGTH ? text.substring(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX : text
+      const line = sliceLine(text, opts)
       const size = Buffer.byteLength(line, "utf-8") + (raw.length > 0 ? 1 : 0)
       if (bytes + size > MAX_BYTES) {
         cut = true
@@ -464,6 +480,20 @@ async function lines(filepath: string, opts: { limit: number; offset: number }) 
   return { raw, count, cut, more, offset: opts.offset }
 }
 
+function sliceLine(text: string, opts: { startChar?: number; endChar?: number }) {
+  if (opts.startChar === undefined && opts.endChar === undefined) {
+    return text.length > MAX_LINE_LENGTH ? text.substring(0, MAX_LINE_LENGTH) + MAX_LINE_SUFFIX : text
+  }
+  const start = (opts.startChar ?? 1) - 1
+  const end = opts.endChar === undefined ? text.length : opts.endChar - 1
+  if (start > text.length || end > text.length || end < start) {
+    throw new Error(
+      `Character range ${opts.startChar ?? 1}-${opts.endChar ?? text.length + 1} is invalid for line length ${text.length}. Use 1 through ${text.length + 1}, with endChar exclusive.`,
+    )
+  }
+  return text.slice(start, end)
+}
+
 function paginateText(input: string, offset: number, limit: number) {
   const all = input.length === 0 ? [] : input.split(/\r?\n/u)
   return paginateEntries(all, offset, limit)
@@ -479,4 +509,3 @@ function paginateEntries(all: string[], offset: number, limit: number) {
     offset,
   }
 }
-

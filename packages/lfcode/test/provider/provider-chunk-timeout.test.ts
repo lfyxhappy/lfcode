@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { DEFAULT_CHUNK_TIMEOUT, wrapSSE } from "../../src/provider/provider"
+import { DEFAULT_CHUNK_TIMEOUT, normalizeAnthropicMessageDeltaUsage, wrapSSE } from "../../src/provider/provider"
 
 describe("provider chunkTimeout", () => {
   test("DEFAULT_CHUNK_TIMEOUT is 8 minutes (480_000 ms)", () => {
@@ -58,5 +58,15 @@ describe("provider chunkTimeout", () => {
     await expect(pending).rejects.toThrow()
     await canceled.promise
     expect(timeoutAbort.signal.aborted).toBe(true)
+  })
+
+  test("normalizes legacy Anthropic message_delta without usage", async () => {
+    const payload = [
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+      "",
+    ].join("\n")
+    const response = normalizeAnthropicMessageDeltaUsage(new Response(payload, { headers: { "Content-Type": "text/event-stream" } }))
+
+    expect(await response.text()).toContain('"usage":{"output_tokens":0}')
   })
 })

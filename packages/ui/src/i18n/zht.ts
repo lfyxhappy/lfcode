@@ -53,6 +53,7 @@ export const dict = {
   "ui.sessionTurn.diffs.more": "+{{count}} 個更多檔案",
   "ui.fileReference.open": "開啟",
   "ui.fileReference.openDefaultApp": "以預設應用程式開啟",
+  "ui.fileReference.browseInApp": "在應用程式內瀏覽",
   "ui.fileReference.openFolder": "開啟所在資料夾",
   "ui.fileReference.openWith": "選擇開啟方式",
   "ui.fileReference.copyPath": "複製路徑",
@@ -140,6 +141,7 @@ export const dict = {
   "ui.common.confirm": "確認",
   "ui.common.dismiss": "忽略",
   "ui.common.close": "關閉",
+  "ui.common.previous": "上一張",
   "ui.common.next": "下一步",
   "ui.common.submit": "提交",
 

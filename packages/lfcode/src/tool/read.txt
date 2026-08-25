@@ -8,7 +8,7 @@ Usage:
 - Use the search tool with `kind="content"` to find specific content in large files or files with long lines.
 - If you are unsure of the correct file path, use the search tool with `kind="path"` to look up filenames by name or fuzzy path.
 - Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\n", you will receive "1: foo\n". For directories, entries are returned one per line (without line numbers) with a trailing `/` for subdirectories.
-- Any line longer than 2000 characters is truncated.
+- Any line longer than 2000 characters is truncated by default. To inspect an exact range of one long line, set `offset` to its line number, `limit=1`, and optional `startChar`/`endChar` (both 1-based; `startChar` inclusive and `endChar` exclusive). The response then contains exactly that range, so use it as exact current context for `edit`.
 - Call this tool in parallel when you know there are multiple files you want to read.
 - Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.
 - This tool can read image files and PDFs and return them as file attachments.

@@ -152,6 +152,32 @@ describe("tool.edit", () => {
         },
       })
     })
+
+    test("replaces an exact current block with canonical fields", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "legacy.txt")
+      await fs.writeFile(filepath, "old content", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          await Effect.runPromise(
+            edit.execute(
+              {
+                operation: "replace",
+                filePath: filepath,
+                oldString: "old",
+                newString: "new",
+              },
+              ctx,
+            ),
+          )
+
+          expect(await fs.readFile(filepath, "utf-8")).toBe("new content")
+        },
+      })
+    })
   })
 
   describe("editing existing files", () => {
@@ -179,6 +205,31 @@ describe("tool.edit", () => {
 
           const content = await fs.readFile(filepath, "utf-8")
           expect(content).toBe("new content here")
+        },
+      })
+    })
+
+    test("writes a complete existing file through the unified edit tool", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "whole-file.txt")
+      await fs.writeFile(filepath, "before", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          await Effect.runPromise(
+            edit.execute(
+              {
+                operation: "write",
+                filePath: filepath,
+                content: "after",
+              },
+              ctx,
+            ),
+          )
+
+          expect(await fs.readFile(filepath, "utf-8")).toBe("after")
         },
       })
     })
@@ -252,7 +303,7 @@ describe("tool.edit", () => {
                 ctx,
               ),
             ),
-          ).rejects.toThrow()
+          ).rejects.toThrow("[tool_error] edit_context_not_found")
         },
       })
     })
@@ -689,4 +740,3 @@ describe("tool.edit", () => {
     })
   })
 })
-

@@ -26,6 +26,7 @@ import { clearSessionPrefetchDirectory } from "./global-sync/session-prefetch"
 import { createSessionStatusReconciler } from "./global-sync/session-status-reconciler"
 import { estimateRootSessionTotal, loadRootSessionsWithFallback } from "./global-sync/session-load"
 import { trimSessions } from "./global-sync/session-trim"
+import { createSingleFlight } from "./global-sync/single-flight"
 import type { ProjectMeta } from "./global-sync/types"
 import { SESSION_RECENT_LIMIT } from "./global-sync/types"
 import { normalizeProviderList, sanitizeProject } from "./global-sync/utils"
@@ -58,9 +59,10 @@ function createGlobalSync() {
   if (!owner) throw new Error("GlobalSync must be created within owner")
 
   const sdkCache = new Map<string, LfcodeClient>()
-  const booting = new Map<string, Promise<void>>()
+  const booting = createSingleFlight<string, void>()
   const sessionLoads = new Map<string, Promise<void>>()
   const sessionMeta = new Map<string, { limit: number }>()
+  const commandLoads = new Map<string, Promise<void>>()
 
   const [projectCache, setProjectCache, projectInit] = persisted(
     Persist.global("globalSync.project", ["globalSync.project.v1"]),
@@ -83,6 +85,10 @@ function createGlobalSync() {
   let projectWritten = false
   let bootedAt = 0
   let bootingRoot = false
+  let streamConnected = false
+  let reconnecting: Promise<void> | undefined
+  const activatedDirectories = new Set<string>()
+  const pendingRequestVersion = new Map<string, number>()
   let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -157,14 +163,14 @@ function createGlobalSync() {
 
   const children = createChildStoreManager({
     owner,
-    isBooting: (directory) => booting.has(directory),
+    isBooting: (directory) => booting.has(normalizeWorkspacePath(directory)),
     isLoadingSessions: (directory) => sessionLoads.has(directory),
-    onBootstrap: (directory) => {
-      void bootstrapInstance(directory)
-    },
+    onBootstrap: bootstrapInstance,
     onDispose: (directory) => {
+      activatedDirectories.delete(directory)
       queue.clear(directory)
       sessionMeta.delete(directory)
+      commandLoads.delete(directory)
       sdkCache.delete(directory)
       clearProviderRev(directory)
       clearSessionPrefetchDirectory(directory)
@@ -268,43 +274,64 @@ function createGlobalSync() {
     return promise
   }
 
-  async function bootstrapInstance(directory: string) {
+  async function loadCommands(directory: string) {
     directory = normalizeWorkspacePath(directory)
     if (!directory) return
-    const pending = booting.get(directory)
+    const pending = commandLoads.get(directory)
     if (pending) return pending
+    const [store, setStore] = children.child(directory, { bootstrap: false })
+    if (store.command_ready) return
 
     children.pin(directory)
-    const promise = Promise.resolve().then(async () => {
-      const child = children.ensureChild(directory)
-      const cache = children.vcsCache.get(directory)
-      if (!cache) return
-      const sdk = sdkFor(directory)
-      await bootstrapDirectory({
-        directory,
-        global: {
-          config: globalStore.config,
-          path: globalStore.path,
-          project: globalStore.project,
-          provider: globalStore.provider,
-        },
-        sdk,
-        store: child[0],
-        setStore: child[1],
-        onSessionStatusSnapshot: sessionStatus.refresh,
-        vcsCache: cache,
-        loadSessions,
-        translate: language.t,
-        queryClient,
+    const promise = retry(() => sdkFor(directory).command.list())
+      .then((x) => {
+        setStore("command", x.data ?? [])
+        setStore("command_ready", true)
       })
-    })
-
-    booting.set(directory, promise)
-    void promise.finally(() => {
-      booting.delete(directory)
-      children.unpin(directory)
-    })
+      .finally(() => {
+        commandLoads.delete(directory)
+        children.unpin(directory)
+      })
+    commandLoads.set(directory, promise)
     return promise
+  }
+
+  async function bootstrapInstance(directory: string, options?: { reconcilePendingRequests?: boolean }) {
+    directory = normalizeWorkspacePath(directory)
+    if (!directory) return
+    activatedDirectories.add(directory)
+    return booting.run(directory, async () => {
+      children.pin(directory)
+      try {
+        const child = children.ensureChild(directory)
+        const cache = children.vcsCache.get(directory)
+        if (!cache) return
+
+        await bootstrapDirectory({
+          directory,
+          global: {
+            config: globalStore.config,
+            path: globalStore.path,
+            project: globalStore.project,
+            provider: globalStore.provider,
+          },
+          sdk: sdkFor(directory),
+          store: child[0],
+          setStore: child[1],
+          onSessionStatusSnapshot: sessionStatus.refresh,
+          reconcilePendingRequests: options?.reconcilePendingRequests,
+          pendingRequestVersion: () => pendingRequestVersion.get(directory) ?? 0,
+          vcsCache: cache,
+          loadSessions,
+          loadCommands,
+          isCurrent: () => children.children[directory] === child,
+          translate: language.t,
+          queryClient,
+        })
+      } finally {
+        children.unpin(directory)
+      }
+    })
   }
 
   const unsub = globalSDK.event.listen((e) => {
@@ -314,7 +341,14 @@ function createGlobalSync() {
 
     if (directory === "global") {
       if (event.type === "server.connected") {
-        for (const childDirectory of Object.keys(children.children)) {
+        if (!streamConnected) {
+          streamConnected = true
+        } else {
+          reconnecting ??= refreshAfterReconnect().finally(() => {
+            reconnecting = undefined
+          })
+        }
+        for (const childDirectory of activatedDirectories) {
           sessionStatus.refresh(childDirectory)
         }
       }
@@ -332,6 +366,9 @@ function createGlobalSync() {
 
     const existing = children.children[directory]
     if (!existing) return
+    if (event.type.startsWith("permission.") || event.type.startsWith("question.")) {
+      pendingRequestVersion.set(directory, (pendingRequestVersion.get(directory) ?? 0) + 1)
+    }
     children.mark(directory)
     const [store, setStore] = existing
     applyDirectoryEvent({
@@ -358,7 +395,7 @@ function createGlobalSync() {
     }
     if (event.type === "message.part.updated" || event.type === "message.part.delta") {
       const props = event.properties as { sessionID: string }
-      sessionStatus.refresh(directory, props.sessionID)
+      sessionStatus.noteActivity(directory, props.sessionID)
     }
   })
 
@@ -392,9 +429,21 @@ function createGlobalSync() {
     }
   }
 
+  async function refreshAfterReconnect() {
+    await bootstrap()
+    await Promise.all(
+      Array.from(activatedDirectories)
+        .filter((directory) => !!children.children[directory])
+        .map((directory) => bootstrapInstance(directory, { reconcilePendingRequests: true })),
+    )
+  }
+
   async function refreshActiveProviders() {
     await Promise.all(
-      Object.entries(children.children).map(([directory, [, setStore]]) => {
+      Array.from(activatedDirectories)
+        .filter((directory) => !!children.children[directory])
+        .map((directory) => {
+          const [, setStore] = children.children[directory]
         clearProviderRev(directory)
         setStore("provider_ready", false)
         return retry(() =>
@@ -412,7 +461,7 @@ function createGlobalSync() {
             description: formatServerError(err, language.t),
           })
         })
-      }),
+        }),
     )
   }
 
@@ -441,6 +490,7 @@ function createGlobalSync() {
 
   const projectApi = {
     loadSessions,
+    loadCommands,
     meta(directory: string, patch: ProjectMeta) {
       children.projectMeta(directory, patch)
     },

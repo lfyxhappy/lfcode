@@ -1,0 +1,2 @@
+[  228183ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://192.168.10.23:43173/:0
+[  228209ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://192.168.10.23:43173/favicon.ico:0

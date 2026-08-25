@@ -61,7 +61,7 @@ function ensureManagedCppPlatform() {
 }
 
 async function installWinlibsRelease(release: ManagedCppRelease) {
-  const tempDir = path.join(Global.Path.cache, "runtime", "cpp", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const tempDir = path.join(managedCppRoot(), "cache", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   const archivePath = path.join(tempDir, release.assetName)
   const extractDir = path.join(tempDir, "extract")
   await fs.mkdir(tempDir, { recursive: true })

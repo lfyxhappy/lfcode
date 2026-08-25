@@ -1,5 +1,6 @@
 interface ImportMetaEnv {
   readonly LFCODE_CHANNEL: string
+  readonly LFCODE_PRE_RELEASE: string
 }
 
 interface ImportMeta {
@@ -25,5 +26,8 @@ declare module "virtual:lfcode-server" {
     export type Progress = import("../../../lfcode/dist/types/src/node").JsonMigration.Progress
     export const run: typeof import("../../../lfcode/dist/types/src/node").JsonMigration.run
   }
+  export const PluginSecureStorageHost: typeof import("../../../lfcode/dist/types/src/node").PluginSecureStorageHost
+  export const Mobile: typeof import("../../../lfcode/dist/types/src/node").Mobile
+  export const LanAccess: typeof import("../../../lfcode/dist/types/src/node").LanAccess
   export const bootstrap: typeof import("../../../lfcode/dist/types/src/node").bootstrap
 }

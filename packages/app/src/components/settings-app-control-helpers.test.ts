@@ -16,6 +16,7 @@ import {
 const state = (): AppControlState => ({
   enabled: true,
   permission: "session_control",
+  browser: { enabled: true, permission: "interactive" },
   target: "app",
   availableTargets: ["app"],
   service: {
@@ -31,6 +32,7 @@ describe("settings app control helpers", () => {
     expect(createAppControlDraft(state())).toEqual({
       enabled: true,
       permission: "session_control",
+      browser: { enabled: true, permission: "interactive" },
     })
   })
 
@@ -39,6 +41,7 @@ describe("settings app control helpers", () => {
     expect(appControlDirty(saved, saved)).toBe(false)
     expect(appControlDirty(saved, { ...saved, enabled: false })).toBe(true)
     expect(appControlDirty(saved, { ...saved, permission: "read_only" })).toBe(true)
+    expect(appControlDirty(saved, { ...saved, browser: { ...saved.browser, enabled: false } })).toBe(true)
   })
 
   test("disables save while loading, saving, or unchanged", () => {
@@ -162,6 +165,18 @@ describe("settings app control helpers", () => {
         durationMs: 18,
         failed: false,
       },
+    ])
+  })
+
+  test("accepts the desktop bridge timestamp fields during protocol migration", () => {
+    expect(
+      normalizeAppControlEvents([
+        { id: 1, scope: "server", type: "request", at: 123 },
+        { id: 2, scope: "renderer", type: "route.changed", isoTime: "2026-07-26T01:02:03.000Z" },
+      ]),
+    ).toEqual([
+      { id: 1, scope: "server", type: "request", timestamp: 123 },
+      { id: 2, scope: "renderer", type: "route.changed", timestamp: Date.parse("2026-07-26T01:02:03.000Z") },
     ])
   })
 

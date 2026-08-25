@@ -1,4 +1,4 @@
-Executes a given terminal command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
+Runs a PowerShell 7 (`pwsh`) command as a durable shell background process with security checks.
 
 Be aware: OS: ${os}, Shell: ${shell}
 ${shell_contract}
@@ -28,9 +28,10 @@ Before executing the command, please follow these steps:
 
 Usage notes:
   - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after 120000ms (2 minutes).
-  - Set `background: true` to start a durable background shell job that survives beyond this single tool call. After that, use `background_job` to inspect logs, wait for completion, or cancel it. Do not combine `background` with `interactive`, and do not pass `timeout` in background mode.
-  - For long-running development commands such as `vite dev`, `npm run dev`, `next dev`, `jupyter lab`, or an explicit watch/serve command, use `background: true` unless the user asks to wait for completion.
+  - Every non-interactive command starts as a durable shell background job. It continues after this tool call returns.
+  - `timeout` is an optional reminder threshold in milliseconds. It never terminates the command.
+  - Do not poll by default: process completion is reported to the session. Use `shell_process.get`, `shell_process.logs`, or `shell_process.wait` only when status or logs are needed. Only `shell_process.cancel`, after an explicit user request, can terminate its process tree.
+  - For long-running development commands such as `vite dev`, `npm run dev`, `next dev`, `jupyter lab`, or an explicit watch/serve command, start it here and keep the returned process id for later inspection if needed.
   - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
   - If the output exceeds ${maxLines} lines or ${maxBytes} bytes, it will be truncated and the full output will be captured under an opaque `tool-output:<id>` reference. Use `tool_output` with a bounded read or search; do not request or expose the real storage path. Do NOT use `head`, `tail`, or other truncation commands to limit output; the full output is already captured for precise inspection.
   - Set `interactive: true` when the command requires user interaction such as:
@@ -38,17 +39,16 @@ Usage notes:
     - Confirmation prompts (y/N, [Y/n])
     - Authentication (git push with credentials, npm login)
     - Any command that reads from stdin and cannot proceed without user input
-    When interactive is set, the terminal will be handed to the user for direct interaction. The command will NOT time out while waiting for user input. Do NOT set interactive for commands that can run unattended.
+    When interactive is set, the terminal is handed to the user for direct interaction and is outside the model-managed background pool. Do NOT set interactive for commands that can run unattended.
   - Keep execution details in the structured tool result. In assistant text, never repeat full commands, raw output, credentials, tokens, environment variables, or private paths. Report only a short progress status, the conclusion, key diagnostics, and the next action.
-  - After a failed command, identify whether it is a syntax, path, permission, process, or timeout failure. Do not retry an equivalent command more than once. A second failure requires a concise explanation and a different verified approach.
-  - If `apply_patch` or another structured editing tool rejects file context, do not use this terminal to write that target file. Re-read the file and repair the structured edit instead.
+  - After a failed command, inspect its durable logs before retrying. Do not retry an equivalent command more than once. A second failure requires a concise explanation and a different verified approach.
+  - If `edit` rejects file context, do not use this terminal to write that target file. Re-read the file and make one corrected `edit` call instead.
 
   - Avoid using this terminal tool with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
     - File search: Use `search(kind="path")` or `tree` (NOT find or ls)
     - Content search: Use `search(kind="content")` (NOT grep or rg)
     - Read files: Use `read` (NOT cat/head/tail)
-    - Edit files: Use `replace_range`, `symbol_edit`, or `apply_patch` (NOT sed/awk)
-    - Write files: Use `apply_patch` for file creation or broader rewrites (NOT shell redirection or here-doc / here-string file-writing tricks)
+    - Edit or write files: Use `edit` (`replace` for an exact current block, `patch` for multi-file changes, `write` only for a deliberate whole-file replacement), never sed/awk or shell redirection.
     - Communication: Output text directly (NOT echo/printf)
   - When issuing multiple commands:
     - If the commands are independent and can run in parallel, make multiple terminal-tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two tool calls in parallel.

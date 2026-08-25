@@ -1,0 +1,221 @@
+{
+  "snapshotID": "sfqbzxzcxc33v-3",
+  "revision": 7,
+  "region": "body",
+  "offset": 0,
+  "limit": 500,
+  "total": 4,
+  "root": {
+    "ref": "r1",
+    "fingerprint": "body::0",
+    "tag": "body",
+    "text": "Lfcode 出了点问题 加载应用程序时发生错误。 错误详情 重启 请将此错误报告给 Lfcode 团队 在 Discord 上 版本：1.1.3",
+    "disabled": false,
+    "checked": false,
+    "expanded": false,
+    "selected": false,
+    "editable": false,
+    "visible": true,
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1296,
+      "height": 837.2000122070312
+    }
+  },
+  "children": [
+    {
+      "ref": "r1o",
+      "fingerprint": "div:root:0/div::0/div::0/div:textfield-cl-277:1/div::0/textarea:textfield-cl-277-textarea:0",
+      "parentRef": "r1",
+      "tag": "textarea",
+      "id": "textfield-cl-277-textarea",
+      "name": "textfield-cl-277",
+      "value": "Error: Unknown error\n    at castError (oc://renderer/assets/styles-DSk0r7HG.js:776:10)\n    at oc://renderer/assets/styles-DSk0r7HG.js:276:83\n\n\n\n────────────────────────────────────────\n原因：\nNotFoundError\nSession not found: ses_fcd2f5febffeX16fmnKfWf1WMi",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 264.8000183105469,
+        "y": 317.2124938964844,
+        "width": 738.4000244140625,
+        "height": 222
+      }
+    },
+    {
+      "ref": "r1p",
+      "fingerprint": "div::0/div::0/div:textfield-cl-277:1/div::0/div::0/button:复制到剪贴板:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "复制到剪贴板",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1003.2000122070312,
+        "y": 321.2124938964844,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r1q",
+      "fingerprint": "body::0/div:root:0/div::0/div::0/div::2/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "重启",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 622,
+        "y": 572.0125122070312,
+        "width": 52,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1r",
+      "fingerprint": "div:root:0/div::0/div::0/div::3/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "在 Discord 上",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 687.1937866210938,
+        "y": 636.0125122070312,
+        "width": 104.95625305175781,
+        "height": 20
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "ref": "r1",
+      "fingerprint": "body::0",
+      "tag": "body",
+      "text": "Lfcode 出了点问题 加载应用程序时发生错误。 错误详情 重启 请将此错误报告给 Lfcode 团队 在 Discord 上 版本：1.1.3",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1296,
+        "height": 837.2000122070312
+      }
+    },
+    {
+      "ref": "r1o",
+      "fingerprint": "div:root:0/div::0/div::0/div:textfield-cl-277:1/div::0/textarea:textfield-cl-277-textarea:0",
+      "parentRef": "r1",
+      "tag": "textarea",
+      "id": "textfield-cl-277-textarea",
+      "name": "textfield-cl-277",
+      "value": "Error: Unknown error\n    at castError (oc://renderer/assets/styles-DSk0r7HG.js:776:10)\n    at oc://renderer/assets/styles-DSk0r7HG.js:276:83\n\n\n\n────────────────────────────────────────\n原因：\nNotFoundError\nSession not found: ses_fcd2f5febffeX16fmnKfWf1WMi",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 264.8000183105469,
+        "y": 317.2124938964844,
+        "width": 738.4000244140625,
+        "height": 222
+      }
+    },
+    {
+      "ref": "r1p",
+      "fingerprint": "div::0/div::0/div:textfield-cl-277:1/div::0/div::0/button:复制到剪贴板:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "复制到剪贴板",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1003.2000122070312,
+        "y": 321.2124938964844,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r1q",
+      "fingerprint": "body::0/div:root:0/div::0/div::0/div::2/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "重启",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 622,
+        "y": 572.0125122070312,
+        "width": 52,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1r",
+      "fingerprint": "div:root:0/div::0/div::0/div::3/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "在 Discord 上",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 687.1937866210938,
+        "y": 636.0125122070312,
+        "width": 104.95625305175781,
+        "height": 20
+      }
+    }
+  ],
+  "windowID": 1,
+  "window": {
+    "id": 1,
+    "title": "Lfcode",
+    "url": "oc://renderer/index.html#/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session/ses_fcd2f5febffeX16fmnKfWf1WMi",
+    "focused": false,
+    "visible": true,
+    "minimized": false,
+    "destroyed": false,
+    "detached": false,
+    "bounds": {
+      "x": 134,
+      "y": 29,
+      "width": 1292,
+      "height": 836
+    }
+  }
+}

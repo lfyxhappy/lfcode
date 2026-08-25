@@ -7,6 +7,7 @@ type Recovery = {
 }
 
 const recovery = new Map<string, Recovery>()
+const coordinateFailures = new Map<string, number>()
 
 function normalize(filepath: string) {
   const resolved = path.resolve(filepath)
@@ -59,6 +60,26 @@ export function markContextFailure(sessionID: string, messageID: string, filepat
 
 export function clear(sessionID: string, messageID: string, filepath: string) {
   recovery.delete(key(sessionID, messageID, filepath))
+  coordinateFailures.delete(key(sessionID, messageID, filepath))
+}
+
+export function markCoordinateFailure(sessionID: string, messageID: string, filepath: string) {
+  const identity = key(sessionID, messageID, filepath)
+  const failures = (coordinateFailures.get(identity) ?? 0) + 1
+  coordinateFailures.set(identity, failures)
+  if (failures < 2) return "Correct the reported coordinate once using the current file version; do not guess another range."
+  const entry = recovery.get(identity) ?? { failures: 0 }
+  entry.version = undefined
+  recovery.set(identity, entry)
+  return "This target has failed coordinate validation twice in the current editing turn. Read the target file again before another edit."
+}
+
+export function markVersionFailure(sessionID: string, messageID: string, filepath: string) {
+  const identity = key(sessionID, messageID, filepath)
+  const entry = recovery.get(identity) ?? { failures: 0 }
+  entry.version = undefined
+  recovery.set(identity, entry)
+  return "The target changed after the previous read. A fresh structured read is required before another edit."
 }
 
 export function blockedShellWrite(sessionID: string, messageID: string, cwd: string, command: string) {

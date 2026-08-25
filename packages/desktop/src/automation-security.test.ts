@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import {
   AUTOMATION_BODY_LIMIT_BYTES,
   automationErrorResponse,
+  browserAutomationError,
   automationRequestNeedsAuth,
   createAutomationToken,
   isAutomationRequestAuthorized,
@@ -28,6 +29,21 @@ afterEach(async () => {
 })
 
 describe("automation request security", () => {
+  test("exposes actionable browser failure codes without page data", () => {
+    expect(automationErrorResponse(browserAutomationError("browser_target_missing"))).toEqual({
+      status: 404,
+      error: "No active side browser tab exists for this session.",
+      logCode: "browser_target_missing",
+      code: "browser_target_missing",
+      retryable: false,
+      recovery: "Open or bind a side browser tab for this session, then retry.",
+    })
+    expect(automationErrorResponse(browserAutomationError("browser_bridge_unavailable"))).toMatchObject({
+      status: 503,
+      code: "browser_bridge_unavailable",
+      retryable: true,
+    })
+  })
   test("generates cryptographically sized unique tokens", () => {
     const tokens = Array.from({ length: 64 }, () => createAutomationToken())
     expect(new Set(tokens).size).toBe(tokens.length)
@@ -67,7 +83,11 @@ describe("automation request security", () => {
   })
 
   test("enforces capability levels on the server route vocabulary", () => {
+    expect(minimumAutomationCapability("GET", "/meta")).toBe("read_only")
     expect(minimumAutomationCapability("GET", "/diagnostics/ui-state")).toBe("read_only")
+    expect(minimumAutomationCapability("GET", "/diagnostics/events/next")).toBe("read_only")
+    expect(minimumAutomationCapability("POST", "/ui/query")).toBe("read_only")
+    expect(minimumAutomationCapability("POST", "/ui/wait")).toBe("read_only")
     expect(minimumAutomationCapability("POST", "/session/open")).toBe("session_control")
     expect(minimumAutomationCapability("POST", "/browser/click")).toBe("browser_control")
     expect(minimumAutomationCapability("POST", "/ui/type")).toBe("full_app_control")

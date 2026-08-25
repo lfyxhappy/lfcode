@@ -1,5 +1,5 @@
 import type { ElectronAPI } from "../preload/types"
-import type { UiDriverEditorInput, UiDriverNodeSnapshot, UiDriverQueryInput, UiDriverReadTextInput, UiDriverTypeInput, UiDriverWaitInput } from "@lfcode-ai/app/automation/ui-driver"
+import type { UiDriverCatalogEntry, UiDriverEditorInput, UiDriverNodeSnapshot, UiDriverQueryInput, UiDriverReadTextInput, UiDriverTypeInput, UiDriverWaitInput } from "@lfcode-ai/app/automation/ui-driver"
 import type { DetachedSidePanelContext } from "@lfcode-ai/app/pages/session/detached-side-panel"
 
 declare global {
@@ -145,6 +145,7 @@ declare global {
   }
 
   type LfcodeUiAutomationDriver = {
+    catalog: () => UiDriverCatalogEntry[]
     query: (input: UiDriverQueryInput) => UiDriverNodeSnapshot
     click: (input: UiDriverQueryInput) => Promise<UiDriverNodeSnapshot>
     type: (input: UiDriverTypeInput) => Promise<UiDriverNodeSnapshot>
@@ -159,6 +160,12 @@ declare global {
     ui?: LfcodeUiAutomationDriver
   }
 
+  type LfcodeSettingsAutomation = {
+    open: (tab?: string) => boolean
+    close: () => void
+    getState: () => { open: boolean; tab?: string }
+  }
+
   interface Window {
     api: ElectronAPI
     __LFCODE__?: {
@@ -167,6 +174,8 @@ declare global {
       navigate?: (route: string) => void
       automation?: LfcodeRendererAutomation
       sessionAutomation?: LfcodeRendererAutomation
+      uiAutomation?: LfcodeUiAutomationDriver
+      settings?: LfcodeSettingsAutomation
     }
   }
 }

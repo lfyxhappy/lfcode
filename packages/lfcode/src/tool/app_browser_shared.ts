@@ -3,12 +3,15 @@ import { Effect } from "effect"
 import { Config } from "@/config"
 import { Session } from "@/session"
 import type * as Tool from "./tool"
-import { createAppControlClient, ensureAppControlAccess } from "@/app-control/client"
+import { createAppControlClient, ensureAppControlAccess, ensureBrowserControlAccess } from "@/app-control/client"
+import { browserSessionKey } from "@/server/routes/browser-session-authorization"
 
-export function withAppControlAccess(required: "read_only" | "session_control" | "browser_control" | "full_app_control") {
+export function withAppControlAccess(
+  required: "read_only" | "session_control" | "browser_control" | "full_app_control",
+) {
   return Effect.gen(function* () {
     const config = yield* Config.Service
-    const current = yield* config.get()
+    const current = yield* config.getGlobal()
     ensureAppControlAccess(current, required)
     return yield* Effect.promise(() => createAppControlClient())
   })
@@ -20,21 +23,30 @@ export const appBrowserAccess = Effect.gen(function* () {
   return {
     client: (required: "read_only" | "session_control" | "browser_control" | "full_app_control") =>
       Effect.gen(function* () {
-        ensureAppControlAccess(yield* config.get(), required)
+        ensureAppControlAccess(yield* config.getGlobal(), required)
+        return yield* Effect.promise(() => createAppControlClient())
+      }),
+    browserClient: (required: "read_only" | "interactive") =>
+      Effect.gen(function* () {
+        ensureBrowserControlAccess(yield* config.getGlobal(), required)
         return yield* Effect.promise(() => createAppControlClient())
       }),
     sessionKey: (ctx: Tool.Context, sessionKey?: string) => {
       if (sessionKey) return Effect.succeed(sessionKey)
-      return session.get(ctx.sessionID).pipe(Effect.map((info) => `${info.directory}/${ctx.sessionID}`))
+      return session
+        .get(ctx.sessionID)
+        .pipe(Effect.map((info) => browserSessionKey({ directory: info.directory, sessionID: ctx.sessionID })))
     },
+    authorizationSessionKey: (ctx: Tool.Context) =>
+      session
+        .get(ctx.sessionID)
+        .pipe(Effect.map((info) => browserSessionKey({ directory: info.directory, sessionID: ctx.sessionID }))),
   }
 })
 
 export function appBrowserTool<Parameters extends z.ZodType, Result extends Tool.Metadata>(
   parameters: Parameters,
-  init: (
-    app: Effect.Success<typeof appBrowserAccess>,
-  ) => Omit<Tool.DefWithoutID<Parameters, Result>, "parameters">,
+  init: (app: Effect.Success<typeof appBrowserAccess>) => Omit<Tool.DefWithoutID<Parameters, Result>, "parameters">,
 ) {
   return appBrowserAccess.pipe(Effect.map((app) => ({ ...init(app), parameters })))
 }
@@ -46,5 +58,5 @@ export const resolveCurrentSessionKey = Effect.fn("AppControl.resolveCurrentSess
   if (sessionKey) return sessionKey
   const session = yield* Session.Service
   const info = yield* session.get(ctx.sessionID)
-  return `${info.directory}/${ctx.sessionID}`
+  return browserSessionKey({ directory: info.directory, sessionID: ctx.sessionID })
 })

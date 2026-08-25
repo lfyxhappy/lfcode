@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store"
 import { Button } from "@lfcode-ai/ui/button"
 import { DockTray } from "@lfcode-ai/ui/dock-surface"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
+import { useMotionEnabled } from "@lfcode-ai/ui/motion-presence"
 import { useLanguage } from "@/context/language"
 
 export function SessionFollowupDock(props: {
@@ -12,6 +13,7 @@ export function SessionFollowupDock(props: {
   onEdit: (id: string) => void
 }) {
   const language = useLanguage()
+  const motion = useMotionEnabled()
   const [store, setStore] = createStore({
     collapsed: false,
   })
@@ -55,7 +57,10 @@ export function SessionFollowupDock(props: {
             icon="chevron-down"
             size="normal"
             variant="ghost"
-            style={{ transform: `rotate(${store.collapsed ? 180 : 0}deg)` }}
+            style={{
+              transform: `rotate(${store.collapsed ? 180 : 0}deg)`,
+              transition: motion() ? "transform var(--motion-micro-ms) var(--motion-ease-out)" : undefined,
+            }}
             onMouseDown={(event) => {
               event.preventDefault()
               event.stopPropagation()
@@ -75,35 +80,52 @@ export function SessionFollowupDock(props: {
         <div class="h-5" aria-hidden="true" />
       </Show>
 
-      <Show when={!store.collapsed}>
-        <div class="px-3 pb-7 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar">
-          <For each={props.items}>
-            {(item) => (
-              <div class="flex items-center gap-2 min-w-0 py-1">
-                <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
-                <Button
-                  size="small"
-                  variant="secondary"
-                  class="shrink-0"
-                  disabled={!!props.sending}
-                  onClick={() => props.onSend(item.id)}
-                >
-                  {language.t("session.followupDock.sendNow")}
-                </Button>
-                <Button
-                  size="small"
-                  variant="ghost"
-                  class="shrink-0"
-                  disabled={!!props.sending}
-                  onClick={() => props.onEdit(item.id)}
-                >
-                  {language.t("session.followupDock.edit")}
-                </Button>
-              </div>
-            )}
-          </For>
+      <div
+        data-slot="session-followup-content"
+        aria-hidden={store.collapsed}
+        inert={store.collapsed}
+        classList={{
+          "grid overflow-hidden": true,
+          "pointer-events-none": store.collapsed,
+        }}
+        style={{
+          "grid-template-rows": store.collapsed ? "0fr" : "1fr",
+          opacity: store.collapsed ? 0 : 1,
+          transition: motion()
+            ? "grid-template-rows var(--motion-content-ms) var(--motion-ease-out), opacity var(--motion-micro-ms) var(--motion-ease-out)"
+            : undefined,
+        }}
+      >
+        <div class="min-h-0 overflow-hidden">
+          <div class="px-3 pb-7 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar">
+            <For each={props.items}>
+              {(item) => (
+                <div class="flex items-center gap-2 min-w-0 py-1">
+                  <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    class="shrink-0"
+                    disabled={!!props.sending}
+                    onClick={() => props.onSend(item.id)}
+                  >
+                    {language.t("session.followupDock.sendNow")}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="ghost"
+                    class="shrink-0"
+                    disabled={!!props.sending}
+                    onClick={() => props.onEdit(item.id)}
+                  >
+                    {language.t("session.followupDock.edit")}
+                  </Button>
+                </div>
+              )}
+            </For>
+          </div>
         </div>
-      </Show>
+      </div>
     </DockTray>
   )
 }

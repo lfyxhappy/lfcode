@@ -50,7 +50,9 @@ function sanitizeSecrets(text: string) {
 }
 
 await mkdir(localConfigDir, { recursive: true })
-const content = existsSync(localConfig) ? await readFile(localConfig, "utf8") : await readFile(distConfig, "utf8")
+// The packaged root config must follow the current build. User runtime data is
+// preserved separately by the use-copy sync flow.
+const content = await readFile(distConfig, "utf8")
 await writeFile(localConfig, sanitizeSecrets(upgradeBundledCommands(content)))
 console.log(`Synced packaged config into local template without secrets: ${localConfig}`)
 

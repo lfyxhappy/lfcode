@@ -25,6 +25,21 @@ describe("recoverActorArgs", () => {
     ).toEqual({ operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", model: "lite", task_id: "T4" } })
   })
 
+  test("identity and purpose survive bare-shape recovery", () => {
+    expect(
+      recoverActorArgs({ subagent_type: "explore", description: "d", prompt: "p", identity: "Researcher", purpose: "Review" }),
+    ).toEqual({
+      operation: {
+        action: "run",
+        subagent_type: "explore",
+        description: "d",
+        prompt: "p",
+        identity: "Researcher",
+        purpose: "Review",
+      },
+    })
+  })
+
   test("stringified operation envelope → parsed nested object", () => {
     expect(recoverActorArgs({ operation: '{"action":"run","subagent_type":"explore","description":"d","prompt":"p"}' })).toEqual({
       operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p" },

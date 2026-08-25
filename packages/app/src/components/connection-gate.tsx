@@ -4,6 +4,7 @@ import { createMemo, createResource, createSignal, For, onCleanup, type ParentPr
 import { useLanguage } from "@/context/language"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useCheckServerHealth } from "@/utils/server-health"
+import { startVisiblePolling } from "@/utils/visible-poll"
 
 export function resolveConnectionGateResult(input: {
   blocking: boolean
@@ -94,8 +95,8 @@ function ConnectionError(props: { onRetry?: () => void; onServerSelected?: (key:
   const serverToken = "\u0000server\u0000"
   const unreachable = createMemo(() => language.t("app.server.unreachable", { server: serverToken }).split(serverToken))
 
-  const timer = setInterval(() => props.onRetry?.(), 1000)
-  onCleanup(() => clearInterval(timer))
+  const stopPolling = startVisiblePolling(() => props.onRetry?.(), 1000, { immediate: false })
+  onCleanup(stopPolling)
 
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base gap-6 p-6">

@@ -5,6 +5,9 @@ import { createMemo } from "solid-js"
 
 export const popularProviders = [
   "lfcode",
+  "opencode",
+  "opencode-go",
+  "a6api",
   "lfcode-go",
   "anthropic",
   "github-copilot",

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { isOverflow, pressureLevel, shouldAutoCompact, usable } from "../../src/session/overflow"
+import { estimateRequestTokens, isOverflow, pressureLevel, shouldAutoCompact, usable } from "../../src/session/overflow"
 import { Token } from "../../src/util"
 import { Session as SessionNs } from "../../src/session"
 import type { Provider } from "../../src/provider"
@@ -213,6 +213,18 @@ describe("isOverflow", () => {
     const cfg = mockCfg({ auto: false })
     const tokens = { input: 75_000, output: 5_000, reasoning: 0, cache: { read: 0, write: 0 } } as any
     expect(isOverflow({ cfg, tokens, model })).toBe(false)
+  })
+})
+
+describe("estimateRequestTokens", () => {
+  test("includes system, messages, and serializable tool schemas", () => {
+    const base = estimateRequestTokens({ system: "system", messages: [{ role: "user", content: "hello" }] })
+    const withTool = estimateRequestTokens({
+      system: "system",
+      messages: [{ role: "user", content: "hello" }],
+      tools: { read: { description: "Read a file", inputSchema: { type: "object", properties: {} } } },
+    })
+    expect(withTool).toBeGreaterThan(base)
   })
 })
 

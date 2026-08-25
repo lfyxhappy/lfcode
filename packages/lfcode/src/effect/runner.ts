@@ -61,9 +61,6 @@ export const make = <A, E = never>(
       ? Deferred.fail(done, new Cancelled()).pipe(Effect.asVoid)
       : Deferred.done(done, exit).pipe(Effect.asVoid)
 
-  const idleIfCurrent = () =>
-    SynchronizedRef.modify(ref, (st) => [st._tag === "Idle" ? idle : Effect.void, st] as const).pipe(Effect.flatten)
-
   const finishRun = (id: number, done: Deferred.Deferred<A, E | Cancelled>, exit: Exit.Exit<A, E>) =>
     SynchronizedRef.modify(
       ref,
@@ -121,6 +118,7 @@ export const make = <A, E = never>(
             return [Deferred.await(run.done), { _tag: "ShellThenRun", shell: st.shell, run }] as const
           }
           case "Idle": {
+            yield* busy
             const done = yield* Deferred.make<A, E | Cancelled>()
             const run = yield* startRun(work, done)
             return [Deferred.await(done), { _tag: "Running", run }] as const
@@ -168,30 +166,16 @@ export const make = <A, E = never>(
       case "Idle":
         return [Effect.void, st] as const
       case "Running":
-        return [
-          Effect.gen(function* () {
-            yield* Fiber.interrupt(st.run.fiber)
-            yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
+        return [Fiber.interrupt(st.run.fiber).pipe(Effect.asVoid), st] as const
       case "Shell":
-        return [
-          Effect.gen(function* () {
-            yield* stopShell(st.shell)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
+        return [stopShell(st.shell).pipe(Effect.asVoid), st] as const
       case "ShellThenRun":
         return [
           Effect.gen(function* () {
-            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
             yield* stopShell(st.shell)
-            yield* idleIfCurrent()
+            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
           }),
-          { _tag: "Idle" } as const,
+          { _tag: "Shell", shell: st.shell } as const,
         ] as const
     }
   }).pipe(Effect.flatten)

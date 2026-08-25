@@ -8,8 +8,14 @@ import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { type Component, createMemo, createSignal, For, type JSX, Show } from "solid-js"
+import { type Component, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show } from "solid-js"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { UiAutomationRegistry } from "@/automation/registry"
+import {
+  modelsSettingsUiDriverTokens,
+  snapshotUiDriverElement,
+  type UiDriverQueryInput,
+} from "@/automation/ui-driver"
 import { useGlobalSync } from "@/context/global-sync"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
@@ -17,9 +23,12 @@ import { useModels } from "@/context/models"
 import { popularProviders } from "@/hooks/use-providers"
 import { formatServerError } from "@/utils/server-errors"
 import { DialogRemoveProvider } from "./dialog-delete-custom-provider"
+import { DialogAddModel } from "./dialog-add-model"
 import { DialogModelDetectResult } from "./dialog-model-detect-result"
 import { DialogModelLimitEditor } from "./dialog-model-limit-editor"
 import { DialogSelectProvider } from "./dialog-select-provider"
+import { ProviderQuotaConfigurationAction } from "./provider-quota-popover"
+import { quotaAuthProviderID } from "./provider-quota-capability"
 import { SettingsList } from "./settings-list"
 import {
   SUBAGENT_FIELDS,
@@ -31,6 +40,7 @@ import {
 } from "./settings-models-helpers"
 
 type ModelItem = ReturnType<ReturnType<typeof useModels>["list"]>[number]
+type ModelProvider = Pick<ModelItem["provider"], "id" | "name" | "models">
 type ConfigModelField = "model" | "small_model"
 type ModelOption = {
   value: string
@@ -39,6 +49,8 @@ type ModelOption = {
   providerID?: string
   custom?: boolean
 }
+
+let settingsModelsScrollTop = 0
 
 const ListLoadingState: Component<{ label: string }> = (props) => {
   return (
@@ -80,12 +92,74 @@ export const SettingsModels: Component = () => {
   const [saving, setSaving] = createSignal<ConfigModelField | SubagentField>()
   const [detecting, setDetecting] = createSignal<Record<string, ModelDetectState>>({})
   const [detectResults, setDetectResults] = createSignal<Record<string, ModelDetectResult>>({})
+  let scrollRef: HTMLDivElement | undefined
 
   const modelValue = (item: ModelItem) => `${item.provider.id}/${item.id}`
   const reopenSettingsModels = () => {
     void import("./dialog-settings").then((x) => {
       dialog.show(() => <x.DialogSettings defaultValue="models" />)
+      const restore = () => {
+        const frame = document.querySelector('[data-component="settings-models-root"]')
+        if (frame instanceof HTMLElement) frame.scrollTop = settingsModelsScrollTop
+      }
+      requestAnimationFrame(() => {
+        restore()
+        requestAnimationFrame(restore)
+        setTimeout(restore, 80)
+      })
     })
+  }
+  const openAddProvider = () => {
+    dialog.show(() => <DialogSelectProvider returnTo="settings-models" />)
+  }
+  const configureProvider = (providerID: string) => {
+    settingsModelsScrollTop = scrollRef?.scrollTop ?? 0
+    void import("./dialog-connect-provider").then((x) => {
+      dialog.show(() => <x.DialogConnectProvider provider={providerID} returnTo="settings-models" configured={globalSync.data.provider.connected.includes(providerID)} />)
+    })
+  }
+
+  onMount(() => {
+    const snapshot = (token: UiDriverQueryInput["token"]) => {
+      const action = token === "settings.models.add-provider" ? "settings-models-add-provider" : "provider-select-dialog"
+      const element = document.querySelector(`[data-action="${action}"]`)
+      return snapshotUiDriverElement(token, element instanceof HTMLElement ? element : undefined)
+    }
+    const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    const unregister = UiAutomationRegistry.register({
+      id: "settings.models",
+      tokens: modelsSettingsUiDriverTokens,
+      query: (input) => snapshot(input.token),
+      click: async (input) => {
+        if (input.token !== "settings.models.add-provider") {
+          throw new Error(`UI token does not support click: ${input.token}`)
+        }
+        openAddProvider()
+        await nextFrame()
+        return snapshot(input.token)
+      },
+      wait: async (input) => {
+        const timeoutMs = input.timeoutMs ?? 10_000
+        const intervalMs = input.intervalMs ?? 120
+        const startedAt = Date.now()
+        while (Date.now() - startedAt <= timeoutMs) {
+          const current = snapshot(input.token)
+          if (current.found && (input.visible === undefined || current.visible === input.visible)) return current
+          await new Promise((resolve) => setTimeout(resolve, intervalMs))
+        }
+        return snapshot(input.token)
+      },
+    })
+    onCleanup(unregister)
+  })
+
+  const removeProvider = (providerID: string, providerName: string) => {
+    // SettingsModels is shared by the full settings route and DialogSettings.
+    // Only the latter has a parent dialog to restore after the confirmation closes.
+    const restoreParent = dialog.active ? reopenSettingsModels : undefined
+    dialog.show(() => (
+      <DialogRemoveProvider providerID={providerID} providerName={providerName} onClose={restoreParent} />
+    ))
   }
 
   const openDetectResult = (item: ModelItem, result: ModelDetectResult) => {
@@ -282,10 +356,23 @@ export const SettingsModels: Component = () => {
       return aName.localeCompare(bName)
     },
   })
+  const configuredProvidersWithoutModels = createMemo<ModelProvider[]>(() =>
+    Object.entries(globalSync.data.config.provider ?? {})
+      .filter(
+        ([providerID]) =>
+          !(globalSync.data.config.disabled_providers ?? []).includes(providerID) &&
+          !models.list().some((model) => model.provider.id === providerID),
+      )
+      .map(([id, provider]) => ({
+        id,
+        name: provider.name ?? id,
+        models: {},
+      })),
+  )
 
   return (
-    <div class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+    <div ref={scrollRef} data-component="settings-models-root" class="flex flex-col h-full overflow-y-auto no-scrollbar px-4 pb-10 sm:px-10 sm:pb-10">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex flex-col w-full max-w-[1440px] mx-auto gap-4 pt-6 pb-6">
           <div>
             <h2 class="text-16-medium text-text-strong">{language.t("settings.models.title")}</h2>
@@ -296,9 +383,8 @@ export const SettingsModels: Component = () => {
               size="large"
               variant="secondary"
               icon="plus-small"
-              onClick={() => {
-                dialog.show(() => <DialogSelectProvider returnTo="settings-models" />)
-              }}
+              data-action="settings-models-add-provider"
+              onClick={openAddProvider}
             >
               {language.t("settings.models.action.addProvider")}
             </Button>
@@ -318,16 +404,23 @@ export const SettingsModels: Component = () => {
               class="flex-1"
             />
             <Show when={list.filter()}>
-              <IconButton icon="circle-x" variant="ghost" aria-label={language.t("common.clearSearch")} onClick={list.clear} />
+              <IconButton
+                icon="circle-x"
+                variant="ghost"
+                aria-label={language.t("common.clearSearch")}
+                onClick={list.clear}
+              />
             </Show>
           </div>
         </div>
       </div>
 
-      <div class="flex flex-col w-full max-w-[1440px] mx-auto gap-8">
-        <div class="flex flex-col gap-1">
-          <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.models.section.defaults")}</h3>
-          <SettingsList>
+      <div class="flex flex-col w-full max-w-[1440px] mx-auto gap-6">
+        <section class="min-w-0 border-y border-border-weak-base" data-component="settings-model-defaults">
+          <header class="px-0 py-3 border-b border-border-weak-base">
+            <h3 class="text-14-medium text-text-strong">{language.t("settings.models.section.defaults")}</h3>
+          </header>
+          <SettingsList class="px-0 py-0">
             <SettingsRow
               title={language.t("settings.models.default.title")}
               description={language.t("settings.models.default.description")}
@@ -423,7 +516,7 @@ export const SettingsModels: Component = () => {
               )}
             </For>
           </SettingsList>
-        </div>
+        </section>
 
         <Show
           when={!list.grouped.loading}
@@ -432,7 +525,7 @@ export const SettingsModels: Component = () => {
           }
         >
           <Show
-            when={list.flat().length > 0}
+            when={list.flat().length > 0 || (!list.filter() && configuredProvidersWithoutModels().length > 0)}
             fallback={<ListEmptyState message={language.t("dialog.model.empty")} filter={list.filter()} />}
           >
             <For each={list.grouped.latest}>
@@ -443,30 +536,33 @@ export const SettingsModels: Component = () => {
                       <ProviderIcon id={group.category} class="size-5 shrink-0 icon-strong-base" />
                       <span class="text-14-medium text-text-strong truncate">{group.items[0].provider.name}</span>
                     </div>
-                    <Tooltip
-                      placement="top"
-                      value={language.t("dialog.model.manage.provider.delete", {
-                        provider: group.items[0].provider.name,
-                      })}
-                    >
-                      <IconButton
-                        tabIndex={-1}
-                        icon="trash"
-                        variant="ghost"
-                        aria-label={language.t("dialog.model.manage.provider.delete", {
+                    <div class="flex items-center gap-1">
+                      <ProviderQuotaConfigurationAction providerID={group.category} providerName={group.items[0].provider.name} configured={globalSync.data.provider.connected.includes(quotaAuthProviderID(group.category))} onConfigure={() => configureProvider(quotaAuthProviderID(group.category))} />
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        icon="plus-small"
+                        onClick={() => dialog.show(() => <DialogAddModel provider={group.items[0].provider} />)}
+                      >
+                        {language.t("settings.models.action.addModel")}
+                      </Button>
+                      <Tooltip
+                        placement="top"
+                        value={language.t("dialog.model.manage.provider.delete", {
                           provider: group.items[0].provider.name,
                         })}
-                        onClick={() =>
-                          dialog.show(() => (
-                            <DialogRemoveProvider
-                              providerID={group.category}
-                              providerName={group.items[0].provider.name}
-                              onClose={reopenSettingsModels}
-                            />
-                          ))
-                        }
-                      />
-                    </Tooltip>
+                      >
+                        <IconButton
+                          tabIndex={-1}
+                          icon="trash"
+                          variant="ghost"
+                          aria-label={language.t("dialog.model.manage.provider.delete", {
+                            provider: group.items[0].provider.name,
+                          })}
+                          onClick={() => removeProvider(group.category, group.items[0].provider.name)}
+                        />
+                      </Tooltip>
+                    </div>
                   </div>
                   <SettingsList>
                     <For each={group.items}>
@@ -538,6 +634,41 @@ export const SettingsModels: Component = () => {
                 </div>
               )}
             </For>
+            <Show when={!list.filter()}>
+              <For each={configuredProvidersWithoutModels()}>
+                {(provider) => (
+                  <div class="flex items-center justify-between gap-3 border-b border-border-weak-base pb-3 last:border-none">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <ProviderIcon id={provider.id} class="size-5 shrink-0 icon-strong-base" />
+                      <span class="truncate text-14-medium text-text-strong">{provider.name}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <ProviderQuotaConfigurationAction providerID={provider.id} providerName={provider.name} configured={globalSync.data.provider.connected.includes(quotaAuthProviderID(provider.id))} onConfigure={() => configureProvider(quotaAuthProviderID(provider.id))} />
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        icon="plus-small"
+                        onClick={() => dialog.show(() => <DialogAddModel provider={provider} />)}
+                      >
+                        {language.t("settings.models.action.addModel")}
+                      </Button>
+                      <Tooltip
+                        placement="top"
+                        value={language.t("dialog.model.manage.provider.delete", { provider: provider.name })}
+                      >
+                        <IconButton
+                          tabIndex={-1}
+                          icon="trash"
+                          variant="ghost"
+                          aria-label={language.t("dialog.model.manage.provider.delete", { provider: provider.name })}
+                          onClick={() => removeProvider(provider.id, provider.name)}
+                        />
+                      </Tooltip>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </Show>
           </Show>
         </Show>
       </div>

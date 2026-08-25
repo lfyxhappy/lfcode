@@ -9,21 +9,39 @@ import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "@/plugin"
 import * as Tool from "./tool"
 import DESCRIPTION from "./background_job.txt"
-import { prepareShellExecution } from "./bash"
 
 const Parameters = z.object({
   operation: z
-    .enum(["start", "wait", "list", "get", "logs", "cancel", "reconcile"])
-    .describe("Which background-job lifecycle or maintenance action to run."),
+    .enum(["wait", "list", "get", "logs", "cancel", "reconcile"])
+    .describe("Which tracked shell-process action to run."),
   session_id: z.string().optional().describe("Session id to inspect. This tool only allows the current session."),
-  status: z.enum(["running", "completed", "failed", "cancelled"]).optional().describe("Optional status filter for operation=list."),
-  job_id: z.string().optional().describe("Background job id for operation=get, operation=logs, operation=cancel, or operation=reconcile."),
-  after_seq: z.number().int().nonnegative().optional().describe("For operation=logs, only return log rows after this sequence number."),
-  limit: z.number().int().min(1).max(200).optional().describe("Maximum number of rows to return. Defaults to 20 for logs and 10 for lists."),
-  command: z.string().optional().describe("For operation=start, the shell command to run in the background."),
-  description: z.string().optional().describe("For operation=start, a short description of the background shell job."),
-  workdir: z.string().optional().describe("For operation=start, optional working directory. Defaults to the current session directory."),
-  timeout_ms: z.number().int().positive().optional().describe("For operation=wait, optional maximum time to wait before returning."),
+  status: z
+    .enum(["running", "completed", "failed", "cancelled"])
+    .optional()
+    .describe("Optional status filter for operation=list."),
+  job_id: z
+    .string()
+    .optional()
+    .describe("Shell process id for operation=wait, operation=get, operation=logs, operation=cancel, or operation=reconcile."),
+  after_seq: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("For operation=logs, only return log rows after this sequence number."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Maximum number of rows to return. Defaults to 20 for logs and 10 for lists."),
+  timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("For operation=wait, optional maximum time to wait before returning."),
 })
 
 type BackgroundJobMetadata = {
@@ -40,74 +58,31 @@ type BackgroundJobMetadata = {
   status?: string
   result?: string
   nextAfterSeq?: number
+  exitCode?: number
+  stdoutTruncated?: boolean
+  stderrTruncated?: boolean
 }
+
+const WAIT_STDOUT_LIMIT = 8 * 1024
+const WAIT_STDERR_LIMIT = 4 * 1024
 
 const definition = {
   description: DESCRIPTION,
   parameters: Parameters,
+  formatValidationError: formatShellProcessValidationError,
   execute: (input: z.infer<typeof Parameters>, ctx: Tool.Context) =>
     Effect.gen(function* () {
       if (input.session_id && input.session_id !== ctx.sessionID) {
         return {
-          title: "Background jobs: wrong session",
-          output: "This tool can only inspect or control background jobs for the current session.",
+          title: "Shell processes: wrong session",
+          output: "This tool can only inspect or control shell processes for the current session.",
           metadata: { count: 0, truncated: false },
-        }
-      }
-
-      if (input.operation === "start") {
-        if (!input.command || !input.description) {
-          return {
-            title: "Background jobs: missing command",
-            output: "`operation=start` requires both `command` and `description`.",
-            metadata: { count: 0, truncated: false },
-          }
-        }
-        const runtime = shellBackgroundRuntimeRef.current
-        if (!runtime) {
-          throw new Error("Shell background runtime is not available in this process.")
-        }
-        const prepared = yield* prepareShellExecution(
-          {
-            command: input.command,
-            workdir: input.workdir,
-            background: true,
-          },
-          ctx,
-        )
-        const job = yield* runtime.start({
-          sessionID: ctx.sessionID,
-          title: input.description,
-          command: input.command,
-          cwd: prepared.cwd,
-          env: prepared.env as Record<string, string>,
-          shell: prepared.shell,
-          shellName: prepared.shellName,
-          source: "background_job",
-          ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
-          ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
-        })
-        return {
-          title: `Background job started: ${job.id}`,
-          output: [
-            `Started durable background shell job.`,
-            `<job_id>${job.id}</job_id>`,
-            `<status>${job.status}</status>`,
-            `<cwd>${job.cwd}</cwd>`,
-            `<title>${job.title}</title>`,
-          ].join("\n"),
-          metadata: {
-            count: 1,
-            jobID: job.id,
-            jobFound: true,
-            truncated: false,
-          },
         }
       }
 
       if (input.operation === "list") {
         const sessionID = (input.session_id ?? ctx.sessionID) as typeof ctx.sessionID
-        const gate = contextReadGate(ctx, "list", `background-jobs:${sessionID}`)
+        const gate = contextReadGate(ctx, "list", `shell-processes:${sessionID}`)
         const jobs = BackgroundJobPersistence.list({
           sessionID,
           ...(input.status ? { status: input.status } : {}),
@@ -120,14 +95,14 @@ const definition = {
         })
         if (items.length === 0) {
           return {
-            title: "Background jobs: 0 jobs",
-            output: `No durable background jobs found for session ${sessionID}.`,
+            title: "Shell processes: 0 processes",
+            output: `No tracked shell processes found for session ${sessionID}.`,
             metadata: { count: 0, sessionID, truncated: false },
           }
         }
 
         const lines = [
-          `Background jobs for session ${sessionID}:`,
+          `Shell processes for session ${sessionID}:`,
           "",
           ...items.flatMap((job) => [
             `### ${job.id}`,
@@ -142,11 +117,13 @@ const definition = {
             ...(job.error ? [`- error: ${job.error}`] : []),
             "",
           ]),
-          jobs.length > items.length ? `(Showing ${items.length} of ${jobs.length} jobs. Use a narrower filter or larger limit to continue.)` : "",
+          jobs.length > items.length
+            ? `(Showing ${items.length} of ${jobs.length} jobs. Use a narrower filter or larger limit to continue.)`
+            : "",
         ].filter(Boolean)
 
         return {
-          title: `Background jobs: ${items.length}${jobs.length > items.length ? `/${jobs.length}` : ""}`,
+          title: `Shell processes: ${items.length}${jobs.length > items.length ? `/${jobs.length}` : ""}`,
           output: lines.join("\n"),
           metadata: {
             count: items.length,
@@ -158,14 +135,14 @@ const definition = {
       }
 
       if (input.operation === "reconcile" && !input.job_id) {
-        const results = reconcileRunningBackgroundJobs(`tool:${ctx.callID ?? "background_job"}`)
+        const results = reconcileRunningBackgroundJobs(`tool:${ctx.callID ?? "shell_process"}`)
         const changed = results.filter((item) => item.ok && item.changed)
         const unmanaged = results.filter((item) => item.ok && item.code === "unmanaged_running")
         const running = results.filter((item) => item.ok && item.code === "still_running")
         return {
-          title: `Background job reconcile: ${results.length} checked`,
+          title: `Shell-process reconcile: ${results.length} checked`,
           output: [
-            `Checked ${results.length} running durable background jobs.`,
+            `Checked ${results.length} running shell processes.`,
             `- reconciled missing process: ${changed.length}`,
             `- still running: ${running.length}`,
             `- unmanaged running: ${unmanaged.length}`,
@@ -186,7 +163,7 @@ const definition = {
 
       if (!input.job_id) {
         return {
-          title: "Background jobs: missing job_id",
+          title: "Shell processes: missing job_id",
           output: `operation=${input.operation} requires a \`job_id\` argument.`,
           metadata: { count: 0, truncated: false },
         }
@@ -195,15 +172,15 @@ const definition = {
       const job = BackgroundJobPersistence.load(input.job_id)
       if (!job) {
         return {
-          title: "Background jobs: job not found",
-          output: `No durable background job with id ${input.job_id}.`,
+          title: "Shell processes: process not found",
+          output: `No tracked shell process with id ${input.job_id}.`,
           metadata: { count: 0, jobFound: false, truncated: false },
         }
       }
       if (job.sessionID !== ctx.sessionID) {
         return {
-          title: "Background jobs: wrong session",
-          output: "This tool can only inspect or control background jobs for the current session.",
+          title: "Shell processes: wrong session",
+          output: "This tool can only inspect or control shell processes for the current session.",
           metadata: { count: 0, jobFound: false, truncated: false },
         }
       }
@@ -218,17 +195,36 @@ const definition = {
           ...(input.timeout_ms !== undefined ? { timeoutMs: input.timeout_ms } : {}),
         })
         const latest = result.job ?? BackgroundJobPersistence.load(job.id) ?? job
+        const logs = result.timedOut ? [] : BackgroundJobPersistence.listLogs({ jobID: latest.id })
+        const stdout = summarizeLogTail(logs, "stdout", WAIT_STDOUT_LIMIT)
+        const stderr = summarizeLogTail(logs, "stderr", WAIT_STDERR_LIMIT)
         return {
-          title: `Background job wait: ${latest.status}`,
+          title: `Shell process wait: ${latest.status}`,
           output: result.timedOut
-            ? `Background job ${latest.id} is still ${latest.status} after waiting ${input.timeout_ms} ms.`
-            : `Background job ${latest.id} finished with status ${latest.status}.`,
+            ? `Shell process ${latest.id} is still ${latest.status} after waiting ${input.timeout_ms} ms; it was not terminated.`
+            : [
+                `Shell process ${latest.id} finished with status ${latest.status}.`,
+                `Exit code: ${latest.exitCode ?? "unavailable"}.`,
+                ...(latest.error ? [`Error: ${latest.error}`] : []),
+                "",
+                "stdout tail:",
+                stdout.text || "(empty)",
+                ...(stdout.truncated ? ["[stdout truncated; use shell_process logs for full output]"] : []),
+                "",
+                "stderr tail:",
+                stderr.text || "(empty)",
+                ...(stderr.truncated ? ["[stderr truncated; use shell_process logs for full output]"] : []),
+              ].join("\n"),
           metadata: {
             count: 1,
             jobFound: true,
-            truncated: false,
+            jobID: latest.id,
+            truncated: stdout.truncated || stderr.truncated,
             timedOut: result.timedOut,
             status: latest.status,
+            ...(latest.exitCode !== undefined ? { exitCode: latest.exitCode } : {}),
+            stdoutTruncated: stdout.truncated,
+            stderrTruncated: stderr.truncated,
           },
         }
       }
@@ -240,7 +236,7 @@ const definition = {
           jobs: [job.id],
         })
         return {
-          title: `Background job ${job.id}`,
+          title: `Shell process ${job.id}`,
           output: [
             `<id>${job.id}</id>`,
             `<session_id>${job.sessionID}</session_id>`,
@@ -268,25 +264,27 @@ const definition = {
         const runtime = shellBackgroundRuntimeRef.current
         const result =
           job.kind === "shell" && runtime
-            ? yield* runtime.cancel(input.job_id, `tool:${ctx.callID ?? "background_job"}`)
-            : cancelBackgroundJob(input.job_id, `tool:${ctx.callID ?? "background_job"}`)
+            ? yield* runtime.cancel(input.job_id, `tool:${ctx.callID ?? "shell_process"}`)
+            : cancelBackgroundJob(input.job_id, `tool:${ctx.callID ?? "shell_process"}`)
         if (!result.ok) {
           return {
-            title: "Background jobs: job not found",
+            title: "Shell processes: process not found",
             output: result.message,
             metadata: { count: 0, jobFound: false, truncated: false },
           }
         }
 
         return {
-          title: `Background job cancel: ${result.code}`,
+          title: `Shell process cancel: ${result.code}`,
           output: [
             result.message,
             "",
             `<id>${result.job.id}</id>`,
             `<status>${result.job.status}</status>`,
             ...(result.job.pid !== undefined ? [`<pid>${result.job.pid}</pid>`] : []),
-            ...(result.job.completedAt ? [`<completed_at>${new Date(result.job.completedAt).toISOString()}</completed_at>`] : []),
+            ...(result.job.completedAt
+              ? [`<completed_at>${new Date(result.job.completedAt).toISOString()}</completed_at>`]
+              : []),
             ...(result.job.error ? [`<error>${result.job.error}</error>`] : []),
           ].join("\n"),
           metadata: {
@@ -300,24 +298,26 @@ const definition = {
       }
 
       if (input.operation === "reconcile") {
-        const result = reconcileBackgroundJob(input.job_id, `tool:${ctx.callID ?? "background_job"}`)
+        const result = reconcileBackgroundJob(input.job_id, `tool:${ctx.callID ?? "shell_process"}`)
         if (!result.ok) {
           return {
-            title: "Background jobs: job not found",
+            title: "Shell processes: process not found",
             output: result.message,
             metadata: { count: 0, jobFound: false, truncated: false },
           }
         }
 
         return {
-          title: `Background job reconcile: ${result.code}`,
+          title: `Shell process reconcile: ${result.code}`,
           output: [
             result.message,
             "",
             `<id>${result.job.id}</id>`,
             `<status>${result.job.status}</status>`,
             ...(result.job.pid !== undefined ? [`<pid>${result.job.pid}</pid>`] : []),
-            ...(result.job.completedAt ? [`<completed_at>${new Date(result.job.completedAt).toISOString()}</completed_at>`] : []),
+            ...(result.job.completedAt
+              ? [`<completed_at>${new Date(result.job.completedAt).toISOString()}</completed_at>`]
+              : []),
             ...(result.job.error ? [`<error>${result.job.error}</error>`] : []),
           ].join("\n"),
           metadata: {
@@ -330,7 +330,7 @@ const definition = {
         }
       }
 
-      const gate = contextReadGate(ctx, "logs", `background-job:${job.id}`)
+      const gate = contextReadGate(ctx, "logs", `shell-process:${job.id}`)
       const limit = input.limit ?? 20
       const logs = BackgroundJobPersistence.listLogs({
         jobID: input.job_id,
@@ -344,14 +344,14 @@ const definition = {
       })
       if (items.length === 0) {
         return {
-          title: `Background job logs ${job.id}: 0 rows`,
-          output: `No durable logs found for background job ${job.id}.`,
+          title: `Shell process logs ${job.id}: 0 rows`,
+          output: `No durable logs found for shell process ${job.id}.`,
           metadata: { count: 0, jobFound: true, truncated: false },
         }
       }
 
       return {
-        title: `Background job logs ${job.id}: ${items.length}${logs.length > items.length ? `/${logs.length}` : ""}`,
+        title: `Shell process logs ${job.id}: ${items.length}${logs.length > items.length ? `/${logs.length}` : ""}`,
         output: [
           `Logs for ${job.id} (${job.title}):`,
           "",
@@ -377,8 +377,43 @@ const definition = {
     }),
 }
 
-export const BackgroundJobTool = Tool.define(
-  "background_job",
+function summarizeLogTail(
+  logs: ReturnType<typeof BackgroundJobPersistence.listLogs>,
+  stream: "stdout" | "stderr",
+  limit: number,
+) {
+  const text = logs
+    .filter((entry) => entry.stream === stream)
+    .map((entry) => entry.text)
+    .join("\n")
+  const bytes = Buffer.from(text, "utf8")
+  if (bytes.length <= limit) return { text, truncated: false }
+  const tail = bytes.subarray(bytes.length - limit)
+  const boundary = tail.findIndex((byte) => (byte & 0b1100_0000) !== 0b1000_0000)
+  return {
+    text: tail.subarray(boundary === -1 ? tail.length : boundary).toString("utf8"),
+    truncated: true,
+  }
+}
+
+function formatShellProcessValidationError(error: z.ZodError) {
+  const fields = [...new Set(error.issues.map((item) => item.path.join(".")).filter(Boolean))]
+  return `[tool_error] ${JSON.stringify({
+    type: "tool_error",
+    tool: "shell_process",
+    category: "schema",
+    fields,
+    message:
+      "Use a top-level string operation. Start commands through shell; use this tool only to inspect an existing shell process.",
+    example: {
+      operation: "get",
+      job_id: "job_...",
+    },
+  })}`
+}
+
+export const ShellProcessTool = Tool.define(
+  "shell_process",
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner
     const fs = yield* AppFileSystem.Service
@@ -386,11 +421,13 @@ export const BackgroundJobTool = Tool.define(
     const wrapped: Tool.DefWithoutID<typeof Parameters, BackgroundJobMetadata> = {
       ...definition,
       execute: (input: z.infer<typeof Parameters>, ctx: Tool.Context) =>
-        definition.execute(input, ctx).pipe(
-          Effect.provideService(ChildProcessSpawner, spawner),
-          Effect.provideService(AppFileSystem.Service, fs),
-          Effect.provideService(Plugin.Service, plugin),
-        ),
+        definition
+          .execute(input, ctx)
+          .pipe(
+            Effect.provideService(ChildProcessSpawner, spawner),
+            Effect.provideService(AppFileSystem.Service, fs),
+            Effect.provideService(Plugin.Service, plugin),
+          ),
     }
     return wrapped
   }),
@@ -398,7 +435,7 @@ export const BackgroundJobTool = Tool.define(
 
 function contextReadGate(ctx: Tool.Context, operation: "list" | "get" | "logs", target: string) {
   const gate = decideCapabilityOperation({
-    caller: "tool:background_job",
+    caller: "tool:shell_process",
     capability: "context_read",
     risk: "read",
     source: "core",
@@ -408,7 +445,7 @@ function contextReadGate(ctx: Tool.Context, operation: "list" | "get" | "logs", 
     target,
     sessionID: ctx.sessionID,
     messageID: ctx.messageID,
-    reason: `Background job ${operation}`,
+    reason: `Shell process ${operation}`,
   })
   requireCapabilityDecision(gate.decision)
   return gate

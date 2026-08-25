@@ -53,9 +53,9 @@ export const SearchTool = Tool.define(
             : path.resolve(SessionCwd.get(ctx.sessionID), params.path ?? ".")
           const normalized = process.platform === "win32" ? AppFileSystem.normalizePath(cwd) : cwd
           const info = yield* fs.stat(normalized).pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (!info || info.type !== "Directory") throw new Error(`search path must be a directory: ${normalized}`)
+          if (!info) throw new Error(`search path does not exist: ${normalized}`)
 
-          yield* assertExternalDirectoryEffect(ctx, normalized, { kind: "directory" })
+          yield* assertExternalDirectoryEffect(ctx, normalized, { kind: info.type === "Directory" ? "directory" : "file" })
           yield* ctx.ask({
             permission: "glob",
             patterns: [params.query],
@@ -67,15 +67,20 @@ export const SearchTool = Tool.define(
           })
 
           const limit = Math.max(1, params.limit ?? 100)
-          const files = yield* rg.files({
-            cwd: normalized,
-            glob: params.include ? [params.include] : undefined,
-            signal: ctx.abort,
-          }).pipe(Stream.runCollect, Effect.map((chunk) => [...chunk]))
+          const files = info.type === "Directory"
+            ? yield* rg.files({
+                cwd: normalized,
+                glob: params.include ? [params.include] : undefined,
+                signal: ctx.abort,
+              }).pipe(Stream.runCollect, Effect.map((chunk) => [...chunk]))
+            : [path.basename(normalized)]
           const ranked = params.query.trim()
             ? fuzzysort.go(params.query, files, { limit }).map((item) => item.target)
             : files.slice(0, limit)
-          const output = ranked.length === 0 ? ["No paths found"] : ranked.map((item) => path.join(normalized, item))
+          const output =
+            ranked.length === 0
+              ? ["No paths found"]
+              : ranked.map((item) => (info.type === "Directory" ? path.join(normalized, item) : normalized))
           return {
             title: params.query || path.basename(normalized),
             output: output.join("\n"),

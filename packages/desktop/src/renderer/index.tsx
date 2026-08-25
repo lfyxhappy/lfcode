@@ -24,6 +24,7 @@ import { createEffect, createResource, onCleanup, onMount, Show } from "solid-js
 import { render } from "solid-js/web"
 import pkg from "../../package.json"
 import { initI18n, t } from "./i18n"
+import { createDesktopFetch, snapshotDesktopFetchDiagnostics } from "./desktop-fetch"
 import { webviewZoom } from "./webview-zoom"
 import "./styles.css"
 import { useTheme } from "@lfcode-ai/ui/theme"
@@ -42,6 +43,7 @@ window.__LFCODE__ ??= {}
 window.__LFCODE__.detachedSidePanel = getDetachedSidePanelContext()
 
 const currentRendererRoute = () => window.location.hash.slice(1) || "/"
+const currentUiAutomation = () => window.__LFCODE__?.uiAutomation ?? window.__LFCODE__?.sessionAutomation?.ui
 const emitAutomationEvent = (type: string, data?: unknown) => {
   window.api.automationEvent({
     type,
@@ -81,43 +83,56 @@ window.__LFCODE__.automation = {
     title: document.title,
     windowFocused: document.hasFocus(),
     detachedSidePanel: !!window.__LFCODE__?.detachedSidePanel,
+    settings: window.__LFCODE__?.settings?.getState?.() ?? { open: false },
     session: window.__LFCODE__?.sessionAutomation?.getState?.() ?? null,
   }),
   call: async (action, input) => {
+    if (action === "diagnostics.desktopFetch") return snapshotDesktopFetchDiagnostics()
+    if (action === "ui.catalog") {
+      return currentUiAutomation()?.catalog?.() ?? []
+    }
     if (action === "ui.query") {
-      const result = await window.__LFCODE__?.sessionAutomation?.ui?.query?.(input as never)
+      const result = await currentUiAutomation()?.query?.(input as never)
       if (!result) throw new Error("Renderer UI automation query is not available")
       return result
     }
     if (action === "ui.click") {
-      const result = await window.__LFCODE__?.sessionAutomation?.ui?.click?.(input as never)
+      const result = await currentUiAutomation()?.click?.(input as never)
       if (!result) throw new Error("Renderer UI automation click is not available")
       return result
     }
     if (action === "ui.type") {
-      const result = await window.__LFCODE__?.sessionAutomation?.ui?.type?.(input as never)
+      const result = await currentUiAutomation()?.type?.(input as never)
       if (!result) throw new Error("Renderer UI automation type is not available")
       return result
     }
     if (action === "ui.readText") {
-      const result = window.__LFCODE__?.sessionAutomation?.ui?.readText?.(input as never)
+      const result = currentUiAutomation()?.readText?.(input as never)
       if (result === undefined) throw new Error("Renderer UI automation readText is not available")
       return result
     }
     if (action === "ui.wait") {
-      const result = await window.__LFCODE__?.sessionAutomation?.ui?.wait?.(input as never)
+      const result = await currentUiAutomation()?.wait?.(input as never)
       if (!result) throw new Error("Renderer UI automation wait is not available")
       return result
     }
     if (action === "ui.editor") {
-      if (!window.__LFCODE__?.sessionAutomation?.ui?.editor) {
+      const ui = currentUiAutomation()
+      if (!ui?.editor) {
         throw new Error("Renderer UI automation editor is not available")
       }
-      return window.__LFCODE__.sessionAutomation.ui.editor(input as never)
+      return ui.editor(input as never)
     }
     if (action === "route.navigate") {
       const route = typeof input === "object" && input && "route" in input ? String((input as { route: unknown }).route ?? "") : ""
       if (!route) throw new Error("Missing route")
+      const settingsRoute = route.match(/^\/settings(?:\/([a-z-]+))?\/?$/i)
+      if (settingsRoute) {
+        if (!window.__LFCODE__?.settings?.open(settingsRoute[1]?.toLowerCase())) {
+          throw new Error(`Unsupported settings route: ${route}`)
+        }
+        return { route, settings: window.__LFCODE__.settings.getState() }
+      }
       window.__LFCODE__?.navigate?.(route)
       return { route: currentRendererRoute() }
     }
@@ -224,6 +239,13 @@ const createPlatform = (): Platform => {
       return api
     }
   })()
+  const updater =
+    import.meta.env.VITE_LFCODE_PRE_RELEASE === "true"
+      ? {}
+      : {
+          checkUpdate: () => window.api.checkUpdate(),
+          update: () => window.api.installUpdate(),
+        }
 
   return {
     platform: "desktop",
@@ -330,6 +352,10 @@ const createPlatform = (): Platform => {
     setActiveBrowserTab: async (target) => {
       await window.api.setActiveBrowserTab(target)
     },
+    reportBrowserState: async (input) => {
+      await window.api.reportBrowserState(input)
+    },
+    onBrowserState: (cb) => window.api.onBrowserState(cb),
     async openPath(path: string, app?: string) {
       if (os === "windows") {
         const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
@@ -345,6 +371,7 @@ const createPlatform = (): Platform => {
       }
       return window.api.openPath(path, app)
     },
+    statPath: (path: string) => window.api.statPath(path),
 
     back() {
       window.history.back()
@@ -356,17 +383,7 @@ const createPlatform = (): Platform => {
 
     storage,
 
-    checkUpdate: async () => {
-      const config = await window.api.getWindowConfig().catch(() => ({ updaterEnabled: false }))
-      if (!config.updaterEnabled) return { updateAvailable: false }
-      return window.api.checkUpdate()
-    },
-
-    update: async () => {
-      const config = await window.api.getWindowConfig().catch(() => ({ updaterEnabled: false }))
-      if (!config.updaterEnabled) return
-      await window.api.installUpdate()
-    },
+    ...updater,
 
     restart: async () => {
       await window.api.killSidecar().catch(() => undefined)
@@ -389,10 +406,7 @@ const createPlatform = (): Platform => {
       }
     },
 
-    fetch: (input, init) => {
-      if (input instanceof Request) return fetch(input)
-      return fetch(input, init)
-    },
+    fetch: createDesktopFetch(),
 
     getWslEnabled: () => isWslEnabled(),
 
@@ -417,6 +431,15 @@ const createPlatform = (): Platform => {
     setDisplayBackend: async (backend) => {
       await window.api.setDisplayBackend(backend)
     },
+
+    getLanAccessStatus: () => window.api.getMobileAccessStatus(),
+    enableLanAccess: () => window.api.enableMobileAccess(),
+    disableLanAccess: () => window.api.disableMobileAccess(),
+    applyLanAccessNetworkChange: () => window.api.applyMobileAccessNetworkChange(),
+    listLanDevices: () => window.api.listMobileDevices(),
+    createLanBrowserPairing: () => window.api.createLanBrowserPairing(),
+    revokeLanDevice: (deviceID) => window.api.revokeMobileDevice(deviceID),
+    resetLanAccessCertificate: () => window.api.resetMobileAccessCertificate(),
 
     parseMarkdown: (markdown: string) => window.api.parseMarkdownCommand(markdown),
 
@@ -475,7 +498,6 @@ window.api.onBrowserWindowOpen((detail) => emitBrowserOpen(detail))
 
 render(() => {
   const platform = createPlatform()
-  const [windowConfig] = createResource(() => window.api.getWindowConfig().catch(() => ({ updaterEnabled: false })))
   const loadLocale = async () => {
     const current = await platform.storage?.("lfcode.global.dat").getItem("language")
     const legacy = current ? undefined : await platform.storage?.().getItem("language.v1")
@@ -556,7 +578,6 @@ render(() => {
           when={
             !defaultServer.loading &&
             !sidecar.loading &&
-            !windowConfig.loading &&
             !windowCount.loading &&
             !locale.loading
           }

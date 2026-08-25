@@ -16,9 +16,11 @@ import {
   onMount,
   untrack,
   createResource,
+  lazy,
   type Accessor,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import { createMediaQuery } from "@solid-primitives/media"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLocal } from "@/context/local"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
@@ -27,6 +29,7 @@ import { createStore, produce } from "solid-js/store"
 import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Select } from "@lfcode-ai/ui/select"
 import { Tabs } from "@lfcode-ai/ui/tabs"
+import { Icon } from "@lfcode-ai/ui/icon"
 import { createAutoScroll } from "@lfcode-ai/ui/hooks"
 import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@lfcode-ai/ui/toast"
@@ -35,7 +38,8 @@ import { getFilename } from "@lfcode-ai/shared/util/path"
 import type { FileReferenceApp } from "@lfcode-ai/ui/context/file-reference"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { useLocation, useSearchParams } from "@solidjs/router"
-import { NewSessionView, SessionHeader } from "@/components/session"
+import { NewSessionView } from "@/components/session/session-new-view"
+import { SessionHeader } from "@/components/session/session-header"
 import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
 import { useGlobalSync } from "@/context/global-sync"
@@ -48,8 +52,16 @@ import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
+import type { ExternalAgentControl } from "@/components/prompt-input"
+import { formatExternalAgentPrompt, type ExternalAgentPrompt } from "@/components/prompt-input/external-agent"
+import { CLAUDE_CODE_CONTROLS, type ClaudePermissionMode } from "@/pages/session/claude-code-controls"
 import type { HtmlComponentEventDetail } from "@lfcode-ai/ui/markdown"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
+import { findPluginSessionComposer } from "@/pages/session/plugin-session-composer"
+import { isPluginProjectRoute } from "@/pages/session/plugin-project-route"
+import { resolveTavernPluginAvailability } from "@/pages/session/tavern-plugin-availability"
+import { isTavernManagedDirectory } from "@/pages/session/tavern-project-directory"
+import { workspaceKey } from "@/pages/layout/helpers"
 import {
   BROWSER_REQUEST_OPEN_EVENT,
   type BrowserOpenRequestDetail,
@@ -70,18 +82,18 @@ import {
   eventBelongsToEditableSurface,
   shouldRoutePrintableKeyToComposer,
 } from "@/pages/session/editable-surface"
-import { SessionTimelineSurface } from "@/pages/session/session-timeline-surface"
 import { buildHtmlComponentFollowupDraft } from "@/pages/session/html-component-followup"
-import { BrowserKeepaliveHost } from "@/pages/session/browser-keepalive-host"
-import { SessionJobsRail } from "@/components/session/session-jobs-rail"
-import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
+import { batchFollowupDrafts, canBatchFollowupDrafts } from "@/pages/session/followup-batch"
+import { wideSessionLayoutQuery } from "@/pages/session/wide-layout"
+import {
+  BROWSER_KEEPALIVE_SLOT_EVENT,
+  hasBrowserKeepaliveSlots,
+} from "@/pages/session/browser-keepalive-slot"
+import type { DiffStyle, SessionReviewTabProps } from "@/pages/session/review-tab"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
-import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { SelectionToolbar } from "@/pages/session/selection-toolbar"
-import { TerminalPanel } from "@/pages/session/terminal-panel"
-import { DetachedSidePanelView } from "@/pages/session/detached-side-panel-view"
-import { getDetachedSidePanelContext } from "@/pages/session/detached-side-panel"
+import { buildDetachedSidePanelRoute, getDetachedSidePanelContext } from "@/pages/session/detached-side-panel"
 import { createLfcodeEditorPath } from "@/pages/session/file-tab-navigation"
 import {
   buildSessionMessageViews,
@@ -111,6 +123,7 @@ import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
 import { getParentPath, inferFileReferenceKind, resolveFileReferencePath } from "@lfcode-ai/ui/file-reference-path"
 import { Persist, persisted } from "@/utils/persist"
+import { SUBAGENT_VIEW_REQUEST_EVENT } from "@lfcode-ai/ui/message-part-events"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { same } from "@/utils/same"
 import { createSessionStorageKey, normalizeSessionStorageKey } from "@/utils/session-key"
@@ -118,14 +131,19 @@ import { formatServerError } from "@/utils/server-errors"
 import { isSessionStreaming } from "@/utils/session-status"
 import { LINUX_APPS, MAC_APPS, WINDOWS_APPS } from "@/components/session/session-open-apps"
 import { messageIdFromHash } from "@/pages/session/message-id-from-hash"
-import type {
-  UiDriverEditorInput,
-  UiDriverNodeSnapshot,
-  UiDriverQueryInput,
-  UiDriverReadTextInput,
-  UiDriverTypeInput,
-  UiDriverWaitInput,
-  UiDriverToken,
+import { isNavigableSubagent } from "@/pages/session/subagent-view"
+import { UiAutomationRegistry } from "@/automation/registry"
+import {
+  isSettingsTabUiDriverToken,
+  sessionUiDriverTokens,
+  settingsTabUiDriverSelector,
+  type UiDriverEditorInput,
+  type UiDriverNodeSnapshot,
+  type UiDriverQueryInput,
+  type UiDriverReadTextInput,
+  type UiDriverTypeInput,
+  type UiDriverWaitInput,
+  type UiDriverToken,
 } from "@/automation/ui-driver"
 
 const emptyUserMessages: UserMessage[] = []
@@ -147,6 +165,16 @@ type MainTimelineSurfaceState = {
 }
 
 const MAX_FULL_REVIEW_FILES = 5000
+const TavernManager = lazy(() => import("@/pages/session/tavern-manager").then((mod) => ({ default: mod.TavernManager })))
+const TavernSessionPage = lazy(() => import("@/pages/session/tavern-session-page").then((mod) => ({ default: mod.TavernSessionPage })))
+const TerminalPanel = lazy(() => import("@/pages/session/terminal-panel").then((mod) => ({ default: mod.TerminalPanel })))
+const ClaudeCodeSession = lazy(() => import("@/pages/session/claude-code-session").then((mod) => ({ default: mod.ClaudeCodeSession })))
+const BrowserKeepaliveHost = lazy(() => import("@/pages/session/browser-keepalive-host").then((mod) => ({ default: mod.BrowserKeepaliveHost })))
+const DetachedSidePanelView = lazy(() => import("@/pages/session/detached-side-panel-view").then((mod) => ({ default: mod.DetachedSidePanelView })))
+const SessionJobsRail = lazy(() => import("@/components/session/session-jobs-rail").then((mod) => ({ default: mod.SessionJobsRail })))
+const SessionTimelineSurface = lazy(() => import("@/pages/session/session-timeline-surface").then((mod) => ({ default: mod.SessionTimelineSurface })))
+const SessionSidePanel = lazy(() => import("@/pages/session/session-side-panel").then((mod) => ({ default: mod.SessionSidePanel })))
+const SessionReviewTab = lazy(() => import("@/pages/session/review-tab").then((mod) => ({ default: mod.SessionReviewTab })))
 
 export default function Page() {
   if (typeof window !== "undefined") {
@@ -166,11 +194,105 @@ export default function Page() {
   const prompt = usePrompt()
   const comments = useComments()
   const terminal = useTerminal()
+  const [browserKeepaliveActive, setBrowserKeepaliveActive] = createSignal(false)
   const routeLocation = useLocation()
   const routeMessageHash = createMemo(() => messageIdFromHash(routeLocation.hash))
-  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string; agentID?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams<{ prompt?: string; agentID?: string; view?: string }>()
   const { params, sessionKey, tabs, view } = useSessionLayout()
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
+  const [claudeBinding] = createResource(
+    () => params.id,
+    async (sessionID) => {
+      if (!sessionID) return
+      try {
+        return (await sdk.client.claudeCode.get({ sessionID })).data ?? undefined
+      } catch {
+        return undefined
+      }
+    },
+  )
+  const claudeCodeSession = createMemo(() => claudeBinding())
+  const [claudeTerminalConnected, setClaudeTerminalConnected] = createSignal(false)
+  const [claudeTerminalRestart, setClaudeTerminalRestart] = createSignal(0)
+  const [claudePermissionMode, setClaudePermissionMode] = createSignal<ClaudePermissionMode>()
+  const [claudeModel, setClaudeModel] = createSignal<string>()
+
+  const claudeControls = createMemo<ExternalAgentControl[]>(() => {
+    const binding = claudeCodeSession()
+    const models = (binding?.models ?? []).map((model) => ({
+      id: `model-${model.id}`,
+      group: "model" as const,
+      kind: "input" as const,
+      icon: "models" as const,
+      label: model.label,
+      shortcut: model.id,
+      data: `/model ${model.id}`,
+      selected: claudeModel() === model.id,
+    }))
+    const permissions = CLAUDE_CODE_CONTROLS.map((control) => ({
+      ...control,
+      label: language.t(control.labelKey),
+      selected: claudePermissionMode() === control.permissionMode,
+    }))
+    return [...models, ...permissions]
+  })
+
+  createEffect(() => {
+    const binding = claudeCodeSession()
+    params.id
+    setClaudeTerminalConnected(false)
+    setClaudePermissionMode(binding?.permissionMode)
+    setClaudeModel(undefined)
+  })
+
+  const submitClaudeComposer = async (input: ExternalAgentPrompt) => {
+    const sessionID = params.id
+    if (!sessionID) throw new Error(language.t("claudeCode.terminalUnavailable"))
+    const data = formatExternalAgentPrompt(input)
+    if (!data) return
+    const response = await sdk.client.claudeCode.input({ sessionID, data })
+    if (!response.data) throw new Error(language.t("claudeCode.terminalUnavailable"))
+  }
+
+  const sendClaudeControl = async (control: ExternalAgentControl) => {
+    const sessionID = params.id
+    if (!sessionID) throw new Error(language.t("claudeCode.terminalUnavailable"))
+    if (control.group === "permissions" && control.permissionMode) {
+      const response = await sdk.client.claudeCode.setPermissionMode({ sessionID, mode: control.permissionMode })
+      if (!response.data) throw new Error(language.t("claudeCode.terminalUnavailable"))
+      setClaudeTerminalConnected(false)
+      setClaudePermissionMode(response.data.permissionMode)
+      setClaudeTerminalRestart((value) => value + 1)
+      return
+    }
+    const data = control.data
+    if (!data) return
+    const response =
+      control.kind === "input"
+        ? await sdk.client.claudeCode.input({ sessionID, data })
+        : await sdk.client.claudeCode.key({ sessionID, data })
+    if (!response.data) throw new Error(language.t("claudeCode.terminalUnavailable"))
+    if (control.group === "model") setClaudeModel(control.data.replace("/model ", ""))
+    if (control.group === "permissions" && control.permissionMode) setClaudePermissionMode(control.permissionMode)
+  }
+
+  onMount(() => {
+    if (hasBrowserKeepaliveSlots()) setBrowserKeepaliveActive(true)
+    return makeEventListener(window, BROWSER_KEEPALIVE_SLOT_EVENT, () => setBrowserKeepaliveActive(true))
+  })
+
+  createEffect(() => {
+    if (!platform.onBrowserState) return
+    return platform.onBrowserState((event) => {
+      if (event.sessionKey !== sessionKey()) return
+      if (event.closed) {
+        layout.view(event.sessionKey).browser.close(event.tabID)
+        tabs().close(browserTab(event.tabID))
+        return
+      }
+      layout.view(event.sessionKey).browser.sync(event.tabID, event)
+    })
+  })
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -195,13 +317,30 @@ export default function Page() {
 
   const composer = createSessionComposerState()
   const sessionActors = createMemo(() => (params.id ? ((sync.data.actor ?? {})[params.id] ?? []) : []))
-  const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent"))
   const selectedViewAgentID = createMemo(() => {
     const agentID = searchParams.agentID ?? "main"
     if (agentID === "main") return "main"
-    if (subagents().some((actor) => actor.actorID === agentID)) return agentID
+    if (isNavigableSubagent(sessionActors(), agentID)) return agentID
     return "main"
   })
+  const openSubagent = async (actorID: string) => {
+    const sessionID = params.id
+    if (!sessionID || !actorID || actorID === "main") return
+    if (!isNavigableSubagent(sessionActors(), actorID)) {
+      try {
+        await sync.session.sync(sessionID)
+      } catch (error) {
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: formatServerError(error, language.t, language.t("common.requestFailed")),
+        })
+        return
+      }
+    }
+    if (params.id !== sessionID || !isNavigableSubagent(sessionActors(), actorID)) return
+    setSearchParams({ agentID: actorID })
+  }
   const [mainSelectionRoot, setMainSelectionRoot] = createSignal<HTMLElement>()
   const [activeSideChatContentRoot, setActiveSideChatContentRoot] = createSignal<HTMLDivElement>()
   const [activeSideChatInputRoot, setActiveSideChatInputRoot] = createSignal<HTMLDivElement>()
@@ -221,8 +360,8 @@ export default function Page() {
     ),
   )
 
-  const workspaceKey = createMemo(() => createSessionStorageKey(params.dir))
-  const workspaceTabs = createMemo(() => layout.tabs(workspaceKey))
+  const workspaceStorageKey = createMemo(() => createSessionStorageKey(params.dir))
+  const workspaceTabs = createMemo(() => layout.tabs(workspaceStorageKey))
   const openLfcodeEditorPath = createLfcodeEditorPath({
     normalizePath: file.normalize,
     loadFile: file.load,
@@ -247,7 +386,7 @@ export default function Page() {
 
         if (pending.id !== id) return
         layout.handoff.clearTabs()
-        if (pending.dir !== workspaceKey()) return
+        if (pending.dir !== workspaceStorageKey()) return
 
         const from = workspaceTabs().tabs()
         if (from.all.length === 0 && !from.active) return
@@ -299,20 +438,24 @@ export default function Page() {
     makeEventListener(window, SESSION_HANDOFF_EVENT, handler as EventListener)
   })
 
-  const isDesktop = createMemo(() => platform.platform === "desktop")
+  // Layout follows the viewport, while platform remains the authority for
+  // Electron-only capabilities such as local path and PTY operations.
+  const isDesktop = createMediaQuery(wideSessionLayoutQuery)
   const size = createSizing()
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const desktopFileTreeOpen = createMemo(() => isDesktop() && layout.fileTree.opened())
   const desktopSidePanelOpen = createMemo(() => desktopReviewOpen() || desktopFileTreeOpen())
-  const desktopSummaryCardVisible = createMemo(
-    () => isDesktop() && !!params.id && !desktopSidePanelOpen() && view().summaryCard.opened(),
-  )
   const sessionPanelWidth = createMemo(() => {
     if (!desktopSidePanelOpen()) return "100%"
     if (desktopReviewOpen()) return `${layout.session.width()}px`
     return `calc(100% - ${layout.fileTree.width()}px)`
   })
   const centered = createMemo(() => isDesktop() && !desktopReviewOpen())
+  const historyRailSpace = createMemo(() => {
+    const surface = activeMainTimelineSurface()
+    if (!isDesktop() || !params.id || selectedViewAgentID() !== "main" || !surface) return false
+    return surface.source.userMessages().length > 0
+  })
 
   function normalizeTab(tab: string) {
     if (!tab.startsWith("file://")) return tab
@@ -359,16 +502,54 @@ export default function Page() {
     })
   }
 
-  const openBrowserTab = (url: string, title?: string) => {
+  const openBrowserTab = (url: string, title?: string, activate = true) => {
     const id = createBrowserTabID()
     const tab = browserTab(id)
     batch(() => {
       layout.view(sessionKey()).browser.open(id, url, title)
       openReviewPanel()
       void tabs().open(tab)
-      tabs().setActive(tab)
+      if (activate) tabs().setActive(tab)
     })
-    if (tabs().active() !== tab) activateSessionTabWhenReady(tab)
+    if (activate && tabs().active() !== tab) activateSessionTabWhenReady(tab)
+    return { id, tab }
+  }
+
+  const openDetachedBrowserTab = async (url: string, title: string | undefined, background: boolean) => {
+    const id = createBrowserTabID()
+    const tab = browserTab(id)
+    const detachedWindowID = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    const route = buildDetachedSidePanelRoute({
+      detachedWindowID,
+      sessionKey: sessionKey(),
+      tab,
+      kind: "browser",
+    })
+    batch(() => {
+      layout.view(sessionKey()).browser.open(id, url, title, { background: true })
+      layout.detachedPanels.detach({
+        detachedWindowID,
+        sessionKey: sessionKey(),
+        tab,
+        kind: "browser",
+        sourceWindowID: -1,
+        title,
+      })
+    })
+    await platform
+      .createDetachedSidePanelWindow?.({
+        detachedWindowID,
+        route,
+        sessionKey: sessionKey(),
+        tab,
+        kind: "browser",
+        title,
+        background,
+      })
+      .catch(() => {
+        layout.detachedPanels.redock(detachedWindowID)
+      })
+    return { id, tab, detachedWindowID }
   }
 
   const focusWithoutScroll = (el: HTMLDivElement | undefined) => {
@@ -390,7 +571,7 @@ export default function Page() {
     })
   }
 
-  const openSideChatTab = (sideSessionID: string) => {
+  const openSideChatTab = (sideSessionID: string, options?: { focus?: boolean }) => {
     const tab = sideChatTab(sideSessionID)
     preserveMainTimelineViewport(() => {
       batch(() => {
@@ -400,7 +581,7 @@ export default function Page() {
       })
     })
     if (tabs().active() !== tab) activateSessionTabWhenReady(tab)
-    scheduleSideChatInputFocus()
+    if (options?.focus !== false) scheduleSideChatInputFocus()
   }
 
   onMount(() => {
@@ -435,6 +616,15 @@ export default function Page() {
       }
 
       event.preventDefault()
+      if (detail?.reason === "tool") {
+        const title = typeof detail.title === "string" ? detail.title : undefined
+        if (detail.presentation === "sidebar") {
+          openBrowserTab(next, title)
+          return
+        }
+        void openDetachedBrowserTab(next, title, detail.presentation !== "detached")
+        return
+      }
       openBrowserTab(next)
     }
 
@@ -447,6 +637,79 @@ export default function Page() {
   })
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
+  const listedProject = createMemo(() =>
+    globalSync.data.project.find((item) => workspaceKey(item.worktree) === workspaceKey(projectDirectory())),
+  )
+  // Only unlisted Tavern-managed directories need a direct project probe. A
+  // normal new session already has enough project state from global sync.
+  const tavernManagedDirectoryRoute = createMemo(() => isTavernManagedDirectory(projectDirectory()))
+  const [resolvedProject] = createResource(
+    () => (!params.id && !listedProject()?.extension && tavernManagedDirectoryRoute() ? projectDirectory() : undefined),
+    async () =>
+      (
+        await sdk.client.project.getManaged({
+          pluginID: "lfcode-tavern",
+          type: "tavern",
+        })
+      ).data,
+  )
+  const project = createMemo(() => {
+    const resolved = resolvedProject()
+    if (resolved && workspaceKey(resolved.worktree) === workspaceKey(projectDirectory())) return resolved
+    return listedProject()
+  })
+  const pluginContext = createMemo(() => params.id ? info()?.extension : project()?.extension)
+  // Plugin manifests are only consumed by extension-owned session surfaces.
+  // Avoid their RPC during a standard session startup.
+  const [plugins, { refetch: refetchPlugins }] = createResource(
+    () => (pluginContext() && sync.status === "complete" ? projectDirectory() : undefined),
+    async (directory) => (await sdk.client.plugin.list({ directory })).data ?? [],
+  )
+  const pluginComposer = createMemo(() =>
+    findPluginSessionComposer({ session: info(), project: project(), plugins: plugins() ?? [] }),
+  )
+  const pluginComposerPending = createMemo(
+    () => !!(params.id ? info()?.extension : project()?.extension) && (sync.status !== "complete" || plugins.loading || plugins() === undefined),
+  )
+  const tavernPluginAvailability = createMemo(() =>
+    resolveTavernPluginAvailability({
+      pending: sync.status !== "complete" || plugins.loading || (plugins() === undefined && !plugins.error),
+      error: plugins.error,
+      plugins: plugins(),
+    }),
+  )
+  const tavernManagerView = createMemo(() => {
+    if (params.id || project()?.extension?.pluginID !== "lfcode-tavern") return
+    const view = searchParams.view
+    return view === "tavern-new" || view === "tavern-characters" || view === "tavern-personas" || view === "tavern-presets" || view === "tavern-groups" || view === "tavern-worldbooks" || view === "tavern-history" || view === "tavern-trash" || view === "tavern-settings"
+      ? view.slice(7) as "new" | "characters" | "personas" | "presets" | "groups" | "worldbooks" | "history" | "trash" | "settings"
+      : undefined
+  })
+  const isTavernSession = createMemo(
+    () => sync.session.get(params.id ?? "")?.extension?.pluginID === "lfcode-tavern",
+  )
+  // The managed worktree is private to the Tavern plugin, including its sessions.
+  const tavernRoute = createMemo(() =>
+    tavernManagedDirectoryRoute() ||
+    isPluginProjectRoute({
+      sessionID: params.id,
+      sessionExtension: info()?.extension,
+      projectExtension: project()?.extension,
+      pluginID: "lfcode-tavern",
+      type: "tavern",
+    }),
+  )
+  const hiddenPluginComponents = createMemo(
+    () => new Set(pluginComposer()?.hiddenComponents ?? (isTavernSession() ? ["summary", "jobs-rail", "side-panel"] : [])),
+  )
+  const desktopSummaryCardVisible = createMemo(
+    () =>
+      platform.platform === "desktop" &&
+      !!params.id &&
+      !hiddenPluginComponents().has("summary") &&
+      !desktopSidePanelOpen() &&
+      view().summaryCard.opened(),
+  )
   const isChildSession = createMemo(() => !!info()?.parentID)
   const canReview = createMemo(() => !!sync.project)
   const reviewTab = createMemo(() => isDesktop() && view().reviewEnabled())
@@ -490,6 +753,7 @@ export default function Page() {
   const messageViews = createMemo(() =>
     buildSessionMessageViews({
       messages: messages(),
+      partsByMessageID: sync.data.part,
       revertMessageID: revertMessageID(),
       viewAgentID: selectedViewAgentID(),
     }),
@@ -968,8 +1232,10 @@ export default function Page() {
     return LINUX_APPS
   })
   const [availableOpenApps, setAvailableOpenApps] = createStore<FileReferenceApp[]>([])
-
-  createEffect(() => {
+  let openAppsRequested = false
+  const requestOpenWithApps = () => {
+    if (openAppsRequested) return
+    openAppsRequested = true
     if (platform.platform !== "desktop" || !platform.checkAppExists) {
       setAvailableOpenApps([])
       return
@@ -991,7 +1257,7 @@ export default function Page() {
       }
       setAvailableOpenApps(next)
     })
-  })
+  }
 
   const showPathError = (path: string, err: unknown) => {
     showToast({
@@ -1037,9 +1303,14 @@ export default function Page() {
     baseDir: projectDirectory(),
     canOpenPaths: true,
     canExternalOpenPaths: platform.platform === "desktop" && !!platform.openPath,
+    canBrowseInAppPaths: platform.platform === "desktop",
     enableMarkdownDecorations: true,
     allowContextMenu: true,
     resolvePath: (value: string, baseDir?: string) => resolveFileReferencePath(value, baseDir ?? projectDirectory()),
+    validatePath: (path: string) => {
+      if (platform.platform === "desktop" && platform.statPath) return platform.statPath(path)
+      return sdk.client.file.stat({ path }).then((result) => result.data ?? { exists: false, kind: "unknown" as const })
+    },
     openWithApps: availableOpenApps,
     inferKind: inferFileReferenceKind,
     onPreviewPath: (path: string) => {
@@ -1048,6 +1319,21 @@ export default function Page() {
     onOpenDefaultApp: (path: string) => {
       void openConversationPath(path)
     },
+    onOpenInApp:
+      platform.platform === "desktop"
+        ? (path: string) => {
+            const target = file.normalize(path)
+            void sdk.client.file
+              .referenceGrant({ path: target })
+              .then((result) => {
+                const grant = result.data
+                if (!grant) throw new Error("Reference directory grant was not returned")
+                file.referenceTree.authorize(grant.root, grant.token)
+                layout.fileTree.openReference(grant.root)
+              })
+              .catch((error) => showPathError(target, error))
+          }
+        : undefined,
     onOpenFolder: (path: string) => {
       const parent = getParentPath(path)
       if (!parent) return
@@ -1059,6 +1345,7 @@ export default function Page() {
     onCopyPath: (path: string) => {
       void copyConversationPath(path)
     },
+    onRequestOpenWithApps: requestOpenWithApps,
     onReviewPath: (path: string) => {
       openReviewPanel()
       focusReviewDiff(file.normalize(path))
@@ -1303,7 +1590,10 @@ export default function Page() {
     if (!layout.fileTree.opened()) return
     if (sync.status === "loading") return
 
-    fileTreeTab()
+    const tab = fileTreeTab()
+    // A new session opens on the empty Changes tab. There is no file tree to
+    // render until the user asks for All files or the session has activity.
+    if (!params.id && tab !== "all") return
     const refresh = treeDir !== dir
     treeDir = dir
     void (refresh ? file.tree.refresh("") : file.tree.list(""))
@@ -1752,7 +2042,7 @@ export default function Page() {
       return out
     })
 
-  const appendSelectionToPrompt = (input: { text: string; messageID?: string; sessionID?: string }) => {
+  const appendSelectionToPrompt = (input: { text: string; comment?: string; messageID?: string; sessionID?: string }) => {
     const scope = input.sessionID ? { dir: sdk.directory, id: input.sessionID } : undefined
     const current = scope ? prompt.scope(scope).current() : prompt.current()
     const next = [
@@ -1760,6 +2050,7 @@ export default function Page() {
       {
         type: "selected-text" as const,
         text: input.text,
+        comment: input.comment,
         messageID: input.messageID,
         content: "",
         start: 0,
@@ -1781,7 +2072,7 @@ export default function Page() {
     })
   }
 
-  const createSideChat = async (input: { text: string; messageID?: string }) => {
+  const createSideChat = async (input: { text: string; messageID?: string; focus?: boolean }) => {
     const sessionID = params.id
     if (!sessionID) return
     const contextWatermark = input.messageID ?? latestMainContextMessageID()
@@ -1814,7 +2105,7 @@ export default function Page() {
             { dir: sdk.directory, id: sideSessionID },
           )
         }
-        openSideChatTab(sideSessionID)
+        openSideChatTab(sideSessionID, { focus: input.focus })
         void sync.session.sync(sideSessionID, { force: true })
         return sideSessionID
       })
@@ -1957,8 +2248,24 @@ export default function Page() {
       const dialog = document.querySelector(".settings-dialog")
       return dialog instanceof HTMLElement ? dialog : undefined
     }
-    if (input.token === "settings.tab.editor" || input.token === "settings.tab.plugins") {
-      const button = document.querySelector(`[data-action="${input.token.replaceAll(".", "-")}"]`)
+    if (isSettingsTabUiDriverToken(input.token)) {
+      const button = document.querySelector(settingsTabUiDriverSelector(input.token))
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "project.sidebar.menu") {
+      const button = document.querySelector('[data-action="project-sidebar-menu"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "project.sidebar.new-temporary-session") {
+      const item = document.querySelector('[data-action="project-sidebar-new-temporary-session"]')
+      return item instanceof HTMLElement ? item : undefined
+    }
+    if (input.token === "project.sidebar.new-claude-code-session") {
+      const item = document.querySelector('[data-action="project-sidebar-new-claude-code-session"]')
+      return item instanceof HTMLElement ? item : undefined
+    }
+    if (input.token === "prompt.schedule-automation") {
+      const button = document.querySelector('[data-action="prompt-schedule-automation"]')
       return button instanceof HTMLElement ? button : undefined
     }
     if (input.token === "session.summary.toggle") {
@@ -1969,8 +2276,25 @@ export default function Page() {
       return inputRef
     }
     if (input.token === "composer.main.submit") {
-      const button = inputRef?.closest("form")?.querySelector('[data-action="prompt-submit"]')
+      const button = inputRef
+        ?.closest('[data-prompt-composer="true"]')
+        ?.querySelector('[data-action="prompt-submit-inline"], [data-action="prompt-submit-external-agent"]')
       return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "claudeCode.model.menu" || input.token === "claudeCode.permissions.menu") {
+      const control = inputRef
+        ?.closest('[data-prompt-composer="true"]')
+        ?.querySelector(`[data-action="claude-code-${input.token === "claudeCode.model.menu" ? "model" : "permissions"}-menu"]`)
+      return control instanceof HTMLElement ? control : undefined
+    }
+    if (input.token.startsWith("claudeCode.control.")) {
+      const selector = `[data-action="claude-code-control-${input.token.slice("claudeCode.control.".length)}"]`
+      const button = inputRef
+        ?.closest('[data-prompt-composer="true"]')
+        ?.querySelector(selector)
+      if (button instanceof HTMLElement) return button
+      const portalButton = document.querySelector(selector)
+      return portalButton instanceof HTMLElement ? portalButton : undefined
     }
     if (input.token === "sidechat.active.input") {
       const sideSessionID = sideChatTabID(tabs().active() ?? "")
@@ -2047,6 +2371,13 @@ export default function Page() {
       await submitAutomationPrompt("active-side")
       return snapshotUiElement(input.token, resolveUiToken(input))
     }
+    if (input.token.startsWith("claudeCode.control.")) {
+      const control = claudeControls().find((item) => item.id === input.token.slice("claudeCode.control.".length))
+      if (!control) throw new Error(`Claude Code control was not found: ${input.token}`)
+      await sendClaudeControl(control)
+      await waitForAutomationFrames(2)
+      return snapshotUiElement(input.token, resolveUiToken(input))
+    }
     const node = resolveUiToken(input)
     if (!node) {
       if (input.token === "messageblock.mode.reload") {
@@ -2059,28 +2390,11 @@ export default function Page() {
       }
       throw new Error(`UI token was not found: ${input.token}`)
     }
-    if (input.token === "filetab.active.command-menu") {
-      node.focus()
-      node.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" }))
-      node.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter" }))
-      await waitForAutomationFrames(2)
-      return snapshotUiElement(input.token, resolveUiToken(input))
-    }
     if (input.token === "composer.main.input" || input.token === "sidechat.active.input") {
-      const editable = node.matches('[contenteditable="true"]') ? node : node.querySelector('[contenteditable="true"]')
-      if (!(editable instanceof HTMLElement)) throw new Error(`Editable input was not found: ${input.token}`)
-      editable.focus()
       await waitForAutomationFrames(2)
       return snapshotUiElement(input.token, resolveUiToken(input))
     }
-    if (node instanceof HTMLButtonElement || node instanceof HTMLAnchorElement) {
-      node.focus()
-      node.click()
-    } else if (node instanceof HTMLDivElement) {
-      node.click()
-    } else {
-      node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
-    }
+    node.click()
     await waitForAutomationFrames(2)
     return snapshotUiElement(input.token, resolveUiToken(input))
   }
@@ -2092,7 +2406,6 @@ export default function Page() {
     if (editor) {
       const current = editor.automation.getState().value
       editor.automation.setValue(input.append ? `${current}${input.text}` : input.text)
-      editor.automation.focus()
       await waitForAutomationFrames(2)
       return snapshotUiElement(input.token, resolveUiToken(input))
     }
@@ -2131,8 +2444,9 @@ export default function Page() {
     const editor = findCodeEditorAutomation(node)
     if (!editor) throw new Error(`UI token is not backed by a phase0 editor: ${input.token}`)
     if (input.action === "getState") return editor.automation.getState()
-    if (input.action === "focus") {
-      editor.automation.focus()
+    if (input.action === "focus" || input.action === "reveal") {
+      const state = editor.automation.getState()
+      if (state.selection) editor.automation.revealSelection(state.selection)
       await waitForAutomationFrames(1)
       return editor.automation.getState()
     }
@@ -2430,6 +2744,15 @@ export default function Page() {
     return textarea instanceof HTMLTextAreaElement ? textarea : undefined
   }
 
+  const textareaPositionOffset = (value: string, lineNumber: number, column: number) =>
+    Math.min(
+      value.length,
+      value
+        .split("\n")
+        .slice(0, Math.max(0, lineNumber - 1))
+        .reduce((offset, line) => offset + line.length + 1, 0) + Math.max(0, column - 1),
+    )
+
   const findCodeEditorFailureMessage = (root?: ParentNode | null) => {
     const host =
       root instanceof HTMLDivElement && root.dataset.automationId === "code-editor-phase0"
@@ -2717,6 +3040,10 @@ export default function Page() {
       sessionID: params.id,
       sessionKey: sessionKey(),
       directory: sdk.directory,
+      extension: info()?.extension ? `${info()!.extension!.pluginID}/${info()!.extension!.type}` : undefined,
+      projectExtension: project()?.extension ? `${project()!.extension!.pluginID}/${project()!.extension!.type}` : undefined,
+      pluginComposer: pluginComposer() ? `${pluginComposer()!.pluginID}/${pluginComposer()!.type}` : undefined,
+      pluginManifestState: plugins.state,
       messagesReady: messagesReady(),
       streaming: sessionStreaming(),
       loading: !messagesReady(),
@@ -2737,6 +3064,12 @@ export default function Page() {
         mainText: automationPromptText(mainComposerScope()),
         activeText: automationPromptText(activeComposer.scope),
       },
+      claudeCode: claudeCodeSession()
+        ? {
+            permissionMode: claudePermissionMode(),
+            terminalConnected: claudeTerminalConnected(),
+          }
+        : undefined,
       fileTabSummary: {
         active: activeFileTabValue ?? null,
         path: activeFilePath ?? null,
@@ -2790,7 +3123,7 @@ export default function Page() {
   const submitAutomationPrompt = async (target?: string, explicitSessionID?: string) => {
     const resolved = automationPromptScope(target, explicitSessionID)
     if (resolved.target !== "main") {
-      openSideChatTab(resolved.target)
+      openSideChatTab(resolved.target, { focus: false })
       await waitForAutomationFrames(2)
     }
     const form = automationPromptRoot(resolved.target)?.closest("form")
@@ -2804,9 +3137,10 @@ export default function Page() {
 
   const callSessionAutomation = async (action: string, input?: unknown) => {
     if (action === "session.create") {
-      const value = input as { title?: unknown; open?: unknown } | undefined
+      const value = input as { title?: unknown; open?: unknown; temporary?: unknown } | undefined
       const result = await sdk.client.session.create({
         title: typeof value?.title === "string" && value.title.trim() ? value.title.trim() : undefined,
+        temporary: value?.temporary === true,
       })
       if (!result.data) throw new Error(language.t("common.requestFailed"))
       const sessionID = result.data.id
@@ -2829,6 +3163,7 @@ export default function Page() {
       const sideSessionID = await createSideChat({
         text: typeof value?.text === "string" ? value.text : "",
         messageID: typeof value?.messageID === "string" ? value.messageID : undefined,
+        focus: false,
       })
       await waitForAutomationFrames(3)
       return { sideSessionID, state: readSessionAutomationState() }
@@ -2837,7 +3172,7 @@ export default function Page() {
       const value = input as { sessionID?: unknown } | undefined
       const sideSessionID = typeof value?.sessionID === "string" ? value.sessionID : ""
       if (!sideSessionID) throw new Error("Missing sessionID")
-      openSideChatTab(sideSessionID)
+      openSideChatTab(sideSessionID, { focus: false })
       await waitForAutomationFrames(2)
       return { sideSessionID, state: readSessionAutomationState() }
     }
@@ -2858,10 +3193,9 @@ export default function Page() {
         value?.append === true,
       )
       if (resolved.target !== "main") {
-        openSideChatTab(resolved.target)
+        openSideChatTab(resolved.target, { focus: false })
         await waitForAutomationFrames(2)
       }
-      focusWithoutScroll(automationPromptRoot(resolved.target))
       return {
         target: resolved.target,
         text: automationPromptText(resolved.scope),
@@ -2933,7 +3267,6 @@ export default function Page() {
       if (editor.implementation === "phase0") {
         const current = editor.automation.getState().value
         editor.automation.setValue(value?.append === true ? `${current}${text}` : text)
-        editor.automation.focus()
       } else {
         const next = value?.append === true ? `${editor.textarea.value}${text}` : text
         editor.textarea.value = next
@@ -3006,12 +3339,20 @@ export default function Page() {
       }
     }
     if (action === "browser.open") {
-      const value = input as { url?: unknown; title?: unknown } | undefined
+      const value = input as { url?: unknown; title?: unknown; presentation?: unknown } | undefined
       const url = typeof value?.url === "string" ? value.url : ""
       if (!url) throw new Error("Missing url")
-      openBrowserTab(url, typeof value?.title === "string" ? value.title : undefined)
+      const title = typeof value?.title === "string" ? value.title : undefined
+      const presentation =
+        value?.presentation === "detached" || value?.presentation === "sidebar" || value?.presentation === "headless"
+          ? value.presentation
+          : "headless"
+      const target =
+        presentation === "sidebar"
+          ? openBrowserTab(url, title)
+          : await openDetachedBrowserTab(url, title, presentation === "headless")
       await waitForAutomationFrames(3)
-      return { state: readSessionAutomationState() }
+      return { ...target, presentation, state: readSessionAutomationState() }
     }
     if (action === "browser.close") {
       const value = input as { tabID?: unknown } | undefined
@@ -3019,6 +3360,11 @@ export default function Page() {
       if (!tabID) throw new Error("No active browser tab to close")
       layout.view(sessionKey()).browser.close(tabID)
       tabs().close(browserTab(tabID))
+      void platform.reportBrowserState?.({
+        sessionKey: sessionKey(),
+        tabID,
+        closed: true,
+      })
       await waitForAutomationFrames(2)
       return { tabID, state: readSessionAutomationState() }
     }
@@ -3075,22 +3421,29 @@ export default function Page() {
       const selection = value?.selection
       const startLineNumber = typeof selection?.startLineNumber === "number" ? selection.startLineNumber : undefined
       const startColumn = typeof selection?.startColumn === "number" ? selection.startColumn : undefined
-      await openLfcodeEditorPath({
-        path: targetPath,
-        selection:
-          startLineNumber && startColumn
-            ? {
-                startLineNumber,
-                startColumn,
-                ...(typeof selection?.endLineNumber === "number" ? { endLineNumber: selection.endLineNumber } : {}),
-                ...(typeof selection?.endColumn === "number" ? { endColumn: selection.endColumn } : {}),
-              }
-            : undefined,
-      })
+      await openLfcodeEditorPath({ path: targetPath })
       openReviewPanel()
       const targetTab = file.tab(targetPath)
       if (tabs().active() !== targetTab) activateSessionTabWhenReady(targetTab)
-      await waitForAutomationFrames(3)
+      await waitForFileTabMode("edit")
+      await waitForAutomationFrames(1)
+      const targetEditor = activeFileTabEditor()
+      if (startLineNumber && startColumn && targetEditor?.implementation === "phase0") {
+        targetEditor.automation.setSelection({
+          startLineNumber,
+          startColumn,
+          ...(typeof selection?.endLineNumber === "number" ? { endLineNumber: selection.endLineNumber } : {}),
+          ...(typeof selection?.endColumn === "number" ? { endColumn: selection.endColumn } : {}),
+        })
+      }
+      if (startLineNumber && startColumn && targetEditor?.implementation === "fallback") {
+        const endLineNumber = typeof selection?.endLineNumber === "number" ? selection.endLineNumber : startLineNumber
+        const endColumn = typeof selection?.endColumn === "number" ? selection.endColumn : startColumn
+        targetEditor.textarea.setSelectionRange(
+          textareaPositionOffset(targetEditor.textarea.value, startLineNumber, startColumn),
+          textareaPositionOffset(targetEditor.textarea.value, endLineNumber, endColumn),
+        )
+      }
       return { tab: targetTab, state: readSessionAutomationState() }
     }
     if (action === "filetab.setMode") {
@@ -3115,7 +3468,6 @@ export default function Page() {
       if (editor.implementation === "phase0") {
         const current = editor.automation.getState().value
         editor.automation.setValue(value?.append === true ? `${current}${text}` : text)
-        editor.automation.focus()
       } else {
         const next = value?.append === true ? `${editor.textarea.value}${text}` : text
         editor.textarea.value = next
@@ -3140,10 +3492,21 @@ export default function Page() {
 
   createEffect(() => {
     window.__LFCODE__ ??= {}
+    const unregisterUi = UiAutomationRegistry.register({
+      id: "session",
+      tokens: sessionUiDriverTokens,
+      query: uiQuery,
+      click: uiClick,
+      type: uiType,
+      readText: uiReadText,
+      wait: uiWait,
+      editor: uiEditor,
+    })
     const bridge: LfcodeRendererAutomation = {
       getState: readSessionAutomationState,
       call: callSessionAutomation,
       ui: {
+        catalog: UiAutomationRegistry.catalog,
         query: uiQuery,
         click: uiClick,
         type: uiType,
@@ -3154,6 +3517,7 @@ export default function Page() {
     }
     window.__LFCODE__.sessionAutomation = bridge
     onCleanup(() => {
+      unregisterUi()
       if (window.__LFCODE__?.sessionAutomation === bridge) {
         window.__LFCODE__.sessionAutomation = undefined
       }
@@ -3277,9 +3641,8 @@ export default function Page() {
   })
 
   const followupMutation = useMutation(() => ({
-    mutationFn: async (input: { sessionID: string; id: string; manual?: boolean }) => {
-      const item = (followup.items[input.sessionID] ?? []).find((entry) => entry.id === input.id)
-      if (!item) return
+    mutationFn: async (input: { sessionID: string; ids: string[]; draft: FollowupDraft; manual?: boolean }) => {
+      if (input.ids.length === 0) return
 
       if (input.manual) setFollowup("paused", input.sessionID, undefined)
       setFollowup("failed", input.sessionID, undefined)
@@ -3288,16 +3651,16 @@ export default function Page() {
         client: sdk.client,
         sync,
         globalSync,
-        draft: item,
-        optimisticBusy: item.sessionDirectory === sdk.directory,
+        draft: input.draft,
+        optimisticBusy: input.draft.sessionDirectory === sdk.directory,
       }).catch((err) => {
-        setFollowup("failed", input.sessionID, input.id)
+        setFollowup("failed", input.sessionID, input.ids[0])
         fail(err)
         return false
       })
       if (!ok) return
 
-      setFollowup("items", input.sessionID, (items) => (items ?? []).filter((entry) => entry.id !== input.id))
+      setFollowup("items", input.sessionID, (items) => (items ?? []).filter((entry) => !input.ids.includes(entry.id)))
       if (input.manual) resumeTimelineToBottom()
     },
   }))
@@ -3309,7 +3672,7 @@ export default function Page() {
     const id = params.id
     if (!id) return
     if (!followupBusy(id)) return
-    return followupMutation.variables?.id
+    return followupMutation.variables?.ids[0]
   })
 
   const followupMode = createMemo(() => {
@@ -3408,11 +3771,22 @@ export default function Page() {
 
   const sendFollowup = (sessionID: string, id: string, opts?: { manual?: boolean }) => {
     if (sync.session.get(sessionID)?.parentID) return Promise.resolve()
-    const item = (followup.items[sessionID] ?? []).find((entry) => entry.id === id)
+    const items = followup.items[sessionID] ?? []
+    const index = items.findIndex((entry) => entry.id === id)
+    const item = items[index]
     if (!item) return Promise.resolve()
     if (followupBusy(sessionID)) return Promise.resolve()
 
-    return followupMutation.mutateAsync({ sessionID, id, manual: opts?.manual })
+    const candidates = items.slice(index)
+    const boundary = candidates.findIndex((next, nextIndex) => nextIndex > 0 && !canBatchFollowupDrafts(item, next))
+    const batch = opts?.manual ? [item] : candidates.slice(0, boundary === -1 ? undefined : boundary)
+
+    return followupMutation.mutateAsync({
+      sessionID,
+      ids: batch.map((entry) => entry.id),
+      draft: batchFollowupDrafts(batch),
+      manual: opts?.manual,
+    })
   }
 
   const editFollowup = (id: string) => {
@@ -3445,12 +3819,13 @@ export default function Page() {
 
   const revertMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; messageID: string }) => {
-      const prev = prompt.current().slice()
+      const scope = mainComposerScope()
+      const prev = prompt.scope(scope).current().slice()
       const last = info()?.revert
       const value = draft(input.messageID)
       batch(() => {
         roll(input.sessionID, { messageID: input.messageID })
-        prompt.set(value)
+        prompt.set(value, undefined, scope)
       })
       await halt(input.sessionID)
         .then(() => sdk.client.session.revert(input))
@@ -3460,7 +3835,7 @@ export default function Page() {
         .catch((err) => {
           batch(() => {
             roll(input.sessionID, last)
-            prompt.set(prev)
+            prompt.set(prev, undefined, scope)
           })
           fail(err)
         })
@@ -3472,36 +3847,25 @@ export default function Page() {
       const sessionID = params.id
       if (!sessionID) return
 
-      const next = mainUserMessages().find((item) => item.id > id)
-      const prev = prompt.current().slice()
+      const scope = mainComposerScope()
+      const prev = prompt.scope(scope).current().slice()
       const last = info()?.revert
 
       batch(() => {
-        roll(sessionID, next ? { messageID: next.id } : undefined)
-        if (next) {
-          prompt.set(draft(next.id))
-          return
-        }
-        prompt.reset()
+        roll(sessionID, { messageID: id })
+        prompt.set(draft(id), undefined, scope)
       })
 
-      const task = !next
-        ? halt(sessionID).then(() => sdk.client.session.unrevert({ sessionID }))
-        : halt(sessionID).then(() =>
-            sdk.client.session.revert({
-              sessionID,
-              messageID: next.id,
-            }),
-          )
-
-      await task
+      await halt(sessionID)
+        .then(() => sdk.client.session.revert({ sessionID, messageID: id }))
         .then((result) => {
           if (result.data) merge(result.data)
+          requestAnimationFrame(focusInput)
         })
         .catch((err) => {
           batch(() => {
             roll(sessionID, last)
-            prompt.set(prev)
+            prompt.set(prev, undefined, scope)
           })
           fail(err)
         })
@@ -3598,6 +3962,7 @@ export default function Page() {
     const source = createSessionTimelineMessageSource({
       sessionID: props.sessionID,
       messages: (sessionID) => sync.data.message[sessionID],
+      partsByMessageID: () => sync.data.part,
       revertMessageID: (sessionID) => sync.session.get(sessionID)?.revert?.messageID,
       viewAgentID: selectedViewAgentID,
     })
@@ -3704,7 +4069,13 @@ export default function Page() {
         renderedUserMessages={history.renderedUserMessages()}
         viewAgentID={selectedViewAgentID()}
         sessionActors={(sync.data.actor ?? {})[props.sessionID] ?? []}
-        onViewAgentChange={(agentID) => setSearchParams({ agentID: agentID === "main" ? undefined : agentID })}
+        onViewAgentChange={(agentID) => {
+          if (agentID === "main") {
+            setSearchParams({ agentID: undefined })
+            return
+          }
+          void openSubagent(agentID)
+        }}
         anchor={anchor}
         domAnchor={(id) => `timeline-${checksum(props.sessionKey)}-${anchor(id)}`}
         fileReferences={fileReferences()}
@@ -3734,6 +4105,11 @@ export default function Page() {
 
   onMount(() => {
     makeEventListener(document, "keydown", handleKeyDown)
+    makeEventListener(window, SUBAGENT_VIEW_REQUEST_EVENT, ((event: CustomEvent<{ sessionID?: string; actorID?: string }>) => {
+      const detail = event.detail
+      if (detail.sessionID !== params.id || !detail.actorID) return
+      void openSubagent(detail.actorID)
+    }) as EventListener)
     if (platform.getRendererMemoryInfo) onCleanup(startSessionViewMemoryGuard(platform.getRendererMemoryInfo))
   })
 
@@ -3761,6 +4137,9 @@ export default function Page() {
 
   return (
     <div class="relative bg-background-base size-full overflow-hidden flex flex-col" data-session-canvas>
+      <Show
+        when={tavernRoute()}
+        fallback={<>
       <SessionHeader />
       <div
         class="relative flex-1 min-h-0 flex"
@@ -3769,7 +4148,7 @@ export default function Page() {
           "flex-col": !isDesktop(),
         }}
       >
-        <Show when={!isDesktop() && !!params.id}>
+        <Show when={!isDesktop() && !!params.id && !claudeCodeSession()}>
           <Tabs value={store.mobileTab} class="h-auto">
             <Tabs.List>
               <Tabs.Trigger
@@ -3802,12 +4181,15 @@ export default function Page() {
           classList={{
             "@container relative shrink-0 flex flex-col min-h-0 h-full bg-background-stronger flex-1 md:flex-none": true,
           }}
+          data-resizing={size.active()}
           style={{
             width: sessionPanelWidth(),
           }}
         >
           <div class="flex-1 min-h-0 overflow-hidden">
             <Switch>
+              <Match when={tavernManagerView()}>{(manager) => <TavernManager view={manager()} projectID={project()?.id ?? ""} worktree={project()?.worktree ?? projectDirectory()} />}</Match>
+              <Match when={claudeCodeSession()}>{(binding) => <ClaudeCodeSession sessionID={params.id!} binding={binding()} restartToken={claudeTerminalRestart()} onConnectionChange={setClaudeTerminalConnected} onPermissionModeChange={setClaudePermissionMode} />}</Match>
               <Match when={params.id}>
                 <Show when={sessionGoal()?.state || latestGoalVerdict()}>
                   <div class="border-b border-border bg-background-base/80 px-4 py-3">
@@ -3842,11 +4224,63 @@ export default function Page() {
             </Switch>
           </div>
 
-          <div class="shrink-0">
-            <SessionComposerRegion
+          <Show when={!tavernManagerView() && claudeCodeSession()}>
+            <div class="shrink-0">
+              <SessionComposerRegion
+                state={composer}
+                ready={true}
+                centered={false}
+                historyRailSpace={false}
+                scope={mainComposerScope()}
+                dropRoot={() => sessionDropRoot}
+                inputRef={(el) => {
+                  inputRef = el
+                }}
+                newSessionWorktree="main"
+                onNewSessionWorktreeReset={() => undefined}
+                onSubmit={() => undefined}
+                onResponseSubmit={() => undefined}
+                externalAgent={{
+                  submit: submitClaudeComposer,
+                  disabled: () => !claudeTerminalConnected(),
+                  disabledMessage: () => (claudeTerminalConnected() ? undefined : language.t("claudeCode.terminalUnavailable")),
+                  imageUnsupported: {
+                    title: language.t("claudeCode.imageUnsupported.title"),
+                    description: language.t("claudeCode.imageUnsupported.description"),
+                  },
+                  label: language.t("claudeCode.title"),
+                  placeholder: language.t("claudeCode.composer.placeholder"),
+                  controls: claudeControls(),
+                  controlSubmit: sendClaudeControl,
+                }}
+                setPromptDockRef={(el) => {
+                  promptDock = el
+                }}
+              />
+            </div>
+          </Show>
+          <Show when={!tavernManagerView() && !claudeCodeSession()}>
+            <Show
+              when={selectedViewAgentID() === "main"}
+              fallback={
+                <button
+                  type="button"
+                  class="pointer-events-auto absolute bottom-4 left-4 z-[70] flex items-center gap-2 rounded-lg border border-border-base bg-surface-raised-base px-3 py-2 text-13-medium text-text-weak shadow-md transition-colors hover:bg-surface-raised-base-hover hover:text-text-base"
+                  onClick={() => setSearchParams({ agentID: undefined })}
+                >
+                  <Icon name="arrow-left" size="small" />
+                  {language.t("session.child.backToParent")}
+                </button>
+              }
+            >
+              <div class="shrink-0">
+                <SessionComposerRegion
               state={composer}
+              pluginComposer={pluginComposer()}
+              pluginComposerPending={pluginComposerPending()}
               ready={messagesReady()}
               centered={centered()}
+              historyRailSpace={historyRailSpace()}
               rightInset={desktopSummaryCardVisible()}
               scope={mainComposerScope()}
               dropRoot={() => sessionDropRoot}
@@ -3894,12 +4328,17 @@ export default function Page() {
               setPromptDockRef={(el) => {
                 promptDock = el
               }}
-            />
-          </div>
-          <Show when={desktopSummaryCardVisible()}>
+                />
+              </div>
+            </Show>
+          </Show>
+          <Show when={!claudeCodeSession() && desktopSummaryCardVisible() && !hiddenPluginComponents().has("jobs-rail")}>
             <SessionJobsRail
               sessionID={params.id!}
               directory={sdk.directory}
+              messages={messages}
+              parts={() => sync.data.part}
+              actors={sessionActors}
               changes={reviewCount}
               sources={sources}
               onOpenChanges={() => {
@@ -3908,54 +4347,75 @@ export default function Page() {
               }}
               onOpenFiles={openFileTree}
               onAttachSources={attachSources}
+              onOpenSubagent={(actorID) => void openSubagent(actorID)}
             />
           </Show>
 
-          <Show when={desktopReviewOpen()}>
+          <Show when={!claudeCodeSession() && desktopReviewOpen()}>
             <div onPointerDown={() => size.start()}>
               <ResizeHandle
                 direction="horizontal"
                 size={layout.session.width()}
                 min={450}
-                max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.45}
+                max={typeof window === "undefined" ? 1000 : Math.max(450, window.innerWidth - 96)}
                 onResize={(width) => {
                   size.touch()
                   layout.session.resize(width)
                 }}
+                collapseThreshold={typeof window === "undefined" ? 760 : Math.max(450, window.innerWidth - 240)}
+                collapseWhen="above"
+                onCollapse={() => view().reviewPanel.close()}
               />
             </div>
           </Show>
         </div>
 
-        <SessionSidePanel
-          canReview={canReview}
-          diffs={reviewDiffs}
-          diffsReady={reviewReady}
-          empty={reviewEmptyText}
-          hasReview={hasReview}
-          reviewCount={reviewCount}
-          reviewPanel={reviewPanel}
-          activeDiff={tree.activeDiff}
-          focusReviewDiff={focusReviewDiff}
-          reviewSnap={ui.reviewSnap}
-          size={size}
-          onOpenSideChat={() => void createSideChat({ text: "" })}
-          onCloseSideChat={(sideSessionID) => void closeSideChatSession(sideSessionID)}
-          onAddToChat={appendSelectionToPrompt}
-          onAskSideChat={askInSideChat}
-          setActiveSideChatContentRef={setActiveSideChatContentRoot}
-          setActiveSideChatInputRef={setActiveSideChatInputRoot}
-        />
+        <Show when={!claudeCodeSession() && !hiddenPluginComponents().has("side-panel") && (desktopSidePanelOpen() || (!isDesktop() && !!params.id))}>
+          <SessionSidePanel
+            canReview={canReview}
+            diffs={reviewDiffs}
+            diffsReady={reviewReady}
+            empty={reviewEmptyText}
+            hasReview={hasReview}
+            reviewCount={reviewCount}
+            reviewPanel={reviewPanel}
+            activeDiff={tree.activeDiff}
+            focusReviewDiff={focusReviewDiff}
+            reviewSnap={ui.reviewSnap}
+            size={size}
+            onOpenSideChat={() => void createSideChat({ text: "" })}
+            onCloseSideChat={(sideSessionID) => void closeSideChatSession(sideSessionID)}
+            onAddToChat={appendSelectionToPrompt}
+            onAskSideChat={askInSideChat}
+            setActiveSideChatContentRef={setActiveSideChatContentRoot}
+            setActiveSideChatInputRef={setActiveSideChatInputRoot}
+          />
+        </Show>
         <div ref={browserKeepaliveMount} class="pointer-events-none absolute inset-0 z-20 overflow-hidden" />
-        <BrowserKeepaliveHost activeSessionKey={sessionKey} mount={() => browserKeepaliveMount} />
+        <Show when={browserKeepaliveActive()}>
+          <BrowserKeepaliveHost activeSessionKey={sessionKey} mount={() => browserKeepaliveMount} />
+        </Show>
       </div>
 
-      <TerminalPanel />
+      <Show when={!claudeCodeSession() && view().terminal.opened()}>
+        <TerminalPanel />
+      </Show>
       <SelectionToolbar
         roots={() => [mainSelectionRoot(), activeSideChatContentRoot()]}
         onAddToChat={appendSelectionToPrompt}
         onAskSideChat={askInSideChat}
       />
+        </>}
+      >
+        <TavernSessionPage
+          sessionID={params.id}
+          directory={project()?.worktree ?? projectDirectory()}
+          projectID={project()?.id ?? ""}
+          managerView={tavernManagerView()}
+          pluginAvailability={tavernPluginAvailability()}
+          onRetryPluginStatus={() => void refetchPlugins()}
+        />
+      </Show>
     </div>
   )
 }

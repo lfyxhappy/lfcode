@@ -1,5 +1,6 @@
 import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import { eq } from "drizzle-orm"
 import { Database } from "../../src/storage"
 import { HistoryFtsTable } from "../../src/history/fts.sql"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
@@ -34,6 +35,7 @@ function seed(
     text?: string
     tool?: string
     state?: any
+    agentID?: string
   }>,
 ) {
   const now = Date.now()
@@ -71,7 +73,7 @@ function seed(
           .values({
             id: p.message_id as any,
             session_id: p.session_id as any,
-            agent_id: "main",
+            agent_id: p.agentID ?? "main",
             data: { role: p.role } as any,
             time_created: now,
             time_updated: now,
@@ -143,6 +145,44 @@ describe("History.backfill", () => {
 
         const rows = Database.use((db) => db.select().from(HistoryFtsTable).all())
         expect(rows.map((r) => r.part_id).sort()).toEqual(["p1", "p2"])
+      }),
+    ),
+  )
+
+  it.live("never indexes hidden reviewer parts and clears their stale rows", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        seed([
+          {
+            session_id: "ses_hidden",
+            message_id: "m_hidden",
+            part_id: "p_hidden",
+            role: "assistant",
+            type: "text",
+            text: "private reviewer analysis",
+            agentID: "context-reviewer-1",
+          },
+        ])
+        Database.use((db) =>
+          db
+            .insert(HistoryFtsTable)
+            .values({
+              part_id: "p_hidden",
+              session_id: "ses_hidden",
+              message_id: "m_hidden",
+              project_id: "proj_ses_hidden",
+              kind: "assistant_text",
+              tool_name: null,
+              body: "private reviewer analysis",
+              time_created: Date.now(),
+            })
+            .run(),
+        )
+
+        yield* backfillAll()
+
+        const row = Database.use((db) => db.select().from(HistoryFtsTable).where(eq(HistoryFtsTable.part_id, "p_hidden")).get())
+        expect(row).toBeUndefined()
       }),
     ),
   )

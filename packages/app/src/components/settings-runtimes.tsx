@@ -183,7 +183,7 @@ export const SettingsRuntimes: Component<{ embedded?: boolean }> = (props) => {
   return (
     <div class={props.embedded ? "flex flex-col gap-4" : "no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10"}>
       <Show when={!props.embedded}>
-        <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+        <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex max-w-[980px] items-start justify-between gap-4 pb-6 pt-6">
           <div class="flex flex-col gap-1">
             <h2 class="text-16-medium text-text-strong">{language.t("settings.tab.runtimes")}</h2>
@@ -224,10 +224,10 @@ export const SettingsRuntimes: Component<{ embedded?: boolean }> = (props) => {
               {(message) => <SettingsMessage>{message()}</SettingsMessage>}
             </Show>
             <Show when={logs.latest?.entries.length}>
-              <div class="flex flex-col gap-3 rounded-[20px] border border-border-weak-base bg-surface-elevated p-4">
+              <div class="flex flex-col gap-3 rounded-lg border border-border-weak-base bg-surface-elevated p-4">
                 <For each={logs.latest?.entries ?? []}>
                   {(entry) => (
-                    <div class="rounded-[16px] border border-border-weak-base bg-surface-base p-3">
+                    <div class="rounded-lg border border-border-weak-base bg-surface-base p-3">
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                           <div class="text-13-medium text-text-strong">{entry.title}</div>
@@ -413,7 +413,7 @@ const RuntimeCard: Component<{
   const activeTarget = () => props.item.targets.find((target) => target.active)
 
   return (
-    <div class="flex flex-col gap-4 rounded-[24px] border border-border-weak-base bg-surface-elevated p-5">
+    <div class="flex flex-col gap-4 rounded-lg border border-border-weak-base bg-surface-elevated p-5">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-14-medium text-text-strong">{props.item.title}</div>
@@ -533,7 +533,7 @@ const SettingsSection: Component<{
 }
 
 const SettingsList: Component<{ children: JSX.Element }> = (props) => {
-  return <div class="flex flex-col gap-2 rounded-[18px] border border-border-weak-base bg-surface-base p-3">{props.children}</div>
+  return <div class="flex flex-col gap-2 rounded-lg border border-border-weak-base bg-surface-base p-3">{props.children}</div>
 }
 
 const SettingsRow: Component<{ title: string; description: string | JSX.Element; mono?: boolean }> = (props) => {

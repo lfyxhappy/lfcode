@@ -9,6 +9,7 @@ import { Log } from "@/util"
 import { startWorkspaceSyncing } from "@/control-plane/workspace"
 import { Instance } from "@/project/instance"
 import { errors } from "../../error"
+import { MessageV2 } from "@/session/message-v2"
 
 const ReplayEvent = z.object({
   id: z.string(),
@@ -19,6 +20,26 @@ const ReplayEvent = z.object({
 })
 
 const log = Log.create({ service: "server.sync" })
+
+function isUserVisibleSyncEvent(row: typeof EventTable.$inferSelect) {
+  if (row.type.startsWith("message.updated.")) {
+    const info = row.data.info
+    return !!info && typeof info === "object" && MessageV2.isUserVisible(info as MessageV2.Info)
+  }
+  if (row.type.startsWith("message.part.updated.")) {
+    const part = row.data.part
+    if (!part || typeof part !== "object" || !("sessionID" in part) || !("messageID" in part)) return false
+    if (typeof part.sessionID !== "string" || typeof part.messageID !== "string") return false
+    return MessageV2.isUserVisibleMessage({
+      sessionID: part.sessionID as MessageV2.Info["sessionID"],
+      messageID: part.messageID as MessageV2.Info["id"],
+    })
+  }
+  // Current hidden removals are never published or persisted. Historical
+  // removal records contain no actor identity, so they are retained to keep
+  // replay cursors coherent for ordinary user-visible messages.
+  return true
+}
 
 export const SyncRoutes = lazy(() =>
   new Hono()
@@ -137,7 +158,7 @@ export const SyncRoutes = lazy(() =>
             ? not(or(...exclude.map(([id, seq]) => and(eq(EventTable.aggregate_id, id), lte(EventTable.seq, seq))))!)
             : undefined
         const rows = Database.use((db) => db.select().from(EventTable).where(where).orderBy(asc(EventTable.seq)).all())
-        return c.json(rows)
+        return c.json(rows.filter(isUserVisibleSyncEvent))
       },
     ),
 )

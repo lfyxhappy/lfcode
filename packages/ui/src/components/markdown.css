@@ -119,7 +119,7 @@
 
   /* Blockquotes */
   blockquote {
-    border-left: 2px solid var(--border-weak-base);
+    border-left: 1px solid var(--border-weak-base);
     margin: 1.5rem 0;
     padding-left: 0.5rem;
     color: var(--text-weak);
@@ -142,6 +142,31 @@
 
   [data-component="markdown-code"] {
     position: relative;
+    margin: 12px 0 32px;
+    overflow: hidden;
+    border: 1px solid var(--border-weak-base);
+    border-radius: 8px;
+    background: var(--background-base);
+  }
+
+  [data-component="markdown-code"] > pre {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding-top: 34px;
+  }
+
+  [data-slot="markdown-code-language"] {
+    position: absolute;
+    top: 9px;
+    left: 12px;
+    z-index: 1;
+    color: var(--text-weak);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-small);
+    font-weight: var(--font-weight-medium);
+    line-height: 1;
+    text-transform: lowercase;
   }
 
   [data-slot="markdown-copy-button"] {
@@ -339,7 +364,7 @@
   :not(pre) > code {
     font-family: var(--font-family-mono);
     font-feature-settings: var(--font-family-mono--font-feature-settings);
-    color: var(--syntax-string);
+    color: var(--text-interactive-base);
     font-weight: var(--font-weight-medium);
     /* font-size: 13px; */
 

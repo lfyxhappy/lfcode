@@ -109,11 +109,17 @@ export function buildProjectMenuActions(input: {
   t: TFunction
   pinned: boolean
   canOpenInExplorer: boolean
+  canCreateScheduledAutomation: boolean
+  canCreateTemporarySession: boolean
+  canCreateClaudeCodeSession: boolean
   workspacesLabel: string
   clearNotificationsLabel: string
   clearNotificationsDisabled: boolean
   onTogglePinned: () => void
   onOpenInExplorer: () => void
+  onCreateScheduledAutomation: () => void
+  onCreateTemporarySession: () => void
+  onCreateClaudeCodeSession: () => void
   onRename: () => void
   onToggleWorkspaces: () => void
   onArchiveChats: () => void
@@ -140,6 +146,36 @@ export function buildProjectMenuActions(input: {
       label: input.t("common.rename"),
       onSelect: input.onRename,
     },
+    ...(input.canCreateScheduledAutomation
+      ? [
+          {
+            key: "new-scheduled-automation",
+            kind: "item" as const,
+            label: input.t("settings.automation.create"),
+            onSelect: input.onCreateScheduledAutomation,
+          },
+        ]
+      : []),
+    ...(input.canCreateTemporarySession
+      ? [
+          {
+            key: "new-temporary-session",
+            kind: "item" as const,
+            label: input.t("menu.newTemporarySession"),
+            onSelect: input.onCreateTemporarySession,
+          },
+        ]
+      : []),
+    ...(input.canCreateClaudeCodeSession
+      ? [
+          {
+            key: "new-claude-code-session",
+            kind: "item" as const,
+            label: input.t("menu.newClaudeCodeSession"),
+            onSelect: input.onCreateClaudeCodeSession,
+          },
+        ]
+      : []),
     {
       key: "workspaces",
       kind: "item",

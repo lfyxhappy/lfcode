@@ -20,6 +20,7 @@ import { questionGuidanceSystem, type QuestionGuidance } from "@/utils/question-
 import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
+import type { ExternalAgentPrompt } from "./external-agent"
 
 type PendingPrompt = {
   abort: AbortController
@@ -38,6 +39,8 @@ export type FollowupDraft = {
   variant?: string
   questionGuidance?: QuestionGuidance
   promptFeatures?: PromptFeature[]
+  system?: string
+  tavernContext?: { depth: { content: string; depth: number }[] }
 }
 
 export type FollowupMode = "queue" | "steer"
@@ -81,13 +84,17 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     return true
   }
 
-  const system = [questionGuidanceSystem(input.draft.questionGuidance), promptFeaturesSystem(input.draft.promptFeatures)]
+  const system = [input.draft.system, questionGuidanceSystem(input.draft.questionGuidance), promptFeaturesSystem(input.draft.promptFeatures)]
     .filter(Boolean)
     .join("\n")
 
   const [head, ...tail] = text.split(" ")
   const cmd = head?.startsWith("/") ? head.slice(1) : undefined
-  if (cmd && input.sync.data.command.find((item) => item.name === cmd)) {
+  const commandStore = input.globalSync.child(input.draft.sessionDirectory, { bootstrap: false })[0]
+  if (cmd && !commandStore.command_ready) {
+    await input.globalSync.project.loadCommands(input.draft.sessionDirectory).catch(() => undefined)
+  }
+  if (cmd && commandStore.command.find((item) => item.name === cmd)) {
     setBusy()
     try {
       if (!(await wait())) {
@@ -175,6 +182,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: requestParts,
       variant: input.draft.variant,
       system: system || undefined,
+      tavernContext: input.draft.tavernContext,
     })
 
     await sendPrompt
@@ -210,6 +218,13 @@ type PromptSubmitInput = {
   onAbort?: () => void
   onSubmit?: () => void
   scope?: Accessor<PromptScope | undefined>
+  tavernMode?: Accessor<boolean>
+  tavern?: Accessor<{ projectID: string; roleName?: string; system: string } | undefined>
+  externalSubmit?: (input: ExternalAgentPrompt) => Promise<void>
+  externalSubmitDisabled?: Accessor<boolean>
+  externalSubmitDisabledMessage?: Accessor<string | undefined>
+  externalImageUnsupported?: { title: string; description: string }
+  setExternalSubmitting?: (value: boolean) => void
 }
 
 type CommentItem = {
@@ -342,6 +357,43 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
+    if (input.externalSubmit) {
+      if (input.externalSubmitDisabled?.()) {
+        const message = input.externalSubmitDisabledMessage?.()
+        if (message) showToast({ title: language.t("prompt.toast.promptSendFailed.title"), description: message })
+        return
+      }
+      if (images.length > 0) {
+        showToast(
+          input.externalImageUnsupported ?? {
+            title: language.t("prompt.toast.promptSendFailed.title"),
+            description: language.t("common.requestFailed"),
+          },
+        )
+        return
+      }
+
+      input.addToHistory(currentPrompt, "normal")
+      input.resetHistoryNavigation()
+      input.setExternalSubmitting?.(true)
+      try {
+        await input.externalSubmit({ prompt: currentPrompt, context: activePrompt().context.items().slice() })
+        removeCommentItems(activePrompt().context.items())
+        clearContext()
+        activePrompt().reset()
+        input.setMode("normal")
+        input.setPopover(null)
+      } catch (err) {
+        showToast({
+          title: language.t("prompt.toast.promptSendFailed.title"),
+          description: errorMessage(err),
+        })
+      } finally {
+        input.setExternalSubmitting?.(false)
+      }
+      return
+    }
+
     const currentModel = local.model.current()
     const currentAgent = local.agent.current()
     const variant = local.model.variant.current()
@@ -405,8 +457,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     let session = input.info()
     if (!session && isNewSession) {
-      const created = await targetClient.session
-        .create()
+      const tavern = input.tavernMode?.() ? input.tavern?.() : undefined
+      if (input.tavernMode?.() && !tavern?.roleName) {
+        showToast({ title: "请选择角色", description: "酒馆对话需要先选择角色。" })
+        return
+      }
+      const created = await (tavern
+        ? targetClient.session.createManaged({
+            projectID: tavern.projectID,
+            extension: { pluginID: "lfcode-tavern", type: "tavern" },
+            title: `${tavern.roleName} 的对话`,
+            permission: [{ permission: "*", pattern: "*", action: "deny" }],
+          })
+        : targetClient.session.create())
         .then((x) => x.data ?? undefined)
         .catch((err) => {
           showToast({
@@ -440,6 +503,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const questionGuidance = local.questionGuidance.current()
     const promptFeatures = local.promptFeatures.current()
     const context = activePrompt().context.items().slice()
+    const tavern = input.tavernMode?.() ? input.tavern?.() : undefined
     const draft: FollowupDraft = {
       sessionID: session.id,
       sessionDirectory: targetDirectory,
@@ -450,6 +514,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       variant,
       questionGuidance,
       promptFeatures,
+      ...(tavern?.system ? { system: tavern.system } : {}),
     }
 
     const clearInput = () => {
@@ -511,7 +576,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (text.startsWith("/")) {
       const [cmdName, ...args] = text.split(" ")
       const commandName = cmdName.slice(1)
-      const customCommand = sync.data.command.find((c) => c.name === commandName)
+      const commandStore = globalSync.child(targetDirectory, { bootstrap: false })[0]
+      if (!commandStore.command_ready) {
+        await globalSync.project.loadCommands(targetDirectory).catch(() => undefined)
+      }
+      const customCommand = commandStore.command.find((c) => c.name === commandName)
       if (customCommand) {
         clearInput()
         targetClient.session

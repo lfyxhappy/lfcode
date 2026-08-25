@@ -102,7 +102,7 @@ export function SettingsMaintenance() {
 
   return (
     <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex max-w-[980px] items-start justify-between gap-4 pb-6 pt-6">
           <div class="flex flex-col gap-1">
             <h2 class="text-16-medium text-text-strong">Memory maintenance</h2>
@@ -122,7 +122,7 @@ export function SettingsMaintenance() {
       <Show when={diagnostics.latest}>
         {(data) => (
           <div class="mx-auto flex w-full max-w-[980px] flex-col gap-8">
-            <section class="rounded-[22px] bg-surface-base p-4 shadow-sm">
+            <section class="rounded-lg bg-surface-base p-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div class="text-14-medium text-text-strong">维护状态</div>
@@ -142,7 +142,7 @@ export function SettingsMaintenance() {
                 <h3 class="text-14-medium text-text-strong">最近运行</h3>
                 <span class="text-12-regular text-text-weak">Dream / Distill</span>
               </div>
-              <div class="overflow-hidden rounded-[18px] bg-surface-base">
+              <div class="overflow-hidden rounded-lg bg-surface-base">
                 <For each={data().runs} fallback={<div class="px-4 py-5 text-13-regular text-text-weak">尚无维护运行记录。</div>}>
                   {(run) => (
                     <div class="border-b border-border-weak-base px-4 py-3 last:border-none">
@@ -163,7 +163,7 @@ export function SettingsMaintenance() {
                 <h3 class="text-14-medium text-text-strong">审核队列与历史</h3>
                 <span class="text-12-regular text-text-weak">仅 Skill 候选可受控应用</span>
               </div>
-              <div class="overflow-hidden rounded-[18px] bg-surface-base">
+              <div class="overflow-hidden rounded-lg bg-surface-base">
                 <For each={data().candidates} fallback={<div class="px-4 py-5 text-13-regular text-text-weak">暂无候选。</div>}>
                   {(candidate) => (
                     <div class="border-b border-border-weak-base px-4 py-3 last:border-none">
@@ -189,7 +189,7 @@ export function SettingsMaintenance() {
                         </div>
                       </div>
                       <Show when={selectedCandidateID() === candidate.id}>
-                        <div class="mt-3 rounded-xl bg-surface-raised-base px-3 py-2 text-11-regular text-text-weak">
+                        <div class="mt-3 rounded-md border border-border-weak-base bg-surface-raised-base px-3 py-2 text-11-regular text-text-weak">
                           <Show when={history.loading}><div>正在加载历史...</div></Show>
                           <For each={history.latest ?? []} fallback={<div>该候选尚无审核或应用历史。</div>}>
                             {(event) => <div class="py-0.5">{formatTime(event.createdAt)} · {event.action}{event.detail?.targetPath ? ` · ${String(event.detail.targetPath)}` : ""}</div>}

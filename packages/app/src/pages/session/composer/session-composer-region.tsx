@@ -3,7 +3,8 @@ import { Portal } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { useSpring } from "@lfcode-ai/ui/motion-spring"
-import { PromptInput } from "@/components/prompt-input"
+import { useMotionEnabled } from "@lfcode-ai/ui/motion-presence"
+import { PromptInput, type ExternalAgentControl } from "@/components/prompt-input"
 import { useLanguage } from "@/context/language"
 import { usePrompt } from "@/context/prompt"
 import { useSync } from "@/context/sync"
@@ -16,13 +17,16 @@ import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { FollowupDraft, FollowupMode } from "@/components/prompt-input/submit"
+import type { ExternalAgentPrompt } from "@/components/prompt-input/external-agent"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import type { PromptScope } from "@/context/prompt"
+import type { PluginSessionComposer } from "@/pages/session/plugin-session-composer"
 
 export function SessionComposerRegion(props: {
   state: SessionComposerState
   ready: boolean
   centered: boolean
+  historyRailSpace: boolean
   rightInset?: boolean
   inputRef: (el: HTMLDivElement) => void
   newSessionWorktree: string
@@ -49,19 +53,31 @@ export function SessionComposerRegion(props: {
   scope?: PromptScope
   dropRoot?: () => HTMLElement | undefined
   disabledMessage?: string
+  externalAgent?: {
+    submit: (input: ExternalAgentPrompt) => Promise<void>
+    disabled: () => boolean
+    disabledMessage: () => string | undefined
+    imageUnsupported: { title: string; description: string }
+    label: string
+    placeholder: string
+    controls?: ExternalAgentControl[]
+    controlSubmit?: (control: ExternalAgentControl) => Promise<void>
+  }
+  pluginComposer?: PluginSessionComposer
+  pluginComposerPending?: boolean
   setPromptDockRef: (el: HTMLDivElement) => void
 }) {
   const navigate = useNavigate()
   const prompt = usePrompt()
   const language = useLanguage()
+  const motion = useMotionEnabled()
   const route = useSessionKey()
   const sync = useSync()
 
-  const handoffPrompt = createMemo(() => getSessionHandoff(route.sessionKey())?.prompt)
   const info = createMemo(() => (route.params.id ? sync.session.get(route.params.id) : undefined))
   const parentID = createMemo(() => info()?.parentID)
   const child = createMemo(() => !!parentID())
-  const showComposer = createMemo(() => !props.state.blocked() || child())
+  const showComposer = createMemo(() => !!props.externalAgent || !props.state.blocked() || child())
 
   const previewPrompt = () =>
     prompt
@@ -92,7 +108,13 @@ export function SessionComposerRegion(props: {
   })
 
   const open = createMemo(() => store.ready && props.state.dock() && !props.state.closing())
-  const progress = useSpring(() => (open() ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
+  const progress = useSpring(
+    () => (open() ? 1 : 0),
+    () => ({
+      visualDuration: motion() ? undefined : 0,
+      bounce: 0,
+    }),
+  )
   const value = createMemo(() => Math.max(0, Math.min(1, progress())))
   const dock = createMemo(() => (store.ready && props.state.dock()) || value() > 0.001)
   const rolled = createMemo(() => (props.revert?.items.length ? props.revert : undefined))
@@ -149,37 +171,22 @@ export function SessionComposerRegion(props: {
       </Show>
       <div
         class="w-full self-start"
-        style={{ width: props.rightInset ? "calc(100% - clamp(336px, 22vw, 440px))" : undefined }}
+        style={{
+          "margin-left": props.historyRailSpace ? "38px" : undefined,
+          width: props.historyRailSpace
+            ? `calc(100% - 38px - ${props.rightInset ? "clamp(336px, 22vw, 440px)" : "0px"})`
+            : props.rightInset
+              ? "calc(100% - clamp(336px, 22vw, 440px))"
+              : undefined,
+        }}
       >
         <div
           classList={{
-            "w-full px-3 pointer-events-auto": true,
+            "w-full px-4 md:px-5 pointer-events-auto": true,
             "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
           }}
         >
         <Show when={showComposer()}>
-          <Show
-            when={prompt.ready()}
-            fallback={
-              <>
-                <Show when={rolled()} keyed>
-                  {(revert) => (
-                    <div class="pb-2">
-                      <SessionRevertDock
-                        items={revert.items}
-                        restoring={revert.restoring}
-                        disabled={revert.disabled}
-                        onRestore={revert.onRestore}
-                      />
-                    </div>
-                  )}
-                </Show>
-                <div class="w-full min-h-32 md:min-h-40 rounded-md border border-border-weak-base bg-background-base/50 px-4 py-3 text-text-weak whitespace-pre-wrap pointer-events-none">
-                  {handoffPrompt() || language.t("prompt.loading")}
-                </div>
-              </>
-            }
-          >
             <Show when={dock()}>
               <div
                 classList={{
@@ -233,29 +240,69 @@ export function SessionComposerRegion(props: {
                   onEdit={props.followup!.onEdit}
                 />
               </Show>
+              <Show when={props.externalAgent} keyed>
+                {(externalAgent) => (
+                  <PromptInput
+                    ref={props.inputRef}
+                    suspendUntilReady={false}
+                    scope={props.scope}
+                    dropRoot={props.dropRoot}
+                    presentation="external-agent"
+                    placeholder={externalAgent.placeholder}
+                    externalAgentLabel={externalAgent.label}
+                    externalSubmit={externalAgent.submit}
+                    externalSubmitDisabled={externalAgent.disabled}
+                    externalSubmitDisabledMessage={externalAgent.disabledMessage}
+                    externalImageUnsupported={externalAgent.imageUnsupported}
+                    externalControls={externalAgent.controls}
+                    externalControlSubmit={externalAgent.controlSubmit}
+                  />
+                )}
+              </Show>
+              <Show when={!props.externalAgent}>
               <Show
                 when={child()}
                 fallback={
                   <Show when={!props.state.blocked()}>
                     <div class="relative">
-                      <div classList={{ "pointer-events-none select-none opacity-60": !!props.disabledMessage }}>
-                        <PromptInput
-                          ref={props.inputRef}
-                          newSessionWorktree={props.newSessionWorktree}
-                          onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
-                          edit={props.followup?.edit}
-                          onEditLoaded={props.followup?.onEditLoaded}
-                          followupMode={props.followup?.mode}
-                          onQueue={props.followup?.onQueue}
-                          onAbort={props.followup?.onAbort}
-                          onSubmit={props.onSubmit}
-                          scope={props.scope}
-                          dropRoot={props.dropRoot}
-                        />
-                      </div>
+                      <Show when={props.pluginComposer} keyed>
+                        {(composer) => (
+                          <div class="mb-2 flex items-center justify-between px-2 text-12-medium text-text-weak">
+                            <span class="flex items-center gap-2">
+                              <span class="size-2 rounded-full bg-icon-info-base" />
+                              {composer.title ?? composer.pluginID}
+                            </span>
+                            <Show when={composer.description}>{(description) => <span>{description()}</span>}</Show>
+                          </div>
+                        )}
+                      </Show>
+                      <Show
+                        when={!props.pluginComposerPending}
+                        fallback={<div class="h-28 rounded-xl border border-border-base bg-surface-raised-base" aria-busy="true" />}
+                      >
+                        <div classList={{ "pointer-events-none select-none opacity-60": !!props.disabledMessage }}>
+                          <PromptInput
+                            ref={props.inputRef}
+                            newSessionWorktree={props.newSessionWorktree}
+                            onNewSessionWorktreeReset={props.onNewSessionWorktreeReset}
+                            edit={props.followup?.edit}
+                            onEditLoaded={props.followup?.onEditLoaded}
+                            followupMode={props.followup?.mode}
+                            onQueue={props.followup?.onQueue}
+                            onAbort={props.followup?.onAbort}
+                            onSubmit={props.onSubmit}
+                            suspendUntilReady={false}
+                            scope={props.scope}
+                            dropRoot={props.dropRoot}
+                            presentation={props.pluginComposer ? "plugin-conversation" : undefined}
+                            placeholder={props.pluginComposer?.placeholder}
+                            submitLabel={props.pluginComposer?.submitLabel}
+                          />
+                        </div>
+                      </Show>
                       <Show when={props.disabledMessage}>
                         {(message) => (
-                          <div class="absolute inset-0 z-10 flex items-center justify-center rounded-[12px] border border-border-weak-base bg-background-base/88 px-4 text-center text-14-regular text-text-weak">
+                          <div class="absolute inset-0 z-10 flex items-center justify-center rounded-md border border-border-weak-base bg-background-base px-4 text-center text-14-regular text-text-weak">
                             {message()}
                           </div>
                         )}
@@ -266,7 +313,7 @@ export function SessionComposerRegion(props: {
               >
                 <div
                   ref={props.inputRef}
-                  class="w-full rounded-[12px] border border-border-weak-base bg-background-base p-3 text-16-regular text-text-weak"
+                  class="w-full rounded-md border border-border-weak-base bg-background-base p-3 text-16-regular text-text-weak"
                 >
                   <span>{language.t("session.child.promptDisabled")} </span>
                   <Show when={parentID()}>
@@ -280,8 +327,8 @@ export function SessionComposerRegion(props: {
                   </Show>
                 </div>
               </Show>
+              </Show>
             </div>
-          </Show>
         </Show>
         </div>
       </div>

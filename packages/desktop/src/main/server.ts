@@ -1,5 +1,7 @@
 import { DEFAULT_SERVER_URL_KEY, WSL_ENABLED_KEY } from "./constants"
-import { getUserShell, loadShellEnv } from "./shell-env"
+import { app, safeStorage } from "electron"
+import { join } from "node:path"
+import { prepareServerEnv } from "./server-env"
 import { getStore } from "./store"
 
 export type WslConfig = { enabled: boolean }
@@ -31,8 +33,25 @@ export function setWslConfig(config: WslConfig) {
 
 export async function spawnLocalServer(hostname: string, port: number, password: string) {
   const url = `http://${hostname}:${port}`
+  if (app.isPackaged) process.env.LFCODE_WEB_UI_DIR = join(app.getAppPath(), "out", "web-ui")
+  // The managed LFCODE_HOME is intentionally app-specific. Claude Code keeps
+  // its user configuration under the OS account home, so preserve that path
+  // explicitly for the embedded server when Electron does not inherit it.
+  process.env.USERPROFILE ??= app.getPath("home")
+  process.env.HOME ??= app.getPath("home")
   prepareServerEnv(password, url)
-  const { Log, Server } = await import("virtual:lfcode-server")
+  const { Log, PluginSecureStorageHost, Server } = await import("virtual:lfcode-server")
+  PluginSecureStorageHost.register({
+    status: () => safeStorage.isEncryptionAvailable() ? "available" : "unavailable",
+    async encrypt(value: string) {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error("Secure credential storage is unavailable on this system")
+      return safeStorage.encryptString(value).toString("base64")
+    },
+    async decrypt(value: string) {
+      if (!safeStorage.isEncryptionAvailable()) return
+      return safeStorage.decryptString(Buffer.from(value, "base64"))
+    },
+  })
   await Log.init({ level: "WARN" })
   const listener = await Server.listen({
     port,
@@ -54,35 +73,6 @@ export async function spawnLocalServer(hostname: string, port: number, password:
   })()
 
   return { listener, health: { wait } }
-}
-
-const ROOT_ENV_KEYS = [
-  "LFCODE_CONFIG_DIR",
-  "LFCODE_DATA_DIR",
-  "LFCODE_STATE_DIR",
-  "LFCODE_CACHE_DIR",
-] as const
-
-function prepareServerEnv(password: string, url: string) {
-  const shell = process.platform === "win32" ? null : getUserShell()
-  const shellEnv = shell ? (loadShellEnv(shell) ?? {}) : {}
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...shellEnv,
-    LFCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
-    LFCODE_EXPERIMENTAL_FILEWATCHER: "true",
-    LFCODE_CLIENT: "desktop",
-    LFCODE_SERVER_USERNAME: "lfcode",
-    LFCODE_SERVER_PASSWORD: password,
-    LFCODE_SERVER_URL: url,
-    LFCODE_SERVER_AUTH: `Basic ${Buffer.from(`lfcode:${password}`).toString("base64")}`,
-  }
-  for (const key of ROOT_ENV_KEYS) {
-    const value = process.env[key]
-    if (!value) continue
-    env[key] = value
-  }
-  Object.assign(process.env, env)
 }
 
 export async function checkHealth(url: string, password?: string | null): Promise<boolean> {

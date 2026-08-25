@@ -1,0 +1,275 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - heading "Lfcode LAN" [level=1] [ref=e5]
+      - paragraph [ref=e6]: DESKTOP-0VB7PNU · 1.1.3
+    - status [ref=e7]: 已登录
+  - generic [ref=e8]:
+    - group [ref=e9]:
+      - navigation "项目与会话" [ref=e10]:
+        - generic [ref=e11]:
+          - heading "项目与会话" [level=2] [ref=e12]
+          - button "收起项目与会话" [expanded] [ref=e13] [cursor=pointer]: ‹
+        - generic "项目与会话" [ref=e14]:
+          - generic [ref=e15]:
+            - generic [ref=e16]:
+              - button "展开项目 自动化会话" [ref=e17] [cursor=pointer]:
+                - heading "自动化会话" [level=3] [ref=e21]
+              - button "在项目 自动化会话 中新建会话" [ref=e25] [cursor=pointer]
+            - generic "自动化会话 的会话" [ref=e28]:
+              - button "[验收] 全局自动化任务" [ref=e29] [cursor=pointer]
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - button "展开项目 ImageMaker" [ref=e32] [cursor=pointer]:
+                - heading "ImageMaker" [level=3] [ref=e36]
+              - button "在项目 ImageMaker 中新建会话" [ref=e40] [cursor=pointer]
+            - generic "ImageMaker 的会话" [ref=e43]:
+              - paragraph [ref=e44]: 暂无对话
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - button "展开项目 酒馆" [ref=e47] [cursor=pointer]:
+                - heading "酒馆" [level=3] [ref=e51]
+              - button "在项目 酒馆 中新建会话" [ref=e55] [cursor=pointer]
+            - generic "酒馆 的会话" [ref=e58]:
+              - button "艾米莉亚 - 麻木的感觉 的对话" [ref=e59] [cursor=pointer]
+              - button "【校园女神的反差生活】 的对话" [ref=e60] [cursor=pointer]
+              - button "【校园女神的反差生活】 的对话" [ref=e61] [cursor=pointer]
+              - button "艾米莉亚 - 麻木的感觉 的对话" [ref=e62] [cursor=pointer]
+              - button "【校园女神的反差生活】 的对话" [ref=e63] [cursor=pointer]
+              - button "【校园女神的反差生活】 的对话" [ref=e64] [cursor=pointer]
+              - button "【校园女神的反差生活】 的对话" [ref=e65] [cursor=pointer]
+              - button "香织 的历史对话" [ref=e66] [cursor=pointer]
+              - button "雪风 的历史对话" [ref=e67] [cursor=pointer]
+              - button "莉莉 的历史对话" [ref=e68] [cursor=pointer]
+              - button "艾米莉亚 - 麻木的感觉 的历史对话" [ref=e69] [cursor=pointer]
+              - button "艾什琳 - 灵魂的选择 的历史对话" [ref=e70] [cursor=pointer]
+              - button "色欲地下城 的历史对话" [ref=e71] [cursor=pointer]
+              - button "色欲地下城 的历史对话" [ref=e72] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e73] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e74] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e75] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e76] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e77] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e78] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e79] [cursor=pointer]
+              - button "自由使用权许可证 的历史对话" [ref=e80] [cursor=pointer]
+              - button "背叛的王冠 的历史对话" [ref=e81] [cursor=pointer]
+              - button "罗恩 的历史对话" [ref=e82] [cursor=pointer]
+              - button "精神控制后宫 的历史对话" [ref=e83] [cursor=pointer]
+              - button "精液餐厅 的历史对话" [ref=e84] [cursor=pointer]
+              - button "简 - 和妈妈发短信 [修正版] 的历史对话" [ref=e85] [cursor=pointer]
+              - button "真纪 的历史对话" [ref=e86] [cursor=pointer]
+              - button "琪莎米和她的朋友们 的历史对话" [ref=e87] [cursor=pointer]
+              - button "清冷的生物女老师 枫江月 的历史对话" [ref=e88] [cursor=pointer]
+              - button "清冷的生物女老师 枫江月 的历史对话" [ref=e89] [cursor=pointer]
+              - button "梅莉尔 的历史对话" [ref=e90] [cursor=pointer]
+              - button "梅芙 的历史对话" [ref=e91] [cursor=pointer]
+              - button "校园十大怪谈 的历史对话" [ref=e92] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h40m46s382ms 的历史对话" [ref=e93] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h39m27s234ms 的历史对话" [ref=e94] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h38m18s469ms 的历史对话" [ref=e95] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h36m57s460ms 的历史对话" [ref=e96] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h33m54s576ms 的历史对话" [ref=e97] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h28m09s882ms 的历史对话" [ref=e98] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@13h09m34s470ms 的历史对话" [ref=e99] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@01h07m33s481ms 的历史对话" [ref=e100] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@01h06m08s985ms 的历史对话" [ref=e101] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@01h06m08s985ms 的历史对话" [ref=e102] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@00h07m23s819ms 的历史对话" [ref=e103] [cursor=pointer]
+              - button "Starlight Academy - 2026-06-01@00h07m23s819ms 的历史对话" [ref=e104] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@23h01m09s306ms 的历史对话" [ref=e105] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@23h01m09s306ms 的历史对话" [ref=e106] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@23h00m37s408ms 的历史对话" [ref=e107] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@23h00m37s408ms 的历史对话" [ref=e108] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@22h58m15s856ms 的历史对话" [ref=e109] [cursor=pointer]
+              - button "Starlight Academy - 2026-05-31@22h58m15s856ms 的历史对话" [ref=e110] [cursor=pointer]
+              - button "斯洛恩 的历史对话" [ref=e111] [cursor=pointer]
+              - button "斯洛恩 的历史对话" [ref=e112] [cursor=pointer]
+              - button "放荡公主与她同样放荡的保镖 的历史对话" [ref=e113] [cursor=pointer]
+              - button "放荡公主与她同样放荡的保镖 的历史对话" [ref=e114] [cursor=pointer]
+              - button "拥挤的列车 的历史对话" [ref=e115] [cursor=pointer]
+              - button "拥挤的列车 的历史对话" [ref=e116] [cursor=pointer]
+              - button "扫一扫 的历史对话" [ref=e117] [cursor=pointer]
+              - button "扫一扫 的历史对话" [ref=e118] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e119] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e120] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e121] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e122] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e123] [cursor=pointer]
+              - button "性教育学校（重制版2.0） 的历史对话" [ref=e124] [cursor=pointer]
+              - button "开放世界奇幻RPG 的历史对话" [ref=e125] [cursor=pointer]
+              - button "开放世界奇幻RPG 的历史对话" [ref=e126] [cursor=pointer]
+              - button "开放世界奇幻RPG 的历史对话" [ref=e127] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e128] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e129] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e130] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e131] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e132] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e133] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e134] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e135] [cursor=pointer]
+              - button "安雅 的历史对话" [ref=e136] [cursor=pointer]
+              - button "安娜 的历史对话" [ref=e137] [cursor=pointer]
+              - button "安娜 的历史对话" [ref=e138] [cursor=pointer]
+              - button "安娜 的历史对话" [ref=e139] [cursor=pointer]
+              - button "妮娜与旋律 的历史对话" [ref=e140] [cursor=pointer]
+              - button "妮娜与旋律 的历史对话" [ref=e141] [cursor=pointer]
+              - button "妮娜与旋律 的历史对话" [ref=e142] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e143] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e144] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e145] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e146] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e147] [cursor=pointer]
+              - button "壁穴风俗店系统 的历史对话" [ref=e148] [cursor=pointer]
+              - button "塞拉菲娜 - 2023-5-12 @21h 32m 29s 224ms 的历史对话" [ref=e149] [cursor=pointer]
+              - button "塞拉菲娜 - 2023-5-12 @21h 32m 29s 224ms 的历史对话" [ref=e150] [cursor=pointer]
+              - button "塞拉菲娜 - 2023-5-12 @21h 32m 29s 224ms 的历史对话" [ref=e151] [cursor=pointer]
+              - button "塔米拉 的历史对话" [ref=e152] [cursor=pointer]
+              - button "塔米拉 的历史对话" [ref=e153] [cursor=pointer]
+              - button "塔米拉 的历史对话" [ref=e154] [cursor=pointer]
+              - button "吉甘托斯 的历史对话" [ref=e155] [cursor=pointer]
+              - button "吉甘托斯 的历史对话" [ref=e156] [cursor=pointer]
+              - button "卡莉 & 罗布 的历史对话" [ref=e157] [cursor=pointer]
+              - button "卡莉 & 罗布 的历史对话" [ref=e158] [cursor=pointer]
+          - generic [ref=e159]:
+            - generic [ref=e160]:
+              - button "展开项目 闲聊" [ref=e161] [cursor=pointer]:
+                - heading "闲聊" [level=3] [ref=e165]
+              - button "在项目 闲聊 中新建会话" [ref=e169] [cursor=pointer]
+            - generic "闲聊 的会话" [ref=e172]:
+              - button "解压压缩包的安全步骤" [ref=e173] [cursor=pointer]
+              - button "压缩包解压与安全处理步骤" [ref=e174] [cursor=pointer]
+              - button "解压压缩包的安全处理步骤" [ref=e175] [cursor=pointer]
+              - button "解压ZIP并处理嵌套目录" [ref=e176] [cursor=pointer]
+              - button "解压目录的规则说明" [ref=e177] [cursor=pointer]
+              - button "2026桌面AI编程助手研究调研" [ref=e178] [cursor=pointer]
+              - button "并行子Agent只读任务验证" [ref=e179] [cursor=pointer]
+              - button "Session/Actor 子Agent协作机制只读审查" [ref=e180] [cursor=pointer]
+              - button "Greeting in Chinese" [ref=e181] [cursor=pointer]
+              - button "React任务看板工作流编排任务" [ref=e182] [cursor=pointer]
+              - button "创建相册文件夹" [ref=e183] [cursor=pointer]
+              - button "你好" [ref=e184] [cursor=pointer]
+              - button "Multi-agent 健康检查面板项目" [ref=e185] [cursor=pointer]
+              - button "桌面应用健康检查面板多agent协作" [ref=e186] [cursor=pointer]
+              - button "多agent能力调用咨询" [ref=e187] [cursor=pointer]
+              - button "Greeting in Chinese" [ref=e188] [cursor=pointer]
+              - button "子智能体工具测试" [ref=e189] [cursor=pointer]
+              - button "任务计时器单页工具开发" [ref=e190] [cursor=pointer]
+              - button "Browser Channel Smoke 测试页验证" [ref=e191] [cursor=pointer]
+              - button "Scratch kanban app with Bun tests" [ref=e192] [cursor=pointer]
+              - button "在 scratch/agent-eval-kanban 实现个人看板应用" [ref=e193] [cursor=pointer]
+              - button "打招呼" [ref=e194] [cursor=pointer]
+              - button "对话内容上下文感知" [ref=e195] [cursor=pointer]
+              - button "Greeting" [ref=e196] [cursor=pointer]
+              - button "New session - 2026-07-22T08:46:40.952Z" [ref=e197] [cursor=pointer]
+              - button "Greeting" [ref=e198] [cursor=pointer]
+              - button "问候" [ref=e199] [cursor=pointer]
+              - button "Bun Electron Windows 打包最佳实践检索" [ref=e200] [cursor=pointer]
+              - button "2026 Bun 与 Electron 打包兼容性调研" [ref=e201] [cursor=pointer]
+              - button "临时中文提交测试 Hook" [ref=e202] [cursor=pointer]
+              - button "临时 Hook 中文提交测试" [ref=e203] [cursor=pointer]
+              - button "联网询问" [ref=e204] [cursor=pointer]
+              - button "New session - 2026-07-21T08:54:09.854Z" [ref=e205] [cursor=pointer]
+              - button "New session - 2026-07-21T08:52:54.522Z" [ref=e206] [cursor=pointer]
+              - button "New session - 2026-07-21T08:51:31.685Z" [ref=e207] [cursor=pointer]
+              - button "创建临时对话级 UserPromptSubmit Hook" [ref=e208] [cursor=pointer]
+              - button "New session - 2026-07-21T04:03:07.981Z" [ref=e209] [cursor=pointer]
+              - button "New session - 2026-07-21T03:24:02.012Z" [ref=e210] [cursor=pointer]
+              - button "New session - 2026-07-21T03:23:32.998Z" [ref=e211] [cursor=pointer]
+              - button "New session - 2026-07-21T03:03:01.009Z" [ref=e212] [cursor=pointer]
+              - button "New session - 2026-07-21T02:54:16.004Z" [ref=e213] [cursor=pointer]
+              - button "New session - 2026-07-21T02:49:01.846Z" [ref=e214] [cursor=pointer]
+              - button "New session - 2026-07-21T02:47:14.719Z" [ref=e215] [cursor=pointer]
+              - button "验证 archive-extract Skill 加载流程" [ref=e216] [cursor=pointer]
+              - button "验证 archive-extract Skill 加载" [ref=e217] [cursor=pointer]
+              - button "可用MCP工具查询" [ref=e218] [cursor=pointer]
+              - button "解压相关 skill 查询" [ref=e219] [cursor=pointer]
+              - button "你好" [ref=e220] [cursor=pointer]
+              - button "子智能体恢复与消息投递机制调研" [ref=e221] [cursor=pointer]
+              - button "子 agent UI 探索任务编排" [ref=e222] [cursor=pointer]
+              - button "并发侦察 actor 注册与测试缺口" [ref=e223] [cursor=pointer]
+              - button "Actor 工具并发侦察与测试审计" [ref=e224] [cursor=pointer]
+              - button "并发派发代码侦察与测试审计子智能体" [ref=e225] [cursor=pointer]
+              - button "询问可用的联网搜索工具" [ref=e226] [cursor=pointer]
+              - button "New session - 2026-07-19T08:15:42.856Z" [ref=e227] [cursor=pointer]
+              - button "你好" [ref=e228] [cursor=pointer]
+              - button "Response与其他格式的区别" [ref=e229] [cursor=pointer]
+              - button "内置浏览器操控" [ref=e230] [cursor=pointer]
+              - button "Greeting in Chinese" [ref=e231] [cursor=pointer]
+              - button "Agent OS 只读验收批次1" [ref=e232] [cursor=pointer]
+              - button "你好" [ref=e233] [cursor=pointer]
+              - button "你好" [ref=e234] [cursor=pointer]
+              - button "Agent OS 只读验收测试" [ref=e235] [cursor=pointer]
+              - button "Agent OS 只读验收测试" [ref=e236] [cursor=pointer]
+              - button "你好" [ref=e237] [cursor=pointer]
+              - button "New session - 2026-07-16T14:50:12.468Z" [ref=e238] [cursor=pointer]
+              - button "Tool runtime smoke test" [ref=e239] [cursor=pointer]
+              - button "问候" [ref=e240] [cursor=pointer]
+              - button "问候" [ref=e241] [cursor=pointer]
+              - button "New session - 2026-07-16T07:54:09.498Z" [ref=e242] [cursor=pointer]
+              - button "工具调用稳定性测试" [ref=e243] [cursor=pointer]
+              - button "了解你的限制" [ref=e244] [cursor=pointer]
+              - button "你好" [ref=e245] [cursor=pointer]
+              - button "Greeting in Chinese" [ref=e246] [cursor=pointer]
+              - button "问候" [ref=e247] [cursor=pointer]
+              - button "Greeting" [ref=e248] [cursor=pointer]
+              - button "你好" [ref=e249] [cursor=pointer]
+              - button "问候" [ref=e250] [cursor=pointer]
+              - button "Greeting" [ref=e251] [cursor=pointer]
+              - button "解压 No.3001-No.4000 文件" [ref=e252] [cursor=pointer]
+              - button "\"C:\\Users\\liangfeng\\Downloads\\【福利姬】No.098_#丸崽_[1008P 314V]_[13.5G]_20260516更新.txt\" \"C:\\Users\\liangfe" [ref=e253] [cursor=pointer]
+              - button "Auto Dream" [ref=e254] [cursor=pointer]
+              - button "CPP文件输出Hello" [ref=e255] [cursor=pointer]
+              - button "测试图片 - 剩余额度 $5.68" [ref=e256] [cursor=pointer]
+              - button "7天调用量448.57M咨询" [ref=e257] [cursor=pointer]
+              - button "查看当前功能" [ref=e258] [cursor=pointer]
+              - button "询问图片内容" [ref=e259] [cursor=pointer]
+              - button "了解功能列表" [ref=e260] [cursor=pointer]
+              - button "当前功能询问" [ref=e261] [cursor=pointer]
+              - button "你好" [ref=e262] [cursor=pointer]
+              - button "Available tools inquiry" [ref=e263] [cursor=pointer]
+              - button "Greeting in Chinese" [ref=e264] [cursor=pointer]
+    - region [ref=e265]:
+      - generic [ref=e266]:
+        - generic [ref=e267]:
+          - paragraph [ref=e268]: 当前项目
+          - heading "选择一个会话" [level=2] [ref=e269]
+        - button "停止" [disabled] [ref=e271]
+      - log [ref=e272]:
+        - paragraph [ref=e273]: 从侧栏选择一个对话后即可开始。
+      - generic [ref=e274]:
+        - generic [ref=e275]:
+          - generic [ref=e276]: 此页面不会提供终端、文件、插件或桌面控制。
+          - button "刷新" [ref=e277] [cursor=pointer]
+        - group [ref=e278]:
+          - generic "待处理权限与问题 展开" [ref=e279] [cursor=pointer]
+      - generic [ref=e280]:
+        - generic [ref=e281]:
+          - generic [ref=e282]: 消息
+          - textbox "消息" [disabled] [ref=e283]:
+            - /placeholder: 输入消息
+        - generic "消息控制" [ref=e284]:
+          - generic [ref=e285]:
+            - generic "添加附件（图片、PDF 或文本）" [ref=e286] [cursor=pointer]:
+              - generic [ref=e287]: 附件（图片、PDF 或文本）
+              - button "附件（图片、PDF 或文本）" [disabled] [ref=e288]
+            - generic [ref=e291]:
+              - generic [ref=e292]: Agent
+              - combobox "Agent" [ref=e293]:
+                - option "自动（默认 Agent）" [selected]
+                - option "build"
+                - option "plan"
+            - generic [ref=e294]:
+              - generic [ref=e295]: 模型
+              - combobox "模型" [ref=e296]:
+                - option "自动（沿用会话或默认模型）" [selected]
+                - option "MiniMax-M2.5-highspeed · MiniMax Token Plan (minimaxi.com)"
+                - option "MiniMax-M2.5 · MiniMax Token Plan (minimaxi.com)"
+                - option "MiniMax-M2.7 · MiniMax Token Plan (minimaxi.com)"
+                - option "MiniMax-M2.1 · MiniMax Token Plan (minimaxi.com)"
+                - option "MiniMax-M2 · MiniMax Token Plan (minimaxi.com)"
+                - option "MiniMax-M3 · MiniMax Token Plan (minimaxi.com)（默认）"
+                - option "MiniMax-M2.7-highspeed · MiniMax Token Plan (minimaxi.com)"
+                - option "grok-4.5 · grok"
+                - option "gpt-5.4 · grok（默认）"
+          - button "发送" [disabled] [ref=e297]

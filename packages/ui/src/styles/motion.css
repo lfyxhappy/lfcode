@@ -4,6 +4,7 @@
   --motion-surface-ms: 340ms;
   --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-ease-in: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
   --transition-duration: var(--motion-micro-ms);
   --transition-easing: var(--motion-ease-out);
 }
@@ -22,9 +23,14 @@
 }
 
 :root[data-motion-mode="off"] *,
-:root[data-motion-reduced="true"] * {
+:root[data-motion-mode="off"] *::before,
+:root[data-motion-mode="off"] *::after,
+:root[data-motion-reduced="true"] *,
+:root[data-motion-reduced="true"] *::before,
+:root[data-motion-reduced="true"] *::after {
   animation-duration: 0ms !important;
   animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
   transition-duration: 0ms !important;
   scroll-behavior: auto !important;
 }
@@ -49,6 +55,22 @@
   --motion-presence-duration: var(--motion-micro-ms);
 }
 
+[data-component="motion-presence"][data-preset="surface-scale"] {
+  --motion-presence-distance: 0px;
+  --motion-presence-duration: var(--motion-surface-ms);
+  transform: scale(1);
+}
+
+[data-component="motion-presence"][data-preset="surface-scale"][data-phase="entering"],
+[data-component="motion-presence"][data-preset="surface-scale"][data-phase="exiting"] {
+  transform: scale(0.985);
+}
+
+[data-component="motion-presence"][data-preset="surface-slide"] {
+  --motion-presence-distance: 8px;
+  --motion-presence-duration: var(--motion-surface-ms);
+}
+
 [data-component="motion-presence"][data-phase="entering"],
 [data-component="motion-presence"][data-phase="exiting"] {
   opacity: 0;
@@ -67,6 +89,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
   [data-component="motion-presence"] {
     transition-duration: 0ms;
   }

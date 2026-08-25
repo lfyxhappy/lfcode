@@ -1,5 +1,7 @@
-import { For, Match, Show, Switch, batch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
+import { For, Match, Show, Switch, batch, createEffect, createMemo, createSignal, lazy, onCleanup, type JSX } from "solid-js"
+import { Portal } from "solid-js/web"
 import { createStore } from "solid-js/store"
+import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { Button } from "@lfcode-ai/ui/button"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
@@ -13,18 +15,18 @@ import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { SnapshotFileDiff, VcsFileDiff } from "@lfcode-ai/sdk/v2"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 
-import FileTree from "@/components/file-tree"
-import { SessionContextUsage } from "@/components/session-context-usage"
-import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
+import { SortableTab, FileVisual } from "@/components/session"
 import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
+import { useSDK } from "@/context/sdk"
+import { useServer } from "@/context/server"
+import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
-import { FileTabContent } from "@/pages/session/file-tabs"
 import {
   browserTab,
   browserTabID,
@@ -42,8 +44,12 @@ import {
 import { buildDetachedSidePanelRoute } from "@/pages/session/detached-side-panel"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { BrowserKeepaliveSlot } from "@/pages/session/browser-keepalive-host"
-import { SideChatPanel } from "@/pages/session/side-chat-panel"
+import { wideSessionLayoutQuery } from "@/pages/session/wide-layout"
+import { canUseTerminal } from "@/pages/session/runtime-capabilities"
+import { BrowserKeepaliveSlot } from "@/pages/session/browser-keepalive-slot"
+import { SubagentDispatchRail } from "@/components/session/subagent-dispatch-rail"
+import { DeepResearchRail } from "@/components/session/deep-research-rail"
+import { SUBAGENT_VIEW_REQUEST_EVENT } from "@lfcode-ai/ui/message-part-events"
 
 type LauncherItem = {
   id: "review" | "terminal" | "browser" | "files" | "side-chat"
@@ -52,6 +58,10 @@ type LauncherItem = {
   keybind: string
   disabled: boolean
 }
+
+const SideChatPanel = lazy(() => import("@/pages/session/side-chat-panel").then((mod) => ({ default: mod.SideChatPanel })))
+const FileTree = lazy(() => import("@/components/file-tree"))
+const FileTabContent = lazy(() => import("@/pages/session/file-tabs").then((mod) => ({ default: mod.FileTabContent })))
 
 export function SessionSidePanel(props: {
   canReview: () => boolean
@@ -75,13 +85,21 @@ export function SessionSidePanel(props: {
   const layout = useLayout()
   const platform = usePlatform()
   const settings = useSettings()
+  const sdk = useSDK()
+  const server = useServer()
+  const sync = useSync()
   const file = useFile()
   const terminal = useTerminal()
   const language = useLanguage()
   const command = useCommand()
   const { params, sessionKey, tabs, view } = useSessionLayout()
 
-  const isDesktop = createMemo(() => platform.platform === "desktop")
+  // Match the outer app shell's lg breakpoint. Platform checks remain in the
+  // individual actions that require a local Electron capability.
+  const isDesktop = createMediaQuery(wideSessionLayoutQuery)
+  const terminalAvailable = createMemo(() => canUseTerminal(platform.platform, server.isLocal()))
+  const [mobileSubagentMount, setMobileSubagentMount] = createSignal<HTMLElement>()
+  const mobileActors = createMemo(() => (params.id ? (sync.data.actor ?? {})[params.id] ?? [] : []))
   const shown = createMemo(
     () =>
       platform.platform !== "desktop" ||
@@ -179,12 +197,17 @@ export function SessionSidePanel(props: {
     hasReview: props.canReview,
     detachedTabs: createMemo(() => layout.detachedPanels.listFor(sessionKey)().map((item) => item.tab)),
   })
-  const contextOpen = tabState.contextOpen
   const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
   const activeFileTab = tabState.activeFileTab
   const browserTabs = createMemo(() => openedTabs().filter(isBrowserTab))
   const sideChatTabs = createMemo(() => openedTabs().filter(isSideChatTab))
+  const hasOpenPage = createMemo(() => reviewTab() || openedTabs().length > 0)
+
+  createEffect(() => {
+    if (!reviewOpen() || hasOpenPage()) return
+    view().reviewPanel.close()
+  })
   const sideChatTitle = (tabID: string) => {
     const index = sideChatTabs().findIndex((tab) => sideChatTabID(tab) === tabID)
     if (index === -1) return language.t("session.sideChat.title")
@@ -194,7 +217,7 @@ export function SessionSidePanel(props: {
     if (tab === "review" && !explicitReviewActivation && (isSideChatTab(activeTab()) || isBrowserTab(activeTab()))) {
       return
     }
-    if (tab === "context" || isBrowserTab(tab) || isSideChatTab(tab)) {
+    if (isBrowserTab(tab) || isSideChatTab(tab)) {
       openReviewPanel()
       tabs().setActive(tab)
       return
@@ -217,14 +240,6 @@ export function SessionSidePanel(props: {
     })
   }
 
-  const openContextTab = () => {
-    batch(() => {
-      openReviewPanel()
-      void tabs().open("context")
-      tabs().setActive("context")
-    })
-  }
-
   const openBrowserTab = () => {
     const id = createBrowserTabID()
     batch(() => {
@@ -235,6 +250,7 @@ export function SessionSidePanel(props: {
   }
 
   const openTerminalTab = () => {
+    if (!terminalAvailable()) return
     if (terminal.all().length > 0) terminal.new()
     view().terminal.open()
   }
@@ -242,6 +258,28 @@ export function SessionSidePanel(props: {
   const openSideChatLauncher = () => {
     props.onOpenSideChat()
   }
+
+  const openMobileSubagent = (actorID: string) => {
+    if (!params.id || typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent(SUBAGENT_VIEW_REQUEST_EVENT, {
+        detail: {
+          sessionID: params.id,
+          actorID,
+        },
+      }),
+    )
+  }
+
+  createEffect(() => {
+    if (isDesktop() || !params.id) {
+      setMobileSubagentMount()
+      return
+    }
+    queueMicrotask(() => {
+      setMobileSubagentMount(document.querySelector<HTMLElement>("[data-component='session-main-panel']") ?? undefined)
+    })
+  })
 
   const launcherItems = createMemo<LauncherItem[]>(() => [
     {
@@ -251,13 +289,9 @@ export function SessionSidePanel(props: {
       keybind: command.keybind("review.toggle"),
       disabled: !props.canReview(),
     },
-    {
-      id: "terminal" as const,
-      label: "Terminal",
-      icon: "terminal",
-      keybind: "",
-      disabled: false,
-    },
+    ...(terminalAvailable()
+      ? [{ id: "terminal" as const, label: "Terminal", icon: "terminal" as const, keybind: "", disabled: false }]
+      : []),
     {
       id: "browser" as const,
       label: "Browser",
@@ -312,6 +346,7 @@ export function SessionSidePanel(props: {
   })
 
   const fileTreeTab = () => layout.fileTree.tab()
+  const referencePath = () => layout.fileTree.referencePath()
   const [allFilesSearch, setAllFilesSearch] = createSignal("")
   const [allFilesMatches, setAllFilesMatches] = createSignal<readonly string[] | undefined>()
   const [allFilesSearchLoading, setAllFilesSearchLoading] = createSignal(false)
@@ -319,12 +354,31 @@ export function SessionSidePanel(props: {
 
   const setFileTreeTabValue = (value: string) => {
     if (value !== "changes" && value !== "all") return
+    if (value === "all") layout.fileTree.clearReference()
     layout.fileTree.setTab(value)
   }
 
   const showAllFiles = () => {
     layout.fileTree.open()
+    layout.fileTree.clearReference()
     layout.fileTree.setTab("all")
+  }
+  const referenceName = () => referencePath()?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || referencePath()
+  const referenceEmpty = createMemo(() => {
+    const target = referencePath()
+    if (!target) return false
+    const state = file.referenceTree.state(target)
+    return !!state?.loaded && file.referenceTree.children(target).length === 0
+  })
+  const openReferenceInExplorer = () => {
+    const target = referencePath()
+    if (!target || platform.platform !== "desktop" || !platform.openPath) return
+    void platform.openPath(target)
+  }
+  const copyReferencePath = () => {
+    const target = referencePath()
+    if (!target) return
+    void navigator.clipboard.writeText(target)
   }
 
   createEffect(() => {
@@ -372,8 +426,7 @@ export function SessionSidePanel(props: {
   })
   const visibleTabCount = createMemo(() => {
     const reviewCount = reviewTab() && props.canReview() ? 1 : 0
-    const contextCount = contextOpen() ? 1 : 0
-    return reviewCount + contextCount + openedTabs().length
+    return reviewCount + openedTabs().length
   })
   const tabStripMetrics = createMemo(() => {
     const baseWidth = 176
@@ -402,14 +455,12 @@ export function SessionSidePanel(props: {
 
   const tabKind = (tab: string) => {
     if (tab === "review") return "review" as const
-    if (tab === "context") return "context" as const
     if (isBrowserTab(tab)) return "browser" as const
     return "file" as const
   }
 
   const tabTitle = (tab: string) => {
     if (tab === "review") return language.t("session.tab.review")
-    if (tab === "context") return language.t("session.tab.context")
     if (isBrowserTab(tab)) {
       const id = browserTabID(tab)
       const current = id ? view().browser.get(id) : undefined
@@ -515,6 +566,7 @@ export function SessionSidePanel(props: {
   })
 
   return (
+    <>
     <Show when={isDesktop()}>
       <aside
         id="review-panel"
@@ -522,6 +574,7 @@ export function SessionSidePanel(props: {
         aria-label={language.t("session.panel.reviewAndFiles")}
         aria-hidden={!open()}
         inert={!open()}
+        data-resizing={props.size.active()}
         class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
         classList={{
           "pointer-events-none": !open(),
@@ -558,7 +611,7 @@ export function SessionSidePanel(props: {
                         "--session-side-tab-min-width": `${tabStripMetrics().minWidth}px`,
                       }}
                       ref={(el: HTMLDivElement) => {
-                        const stop = createFileTabListSync({ el, contextOpen })
+                        const stop = createFileTabListSync({ el })
                         const resizeObserver = new ResizeObserver(() => {
                           setStore("tabStripWidth", el.clientWidth)
                         })
@@ -619,34 +672,6 @@ export function SessionSidePanel(props: {
                           </div>
                         </Tabs.Trigger>
                       </Show>
-                      <Show when={contextOpen()}>
-                        <Tabs.Trigger
-                          value="context"
-                          closeButton={
-                            <TooltipKeybind
-                              title={language.t("common.closeTab")}
-                              keybind={command.keybind("tab.close")}
-                              placement="bottom"
-                              gutter={10}
-                            >
-                              <IconButton
-                                icon="close-small"
-                                variant="ghost"
-                                class="h-5 w-5"
-                                onClick={() => tabs().close("context")}
-                                aria-label={language.t("common.closeTab")}
-                              />
-                            </TooltipKeybind>
-                          }
-                          hideCloseButton
-                          onMiddleClick={() => tabs().close("context")}
-                        >
-                          <div class="flex items-center gap-2">
-                            <SessionContextUsage variant="indicator" />
-                            <div>{language.t("session.tab.context")}</div>
-                          </div>
-                        </Tabs.Trigger>
-                      </Show>
                       <SortableProvider ids={openedTabs()}>
                         <For each={openedTabs()}>
                           {(tab) => (
@@ -684,7 +709,7 @@ export function SessionSidePanel(props: {
                             aria-label={language.t("common.moreOptions")}
                           />
                           <DropdownMenu.Portal>
-                            <DropdownMenu.Content class="min-w-[248px] rounded-xl border border-border-weaker-base bg-background-panel p-1.5 shadow-2xl">
+                            <DropdownMenu.Content class="min-w-[248px] rounded-lg border border-border-weaker-base bg-background-panel p-1.5 shadow-md">
                               <div class="flex flex-col gap-1">
                                 <For each={launcherItems()}>
                                   {(item) => (
@@ -705,14 +730,6 @@ export function SessionSidePanel(props: {
                                     </DropdownMenu.Item>
                                   )}
                                 </For>
-                                <DropdownMenu.Item onSelect={openContextTab} class="rounded-lg px-3 py-2 hover:bg-surface-hover">
-                                  <div class="flex min-w-0 items-center gap-3">
-                                    <div class="flex size-4 shrink-0 items-center justify-center text-text-muted">
-                                      <Icon name="settings-gear" size="small" />
-                                    </div>
-                                    <div class="min-w-0 flex-1 text-13-medium text-text-primary">{language.t("session.tab.context")}</div>
-                                  </div>
-                                </DropdownMenu.Item>
                               </div>
                             </DropdownMenu.Content>
                           </DropdownMenu.Portal>
@@ -728,26 +745,23 @@ export function SessionSidePanel(props: {
 
                     <Show when={activeTab() === "empty"}>
                       <div class="h-full min-h-0 overflow-hidden bg-background-base">
-                        <div class="flex h-full items-center justify-center px-6 pb-24">
-                          <div class="mx-auto flex w-full max-w-[760px] flex-col gap-2.5">
+                        <div class="flex h-full items-center justify-center px-6 pb-16">
+                          <div class="mx-auto w-full max-w-[380px] rounded-xl border border-border-weaker-base bg-surface-raised-base p-1.5 shadow-xs-border-base">
                             <For each={launcherItems()}>
                               {(item) => (
                                 <Button
                                   variant="ghost"
-                                  size="large"
                                   disabled={item.disabled}
                                   onClick={() => openLauncherItem(item.id)}
-                                  class="h-17 justify-start rounded-[18px] border border-white/4 bg-[#262525] px-5 text-left text-[#f2f2f2] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] hover:bg-[#2a2929]"
+                                  class="h-12 w-full justify-start rounded-lg px-3 text-left text-text-strong hover:bg-surface-raised-base-hover"
                                 >
-                                  <div class="flex min-w-0 w-full items-center gap-4">
-                                    <div class="flex size-6 shrink-0 items-center justify-center text-[#d0d0d0]">
+                                  <div class="flex min-w-0 w-full items-center gap-3">
+                                    <div class="flex size-5 shrink-0 items-center justify-center text-icon-weak-base">
                                       <Icon name={item.icon as any} size="small" />
                                     </div>
-                                    <div class="min-w-0 flex-1 text-[16px] font-medium tracking-[-0.01em]">{item.label}</div>
+                                    <div class="min-w-0 flex-1 text-14-medium">{item.label}</div>
                                     <Show when={item.keybind}>
-                                      <div class="shrink-0 rounded-full bg-[#3b3a3a] px-3 py-1 text-[12px] text-[#d2d2d2]">
-                                        {item.keybind}
-                                      </div>
+                                      <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
                                     </Show>
                                   </div>
                                 </Button>
@@ -755,12 +769,6 @@ export function SessionSidePanel(props: {
                             </For>
                           </div>
                         </div>
-                      </div>
-                    </Show>
-
-                    <Show when={contextOpen() && activeTab() === "context"}>
-                      <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                        <SessionContextTab />
                       </div>
                     </Show>
 
@@ -870,17 +878,19 @@ export function SessionSidePanel(props: {
               aria-hidden={!fileOpen()}
               inert={!fileOpen()}
               data-component="session-file-tree"
+              data-resizing={props.size.active()}
               class="relative min-w-0 h-full shrink-0 overflow-hidden"
               classList={{
                 "pointer-events-none": !fileOpen(),
               }}
               style={{ width: treeWidth() }}
             >
-              <div
-                class="h-full flex flex-col overflow-hidden group/filetree"
-                classList={{ "border-l border-border-weaker-base": reviewOpen() }}
-              >
-                <Tabs
+              <Show when={fileOpen()}>
+                <div
+                  class="h-full flex flex-col overflow-hidden group/filetree"
+                  classList={{ "border-l border-border-weaker-base": reviewOpen() }}
+                >
+                  <Tabs
                   variant="pill"
                   value={fileTreeTab()}
                   onChange={setFileTreeTabValue}
@@ -978,8 +988,50 @@ export function SessionSidePanel(props: {
                       </Match>
                     </Switch>
                   </Tabs.Content>
-                </Tabs>
-              </div>
+                  <Tabs.Content value="folder" class="bg-background-stronger px-3 py-0">
+                    <Show when={referencePath()} keyed fallback={empty(language.t("session.files.empty"))}>
+                      {(target) => (
+                        <div class="min-h-0">
+                          <div class="sticky top-0 z-10 flex items-center gap-1 border-b border-border-weaker-base bg-background-stronger py-2">
+                            <IconButton
+                              icon="arrow-left"
+                              variant="ghost"
+                              aria-label={language.t("session.files.backToProject")}
+                              title={language.t("session.files.backToProject")}
+                              onClick={showAllFiles}
+                            />
+                            <div class="min-w-0 flex-1" title={target}>
+                              <div class="truncate text-12-medium text-text-strong">{referenceName()}</div>
+                              <div class="truncate text-10-regular text-text-weak">{target}</div>
+                            </div>
+                            <IconButton
+                              icon="folder"
+                              variant="ghost"
+                              aria-label={language.t("session.files.openInExplorer")}
+                              title={language.t("session.files.openInExplorer")}
+                              onClick={openReferenceInExplorer}
+                            />
+                            <IconButton
+                              icon="copy"
+                              variant="ghost"
+                              aria-label={language.t("session.files.copyPath")}
+                              title={language.t("session.files.copyPath")}
+                              onClick={copyReferencePath}
+                            />
+                            <Button size="small" variant="ghost" onClick={() => void file.referenceTree.refresh(target)}>
+                              {language.t("session.files.refresh")}
+                            </Button>
+                          </div>
+                          <Show when={referenceEmpty()} fallback={<FileTree path={target} tree={file.referenceTree} normalizePath={file.referenceTree.normalize} class="py-3" onFileClick={(node) => openTab(file.tab(node.path))} />}>
+                            {empty(language.t("session.files.referenceEmpty"))}
+                          </Show>
+                        </div>
+                      )}
+                    </Show>
+                  </Tabs.Content>
+                  </Tabs>
+                </div>
+              </Show>
               <Show when={fileOpen()}>
                 <div onPointerDown={() => props.size.start()}>
                   <ResizeHandle
@@ -992,6 +1044,8 @@ export function SessionSidePanel(props: {
                       props.size.touch()
                       layout.fileTree.resize(width)
                     }}
+                    collapseThreshold={152}
+                    onCollapse={() => layout.fileTree.close()}
                   />
                 </div>
               </Show>
@@ -1000,5 +1054,31 @@ export function SessionSidePanel(props: {
         </div>
       </aside>
     </Show>
+    <Show when={!isDesktop() && !!params.id && mobileSubagentMount()}>
+      <Portal mount={mobileSubagentMount()!}>
+          <aside
+            data-component="session-mobile-subagents"
+            aria-label="子智能体"
+            class="shrink-0 border-t border-border-weaker-base bg-background-base"
+          >
+            <div class="max-h-56 min-h-0 overflow-y-auto overscroll-contain px-3 pb-3">
+              <DeepResearchRail
+                sessionID={params.id!}
+                directory={sdk.directory}
+                onOpenSubagent={openMobileSubagent}
+                showEmpty
+              />
+              <SubagentDispatchRail
+                sessionID={params.id!}
+                directory={sdk.directory}
+                actors={mobileActors}
+                onOpenSubagent={openMobileSubagent}
+                showEmpty
+              />
+            </div>
+          </aside>
+      </Portal>
+    </Show>
+    </>
   )
 }

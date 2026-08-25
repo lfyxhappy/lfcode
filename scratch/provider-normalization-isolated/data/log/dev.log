@@ -1,0 +1,246 @@
+INFO  2026-07-24T12:17:38 +1832ms service=default directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-m6okiskmx5 creating instance
+INFO  2026-07-24T12:17:38 +8ms service=db path=:memory: opening database
+INFO  2026-07-24T12:17:38 +10ms service=db count=46 mode=dev applying migrations
+WARN  2026-07-24T12:17:38 +28ms service=db projectHas=false sessionHas=true repaired recent user activity schema
+INFO  2026-07-24T12:17:38 +23ms service=file init
+INFO  2026-07-24T12:17:38 +7ms service=actor.registry orphan recovery complete
+INFO  2026-07-24T12:17:38 +9ms service=inbox inbox gc-on-init complete
+INFO  2026-07-24T12:17:38 +48ms service=provider status=started state
+INFO  2026-07-24T12:17:38 +11ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\config.json loading
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+INFO  2026-07-24T12:17:38 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+INFO  2026-07-24T12:17:38 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:38 +6ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-m6okiskmx5\lfcode.json loading
+DEBUG 2026-07-24T12:17:38 +15ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config loading config from LFCODE_CONFIG_DIR
+DEBUG 2026-07-24T12:17:38 +17ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:38 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:38 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:38 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:38 +18ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:38 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:38 +6ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:38 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:38 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-07-24T12:17:39 +824ms service=provider init
+INFO  2026-07-24T12:17:39 +218ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +1ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+WARN  2026-07-24T12:17:39 +80ms service=config dir=C:\Users\liangfeng\.lfcode error=Cause([Fail(NpmInstallFailedError (cause: Error: Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\%E7%AE%97%E6%B3%95\%E5%B0%8F%E5%BA%94%E7%94%A8\%E7%9F%A5%E8%AF%86%E5%BA%93\10_Projects\Lfcode\packages\plugin\package.json'))]) background dependency install failed
+INFO  2026-07-24T12:17:39 +0ms service=plugin path=file:///C:/Users/liangfeng/.lfcode/plugins/lfcode-tavern loading plugin
+INFO  2026-07-24T12:17:39 +46ms service=server method=POST path=/project/managed request
+INFO  2026-07-24T12:17:39 +0ms service=server status=started method=POST path=/project/managed request
+INFO  2026-07-24T12:17:39 +5ms service=bus type=* subscribing
+WARN  2026-07-24T12:17:39 +1ms service=provider providerID=custom-openai modelID=gpt-5-web defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.custom-openai.models.gpt-5-web limit.context not configured and not found in models.dev
+WARN  2026-07-24T12:17:39 +0ms service=provider providerID=custom-openai modelID=gpt-5-manual defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.custom-openai.models.gpt-5-manual limit.context not configured and not found in models.dev
+WARN  2026-07-24T12:17:39 +0ms service=provider providerID=custom-openai modelID=legacy-vision defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.custom-openai.models.legacy-vision limit.context not configured and not found in models.dev
+WARN  2026-07-24T12:17:39 +0ms service=provider providerID=custom-claude modelID=claude-sonnet-4 defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.custom-claude.models.claude-sonnet-4 limit.context not configured and not found in models.dev
+WARN  2026-07-24T12:17:39 +0ms service=provider providerID=custom-gemini modelID=gemini-2.5-pro defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.custom-gemini.models.gemini-2.5-pro limit.context not configured and not found in models.dev
+WARN  2026-07-24T12:17:39 +0ms service=provider providerID=neco modelID=grok-4.5 defaulting_to=1000000 fix=Set limit.context explicitly in lfcode.json under provider.neco.models.grok-4.5 limit.context not configured and not found in models.dev
+INFO  2026-07-24T12:17:39 +2ms service=server status=completed duration=8 method=POST path=/project/managed request
+ERROR 2026-07-24T12:17:39 +10ms service=provider Provider does not exist in model list lfcode
+INFO  2026-07-24T12:17:39 +6ms service=provider providerID=custom-openai found
+INFO  2026-07-24T12:17:39 +0ms service=provider providerID=custom-claude found
+INFO  2026-07-24T12:17:39 +0ms service=provider providerID=custom-gemini found
+INFO  2026-07-24T12:17:39 +0ms service=provider providerID=minimax-cn-coding-plan found
+INFO  2026-07-24T12:17:39 +0ms service=provider providerID=grok found
+INFO  2026-07-24T12:17:39 +0ms service=provider status=completed duration=1271 state
+INFO  2026-07-24T12:17:39 +135ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:39 +0ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-m6okiskmx5 disposing instance
+INFO  2026-07-24T12:17:39 +2ms service=bus type=* unsubscribing
+INFO  2026-07-24T12:17:39 +2ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:39 +2ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-afuv5tq7m0n creating instance
+INFO  2026-07-24T12:17:39 +6ms service=provider status=started state
+INFO  2026-07-24T12:17:39 +9ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-afuv5tq7m0n\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +5ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config loading config from LFCODE_CONFIG_DIR
+DEBUG 2026-07-24T12:17:39 +14ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:39 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:39 +16ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +0ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:39 +1ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:39 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:39 +1ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +0ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-07-24T12:17:39 +38ms service=provider init
+INFO  2026-07-24T12:17:39 +1ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +1ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-07-24T12:17:39 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+WARN  2026-07-24T12:17:39 +78ms service=config dir=C:\Users\liangfeng\.lfcode error=Cause([Fail(NpmInstallFailedError (cause: Error: Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\%E7%AE%97%E6%B3%95\%E5%B0%8F%E5%BA%94%E7%94%A8\%E7%9F%A5%E8%AF%86%E5%BA%93\10_Projects\Lfcode\packages\plugin\package.json'))]) background dependency install failed
+INFO  2026-07-24T12:17:39 +0ms service=plugin path=file:///C:/Users/liangfeng/.lfcode/plugins/lfcode-tavern loading plugin
+INFO  2026-07-24T12:17:39 +4ms service=server method=POST path=/project/managed request
+INFO  2026-07-24T12:17:39 +0ms service=server status=started method=POST path=/project/managed request
+INFO  2026-07-24T12:17:39 +3ms service=bus type=* subscribing
+INFO  2026-07-24T12:17:39 +2ms service=server status=completed duration=5 method=POST path=/project/managed request
+ERROR 2026-07-24T12:17:39 +7ms service=provider Provider does not exist in model list lfcode
+INFO  2026-07-24T12:17:39 +6ms service=provider providerID=minimax-cn-coding-plan found
+INFO  2026-07-24T12:17:39 +0ms service=provider providerID=grok found
+INFO  2026-07-24T12:17:39 +0ms service=provider status=completed duration=190 state
+INFO  2026-07-24T12:17:39 +152ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:39 +0ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-afuv5tq7m0n disposing instance
+INFO  2026-07-24T12:17:39 +1ms service=bus type=* unsubscribing
+INFO  2026-07-24T12:17:39 +7ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:39 +2ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-53uz362fy5c creating instance
+INFO  2026-07-24T12:17:39 +6ms service=provider status=started state
+INFO  2026-07-24T12:17:39 +6ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-d0nrpbh0agj\config.json loading
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-d0nrpbh0agj\lfcode.json loading
+INFO  2026-07-24T12:17:39 +1ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-d0nrpbh0agj\lfcode.jsonc loading
+INFO  2026-07-24T12:17:39 +0ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-d0nrpbh0agj\lfcode.json loading
+INFO  2026-07-24T12:17:39 +1ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-d0nrpbh0agj\lfcode.jsonc loading
+INFO  2026-07-24T12:17:39 +7ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-53uz362fy5c\lfcode.json loading
+DEBUG 2026-07-24T12:17:39 +9ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config loading config from LFCODE_CONFIG_DIR
+DEBUG 2026-07-24T12:17:40 +36ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +0ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +14ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +48ms service=provider init
+INFO  2026-07-24T12:17:40 +1ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +1ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+WARN  2026-07-24T12:17:40 +77ms service=config dir=C:\Users\liangfeng\.lfcode error=Cause([Fail(NpmInstallFailedError (cause: Error: Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\%E7%AE%97%E6%B3%95\%E5%B0%8F%E5%BA%94%E7%94%A8\%E7%9F%A5%E8%AF%86%E5%BA%93\10_Projects\Lfcode\packages\plugin\package.json'))]) background dependency install failed
+INFO  2026-07-24T12:17:40 +0ms service=plugin path=file:///C:/Users/liangfeng/.lfcode/plugins/lfcode-tavern loading plugin
+INFO  2026-07-24T12:17:40 +4ms service=server method=POST path=/project/managed request
+INFO  2026-07-24T12:17:40 +0ms service=server status=started method=POST path=/project/managed request
+INFO  2026-07-24T12:17:40 +2ms service=bus type=* subscribing
+INFO  2026-07-24T12:17:40 +1ms service=server status=completed duration=3 method=POST path=/project/managed request
+ERROR 2026-07-24T12:17:40 +3ms service=provider Provider does not exist in model list lfcode
+INFO  2026-07-24T12:17:40 +8ms service=provider providerID=minimax-cn-coding-plan found
+INFO  2026-07-24T12:17:40 +0ms service=provider providerID=grok found
+INFO  2026-07-24T12:17:40 +0ms service=provider status=completed duration=225 state
+INFO  2026-07-24T12:17:40 +141ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:40 +1ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-53uz362fy5c disposing instance
+INFO  2026-07-24T12:17:40 +0ms service=bus type=* unsubscribing
+INFO  2026-07-24T12:17:40 +137ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:40 +1ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:40 +3ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-zktrp18kbv creating instance
+INFO  2026-07-24T12:17:40 +6ms service=provider status=started state
+INFO  2026-07-24T12:17:40 +2ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-j48r5qay4hr\config.json loading
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-j48r5qay4hr\lfcode.json loading
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-j48r5qay4hr\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-j48r5qay4hr\lfcode.json loading
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-j48r5qay4hr\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +9ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-zktrp18kbv\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +3ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config loading config from LFCODE_CONFIG_DIR
+DEBUG 2026-07-24T12:17:40 +28ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +13ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +38ms service=provider init
+INFO  2026-07-24T12:17:40 +3ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-07-24T12:17:40 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+WARN  2026-07-24T12:17:40 +64ms service=config dir=C:\Users\liangfeng\.lfcode error=Cause([Fail(NpmInstallFailedError (cause: Error: Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\%E7%AE%97%E6%B3%95\%E5%B0%8F%E5%BA%94%E7%94%A8\%E7%9F%A5%E8%AF%86%E5%BA%93\10_Projects\Lfcode\packages\plugin\package.json'))]) background dependency install failed
+INFO  2026-07-24T12:17:40 +0ms service=plugin path=file:///C:/Users/liangfeng/.lfcode/plugins/lfcode-tavern loading plugin
+INFO  2026-07-24T12:17:40 +3ms service=server method=POST path=/project/managed request
+INFO  2026-07-24T12:17:40 +0ms service=server status=started method=POST path=/project/managed request
+INFO  2026-07-24T12:17:40 +3ms service=bus type=* subscribing
+INFO  2026-07-24T12:17:40 +1ms service=server status=completed duration=4 method=POST path=/project/managed request
+ERROR 2026-07-24T12:17:40 +8ms service=provider Provider does not exist in model list lfcode
+INFO  2026-07-24T12:17:40 +5ms service=provider providerID=minimax-cn-coding-plan found
+INFO  2026-07-24T12:17:40 +0ms service=provider providerID=grok found
+INFO  2026-07-24T12:17:40 +0ms service=provider status=completed duration=187 state
+INFO  2026-07-24T12:17:40 +140ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:40 +0ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-zktrp18kbv disposing instance
+INFO  2026-07-24T12:17:40 +0ms service=bus type=* unsubscribing
+INFO  2026-07-24T12:17:40 +138ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:40 +2ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-wgd17jfw45l creating instance
+INFO  2026-07-24T12:17:40 +4ms service=provider status=started state
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\config.json loading
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+INFO  2026-07-24T12:17:40 +1ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+INFO  2026-07-24T12:17:40 +6ms service=config path=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-wgd17jfw45l\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +7ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config loading config from LFCODE_CONFIG_DIR
+DEBUG 2026-07-24T12:17:40 +15ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +0ms service=config loading config from C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\算法\小应用\知识库\10_Projects\Lfcode\scratch\provider-normalization-isolated\config\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:40 +14ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:40 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:40 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+DEBUG 2026-07-24T12:17:41 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.json
+INFO  2026-07-24T12:17:41 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.json loading
+DEBUG 2026-07-24T12:17:41 +1ms service=config loading config from C:\Users\liangfeng\.lfcode\lfcode.jsonc
+INFO  2026-07-24T12:17:41 +0ms service=config path=C:\Users\liangfeng\.lfcode\lfcode.jsonc loading
+INFO  2026-07-24T12:17:41 +23ms service=provider init
+INFO  2026-07-24T12:17:41 +1ms service=plugin name=AnthropicProxyPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=CodexAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=CopilotAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=CloudflareWorkersAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=CloudflareAIGatewayAuthPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=CheckpointSplitoverPlugin loading internal plugin
+INFO  2026-07-24T12:17:41 +0ms service=plugin name=SubagentProgressCheckerPlugin loading internal plugin
+WARN  2026-07-24T12:17:41 +65ms service=config dir=C:\Users\liangfeng\.lfcode error=Cause([Fail(NpmInstallFailedError (cause: Error: Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\%E7%AE%97%E6%B3%95\%E5%B0%8F%E5%BA%94%E7%94%A8\%E7%9F%A5%E8%AF%86%E5%BA%93\10_Projects\Lfcode\packages\plugin\package.json'))]) background dependency install failed
+INFO  2026-07-24T12:17:41 +0ms service=plugin path=file:///C:/Users/liangfeng/.lfcode/plugins/lfcode-tavern loading plugin
+INFO  2026-07-24T12:17:41 +3ms service=server method=POST path=/project/managed request
+INFO  2026-07-24T12:17:41 +0ms service=server status=started method=POST path=/project/managed request
+INFO  2026-07-24T12:17:41 +2ms service=bus type=* subscribing
+INFO  2026-07-24T12:17:41 +2ms service=server status=completed duration=4 method=POST path=/project/managed request
+ERROR 2026-07-24T12:17:41 +2ms service=provider Provider does not exist in model list lfcode
+INFO  2026-07-24T12:17:41 +8ms service=provider providerID=minimax found
+INFO  2026-07-24T12:17:41 +0ms service=provider providerID=minimax-cn-coding-plan found
+INFO  2026-07-24T12:17:41 +0ms service=provider providerID=grok found
+INFO  2026-07-24T12:17:41 +0ms service=provider status=completed duration=154 state
+INFO  2026-07-24T12:17:41 +148ms service=server-proxy disposing all instances
+INFO  2026-07-24T12:17:41 +0ms service=server-proxy directory=C:\Users\liangfeng\AppData\Local\Temp\lfcode-test-data-20816\fixtures\lfcode-test-wgd17jfw45l disposing instance
+INFO  2026-07-24T12:17:41 +0ms service=bus type=* unsubscribing

@@ -1,4 +1,5 @@
 import { Flag } from "@/flag/flag"
+import { PluginPath } from "@/plugin/path"
 import { lazy } from "@/util/lazy"
 import { Filesystem } from "@/util"
 import { which } from "@/util/which"
@@ -65,6 +66,7 @@ function bundledPwsh() {
   if (process.platform !== "win32") return
   const resourcesPath = "resourcesPath" in process && typeof process.resourcesPath === "string" ? process.resourcesPath : undefined
   const candidates = [
+    path.join(PluginPath.data("runtime-pwsh7"), "pwsh.exe"),
     process.env[BUNDLED_PWSH_ENV],
     resourcesPath ? path.join(resourcesPath, "pwsh", "pwsh.exe") : undefined,
     path.join(path.dirname(process.execPath), "pwsh", "pwsh.exe"),

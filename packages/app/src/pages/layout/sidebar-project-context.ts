@@ -1,5 +1,6 @@
 import type { Accessor } from "solid-js"
 import type { LocalProject } from "@/context/layout"
+import type { RenameTriggerComponent } from "./inline-editor"
 import type { SessionItemProps } from "./sidebar-items"
 
 export type ProjectSidebarContext = {
@@ -12,6 +13,7 @@ export type ProjectSidebarContext = {
   openSidebar: () => void
   toggleExpanded: (directory: string) => void
   isExpanded: (directory: string) => boolean
+  projectExpansionActivated: (directory: string) => boolean
   setExpanded: (directory: string, value: boolean) => void
   isProjectPinned: (project: LocalProject) => boolean
   toggleProjectPinned: (project: LocalProject) => void
@@ -24,18 +26,20 @@ export type ProjectSidebarContext = {
   projectEditorID: (project: LocalProject) => string
   renameProject: (project: LocalProject, next: string) => Promise<void>
   openProjectInExplorer: (project: LocalProject) => void
+  canCreateScheduledAutomation: (project: LocalProject) => boolean
+  createScheduledAutomation: (project: LocalProject) => void
+  canCreateTemporarySession: () => boolean
+  createTemporarySession: (project: LocalProject) => Promise<void>
   archiveProjectSessions: (project: LocalProject) => Promise<void>
   clearProjectNotifications: (project: LocalProject) => void
   canOpenProjectPath: () => boolean
-  editorOpen: (id: string) => boolean
-  InlineEditor: SessionItemProps["InlineEditor"]
+  RenameTrigger: RenameTriggerComponent
   sessionProps: Omit<SessionItemProps, "session" | "list" | "slug" | "mobile" | "dense">
 }
 
 export type ProjectSectionProps = {
   project: LocalProject
   mobile?: boolean
-  sortNow: Accessor<number>
   ctx?: ProjectSidebarContext
 } & Partial<ProjectSidebarContext>
 
@@ -51,6 +55,7 @@ export function resolveProjectSidebarCtx(props: ProjectSectionProps): ProjectSid
     props.openSidebar &&
     props.toggleExpanded &&
     props.isExpanded &&
+    props.projectExpansionActivated &&
     props.setExpanded &&
     props.isProjectPinned &&
     props.toggleProjectPinned &&
@@ -63,11 +68,14 @@ export function resolveProjectSidebarCtx(props: ProjectSectionProps): ProjectSid
     props.projectEditorID &&
     props.renameProject &&
     props.openProjectInExplorer &&
+    props.canCreateScheduledAutomation &&
+    props.createScheduledAutomation &&
+    props.canCreateTemporarySession &&
+    props.createTemporarySession &&
     props.archiveProjectSessions &&
     props.clearProjectNotifications &&
     props.canOpenProjectPath &&
-    props.editorOpen &&
-    props.InlineEditor &&
+    props.RenameTrigger &&
     props.sessionProps
   ) {
     return {
@@ -80,6 +88,7 @@ export function resolveProjectSidebarCtx(props: ProjectSectionProps): ProjectSid
       openSidebar: props.openSidebar,
       toggleExpanded: props.toggleExpanded,
       isExpanded: props.isExpanded,
+      projectExpansionActivated: props.projectExpansionActivated,
       setExpanded: props.setExpanded,
       isProjectPinned: props.isProjectPinned,
       toggleProjectPinned: props.toggleProjectPinned,
@@ -92,11 +101,14 @@ export function resolveProjectSidebarCtx(props: ProjectSectionProps): ProjectSid
       projectEditorID: props.projectEditorID,
       renameProject: props.renameProject,
       openProjectInExplorer: props.openProjectInExplorer,
+      canCreateScheduledAutomation: props.canCreateScheduledAutomation,
+      createScheduledAutomation: props.createScheduledAutomation,
+      canCreateTemporarySession: props.canCreateTemporarySession,
+      createTemporarySession: props.createTemporarySession,
       archiveProjectSessions: props.archiveProjectSessions,
       clearProjectNotifications: props.clearProjectNotifications,
       canOpenProjectPath: props.canOpenProjectPath,
-      editorOpen: props.editorOpen,
-      InlineEditor: props.InlineEditor,
+      RenameTrigger: props.RenameTrigger,
       sessionProps: props.sessionProps,
     }
   }

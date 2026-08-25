@@ -252,7 +252,20 @@ describe("tool.replace_range", () => {
             },
             ctx,
           ),
-        ).rejects.toThrow("startChar 5 exceeds line 1 length 3")
+        ).rejects.toThrow('"lineLength":3')
+        await expect(
+          execute(
+            {
+              filePath: target,
+              startLine: 1,
+              startChar: 5,
+              endLine: 1,
+              endChar: 5,
+              newText: "x",
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("Read the target file again")
       },
     })
   })
@@ -305,7 +318,18 @@ describe("tool.replace_range", () => {
             },
             ctx,
           ),
-        ).rejects.toThrow("Read the target file again")
+        ).rejects.toThrow("fresh structured read")
+        await expect(
+          execute(
+            {
+              filePath: target,
+              startLine: 1,
+              endLine: 1,
+              newText: "gamma",
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("fresh structured read")
         expect(await fs.readFile(target, "utf-8")).toBe("beta\n")
       },
     })

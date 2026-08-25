@@ -65,6 +65,14 @@ describe("WebFetchTool helpers", () => {
     expect(WebFetchTool.classifyWebFetchFailure(new Error("certificate verify failed"))).toBe("tls")
   })
 
+  test("uses the Windows PowerShell fallback only for TLS and transport failures", () => {
+    expect(WebFetchTool.shouldUseWindowsPowerShellFallback(new Error("certificate verify failed"), "win32")).toBe(true)
+    expect(WebFetchTool.shouldUseWindowsPowerShellFallback(new Error("socket closed"), "win32")).toBe(true)
+    expect(WebFetchTool.shouldUseWindowsPowerShellFallback(new Error("webfetch:timeout"), "win32")).toBe(false)
+    expect(WebFetchTool.shouldUseWindowsPowerShellFallback(new Error("webfetch:http_403"), "win32")).toBe(false)
+    expect(WebFetchTool.shouldUseWindowsPowerShellFallback(new Error("certificate verify failed"), "linux")).toBe(false)
+  })
+
   test("defaults format and rejects invalid timeout controls", () => {
     const decode = Schema.decodeUnknownSync(WebFetchTool.Input)
     expect(decode({ url: "https://example.com" })).toEqual({ url: "https://example.com", format: "markdown" })

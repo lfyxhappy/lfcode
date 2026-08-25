@@ -7,6 +7,7 @@
     "./package.json": "./package.json",
     "./*": "./src/components/*.tsx",
     "./message-code-blocks": "./src/components/message-code-blocks.ts",
+    "./message-part-events": "./src/components/message-part-events.ts",
     "./file-reference-path": "./src/components/file-reference-path.ts",
     "./code-diff-shared": "./src/components/code-diff-shared.ts",
     "./monaco-kernel": "./src/components/monaco-kernel.ts",

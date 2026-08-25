@@ -1,0 +1,30 @@
+{
+  "events": [
+    {
+      "id": 4,
+      "at": 1785902187936,
+      "timestamp": 1785902187936,
+      "isoTime": "2026-08-05T03:56:27.936Z",
+      "scope": "renderer",
+      "type": "route.changed",
+      "data": {
+        "route": "/Qzov566X5rOVL-Wwj-W6lOeUqC_pl7LogYo/session"
+      }
+    },
+    {
+      "id": 5,
+      "at": 1785902193735,
+      "timestamp": 1785902193735,
+      "isoTime": "2026-08-05T03:56:33.735Z",
+      "scope": "renderer",
+      "type": "route.changed",
+      "data": {
+        "route": "/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session"
+      }
+    }
+  ],
+  "nextCursor": 13,
+  "oldestID": 1,
+  "latestID": 13,
+  "resetRequired": false
+}

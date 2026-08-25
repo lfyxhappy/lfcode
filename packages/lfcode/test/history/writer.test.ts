@@ -132,6 +132,33 @@ describe("History.Writer", () => {
     ),
   )
 
+  it.live("never writes parts owned by a hidden context reviewer", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        seedSession()
+        Database.use((db) => db.update(MessageTable).set({ agent_id: "context-reviewer-1" }).where(eq(MessageTable.id, "msg_t" as any)).run())
+        const writer = yield* Writer.Service
+        yield* writer.init()
+        const bus = yield* Bus.Service
+        yield* bus.publish(MessageV2.Event.PartUpdated, {
+          sessionID: "ses_t" as any,
+          part: {
+            id: "prt_hidden",
+            sessionID: "ses_t",
+            messageID: "msg_t",
+            type: "text",
+            text: "private reviewer analysis",
+          } as any,
+          time: Date.now(),
+        })
+        yield* Effect.sleep("200 millis")
+
+        const row = Database.use((db) => db.select().from(HistoryFtsTable).where(eq(HistoryFtsTable.part_id, "prt_hidden")).get())
+        expect(row).toBeUndefined()
+      }),
+    ),
+  )
+
   it.live("tool pending/running parts are NOT written", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

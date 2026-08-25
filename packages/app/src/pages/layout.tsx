@@ -12,6 +12,7 @@ import {
   Show,
   untrack,
   type Accessor,
+  type JSX,
 } from "solid-js"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
@@ -73,6 +74,25 @@ import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { Titlebar } from "@/components/titlebar"
 import { SettingsView } from "@/components/dialog-settings"
+import type { SettingsTab } from "@/components/dialog-settings-logic"
+import { UiAutomationRegistry } from "@/automation/registry"
+import {
+  SCHEDULED_AUTOMATION_CREATE_EVENT,
+  type ScheduledAutomationCreateRequest,
+  requestScheduledAutomation,
+} from "@/automation/scheduled-task"
+import {
+  globalUiDriverTokens,
+  isAutomationDialogUiDriverToken,
+  isLanAccessSettingsUiDriverToken,
+  isSettingsTabUiDriverToken,
+  resolveAutomationDialogUiDriverElement,
+  resolveLanAccessSettingsUiDriverElement,
+  settingsTabUiDriverSelector,
+  snapshotUiDriverElement,
+  type UiDriverQueryInput,
+  type UiDriverTypeInput,
+} from "@/automation/ui-driver"
 import { useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
 import {
@@ -100,7 +120,7 @@ import {
   deepLinkEvent,
   drainPendingDeepLinks,
 } from "./layout/deep-links"
-import { createInlineEditorController } from "./layout/inline-editor"
+import { createRenameDialogController } from "./layout/inline-editor"
 import {
   LocalWorkspace,
   SortableWorkspace,
@@ -109,10 +129,49 @@ import {
 } from "./layout/sidebar-workspace"
 import { ProjectSection } from "./layout/sidebar-project"
 import type { ProjectSidebarContext } from "./layout/sidebar-project-context"
-import { SidebarContent } from "./layout/sidebar-shell"
+import { SidebarContent, type SidebarQuickAction } from "./layout/sidebar-shell"
 import { DebugBar } from "@/components/debug-bar"
 
-export default function Layout(props: ParentProps) {
+const automationSettingsTabs = new Set<SettingsTab>([
+  "general",
+  "editor",
+  "personalization",
+  "appControl",
+  "lanAccess",
+  "shortcuts",
+  "browser",
+  "research",
+  "archives",
+  "automation",
+  "models",
+  "mcp",
+  "plugins",
+  "skills",
+  "hooks",
+  "usage",
+  "agentOS",
+])
+
+function automationSettingsTab(value?: string) {
+  if (value?.toLowerCase() === "maintenance") return "personalization"
+  const normalized =
+    value?.toLowerCase() === "app-control" || value?.toLowerCase() === "appcontrol"
+      ? "appControl"
+      : value ?? "general"
+  return automationSettingsTabs.has(normalized as SettingsTab) ? (normalized as SettingsTab) : undefined
+}
+
+function settingsTabForUiToken(token: Extract<UiDriverQueryInput["token"], `settings.tab.${string}`>) {
+  if (token === "settings.tab.automation") return "automation" as const
+  if (token === "settings.tab.editor") return "editor" as const
+  if (token === "settings.tab.models") return "models" as const
+  if (token === "settings.tab.plugins") return "plugins" as const
+  if (token === "settings.tab.lan-access") return "lanAccess" as const
+  if (token === "settings.tab.usage") return "usage" as const
+  return "appControl" as const
+}
+
+export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.Element | undefined> }>) {
   const consumedBrowserRequestIDs = (() => {
     const root = window as typeof window & {
       __LFCODE_BROWSER_REQUESTS__?: Map<string, number>
@@ -134,6 +193,10 @@ export default function Layout(props: ParentProps) {
       gettingStartedDismissed: false,
     }),
   )
+  const [activated, setActivated] = createStore({
+    projects: {} as Record<string, boolean>,
+    workspaces: {} as Record<string, boolean>,
+  })
 
   const pageReady = createMemo(() => ready())
 
@@ -152,7 +215,7 @@ export default function Layout(props: ParentProps) {
   const notification = useNotification()
   const permission = usePermission()
   const navigate = useNavigate()
-  setNavigate(navigate)
+  onCleanup(setNavigate(navigate))
   const providers = useProviders()
   const dialog = useDialog()
   const command = useCommand()
@@ -172,8 +235,9 @@ export default function Layout(props: ParentProps) {
       dir: store[0].path.directory || dir,
     }
   })
-  const availableThemeEntries = createMemo(() => theme.ids().map((id) => [id, theme.themes()[id]] as const))
   const [settingsOpen, setSettingsOpen] = createSignal(false)
+  const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("general")
+  const [settingsDirect, setSettingsDirect] = createSignal(false)
   const colorSchemeOrder: ColorScheme[] = ["system", "light", "dark"]
   const colorSchemeKey: Record<ColorScheme, "theme.scheme.system" | "theme.scheme.light" | "theme.scheme.dark"> = {
     system: "theme.scheme.system",
@@ -193,11 +257,10 @@ export default function Layout(props: ParentProps) {
     busyWorkspaces: {} as Record<string, boolean>,
     scrollSessionKey: undefined as string | undefined,
     nav: undefined as HTMLElement | undefined,
-    sortNow: Date.now(),
     sizing: false,
   })
 
-  const editor = createInlineEditorController()
+  const editor = createRenameDialogController(dialog)
   const setBusy = (directory: string, value: boolean) => {
     const key = workspaceKey(directory)
     if (value) {
@@ -213,23 +276,12 @@ export default function Layout(props: ParentProps) {
   }
   const isBusy = (directory: string) => !!state.busyWorkspaces[workspaceKey(directory)]
   const navLeave = { current: undefined as number | undefined }
-  const sortNow = () => state.sortNow
   let sizet: number | undefined
-  let sortNowInterval: ReturnType<typeof setInterval> | undefined
-  const sortNowTimeout = setTimeout(
-    () => {
-      setState("sortNow", Date.now())
-      sortNowInterval = setInterval(() => setState("sortNow", Date.now()), 60_000)
-    },
-    60_000 - (Date.now() % 60_000),
-  )
 
   onCleanup(() => {
     dialogDead = true
     dialogRun += 1
     if (navLeave.current !== undefined) clearTimeout(navLeave.current)
-    clearTimeout(sortNowTimeout)
-    if (sortNowInterval) clearInterval(sortNowInterval)
     if (sizet !== undefined) clearTimeout(sizet)
   })
 
@@ -240,11 +292,38 @@ export default function Layout(props: ParentProps) {
       if (document.visibilityState !== "hidden") return
       reset()
     }
+    const closeSettingsForSidebarPointer = (event: Event) => closeSettingsForSessionSelection(event)
     makeEventListener(window, "pointerup", stop)
     makeEventListener(window, "pointercancel", stop)
     makeEventListener(window, "blur", stop)
     makeEventListener(window, "blur", blur)
     makeEventListener(document, "visibilitychange", hide)
+    // Context menus can stop the delegated click before it reaches the sidebar.
+    // Capture the physical interaction at the document boundary so selecting a
+    // conversation always leaves a settings-only surface first.
+    document.addEventListener("pointerdown", closeSettingsForSidebarPointer, true)
+    document.addEventListener("click", closeSettingsForSidebarPointer, true)
+    window.__LFCODE__ ??= {}
+    const previous = window.__LFCODE__.settings
+    const automation = {
+      open: (value?: string) => {
+        const tab = automationSettingsTab(value)
+        if (!tab) return false
+        openSettings(tab)
+        return true
+      },
+      close: closeSettings,
+      getState: () => ({
+        open: settingsOpen(),
+        ...(settingsOpen() ? { tab: settingsTab() } : {}),
+      }),
+    }
+    window.__LFCODE__.settings = automation
+    return () => {
+      document.removeEventListener("pointerdown", closeSettingsForSidebarPointer, true)
+      document.removeEventListener("click", closeSettingsForSidebarPointer, true)
+      if (window.__LFCODE__?.settings === automation) window.__LFCODE__.settings = previous
+    }
   })
 
   const sidebarHovering = createMemo(() => false)
@@ -261,11 +340,8 @@ export default function Layout(props: ParentProps) {
     setState("autoselect", false)
   })
 
-  const editorOpen = editor.editorOpen
   const openEditor = editor.openEditor
-  const closeEditor = editor.closeEditor
-  const setEditor = editor.setEditor
-  const InlineEditor = editor.InlineEditor
+  const RenameTrigger = editor.RenameTrigger
 
   const clearSidebarHoverState = () => {
     return
@@ -287,19 +363,6 @@ export default function Layout(props: ParentProps) {
     clearSidebarHoverState()
     navigate(normalizeNavigationHref(href))
     layout.mobileSidebar.hide()
-  }
-
-  function cycleTheme(direction = 1) {
-    const ids = availableThemeEntries().map(([id]) => id)
-    if (ids.length === 0) return
-    const currentIndex = ids.indexOf(theme.themeId())
-    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + direction + ids.length) % ids.length
-    const nextThemeId = ids[nextIndex]
-    theme.setTheme(nextThemeId)
-    showToast({
-      title: language.t("toast.theme.title"),
-      description: theme.name(nextThemeId),
-    })
   }
 
   function cycleColorScheme(direction = 1) {
@@ -337,7 +400,11 @@ export default function Layout(props: ParentProps) {
     onMount(() => {
       if (!platform.checkUpdate || !platform.update || !platform.restart) return
       let toastId: number | undefined
+      let startupEnabled = false
       let startupPolled = false
+      let startupFrame: number | undefined
+      let idle: number | undefined
+      let fallback: ReturnType<typeof setTimeout> | undefined
 
       const pollUpdate = () =>
         platform.checkUpdate!().then(({ updateAvailable, version }) => {
@@ -364,12 +431,45 @@ export default function Layout(props: ParentProps) {
           })
         })
 
+      const scheduleStartupPoll = () => {
+        if (!startupEnabled || startupPolled || startupFrame !== undefined || idle !== undefined || fallback !== undefined) return
+        if (document.visibilityState !== "visible") return
+        startupFrame = requestAnimationFrame(() => {
+          startupFrame = requestAnimationFrame(() => {
+            startupFrame = undefined
+            if (document.visibilityState !== "visible") return
+            const run = () => {
+              idle = undefined
+              fallback = undefined
+              if (document.visibilityState !== "visible") return
+              startupPolled = true
+              void pollUpdate()
+            }
+            if (typeof window.requestIdleCallback === "function") {
+              idle = window.requestIdleCallback(run, { timeout: 5_000 })
+              return
+            }
+            fallback = setTimeout(run, 0)
+          })
+        })
+      }
+
       createEffect(() => {
-        if (startupPolled) return
+        if (startupEnabled) return
         if (!settings.ready()) return
+        if (!globalSync.ready) return
         if (!settings.updates.startup()) return
-        startupPolled = true
-        void pollUpdate()
+        startupEnabled = true
+        scheduleStartupPoll()
+      })
+
+      const visible = () => scheduleStartupPoll()
+      document.addEventListener("visibilitychange", visible)
+      onCleanup(() => {
+        document.removeEventListener("visibilitychange", visible)
+        if (startupFrame !== undefined) cancelAnimationFrame(startupFrame)
+        if (idle !== undefined) cancelIdleCallback(idle)
+        if (fallback !== undefined) clearTimeout(fallback)
       })
     })
 
@@ -612,7 +712,11 @@ export default function Layout(props: ParentProps) {
       workspacesEnabled: workspaceSetting(),
       currentDir: currentDir(),
       orderedDirs: workspaceIds(currentProject()),
-      expanded: store.workspaceExpanded,
+      expanded: Object.fromEntries(
+        Object.entries(store.workspaceExpanded).filter(
+          ([directory, expanded]) => expanded && activated.workspaces[workspaceKey(directory)],
+        ),
+      ),
     })
   })
 
@@ -652,6 +756,14 @@ export default function Layout(props: ParentProps) {
     return result
   })
 
+  const currentSessionMessagesReady = () => {
+    const directory = currentDir()
+    const sessionID = params.id
+    if (!directory || !sessionID) return true
+    const existing = globalSync.existing(directory, { bootstrap: false })
+    return existing?.[0].message[sessionID] !== undefined
+  }
+
   type PrefetchQueue = {
     inflight: Set<string>
     pending: string[]
@@ -668,9 +780,45 @@ export default function Layout(props: ParentProps) {
   const span = 1
   const prefetchToken = { value: 0 }
   const prefetchQueues = new Map<string, PrefetchQueue>()
+  let automaticPrefetchFrame: number | undefined
+  let automaticPrefetchIdle: number | undefined
+  let automaticPrefetchFallback: ReturnType<typeof setTimeout> | undefined
+  let automaticPrefetchSuppressedToken: number | undefined
 
   const PREFETCH_MAX_SESSIONS_PER_DIR = 6
   const prefetchedByDir = new Map<string, Set<string>>()
+
+  const cancelAutomaticPrefetch = () => {
+    if (automaticPrefetchFrame !== undefined) cancelAnimationFrame(automaticPrefetchFrame)
+    if (automaticPrefetchIdle !== undefined) cancelIdleCallback(automaticPrefetchIdle)
+    if (automaticPrefetchFallback !== undefined) clearTimeout(automaticPrefetchFallback)
+    automaticPrefetchFrame = undefined
+    automaticPrefetchIdle = undefined
+    automaticPrefetchFallback = undefined
+  }
+
+  onMount(() => {
+    const suppress = () => {
+      automaticPrefetchSuppressedToken = prefetchToken.value
+      cancelAutomaticPrefetch()
+    }
+    const hide = () => {
+      if (document.visibilityState !== "hidden") return
+      suppress()
+    }
+
+    window.addEventListener("pointerdown", suppress, { passive: true })
+    window.addEventListener("keydown", suppress)
+    window.addEventListener("wheel", suppress, { passive: true })
+    document.addEventListener("visibilitychange", hide)
+    onCleanup(() => {
+      window.removeEventListener("pointerdown", suppress)
+      window.removeEventListener("keydown", suppress)
+      window.removeEventListener("wheel", suppress)
+      document.removeEventListener("visibilitychange", hide)
+      cancelAutomaticPrefetch()
+    })
+  })
 
   const lruFor = (directory: string) => {
     const existing = prefetchedByDir.get(directory)
@@ -703,6 +851,8 @@ export default function Layout(props: ParentProps) {
     globalSDK.url
 
     prefetchToken.value += 1
+    automaticPrefetchSuppressedToken = undefined
+    cancelAutomaticPrefetch()
     clearSessionPrefetchInflight()
     prefetchQueues.clear()
   })
@@ -895,20 +1045,61 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  const queueAutomaticWarm = (sessions: Session[], index: number) => {
+    const token = prefetchToken.value
+    if (automaticPrefetchSuppressedToken === token) return
+    cancelAutomaticPrefetch()
+
+    const run = () => {
+      automaticPrefetchIdle = undefined
+      automaticPrefetchFallback = undefined
+      if (automaticPrefetchSuppressedToken === token) return
+      if (prefetchToken.value !== token) return
+      if (document.visibilityState !== "visible") return
+      // The active conversation must finish its first message sync before
+      // speculative neighbors are allowed onto the network. Explicit
+      // navigation still calls `prefetchSession` directly and is unaffected.
+      if (!currentSessionMessagesReady()) return
+
+      if (!params.id) {
+        const first = sessions[index]
+        if (first) prefetchSession(first, "high")
+      }
+      warm(sessions, index)
+    }
+
+    automaticPrefetchFrame = requestAnimationFrame(() => {
+      automaticPrefetchFrame = requestAnimationFrame(() => {
+        automaticPrefetchFrame = undefined
+        if (automaticPrefetchSuppressedToken === token) return
+        if (prefetchToken.value !== token) return
+        if (document.visibilityState !== "visible") return
+        if (typeof window.requestIdleCallback === "function") {
+          automaticPrefetchIdle = window.requestIdleCallback(run, { timeout: 3_000 })
+          return
+        }
+        automaticPrefetchFallback = setTimeout(run, 100)
+      })
+    })
+  }
+
   createEffect(() => {
     if (!sessionPrefetchEnabled) return
     const sessions = currentSessions()
     if (sessions.length === 0) return
 
-    const index = params.id ? sessions.findIndex((s) => s.id === params.id) : 0
-    if (index === -1) return
-
-    if (!params.id) {
-      const first = sessions[index]
-      if (first) prefetchSession(first, "high")
+    // A new-session screen has no active conversation to warm. Starting a
+    // historical message request here competes with the first directory
+    // bootstrap and cannot improve the visible page. Explicit session
+    // navigation still warms its target through `prefetchSession` below.
+    if (!params.id) return
+    if (!currentSessionMessagesReady()) {
+      cancelAutomaticPrefetch()
+      return
     }
-
-    warm(sessions, index)
+    const index = sessions.findIndex((s) => s.id === params.id)
+    if (index === -1) return
+    queueAutomaticWarm(sessions, index)
   })
 
   function navigateSessionByOffset(offset: number) {
@@ -1198,27 +1389,7 @@ export default function Layout(props: ParentProps) {
           })
         },
       },
-      {
-        id: "theme.cycle",
-        title: language.t("command.theme.cycle"),
-        category: language.t("command.category.theme"),
-        keybind: "mod+shift+t",
-        onSelect: () => cycleTheme(1),
-      },
     ]
-
-    for (const [id] of availableThemeEntries()) {
-      commands.push({
-        id: `theme.set.${id}`,
-        title: language.t("command.theme.set", { theme: theme.name(id) }),
-        category: language.t("command.category.theme"),
-        onSelect: () => theme.commitPreview(),
-        onHighlight: () => {
-          theme.previewTheme(id)
-          return () => theme.cancelPreview()
-        },
-      })
-    }
 
     commands.push({
       id: "theme.scheme.cycle",
@@ -1276,14 +1447,225 @@ export default function Layout(props: ParentProps) {
     })
   }
 
-  function openSettings() {
+  function openSettings(tab: SettingsTab = "general", direct = false) {
+    setSettingsTab(tab)
+    setSettingsDirect(direct)
     setSettingsOpen(true)
     layout.mobileSidebar.hide()
   }
 
   function closeSettings() {
     setSettingsOpen(false)
+    setSettingsTab("general")
+    setSettingsDirect(false)
   }
+
+  function closeSettingsForSessionSelection(event: Event) {
+    if (!settingsOpen()) return
+    const target = event.target
+    if (!(target instanceof Element)) return
+    if (!target.closest('[data-component="sidebar-session-item"]')) return
+    if (target.closest("button, input, textarea, select, [contenteditable]")) return
+    closeSettings()
+  }
+
+  function openSidebarNewSession() {
+    const project = currentProject()
+    closeSettings()
+    if (project) {
+      navigateWithSidebarReset(`/${base64Encode(project.worktree)}/session`)
+      return
+    }
+
+    void globalSDK.client.path
+      .get()
+      .then((result) => {
+        const directory = result.data?.directory
+        if (!directory) throw new Error("A global session directory was not found")
+        navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
+      })
+      .catch((error) => {
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: errorMessage(error, language.t("common.requestFailed")),
+        })
+      })
+  }
+
+  function openScheduledAutomation(input: ScheduledAutomationCreateRequest = {}) {
+    const run = ++dialogRun
+    void import("@/components/dialog-scheduled-automation").then((x) => {
+      if (dialogDead || dialogRun !== run) return
+      dialog.show(() => <x.DialogScheduledAutomation {...input} />)
+    })
+  }
+
+  const openAutomationSession = (sessionID: string) => {
+    void globalSDK.client.global.automation.session
+      .resolve({ sessionID })
+      .then((resolution) => {
+        const directory = resolution.data?.directory
+        if (!directory) throw new Error("Automation session directory was not found")
+        return globalSDK.createClient({ directory, throwOnError: true }).session.get({ sessionID })
+      })
+      .then((result) => {
+        const session = result.data
+        if (!session) throw new Error("Automation session was not found")
+        globalSync.child(session.directory, { bootstrap: true })
+        navigateWithSidebarReset(`/${base64Encode(session.directory)}/session/${session.id}`)
+      })
+      .catch((error) => {
+        showToast({
+          variant: "error",
+          title: language.t("common.requestFailed"),
+          description: errorMessage(error, language.t("common.requestFailed")),
+        })
+      })
+  }
+
+  onMount(() => {
+    const create = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : undefined
+      if (!detail || typeof detail !== "object") return
+      openScheduledAutomation(detail as ScheduledAutomationCreateRequest)
+    }
+    const open = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : undefined
+      if (!detail || typeof detail !== "object") return
+      if (!("sessionID" in detail) || typeof detail.sessionID !== "string") return
+      openAutomationSession(detail.sessionID)
+    }
+    makeEventListener(window, SCHEDULED_AUTOMATION_CREATE_EVENT, create)
+    makeEventListener(window, "lfcode:automation-create", create)
+    makeEventListener(window, "lfcode:automation-open-session", open)
+  })
+
+  const resolveGlobalUiToken = (input: UiDriverQueryInput) => {
+    if (input.token === "settings.toggle") {
+      const button = document.querySelector('[data-action="settings-toggle"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "settings.close") {
+      const button = document.querySelector('[data-action="settings-close"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "settings.dialog") {
+      const dialog = document.querySelector(".settings-dialog")
+      return dialog instanceof HTMLElement ? dialog : undefined
+    }
+    if (input.token === "settings.provider-quota") {
+      const button = document.querySelector('[data-action^="settings-provider-quota-"]:not([data-action^="settings-provider-quota-config-"])')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "settings.provider-quota-config") {
+      const button = document.querySelector('[data-action^="settings-provider-quota-config-"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "sidebar.provider-quota") {
+      const button = document.querySelector('[data-action^="sidebar-provider-quota-"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "sidebar.provider-quota.card") {
+      const card = document.querySelector('[data-component="provider-quota-card"]')
+      return card instanceof HTMLElement ? card : undefined
+    }
+    if (isSettingsTabUiDriverToken(input.token)) {
+      const button = document.querySelector(settingsTabUiDriverSelector(input.token))
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (isLanAccessSettingsUiDriverToken(input.token)) {
+      return resolveLanAccessSettingsUiDriverElement(input.token)
+    }
+    if (input.token === "project.sidebar.menu") {
+      const button = document.querySelector('[data-action="project-sidebar-menu"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "project.sidebar.new-temporary-session") {
+      const button = document.querySelector('[data-action="project-sidebar-new-temporary-session"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "project.sidebar.new-automation") {
+      const button = document.querySelector('[data-action="project-sidebar-new-automation"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (input.token === "automation.dialog") {
+      const dialog = document.querySelector('[data-action="scheduled-automation-dialog"]')
+      return dialog instanceof HTMLElement ? dialog : undefined
+    }
+    if (input.token === "automation.dialog.save") {
+      const button = document.querySelector('[data-action="scheduled-automation-save"]')
+      return button instanceof HTMLElement ? button : undefined
+    }
+    if (isAutomationDialogUiDriverToken(input.token)) {
+      return resolveAutomationDialogUiDriverElement(input.token)
+    }
+  }
+
+  const snapshotGlobalUiToken = (input: UiDriverQueryInput) => snapshotUiDriverElement(input.token, resolveGlobalUiToken(input))
+
+  const waitForGlobalUiFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+  onMount(() => {
+    const unregister = UiAutomationRegistry.register({
+      id: "layout",
+      tokens: globalUiDriverTokens,
+      query: snapshotGlobalUiToken,
+      click: async (input) => {
+        if (input.token === "settings.toggle") {
+          if (settingsOpen()) closeSettings()
+          else openSettings()
+          await waitForGlobalUiFrame()
+          return snapshotGlobalUiToken(input)
+        }
+        if (input.token === "settings.close") {
+          closeSettings()
+          await waitForGlobalUiFrame()
+          return snapshotGlobalUiToken(input)
+        }
+        if (isSettingsTabUiDriverToken(input.token)) {
+          openSettings(settingsTabForUiToken(input.token))
+          await waitForGlobalUiFrame()
+          return snapshotGlobalUiToken(input)
+        }
+        const node = resolveGlobalUiToken(input)
+        if (!node) throw new Error(`UI token was not found: ${input.token}`)
+        node.click()
+        await waitForGlobalUiFrame()
+        return snapshotGlobalUiToken(input)
+      },
+      type: async (input: UiDriverTypeInput) => {
+        if (!isAutomationDialogUiDriverToken(input.token)) {
+          throw new Error(`UI token does not support type: ${input.token}`)
+        }
+        const node = resolveGlobalUiToken(input)
+        if (!(node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement)) {
+          throw new Error(`UI token does not target a text field: ${input.token}`)
+        }
+        const current = node.value
+        node.value = input.append ? `${current}${input.text}` : input.text
+        node.dispatchEvent(new InputEvent("input", { bubbles: true, data: input.text }))
+        await waitForGlobalUiFrame()
+        return snapshotGlobalUiToken(input)
+      },
+      readText: (input) => {
+        const snapshot = snapshotGlobalUiToken(input)
+        return snapshot.value ?? snapshot.text ?? ""
+      },
+      wait: async (input) => {
+        const timeoutMs = input.timeoutMs ?? 10_000
+        const intervalMs = input.intervalMs ?? 120
+        const startedAt = Date.now()
+        while (Date.now() - startedAt <= timeoutMs) {
+          const snapshot = snapshotGlobalUiToken(input)
+          if (snapshot.found && (input.visible === undefined || snapshot.visible === input.visible)) return snapshot
+          await new Promise((resolve) => setTimeout(resolve, intervalMs))
+        }
+        return snapshotGlobalUiToken(input)
+      },
+    })
+    onCleanup(unregister)
+  })
 
   function projectRoot(directory: string) {
     const [child] = globalSync.child(directory, { bootstrap: false })
@@ -1533,6 +1915,9 @@ export default function Layout(props: ParentProps) {
       if (detail?.url && /^\/[^/]/.test(detail.url)) return
       const url = normalizeBrowserRequestURL(detail?.url)
       if (!url) return
+      // Tool-originated navigation is claimed by the active session and must
+      // never materialize as a user-facing review/sidebar page.
+      if (detail?.reason === "tool") return
       if (detail?.sessionKey) {
         const targetSessionKey = normalizeSessionStorageKey(detail.sessionKey)
         if (targetSessionKey === activeSessionKey()) return
@@ -1685,10 +2070,60 @@ export default function Layout(props: ParentProps) {
   const startProjectRename = (project: LocalProject) => {
     layout.sidebar.open()
     setStore("projectExpanded", workspaceKey(project.worktree), true)
-    openEditor(projectEditorID(project), displayName(project))
+    openEditor(projectEditorID(project), displayName(project), (next) => renameProject(project, next))
   }
 
   const canOpenProjectPath = () => platform.platform === "desktop" && !!platform.openPath && server.isLocal() === true
+
+  const canCreateTemporarySession = () => platform.platform === "desktop" && server.isLocal() === true
+
+  const scheduledAutomationProjectID = (project: LocalProject) =>
+    project.id ??
+    globalSync.data.project.find((item) => workspaceKey(item.worktree) === workspaceKey(project.worktree))?.id
+
+  const canCreateScheduledAutomation = (project: LocalProject) => {
+    const projectID = scheduledAutomationProjectID(project)
+    return !!projectID && projectID !== "global"
+  }
+
+  const createScheduledAutomation = (project: LocalProject) => {
+    const projectID = scheduledAutomationProjectID(project)
+    if (!projectID || projectID === "global") {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+        description: language.t("settings.automation.error.projectNotReady"),
+      })
+      return
+    }
+    requestScheduledAutomation({ target: { kind: "project", projectID } })
+  }
+
+  const createTemporarySession = async (project: LocalProject) => {
+    if (!canCreateTemporarySession()) return
+    const created = await globalSDK
+      .createClient({ directory: project.worktree, throwOnError: true })
+      .session.create({ temporary: true })
+      .then((result) => result.data ?? undefined)
+      .catch((error) => {
+        showToast({
+          title: language.t("common.requestFailed"),
+          description: errorMessage(error, language.t("common.requestFailed")),
+        })
+        return undefined
+      })
+    if (!created) return
+
+    layout.projects.open(project.worktree)
+    setStore("projectExpanded", workspaceKey(project.worktree), true)
+    setStore("lastProjectSession", project.worktree, {
+      directory: created.directory,
+      id: created.id,
+      at: Date.now(),
+    })
+    globalSync.child(created.directory, { bootstrap: false })
+    navigateWithSidebarReset(`/${base64Encode(created.directory)}/session/${created.id}`)
+  }
 
   const openProjectInExplorer = (project: LocalProject) => {
     if (!canOpenProjectPath()) return
@@ -2316,20 +2751,28 @@ export default function Layout(props: ParentProps) {
     sidebarExpanded,
     sidebarHovering,
     clearHoverProjectSoon,
+    onSelectSession: closeSettings,
     prefetchSession,
     renameSession,
     archiveSession,
     showDeleteSessionDialog: (session) => dialog.show(() => <DialogDeleteSession session={session} />),
     workspaceName,
     renameWorkspace,
-    editorOpen,
     openEditor,
-    closeEditor,
-    setEditor,
-    InlineEditor,
+    RenameTrigger,
     isBusy,
-    workspaceExpanded: (directory, local) => store.workspaceExpanded[directory] ?? local,
-    setWorkspaceExpanded: (directory, value) => setStore("workspaceExpanded", directory, value),
+    workspaceExpanded: (directory, local) => {
+      const key = workspaceKey(directory)
+      if (activated.workspaces[key]) return store.workspaceExpanded[key] ?? false
+      if (workspaceKey(currentDir()) === key) return store.workspaceExpanded[key] ?? local
+      return false
+    },
+    workspaceExpansionActivated: (directory) => !!activated.workspaces[workspaceKey(directory)],
+    setWorkspaceExpanded: (directory, value) => {
+      const key = workspaceKey(directory)
+      if (value) setActivated("workspaces", key, true)
+      setStore("workspaceExpanded", key, value)
+    },
     showResetWorkspaceDialog: (root, directory) =>
       dialog.show(() => <DialogResetWorkspace root={root} directory={directory} />),
     showDeleteWorkspaceDialog: (root, directory) =>
@@ -2347,13 +2790,34 @@ export default function Layout(props: ParentProps) {
     sidebarHovering,
     navigateToProject,
     openSidebar: () => layout.sidebar.open(),
-    toggleExpanded: (directory: string) => setStore("projectExpanded", workspaceKey(directory), (current) => !current),
-    isExpanded: (directory: string) => {
-      const persisted = store.projectExpanded[workspaceKey(directory)]
-      if (persisted !== undefined) return persisted
-      return workspaceKey(directory) === workspaceKey(currentProject()?.worktree ?? "")
+    toggleExpanded: (directory: string) => {
+      const key = workspaceKey(directory)
+      const currentProjectKey = workspaceKey(currentProject()?.worktree ?? "")
+      const wasActivated = !!activated.projects[key]
+      setActivated("projects", key, true)
+      if (!wasActivated && key !== currentProjectKey) {
+        setStore("projectExpanded", key, true)
+        return
+      }
+      const current = store.projectExpanded[key] ?? (key === currentProjectKey)
+      setStore("projectExpanded", key, !current)
     },
-    setExpanded: (directory: string, value: boolean) => setStore("projectExpanded", workspaceKey(directory), value),
+    isExpanded: (directory: string) => {
+      const key = workspaceKey(directory)
+      const currentProjectKey = workspaceKey(currentProject()?.worktree ?? "")
+      if (!activated.projects[key]) {
+        if (key !== currentProjectKey) return false
+        return store.projectExpanded[key] ?? true
+      }
+      if (store.projectExpanded[key] !== undefined) return store.projectExpanded[key]
+      return key === currentProjectKey
+    },
+    projectExpansionActivated: (directory: string) => !!activated.projects[workspaceKey(directory)],
+    setExpanded: (directory: string, value: boolean) => {
+      const key = workspaceKey(directory)
+      if (value) setActivated("projects", key, true)
+      setStore("projectExpanded", key, value)
+    },
     isProjectPinned: (project: LocalProject) => layout.projects.isPinned(project.worktree),
     toggleProjectPinned: (project: LocalProject) => layout.projects.togglePinned(project.worktree),
     closeProject,
@@ -2366,23 +2830,26 @@ export default function Layout(props: ParentProps) {
     projectEditorID,
     renameProject,
     openProjectInExplorer,
+    canCreateScheduledAutomation,
+    createScheduledAutomation,
+    canCreateTemporarySession,
+    createTemporarySession,
     archiveProjectSessions,
     clearProjectNotifications,
     canOpenProjectPath,
-    editorOpen,
-    InlineEditor,
+    RenameTrigger,
     sessionProps: {
       navList: currentSessions,
       sidebarExpanded,
       sidebarHovering,
       clearHoverProjectSoon,
+      onSelect: closeSettings,
       prefetchSession,
       renameSession,
       archiveSession,
       showDeleteSessionDialog: (session: Session) => dialog.show(() => <DialogDeleteSession session={session} />),
-      editorOpen,
       openEditor,
-      InlineEditor,
+      RenameTrigger,
     },
   }
 
@@ -2472,13 +2939,13 @@ export default function Layout(props: ParentProps) {
               <div class="shrink-0 pl-1 py-1">
                 <div class="group/project flex items-start justify-between gap-2 py-2 pl-2 pr-0">
                   <div class="flex flex-col min-w-0">
-                    <InlineEditor
+                    <RenameTrigger
                       id={`project:${projectId()}`}
                       value={projectName}
                       onSave={(next) => {
                         const item = project()
                         if (!item) return
-                        void renameProject(item, next)
+                        return renameProject(item, next)
                       }}
                       class="text-14-medium text-text-strong truncate"
                       displayClass="text-14-medium text-text-strong truncate"
@@ -2594,7 +3061,6 @@ export default function Layout(props: ParentProps) {
                         <LocalWorkspace
                           ctx={workspaceSidebarCtx}
                           project={project()}
-                          sortNow={sortNow}
                           mobile={panelProps.mobile}
                         />
                       </div>
@@ -2638,7 +3104,6 @@ export default function Layout(props: ParentProps) {
                                   ctx={workspaceSidebarCtx}
                                   directory={directory}
                                   project={project()}
-                                  sortNow={sortNow}
                                   mobile={panelProps.mobile}
                                 />
                               )}
@@ -2700,9 +3165,52 @@ export default function Layout(props: ParentProps) {
         pinned: (project) => layout.projects.isPinned(project.worktree),
       },
     )
+  const sidebarQuickActions = (): SidebarQuickAction[] => [
+    {
+      id: "new-session",
+      icon: "new-session",
+      label: () => language.t("sidebar.quickAction.newSession"),
+      active: () => !settingsOpen() && !params.id,
+      onSelect: openSidebarNewSession,
+    },
+    {
+      id: "scheduled",
+      icon: "status",
+      label: () => language.t("sidebar.quickAction.scheduled"),
+      active: () => settingsOpen() && settingsTab() === "automation",
+      onSelect: () => openSettings("automation", true),
+    },
+    {
+      id: "plugins",
+      icon: "mcp",
+      label: () => language.t("settings.plugins.title"),
+      active: () => settingsOpen() && settingsTab() === "plugins",
+      onSelect: () => openSettings("plugins", true),
+    },
+  ]
   const sidebarRail = () => (
     <div class="flex h-full w-full flex-col items-center justify-between px-2 py-3">
       <div class="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto no-scrollbar">
+        <For each={sidebarQuickActions()}>
+          {(action) => (
+            <Tooltip placement="right" value={action.label()}>
+              <IconButton
+                icon={action.icon}
+                variant="ghost"
+                size="large"
+                data-action={`sidebar-quick-${action.id}`}
+                onClick={action.onSelect}
+                aria-label={action.label()}
+                aria-current={action.active?.() ? "page" : undefined}
+                classList={{
+                  "bg-surface-base-active text-icon-strong": action.active?.() === true,
+                  "text-icon-weak hover:bg-surface-raised-base-hover hover:text-icon-strong": action.active?.() !== true,
+                }}
+              />
+            </Tooltip>
+          )}
+        </For>
+        <div class="h-px w-full bg-border-weak-base" />
         <Tooltip placement="right" value={language.t("command.project.open")}>
           <IconButton
             icon="plus"
@@ -2739,6 +3247,7 @@ export default function Layout(props: ParentProps) {
         </For>
       </div>
       <div class="flex w-full flex-col items-center gap-2 border-t border-border-weak-base pt-3">
+        <Show when={props.quotaAction?.()}>{(action) => action()}</Show>
         <Tooltip
           placement="right"
           value={settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings")}
@@ -2774,6 +3283,7 @@ export default function Layout(props: ParentProps) {
   const sidebarContent = (mobile?: boolean) => (
     <SidebarContent
       mobile={mobile}
+      quickActions={sidebarQuickActions}
       sections={() =>
         projects().length === 0
           ? [
@@ -2792,12 +3302,13 @@ export default function Layout(props: ParentProps) {
               </div>,
             ]
           : projects().map((project) => (
-              <ProjectSection ctx={projectSidebarCtx} project={project} sortNow={sortNow} mobile={mobile} />
+              <ProjectSection ctx={projectSidebarCtx} project={project} mobile={mobile} />
             ))
       }
       openProjectLabel={language.t("command.project.open")}
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
+      quotaAction={props.quotaAction}
       settingsOpen={settingsOpen}
       settingsLabel={() => (settingsOpen() ? language.t("common.goBack") : language.t("sidebar.settings"))}
       settingsKeybind={() => (settingsOpen() ? undefined : command.keybind("settings.open"))}
@@ -2811,7 +3322,7 @@ export default function Layout(props: ParentProps) {
   return (
     <div class="relative bg-background-base flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
       {autoselecting() ?? ""}
-      <Titlebar />
+      <Titlebar settingsOpen={settingsOpen} />
       <div class="flex-1 min-h-0 min-w-0 flex">
         <div class="flex-1 min-h-0 relative">
           <div class="size-full relative overflow-x-hidden">
@@ -2819,11 +3330,12 @@ export default function Layout(props: ParentProps) {
               aria-label={language.t("sidebar.nav.projectsAndSessions")}
               data-component="sidebar-nav-desktop"
               classList={{
-                "hidden xl:block": true,
+                "hidden lg:block": true,
                 "absolute inset-y-0 left-0": true,
                 "z-10": true,
               }}
               style={{ width: `${desktopSidebarWidth()}px` }}
+              onClick={closeSettingsForSessionSelection}
               ref={(el) => {
                 setState("nav", el)
               }}
@@ -2837,7 +3349,7 @@ export default function Layout(props: ParentProps) {
 
             <Show when={layout.sidebar.opened()}>
               <div
-                class="hidden xl:block absolute inset-y-0 z-30 w-0 overflow-visible"
+                class="hidden lg:block absolute inset-y-0 z-30 w-0 overflow-visible"
                 style={{ left: `${side()}px` }}
                 onPointerDown={() => setState("sizing", true)}
               >
@@ -2857,14 +3369,15 @@ export default function Layout(props: ParentProps) {
             </Show>
 
             <div
-              class="hidden xl:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
+              class="hidden lg:block pointer-events-none absolute top-0 right-0 z-0 border-t border-border-weaker-base"
               style={{ left: "calc(4rem + 12px)" }}
             />
 
-            <div class="xl:hidden">
+            <div class="lg:hidden">
               <div
+                data-component="sidebar-mobile-backdrop"
                 classList={{
-                  "fixed inset-x-0 top-10 bottom-0 z-40 transition-opacity duration-200": true,
+                  "fixed inset-x-0 top-10 bottom-0 z-40 bg-background-inverse/20 transition-opacity duration-200": true,
                   "opacity-100 pointer-events-auto": layout.mobileSidebar.opened(),
                   "opacity-0 pointer-events-none": !layout.mobileSidebar.opened(),
                 }}
@@ -2880,16 +3393,19 @@ export default function Layout(props: ParentProps) {
                   "translate-x-0": layout.mobileSidebar.opened(),
                   "-translate-x-full": !layout.mobileSidebar.opened(),
                 }}
-                onClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  closeSettingsForSessionSelection(e)
+                  e.stopPropagation()
+                }}
               >
-                {sidebarContent(true)}
+                <Show when={layout.mobileSidebar.opened()}>{sidebarContent(true)}</Show>
               </nav>
             </div>
 
             <div
               classList={{
                 "absolute inset-0": true,
-                "xl:inset-y-0 xl:right-0 xl:left-[var(--main-left)]": true,
+                "lg:inset-y-0 lg:right-0 lg:left-[var(--main-left)]": true,
                 "z-20": true,
                 "transition-[left] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[left] motion-reduce:transition-none":
                   !state.sizing,
@@ -2900,8 +3416,8 @@ export default function Layout(props: ParentProps) {
             >
               <main
                 classList={{
-                  "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base xl:border-l": true,
-                  "xl:rounded-tl-[12px]": !settingsOpen(),
+                  "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base lg:border-l": true,
+                  "lg:rounded-tl-[12px]": !settingsOpen(),
                 }}
               >
                 <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
@@ -2910,11 +3426,6 @@ export default function Layout(props: ParentProps) {
                   </div>
                 </Show>
               </main>
-              <Show when={settingsOpen()}>
-                <div class="absolute inset-0 z-30 bg-background-base">
-                  <SettingsView directory={currentDir() || currentProject()?.worktree} />
-                </div>
-              </Show>
             </div>
 
             <Show when={import.meta.env.DEV}>
@@ -2923,6 +3434,20 @@ export default function Layout(props: ParentProps) {
           </div>
         </div>
       </div>
+      <Show when={settingsOpen()}>
+        <section
+          class="absolute inset-x-0 top-10 bottom-0 z-[60] bg-background-base"
+          data-component="settings-full-page"
+          aria-label={language.t("sidebar.settings")}
+        >
+          <SettingsView
+            defaultValue={settingsTab()}
+            directory={currentDir() || currentProject()?.worktree}
+            onClose={closeSettings}
+            showNavigation={!settingsDirect()}
+          />
+        </section>
+      </Show>
       <Toast.Region />
     </div>
   )

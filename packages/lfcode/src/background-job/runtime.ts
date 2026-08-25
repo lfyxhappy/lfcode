@@ -42,15 +42,23 @@ type ShellBackgroundRecovery = {
   childPid?: number
 }
 
+type BackgroundJobFile = {
+  name: string
+  content: string
+}
+
 type StartInput = {
   sessionID: SessionID
   title: string
-  command: string
+  command?: string
+  argv?: string[]
   cwd: string
   env: Record<string, string>
   shell: string
   shellName: string
-  source: "shell" | "background_job"
+  source: string
+  files?: BackgroundJobFile[]
+  remindAfterMs?: number
   sourceMessageID?: MessageID
   sourceToolCallID?: string
   metadata?: Record<string, unknown>
@@ -71,6 +79,7 @@ type LiveJob = {
   sessionID: SessionID
   deferred: Deferred.Deferred<BackgroundJobSummary>
   timer: ReturnType<typeof setInterval>
+  reminderTimer?: ReturnType<typeof setTimeout>
   settling: boolean
 }
 
@@ -175,6 +184,16 @@ function wrapperSource() {
     "",
     "function launch() {",
     '  const lower = String(payload.shellName || "").toLowerCase();',
+    '  if (Array.isArray(payload.argv) && payload.argv.length > 0) {',
+    '    const argv = payload.argv.map((item) => String(item).replaceAll("{jobRoot}", path.dirname(payload.payloadPath)));',
+    '    return spawn(argv[0], argv.slice(1), {',
+    "      cwd: payload.cwd,",
+    "      env: payload.env,",
+    '      stdio: ["ignore", outFd, errFd],',
+    '      detached: process.platform !== "win32",',
+    "      windowsHide: true,",
+    "    });",
+    "  }",
     '  if (process.platform === "win32" && (lower === "pwsh" || lower === "powershell")) {',
     '    const command = "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); $OutputEncoding = [Console]::OutputEncoding; & { " + payload.command + " }";',
     '    return spawn(payload.shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {',
@@ -388,29 +407,33 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
       })
     }
 
-    const notifyTerminal = (job: BackgroundJobSummary) =>
-      Effect.gen(function* () {
-        const inbox = inboxServiceRef.current
-        if (!inbox) return
-        yield* inbox
-          .send({
-            receiverSessionID: job.sessionID,
-            receiverActorID: "main",
-            senderSessionID: job.sessionID,
-            senderActorID: "background_job",
-            type: "actor_notification",
-            content: `Background shell job ${job.status}. job_id: ${job.id}\ntitle: ${job.title}`,
-          })
-          .pipe(Effect.ignore)
-      })
-
     const settleLive = async (jobID: string, terminal: BackgroundJobSummary) => {
       const current = live.get(jobID)
       if (!current) return
       clearInterval(current.timer)
+      if (current.reminderTimer) clearTimeout(current.reminderTimer)
       live.delete(jobID)
       await Effect.runPromise(Deferred.succeed(current.deferred, terminal).pipe(Effect.ignore))
-      await Effect.runPromise(notifyTerminal(terminal).pipe(Effect.ignore))
+    }
+
+    const scheduleReminder = (job: BackgroundJobSummary, remindAfterMs?: number) => {
+      if (!remindAfterMs || remindAfterMs <= 0) return undefined
+      return setTimeout(() => {
+        const latest = BackgroundJobPersistence.load(job.id)
+        if (!latest || latest.status !== "running") return
+        const inbox = inboxServiceRef.current
+        if (!inbox) return
+        void Effect.runPromise(
+          inbox.send({
+            receiverSessionID: latest.sessionID,
+            receiverActorID: "main",
+            senderSessionID: latest.sessionID,
+            senderActorID: "shell_process",
+            type: "actor_notification",
+            content: `Shell process reminder: job_id ${latest.id} is still running after ${remindAfterMs}ms. It was not terminated. Use shell_process only when inspection is needed; cancel only when the user explicitly asks to stop it.`,
+          }).pipe(Effect.ignore),
+        )
+      }, remindAfterMs)
     }
 
     const recordTerminal = async (
@@ -432,6 +455,31 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           pid: null,
         }) ?? job
       await settleLive(job.id, next)
+      const inbox = inboxServiceRef.current
+      if (inbox?.sendCompletion) {
+        void Effect.runPromise(
+          inbox
+            .sendCompletion({
+              receiverSessionID: next.sessionID,
+              receiverActorID: "main",
+              senderSessionID: next.sessionID,
+              senderActorID: "shell_process",
+              notification: {
+                source: "shell-job",
+                id: next.id,
+                status: input.status,
+                summary:
+                  next.status === "completed"
+                    ? `${next.title} completed${next.exitCode === undefined ? "" : ` (exit ${next.exitCode})`}`
+                    : next.error ?? `${next.title} ${next.status}`,
+                finishedAt: next.completedAt ?? Date.now(),
+                collectAction: `Use background_job get ${next.id} or logs ${next.id} when the output is needed.`,
+                dedupeKey: `shell-job:${next.id}:${next.status}:${next.completedAt ?? "pending"}`,
+              },
+            })
+            .pipe(Effect.ignore),
+        )
+      }
       return next
     }
 
@@ -502,7 +550,7 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
       }
     }
 
-    const attach = async (job: BackgroundJobSummary) => {
+    const attach = async (job: BackgroundJobSummary, remindAfterMs?: number) => {
       const existing = live.get(job.id)
       if (existing) return existing
       const deferred = await Effect.runPromise(Deferred.make<BackgroundJobSummary>())
@@ -515,6 +563,7 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
         deferred,
         timer,
         settling: false,
+        reminderTimer: scheduleReminder(job, remindAfterMs),
       }
       live.set(job.id, item)
       void pollJob(job.id)
@@ -576,6 +625,17 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
       const stderrPath = path.join(rootDir, "stderr.log")
       const manifestPath = path.join(rootDir, "manifest.json")
       const pidPath = path.join(rootDir, "child-pid.json")
+      yield* Effect.promise(() =>
+        Promise.all(
+          (input.files ?? []).map((file) => {
+            const target = path.join(rootDir, file.name)
+            if (!path.resolve(target).startsWith(path.resolve(rootDir) + path.sep)) {
+              throw new Error(`Background job file escapes its job directory: ${file.name}`)
+            }
+            return mkdir(path.dirname(target), { recursive: true }).then(() => writeFile(target, file.content, "utf8"))
+          }),
+        ),
+      )
       const recovery: ShellBackgroundRecovery = {
         version: 1,
         shell: input.shell,
@@ -603,6 +663,8 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
                 shell: input.shell,
                 shellName: input.shellName,
                 command: input.command,
+                argv: input.argv,
+                payloadPath,
                 cwd: input.cwd,
                 env: input.env,
                 stdoutPath,
@@ -647,13 +709,14 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
         title: input.title,
         cwd: input.cwd,
         payload: {
-          command: input.command,
+          ...(input.command ? { command: input.command } : {}),
+          ...(input.argv ? { argv: input.argv } : {}),
           shell: input.shell,
           shellName: input.shellName,
         },
         env: input.env,
         ...(input.sourceMessageID ? { sourceMessageID: input.sourceMessageID } : {}),
-        ...(input.sourceToolCallID ? { sourceToolCallID: input.sourceToolCallID } : {}),
+          ...(input.sourceToolCallID ? { sourceToolCallID: input.sourceToolCallID } : {}),
         recovery,
         metadata: {
           ...input.metadata,
@@ -667,6 +730,10 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
             cwd: input.cwd,
             detached: true,
             stdio: "ignore",
+            // Desktop's bundled Node runtime is Electron itself. Without this
+            // flag Windows launches another GUI process instead of the wrapper,
+            // leaving jobs forever at "running" without logs or a manifest.
+            env: process.platform === "win32" ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env,
             windowsHide: true,
           }),
         catch: (error) => error,
@@ -693,7 +760,7 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           recovery,
           pid: wrapper.pid,
       }) ?? job
-      yield* Effect.promise(() => attach(next))
+      yield* Effect.promise(() => attach(next, input.remindAfterMs))
       CapabilityPersistence.completeAudit({ id: audit.id, result: "background job started" })
       return next
     })

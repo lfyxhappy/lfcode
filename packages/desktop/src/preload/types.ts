@@ -26,8 +26,34 @@ export type TitlebarTheme = {
   mode: "light" | "dark"
 }
 
+export type WindowVisibility = boolean
+
 export type WindowConfig = {
   updaterEnabled: boolean
+}
+
+export type MobileAccessStatus = {
+  enabled: boolean
+  hostID?: string
+  port?: number
+  spkiSha256?: string
+  endpoints?: string[]
+  certificateStale?: boolean
+  pendingEndpoints?: string[]
+  certificateUpdated?: { at: number; reason: "network_changed" | "manual_reset" }
+}
+
+export type LanAccessDevice = {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  revokedAt?: number
+}
+
+export type LanBrowserPairing = {
+  url: string
+  expiresAt: number
 }
 
 export type BrowserGuestTarget = {
@@ -39,6 +65,17 @@ export type BrowserGuestTarget = {
 
 export type BrowserGuestReadyTarget = BrowserGuestTarget & {
   guestID: number
+}
+
+export type BrowserStateSync = {
+  sessionKey: string
+  tabID: string
+  url?: string
+  input?: string
+  title?: string
+  loading?: boolean
+  error?: string
+  closed?: true
 }
 
 export type BrowserSiteDataResult = {
@@ -65,10 +102,12 @@ export type BrowserWindowOpenRequest = {
   sessionKey?: string
   sessionID?: string
   url: string
+  title?: string
   reason?: "human" | "tool"
+  presentation?: "headless" | "detached" | "sidebar"
 }
 
-export type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
+export type DetachedSidePanelKind = "file" | "browser" | "review"
 
 export type DetachedSidePanelRecord = {
   detachedWindowID: string
@@ -126,6 +165,14 @@ export type ElectronAPI = {
   setWslConfig: (config: WslConfig) => Promise<void>
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>
+  getMobileAccessStatus: () => Promise<MobileAccessStatus>
+  enableMobileAccess: () => Promise<MobileAccessStatus>
+  disableMobileAccess: () => Promise<MobileAccessStatus>
+  applyMobileAccessNetworkChange: () => Promise<MobileAccessStatus>
+  revokeMobileDevice: (deviceID: string) => Promise<void>
+  listMobileDevices: () => Promise<LanAccessDevice[]>
+  createLanBrowserPairing: () => Promise<LanBrowserPairing>
+  resetMobileAccessCertificate: () => Promise<void>
   parseMarkdownCommand: (markdown: string) => Promise<string>
   checkAppExists: (appName: string) => Promise<boolean>
   wslPath: (path: string, mode: "windows" | "linux" | null) => Promise<string>
@@ -143,6 +190,7 @@ export type ElectronAPI = {
     tab: string
     kind: DetachedSidePanelKind
     title?: string
+    background?: boolean
   }) => Promise<void>
   redockDetachedSidePanelWindow: (
     detachedWindowID: string,
@@ -159,12 +207,15 @@ export type ElectronAPI = {
 
   getWindowCount: () => Promise<number>
   getWindowID: () => Promise<number | null>
+  getWindowVisibility: () => Promise<WindowVisibility>
   getRendererMemoryInfo: () => Promise<{ private: number; shared: number; residentSet: number }>
   onSqliteMigrationProgress: (cb: (progress: SqliteMigrationProgress) => void) => () => void
   onMenuCommand: (cb: (id: string) => void) => () => void
   onDeepLink: (cb: (urls: string[]) => void) => () => void
+  onWindowVisibility: (cb: (visible: WindowVisibility) => void) => () => void
   onBrowserWindowOpen: (cb: (detail: BrowserWindowOpenRequest) => void) => () => void
   onBrowserPasswordCapture: (cb: (event: BrowserPasswordCapturePrompt) => void) => () => void
+  onBrowserState: (cb: (event: BrowserStateSync) => void) => () => void
   onDetachedSidePanelEvent: (cb: (event: DetachedSidePanelEvent) => void) => () => void
   onNativeFileTransfer: (cb: (transfer: NativeFileTransfer) => void) => () => void
   automationEvent: (payload: AutomationEventPayload) => void
@@ -207,7 +258,9 @@ export type ElectronAPI = {
   markBrowserGuestReady: (target: BrowserGuestReadyTarget) => Promise<void>
   unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void>
   setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void>
+  reportBrowserState: (input: BrowserStateSync) => Promise<void>
   openPath: (path: string, app?: string) => Promise<void>
+  statPath: (path: string) => Promise<{ exists: boolean; kind: "file" | "directory" | "unknown" }>
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
   getPathForFile: (file: File) => string
   readDroppedImage: (path: string) => Promise<{ dataUrl: string; filename: string; mime: string } | null>

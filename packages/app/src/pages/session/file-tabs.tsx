@@ -946,7 +946,7 @@ export function FileTabContent(props: { tab: string }) {
   const toolbarButtonClass = "size-8 min-w-8 rounded-lg p-0"
   const toolbarIconClass = "size-4"
   const toolbarMenuContentClass =
-    "min-w-[220px] rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl"
+    "min-w-[220px] rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md"
   const toolbarMenuItemClass = "rounded-lg"
   const renderToolbarMenuLabel = (input: { icon: IconProps["name"]; label: string }) => (
     <div class="flex items-center gap-2.5">
@@ -1040,7 +1040,7 @@ export function FileTabContent(props: { tab: string }) {
                   <Icon name={currentModeIcon()} class={toolbarIconClass} />
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
-                  <DropdownMenu.Content class="min-w-[220px] rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl">
+                  <DropdownMenu.Content class="min-w-[220px] rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md">
                     <DropdownMenu.Item class="rounded-lg" onSelect={() => updateEditor({ mode: "edit" })}>
                       {renderToolbarMenuLabel({ icon: "edit", label: language.t("common.edit") })}
                     </DropdownMenu.Item>

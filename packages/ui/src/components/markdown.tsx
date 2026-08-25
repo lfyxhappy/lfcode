@@ -9,6 +9,7 @@ import { stream } from "./markdown-stream"
 import {
   getPlainTextPathMatch,
   inferFileReferenceKind,
+  isAbsoluteFileReferencePath,
   isLocalFileHref,
   isPathLike,
   looksLikeCommand,
@@ -18,6 +19,14 @@ import { getFileReferenceEventElement } from "./markdown-file-reference"
 import { ContextMenu } from "./context-menu"
 import { AppIcon } from "./app-icon"
 import { sanitizeMarkdownHtml } from "./markdown-sanitize"
+import {
+  getFileReferenceCategory,
+  isCardableFileReference,
+  type FileReferenceValidation,
+} from "./markdown-file-reference-card"
+
+export { sanitizeMarkdownHtml } from "./markdown-sanitize"
+import { extractMarkdownCodeLanguages } from "./markdown-code-languages"
 import {
   type HtmlComponentContext,
   type HtmlComponentEventDetail,
@@ -34,8 +43,10 @@ type FileReferenceOptions = {
   enabled: boolean
   allowContextMenu?: boolean
   resolveRelativePath?: (value: string) => string | undefined
+  validatePath?: (path: string) => Promise<FileReferenceValidation>
   onPreviewPath?: (path: string) => void
   onOpenDefaultApp?: (path: string) => void
+  onOpenInApp?: (path: string) => void
   onOpenFolder?: (path: string) => void
   onOpenWith?: (path: string, app: string) => void
   onCopyPath?: (path: string) => void
@@ -45,6 +56,9 @@ type FileReferenceOptions = {
 
 const max = 200
 const cache = new Map<string, Entry>()
+const fileReferenceValidationCache = new Map<string, { result: FileReferenceValidation; expires: number }>()
+const fileReferenceValidationInflight = new Map<string, Promise<FileReferenceValidation>>()
+const fileReferenceValidationTtl = 3_000
 
 const iconPaths = {
   copy: '<path d="M6.2513 6.24935V2.91602H17.0846V13.7493H13.7513M13.7513 6.24935V17.0827H2.91797V6.24935H13.7513Z" stroke="currentColor" stroke-linecap="round"/>',
@@ -125,25 +139,32 @@ function setCopyState(button: HTMLButtonElement, labels: CopyLabels, copied: boo
   button.setAttribute("data-tooltip", labels.copy)
 }
 
-function ensureCodeWrapper(block: HTMLPreElement, labels: CopyLabels) {
+function ensureCodeWrapper(block: HTMLPreElement, labels: CopyLabels, languageHint?: string) {
   const parent = block.parentElement
   if (!parent) return
-  const wrapped = parent.getAttribute("data-component") === "markdown-code"
-  if (!wrapped) {
-    const wrapper = document.createElement("div")
+  const wrapper = parent.getAttribute("data-component") === "markdown-code" ? parent : document.createElement("div")
+  if (wrapper !== parent) {
     wrapper.setAttribute("data-component", "markdown-code")
     parent.replaceChild(wrapper, block)
     wrapper.appendChild(block)
-    wrapper.appendChild(createCopyButton(labels))
-    return
   }
 
-  const buttons = Array.from(parent.querySelectorAll('[data-slot="markdown-copy-button"]')).filter(
+  const code = block.querySelector("code")
+  const language = code?.className.match(/(?:^|\s)language-([^\s]+)/)?.[1] ?? languageHint ?? "text"
+  let languageLabel = wrapper.querySelector('[data-slot="markdown-code-language"]')
+  if (!(languageLabel instanceof HTMLSpanElement)) {
+    languageLabel = document.createElement("span")
+    languageLabel.setAttribute("data-slot", "markdown-code-language")
+    wrapper.insertBefore(languageLabel, block)
+  }
+  languageLabel.textContent = language
+
+  const buttons = Array.from(wrapper.querySelectorAll('[data-slot="markdown-copy-button"]')).filter(
     (el): el is HTMLButtonElement => el instanceof HTMLButtonElement,
   )
 
   if (buttons.length === 0) {
-    parent.appendChild(createCopyButton(labels))
+    wrapper.appendChild(createCopyButton(labels))
     return
   }
 
@@ -181,6 +202,50 @@ function markCodeLinks(root: HTMLDivElement) {
   }
 }
 
+function pathFilename(value: string) {
+  return value.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || value
+}
+
+function decorateFileReference(link: HTMLAnchorElement, path: string, display: string) {
+  link.setAttribute("data-kind", "file-ref")
+  link.setAttribute("data-path", path)
+  link.setAttribute("data-display", display)
+  link.classList.add("file-reference")
+  link.removeAttribute("target")
+  link.removeAttribute("rel")
+  link.href = "#"
+
+  const cached = getFileReferenceValidation(path)
+  if (!cached?.exists) return
+  applyFileReferenceCard(link, cached)
+}
+
+function getFileReferenceValidation(path: string) {
+  const entry = fileReferenceValidationCache.get(path)
+  if (!entry || entry.expires < Date.now()) return
+  return entry.result
+}
+
+function rememberFileReferenceValidation(path: string, result: FileReferenceValidation) {
+  fileReferenceValidationCache.delete(path)
+  fileReferenceValidationCache.set(path, { result, expires: Date.now() + fileReferenceValidationTtl })
+  if (fileReferenceValidationCache.size <= max) return
+  const first = fileReferenceValidationCache.keys().next().value
+  if (first) fileReferenceValidationCache.delete(first)
+}
+
+function applyFileReferenceCard(link: HTMLAnchorElement, result: FileReferenceValidation) {
+  const path = link.dataset.path
+  if (!path || !isCardableFileReference(path, result)) return
+  if (result.kind !== "file" && result.kind !== "directory") return
+  link.classList.add("file-reference-card")
+  link.setAttribute("data-reference-kind", result.kind)
+  link.setAttribute("data-file-category", getFileReferenceCategory(path, result.kind))
+  link.textContent = pathFilename(path)
+  link.setAttribute("title", path)
+  link.setAttribute("aria-label", path)
+}
+
 function decorateMarkdownLinks(root: HTMLDivElement, options: FileReferenceOptions) {
   const links = Array.from(root.querySelectorAll("a"))
   for (const link of links) {
@@ -189,13 +254,7 @@ function decorateMarkdownLinks(root: HTMLDivElement, options: FileReferenceOptio
     const value = stripTrailingPathPunctuation(href)
     const resolved = options.resolveRelativePath?.(value) ?? value
     if (!resolved) continue
-    link.setAttribute("data-kind", "file-ref")
-    link.setAttribute("data-path", resolved)
-    link.setAttribute("data-display", link.textContent?.trim() || value)
-    link.classList.add("file-reference")
-    link.removeAttribute("target")
-    link.removeAttribute("rel")
-    link.href = "#"
+    decorateFileReference(link, resolved, link.textContent?.trim() || value)
   }
 }
 
@@ -207,13 +266,9 @@ function decorateInlineCodePaths(root: HTMLDivElement, options: FileReferenceOpt
     const resolved = options.resolveRelativePath?.(text) ?? stripTrailingPathPunctuation(text)
     if (!resolved) continue
     const link = document.createElement("a")
-    link.href = "#"
-    link.className = "file-reference"
-    link.setAttribute("data-kind", "file-ref")
-    link.setAttribute("data-path", resolved)
-    link.setAttribute("data-display", text)
+    decorateFileReference(link, resolved, text)
+    if (!link.textContent) link.textContent = text
     code.parentNode?.replaceChild(link, code)
-    link.appendChild(code)
   }
 }
 
@@ -258,12 +313,8 @@ function decoratePlainTextPaths(root: HTMLDivElement, options: FileReferenceOpti
       if (match.start > last) fragment.append(text.slice(last, match.start))
 
       const link = document.createElement("a")
-      link.href = "#"
-      link.className = "file-reference"
-      link.setAttribute("data-kind", "file-ref")
-      link.setAttribute("data-path", resolved)
-      link.setAttribute("data-display", value)
-      link.textContent = value
+      decorateFileReference(link, resolved, value)
+      if (!link.classList.contains("file-reference-card")) link.textContent = value
       fragment.append(link)
       last = match.end
     }
@@ -273,13 +324,52 @@ function decoratePlainTextPaths(root: HTMLDivElement, options: FileReferenceOpti
   }
 }
 
+function validateFileReferences(root: HTMLDivElement, options: FileReferenceOptions, isCurrent: () => boolean) {
+  if (!options.validatePath) return
+  const candidates = Array.from(root.querySelectorAll('[data-kind="file-ref"]')).filter(
+    (element): element is HTMLAnchorElement => element instanceof HTMLAnchorElement && isAbsoluteFileReferencePath(element.dataset.path ?? ""),
+  )
+  const paths = Array.from(new Set(candidates.map((element) => element.dataset.path).filter((path): path is string => !!path)))
+
+  for (const path of paths) {
+    const cached = getFileReferenceValidation(path)
+    if (cached) {
+      for (const element of candidates) {
+        if (element.dataset.path === path) applyFileReferenceCard(element, cached)
+      }
+      continue
+    }
+
+    const pending =
+      fileReferenceValidationInflight.get(path) ??
+      options
+        .validatePath(path)
+        .catch(() => ({ exists: false, kind: "unknown" as const }))
+        .finally(() => fileReferenceValidationInflight.delete(path))
+    fileReferenceValidationInflight.set(path, pending)
+    void pending.then((result) => {
+      rememberFileReferenceValidation(path, result)
+      if (!isCurrent()) return
+      for (const element of candidates) {
+        if (element.isConnected && element.dataset.path === path) applyFileReferenceCard(element, result)
+      }
+    })
+  }
+}
+
+function getFileReferenceKind(element: HTMLElement) {
+  const kind = element.dataset.referenceKind
+  if (kind === "file" || kind === "directory") return kind
+  return inferFileReferenceKind(element.dataset.display ?? element.dataset.path ?? "")
+}
+
 function setupFileReferenceActions(root: HTMLDivElement, options: FileReferenceOptions) {
   const click = (event: MouseEvent) => {
     const element = getFileReferenceEventElement(event.target)
     if (!element) return
     const path = element.dataset.path
     if (!path) return
-    const kind = inferFileReferenceKind(element.dataset.display ?? path)
+    const kind = getFileReferenceKind(element)
     event.preventDefault()
     event.stopPropagation()
     if (kind === "directory" && options.onOpenDefaultApp) {
@@ -302,11 +392,10 @@ type ContextState = {
   kind?: "file" | "directory" | "unknown"
 }
 
-function decorate(root: HTMLDivElement, labels: CopyLabels, fileReferences?: FileReferenceOptions) {
+function decorate(root: HTMLDivElement, labels: CopyLabels, fileReferences?: FileReferenceOptions, source?: string) {
+  const languages = source ? extractMarkdownCodeLanguages(source) : []
   const blocks = Array.from(root.querySelectorAll("pre"))
-  for (const block of blocks) {
-    ensureCodeWrapper(block, labels)
-  }
+  blocks.forEach((block, index) => ensureCodeWrapper(block, labels, languages[index]))
   markCodeLinks(root)
   if (!fileReferences?.enabled) return
   decorateMarkdownLinks(root, fileReferences)
@@ -404,8 +493,10 @@ export function Markdown(
       enabled: true,
       allowContextMenu: context.allowContextMenu,
       resolveRelativePath: (value) => context.resolvePath?.(value, context.baseDir),
+      validatePath: context.validatePath,
       onPreviewPath: context.onPreviewPath,
       onOpenDefaultApp: context.onOpenDefaultApp,
+      onOpenInApp: context.onOpenInApp,
       onOpenFolder: context.onOpenFolder,
       onOpenWith: context.onOpenWith,
       onCopyPath: context.onCopyPath,
@@ -452,6 +543,7 @@ export function Markdown(
   let copyCleanup: (() => void) | undefined
   let fileReferenceCleanup: (() => void) | undefined
   let htmlComponentCleanup: (() => void) | undefined
+  let fileReferenceDecorationVersion = 0
 
   createEffect(() => {
     const container = root()
@@ -470,7 +562,7 @@ export function Markdown(
     }
     const temp = document.createElement("div")
     temp.innerHTML = content
-    decorate(temp, labels, effectiveFileReferences())
+    decorate(temp, labels, effectiveFileReferences(), local.text)
 
     morphdom(container, temp, {
       childrenOnly: true,
@@ -519,6 +611,12 @@ export function Markdown(
       context: local.htmlComponents?.context,
       onEvent: local.htmlComponents?.onEvent,
     })
+
+    fileReferenceDecorationVersion += 1
+    const decorationVersion = fileReferenceDecorationVersion
+    if (effectiveFileReferences()?.enabled) {
+      validateFileReferences(container, effectiveFileReferences()!, () => fileReferenceDecorationVersion === decorationVersion)
+    }
   })
 
   const handleFileReferenceContextMenu = (event: MouseEvent) => {
@@ -527,6 +625,9 @@ export function Markdown(
     const element = getFileReferenceEventElement(event.target)
     if (!element) {
       setMenu({ open: false })
+      // The context-menu trigger wraps the whole Markdown surface. Do not let
+      // non-file targets reach it, or it opens an empty file-reference menu.
+      event.stopPropagation()
       return
     }
     const path = element.dataset.path
@@ -540,7 +641,7 @@ export function Markdown(
       open: true,
       path,
       display: element.dataset.display,
-      kind: inferFileReferenceKind(element.dataset.display ?? path),
+      kind: getFileReferenceKind(element),
     })
   }
 
@@ -589,12 +690,17 @@ export function Markdown(
           </ContextMenu.Trigger>
           <ContextMenu.Portal>
             <ContextMenu.Content>
-              <Show when={menu().path && effectiveFileReferences()?.onPreviewPath}>
+              <Show when={menu().kind === "directory" && menu().path && effectiveFileReferences()?.onOpenInApp}>
+                <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onOpenInApp?.(menu().path!)}>
+                  <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.browseInApp")}</ContextMenu.ItemLabel>
+                </ContextMenu.Item>
+              </Show>
+              <Show when={menu().kind === "file" && menu().path && effectiveFileReferences()?.onPreviewPath}>
                 <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onPreviewPath?.(menu().path!)}>
                   <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.open")}</ContextMenu.ItemLabel>
                 </ContextMenu.Item>
               </Show>
-              <Show when={menu().path && effectiveFileReferences()?.onReviewPath}>
+              <Show when={menu().kind === "file" && menu().path && effectiveFileReferences()?.onReviewPath}>
                 <ContextMenu.Item onSelect={() => effectiveFileReferences()?.onReviewPath?.(menu().path!)}>
                   <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.reviewDiff")}</ContextMenu.ItemLabel>
                 </ContextMenu.Item>

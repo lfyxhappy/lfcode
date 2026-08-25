@@ -1,4 +1,5 @@
 export type AppControlPermission = "read_only" | "session_control" | "browser_control" | "full_app_control"
+export type BrowserControlPermission = "read_only" | "interactive"
 export type AppControlTarget = "app"
 
 export type AppControlServiceState = {
@@ -9,11 +10,17 @@ export type AppControlServiceState = {
   pid?: number
   version?: string
   startedAt?: number
+  protocolVersion?: number
+  instanceID?: string
 }
 
 export type AppControlDraft = {
   enabled: boolean
   permission: AppControlPermission
+  browser: {
+    enabled: boolean
+    permission: BrowserControlPermission
+  }
 }
 
 export type AppControlState = AppControlDraft & {
@@ -55,12 +62,18 @@ export function createAppControlDraft(input: AppControlState): AppControlDraft {
   return {
     enabled: input.enabled,
     permission: input.permission,
+    browser: input.browser ?? { enabled: true, permission: "interactive" },
   }
 }
 
 export function appControlDirty(saved: AppControlDraft | undefined, draft: AppControlDraft) {
   if (!saved) return false
-  return saved.enabled !== draft.enabled || saved.permission !== draft.permission
+  return (
+    saved.enabled !== draft.enabled ||
+    saved.permission !== draft.permission ||
+    saved.browser.enabled !== draft.browser.enabled ||
+    saved.browser.permission !== draft.browser.permission
+  )
 }
 
 export function appControlSaveDisabled(input: {
@@ -84,7 +97,21 @@ export function normalizeAppControlEvents(input: unknown) {
   return input.flatMap((item) => {
     if (!item || typeof item !== "object") return []
     const value = item as Record<string, unknown>
-    if (typeof value.id !== "number" || typeof value.scope !== "string" || typeof value.type !== "string" || typeof value.timestamp !== "number") {
+    const timestamp =
+      typeof value.timestamp === "number"
+        ? value.timestamp
+        : typeof value.at === "number"
+          ? value.at
+          : typeof value.isoTime === "string"
+            ? Date.parse(value.isoTime)
+            : undefined
+    if (
+      typeof value.id !== "number" ||
+      typeof value.scope !== "string" ||
+      typeof value.type !== "string" ||
+      timestamp === undefined ||
+      !Number.isFinite(timestamp)
+    ) {
       return []
     }
     return [
@@ -92,7 +119,7 @@ export function normalizeAppControlEvents(input: unknown) {
         id: value.id,
         scope: value.scope,
         type: value.type,
-        timestamp: value.timestamp,
+        timestamp,
         data: value.data && typeof value.data === "object" && !Array.isArray(value.data) ? (value.data as Record<string, unknown>) : undefined,
       } satisfies AppControlEvent,
     ]

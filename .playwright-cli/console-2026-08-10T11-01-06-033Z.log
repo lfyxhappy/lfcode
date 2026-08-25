@@ -1,0 +1,27 @@
+[      69ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/:0
+[  608003ms] TypeError: Cannot read properties of undefined (reading 'onMenuCommand')
+    at https://192.168.10.23:43173/assets/main-c1L_aiw9.js:125063:12
+[  608004ms] TypeError: Cannot read properties of undefined (reading 'automationEvent')
+    at emitAutomationEvent (https://192.168.10.23:43173/assets/main-c1L_aiw9.js:124612:14)
+    at https://192.168.10.23:43173/assets/main-c1L_aiw9.js:124736:3
+[ 1026526ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'wasm-unsafe-eval''. Either the 'unsafe-inline' keyword, a hash ('sha256-KaVTdByQBLuXcnAaSPohcHVXJC5XRSx5cD0meUOrlPs='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://192.168.10.23:43173/:15
+[ 1026586ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://192.168.10.23:43173/site.webmanifest:0
+[ 1026587ms] [ERROR] Manifest fetch from https://192.168.10.23:43173/site.webmanifest failed, code 401 @ https://192.168.10.23:43173/:0
+[ 1026931ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/global/config:0
+[ 1027921ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/global/config:0
+[ 1029874ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/global/config:0
+[ 1031015ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/project:0
+[ 1031020ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/path:0
+[ 1031328ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/provider:0
+[ 1032003ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/project:0
+[ 1032013ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/path:0
+[ 1032329ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/provider:0
+[ 1034040ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/project:0
+[ 1034040ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/path:0
+[ 1034133ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/provider:0
+[ 1573002ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src 'self' 'wasm-unsafe-eval' 'sha256-KU9NIMtnBimUFAeLFUqYvawjMJ0zXBv3xNXqcG4XQis=''. Either the 'unsafe-inline' keyword, a hash ('sha256-KaVTdByQBLuXcnAaSPohcHVXJC5XRSx5cD0meUOrlPs='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://192.168.10.23:43173/:15
+[ 1573036ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://192.168.10.23:43173/site.webmanifest:0
+[ 1573036ms] [ERROR] Manifest fetch from https://192.168.10.23:43173/site.webmanifest failed, code 401 @ https://192.168.10.23:43173/:0
+[ 2470801ms] [ERROR] Manifest: Line: 1, column: 1, Syntax error. @ https://192.168.10.23:43173/site.webmanifest:0
+[ 2471753ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ https://192.168.10.23:43173/plugin/lfcode-imagemaker/action/status:0
+[ 2471800ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ https://192.168.10.23:43173/plugin/lfcode-imagemaker/action/gallery:0

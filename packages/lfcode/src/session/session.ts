@@ -12,6 +12,8 @@ import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt,
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage"
 import { PartTable, SessionTable, MessageTable } from "./session.sql"
+import { cleanupSessionHooks } from "@/hook/persistence"
+import { dispatchHooks } from "@/hook/runtime"
 import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage"
 import { Log } from "../util"
@@ -27,7 +29,6 @@ import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
 import { GoalState } from "./goal-state"
 import { SessionInteraction } from "./interaction"
-import { ComposeRoute } from "./compose-route"
 import { isRealUserPart } from "./part-helpers"
 import { hydrateStoredPart } from "./part-blob"
 import { MAX_SESSION_DIFF_STORAGE_BYTES, isStoredDiffTooLarge, storedDiffSize } from "./diff-storage"
@@ -84,13 +85,14 @@ export function fromRow(row: SessionRow): Info {
     contextWatermark: row.context_watermark ?? undefined,
     title: row.title,
     version: row.version,
+    temporary: row.temporary === 1,
     summary,
     share,
     revert,
     permission: row.permission ?? undefined,
     goal: row.goal ?? undefined,
     interaction: row.interaction ?? undefined,
-    composeRoute: row.compose_route ?? undefined,
+    extension: row.extension ?? undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -113,6 +115,7 @@ export function toRow(info: Info) {
     directory: info.directory,
     title: info.title,
     version: info.version,
+    temporary: info.temporary ? 1 : 0,
     share_url: info.share?.url,
     summary_additions: info.summary?.additions,
     summary_deletions: info.summary?.deletions,
@@ -122,7 +125,7 @@ export function toRow(info: Info) {
     permission: info.permission,
     goal: info.goal,
     interaction: info.interaction,
-    compose_route: info.composeRoute,
+    extension: info.extension,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_last_user: info.time.lastUser,
@@ -166,6 +169,7 @@ export const Info = z
       .optional(),
     title: z.string(),
     version: z.string(),
+    temporary: z.boolean().default(false),
     time: z.object({
       created: z.number(),
       updated: z.number(),
@@ -176,7 +180,7 @@ export const Info = z
     permission: Permission.Ruleset.zod.optional(),
     goal: GoalState.optional(),
     interaction: SessionInteraction.Info.optional(),
-    composeRoute: ComposeRoute.optional(),
+    extension: Project.ProjectExtension.zod.optional(),
     revert: z
       .object({
         messageID: MessageID.zod,
@@ -216,11 +220,39 @@ export const CreateInput = z
     title: z.string().optional(),
     permission: Info.shape.permission,
     workspaceID: WorkspaceID.zod.optional(),
+    temporary: z.boolean().optional(),
   })
   .optional()
 export type CreateInput = z.output<typeof CreateInput>
 
-export const ForkInput = z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional() })
+export const CreateManagedInput = z.object({
+  projectID: ProjectID.zod,
+  extension: Project.ProjectExtension.zod,
+  title: z.string().optional(),
+  permission: Info.shape.permission,
+  temporary: z.boolean().optional(),
+})
+export type CreateManagedInput = z.output<typeof CreateManagedInput>
+
+export const ImportHistoryInput = CreateManagedInput.extend({
+  sessionID: SessionID.zod.optional(),
+  messages: z.array(
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      text: z.string(),
+      time: z.number().optional(),
+      swipes: z.string().array().optional(),
+      swipeID: z.number().int().nonnegative().optional(),
+    }),
+  ),
+})
+export type ImportHistoryInput = z.output<typeof ImportHistoryInput>
+
+export const ForkInput = z.object({
+  sessionID: SessionID.zod,
+  messageID: MessageID.zod.optional(),
+  includeMessage: z.boolean().optional(),
+})
 export const GetInput = SessionID.zod
 export const ChildrenInput = SessionID.zod
 export const RemoveInput = SessionID.zod
@@ -229,8 +261,10 @@ export const SetArchivedInput = z.object({ sessionID: SessionID.zod, time: z.num
 export const SetCompactingInput = z.object({ sessionID: SessionID.zod, time: z.number().nullable().optional() })
 export const SetPermissionInput = z.object({ sessionID: SessionID.zod, permission: Permission.Ruleset.zod })
 export const SetGoalInput = z.object({ sessionID: SessionID.zod, goal: GoalState.nullable() })
-export const SetInteractionInput = z.object({ sessionID: SessionID.zod, interaction: SessionInteraction.Info.nullable() })
-export const SetComposeRouteInput = z.object({ sessionID: SessionID.zod, composeRoute: ComposeRoute.nullable() })
+export const SetInteractionInput = z.object({
+  sessionID: SessionID.zod,
+  interaction: SessionInteraction.Info.nullable(),
+})
 export const SetRevertInput = z.object({
   sessionID: SessionID.zod,
   revert: Info.shape.revert,
@@ -284,6 +318,10 @@ export const Event = {
     "session.error",
     z.object({
       sessionID: SessionID.zod.optional(),
+      // Internal system actors may fail after their hidden messages have been
+      // persisted. Event consumers must not turn that failure into a visible
+      // toast, LAN event, or plugin notification.
+      visible: z.boolean().optional(),
       // z.lazy defers access to break circular dep: session → message-v2 → provider → plugin → session
       error: z.lazy(() => MessageV2.Assistant.shape.error),
     }),
@@ -387,8 +425,10 @@ export interface Interface {
     title?: string
     permission?: Permission.Ruleset
     workspaceID?: WorkspaceID
+    temporary?: boolean
   }) => Effect.Effect<Info>
-  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
+  readonly createManaged: (input: CreateManagedInput) => Effect.Effect<Info>
+  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID; includeMessage?: boolean }) => Effect.Effect<Info>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly setLastUserActivity: (input: { sessionID: SessionID; at: number }) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info>
@@ -400,10 +440,6 @@ export interface Interface {
   readonly setInteraction: (input: {
     sessionID: SessionID
     interaction?: z.infer<typeof SessionInteraction.Info>
-  }) => Effect.Effect<void>
-  readonly setComposeRoute: (input: {
-    sessionID: SessionID
-    composeRoute?: z.infer<typeof ComposeRoute>
   }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
@@ -430,6 +466,7 @@ export interface Interface {
   }) => Effect.Effect<MessageV2.WithParts[]>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void>
+  readonly cleanupTemporary: () => Effect.Effect<number>
   readonly updateMessage: <T extends MessageV2.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
@@ -474,6 +511,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
+      projectID: ProjectID
+      extension?: Project.ProjectExtension
       title?: string
       parentID?: SessionID
       contextFrom?: SessionID
@@ -481,13 +520,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       workspaceID?: WorkspaceID
       directory: string
       permission?: Permission.Ruleset
+      temporary?: boolean
     }) {
-      const ctx = yield* InstanceState.context
       const result: Info = {
         id: SessionID.descending(input.id),
         slug: Slug.create(),
         version: InstallationVersion,
-        projectID: ctx.project.id,
+        projectID: input.projectID,
         directory: input.directory,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
@@ -495,6 +534,8 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         contextWatermark: input.contextWatermark,
         title: input.title ?? createDefaultTitle(!!input.parentID),
         permission: input.permission,
+        temporary: input.temporary ?? false,
+        extension: input.extension,
         time: {
           created: Date.now(),
           updated: Date.now(),
@@ -504,19 +545,21 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
       yield* Effect.sync(() => SyncEvent.run(Event.Created, { sessionID: result.id, info: result }))
 
-      yield* actorReg.register({
-        sessionID: result.id,
-        actorID: "main",
-        mode: "main",
-        parentActorID: undefined,
-        agent: "main",
-        description: "main agent",
-        contextMode: "full",
-        contextWatermark: undefined,
-        background: false,
-        lifecycle: "persistent",
-        tools: "INHERIT",
-      }).pipe(Effect.ignore)
+      yield* actorReg
+        .register({
+          sessionID: result.id,
+          actorID: "main",
+          mode: "main",
+          parentActorID: undefined,
+          agent: "main",
+          description: "main agent",
+          contextMode: "full",
+          contextWatermark: undefined,
+          background: false,
+          lifecycle: "persistent",
+          tools: "INHERIT",
+        })
+        .pipe(Effect.ignore)
 
       if (!Flag.LFCODE_EXPERIMENTAL_WORKSPACES) {
         // This only exist for backwards compatibility. We should not be
@@ -543,7 +586,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       )
     })
 
-    const refreshProjectLastUserActivity = Effect.fn("Session.refreshProjectLastUserActivity")(function* (projectID: ProjectID) {
+    const refreshProjectLastUserActivity = Effect.fn("Session.refreshProjectLastUserActivity")(function* (
+      projectID: ProjectID,
+    ) {
       const latest = yield* db((d) =>
         d
           .select({ latest: sql<number>`max(${SessionTable.time_last_user})` })
@@ -606,7 +651,18 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           Effect.catchCause(() => Effect.succeed(false)),
         )
 
+        yield* Effect.promise(() =>
+          dispatchHooks({
+            event: "SessionEnd",
+            sessionID,
+            projectID: String(session.projectID),
+            cwd: session.directory,
+            payload: { reason: "removed" },
+          }),
+        ).pipe(Effect.ignore)
+
         yield* Effect.sync(() => {
+          cleanupSessionHooks(sessionID)
           SyncEvent.run(Event.Deleted, { sessionID, info: session }, { publish: hasInstance })
           SyncEvent.remove(sessionID)
         })
@@ -616,20 +672,46 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       }
     })
 
+    const cleanupTemporary: Interface["cleanupTemporary"] = Effect.fn("Session.cleanupTemporary")(function* () {
+      const rows = yield* db((d) =>
+        d
+          .select({ id: SessionTable.id, parent_id: SessionTable.parent_id })
+          .from(SessionTable)
+          .where(eq(SessionTable.temporary, 1))
+          .all(),
+      )
+      if (rows.length === 0) return 0
+
+      const temporaryIDs = new Set(rows.map((row) => row.id))
+      const roots = rows.filter((row) => !row.parent_id || !temporaryIDs.has(row.parent_id))
+      for (const root of roots) {
+        yield* remove(root.id)
+      }
+
+      const remaining = yield* db((d) =>
+        d.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.temporary, 1)).all(),
+      )
+      return rows.length - remaining.length
+    })
+
     const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
+        const visible = MessageV2.isUserVisible(msg)
+        yield* Effect.sync(() =>
+          SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }, { publish: visible, persist: visible }),
+        )
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        const visible = MessageV2.isUserVisibleMessage({ sessionID: part.sessionID, messageID: part.messageID })
         yield* Effect.sync(() =>
           SyncEvent.run(MessageV2.Event.PartUpdated, {
             sessionID: part.sessionID,
             part: structuredClone(part),
             time: Date.now(),
-          }),
+          }, { publish: visible, persist: visible }),
         )
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
@@ -664,10 +746,17 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       title?: string
       permission?: Permission.Ruleset
       workspaceID?: WorkspaceID
+      temporary?: boolean
     }) {
+      const ctx = yield* InstanceState.context
+      if (ctx.project.extension?.pluginID === "lfcode-tavern" && ctx.project.extension.type === "tavern") {
+        throw new Error("Tavern projects require Session.createManaged with the lfcode-tavern/tavern extension")
+      }
       const directory = yield* InstanceState.directory
       const workspace = yield* InstanceState.workspaceID
+      const parent = input?.parentID ? yield* get(input.parentID) : undefined
       return yield* createNext({
+        projectID: ctx.project.id,
         parentID: input?.parentID,
         contextFrom: input?.contextFrom,
         contextWatermark: input?.contextWatermark,
@@ -675,23 +764,61 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         title: input?.title,
         permission: input?.permission,
         workspaceID: workspace,
+        temporary: parent?.temporary === true ? true : input?.temporary,
       })
     })
 
-    const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
-      const directory = yield* InstanceState.directory
+    const createManaged = Effect.fn("Session.createManaged")(function* (input: CreateManagedInput) {
+      const project = yield* db((d) => d.select().from(ProjectTable).where(eq(ProjectTable.id, input.projectID)).get())
+      if (!project) throw new NotFoundError({ message: `Project not found: ${input.projectID}` })
+      if (
+        project.extension?.pluginID !== input.extension.pluginID ||
+        project.extension.type !== input.extension.type
+      ) {
+        throw new Error(`Project ${input.projectID} is not owned by ${input.extension.pluginID}/${input.extension.type}`)
+      }
+      return yield* createNext({
+        projectID: project.id,
+        directory: project.worktree,
+        extension: input.extension,
+        title: input.title,
+        // Tavern conversations are narrative-only. This is enforced at the
+        // durable Session boundary so direct HTTP callers cannot regain tools.
+        permission:
+          input.extension.pluginID === "lfcode-tavern" && input.extension.type === "tavern"
+            ? [{ permission: "*", pattern: "*", action: "deny" }]
+            : input.permission,
+        temporary: input.temporary,
+      })
+    })
+
+    const fork = Effect.fn("Session.fork")(function* (input: {
+      sessionID: SessionID
+      messageID?: MessageID
+      includeMessage?: boolean
+    }) {
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
       const session = yield* createNext({
-        directory,
+        projectID: original.projectID,
+        directory: original.directory,
         workspaceID: original.workspaceID,
+        parentID: original.id,
         title,
+        temporary: original.temporary,
+        extension: original.extension,
+        permission: original.permission,
       })
-      const msgs = yield* messages({ sessionID: input.sessionID, agentID: "*" })
+      const msgs = (yield* messages({ sessionID: input.sessionID, agentID: "*" })).filter((message) =>
+        MessageV2.isUserVisible(message.info),
+      )
       const idMap = new Map<string, MessageID>()
 
       for (const msg of msgs) {
-        if (input.messageID && msg.info.id >= input.messageID) break
+        if (
+          input.messageID &&
+          (msg.info.id > input.messageID || (!input.includeMessage && msg.info.id === input.messageID))
+        ) break
         const newID = MessageID.ascending()
         idMap.set(msg.info.id, newID)
 
@@ -782,16 +909,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       yield* patch(input.sessionID, { interaction: input.interaction ?? null })
     })
 
-    const setComposeRoute = Effect.fn("Session.setComposeRoute")(function* (input: {
-      sessionID: SessionID
-      composeRoute?: z.infer<typeof ComposeRoute>
-    }) {
-      yield* patch(input.sessionID, {
-        composeRoute: input.composeRoute ?? null,
-        time: { updated: Date.now() },
-      })
-    })
-
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
       sessionID: SessionID
       revert: Info["revert"]
@@ -847,6 +964,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       const session = yield* get(input.sessionID)
       const all = yield* messages({ sessionID: input.sessionID, agentID: "*" })
       const removed = all.find((message) => message.info.id === input.messageID)
+      const visible = removed ? MessageV2.isUserVisible(removed.info) : false
       const shouldRefresh =
         !!removed && isRealUserMessage(removed) && removed.info.time.created === session.time.lastUser
 
@@ -854,7 +972,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         SyncEvent.run(MessageV2.Event.Removed, {
           sessionID: input.sessionID,
           messageID: input.messageID,
-        }),
+        }, { publish: visible, persist: visible }),
       )
       if (shouldRefresh) {
         const next = all.filter((message) => message.info.id !== input.messageID).findLast(isRealUserMessage)
@@ -868,12 +986,13 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       messageID: MessageID
       partID: PartID
     }) {
+      const visible = MessageV2.isUserVisibleMessage({ sessionID: input.sessionID, messageID: input.messageID })
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.PartRemoved, {
           sessionID: input.sessionID,
           messageID: input.messageID,
           partID: input.partID,
-        }),
+        }, { publish: visible, persist: visible }),
       )
       return input.partID
     })
@@ -885,7 +1004,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       field: string
       delta: string
     }) {
-      yield* bus.publish(MessageV2.Event.PartDelta, input)
+      if (MessageV2.isUserVisibleMessage({ sessionID: input.sessionID, messageID: input.messageID })) {
+        yield* bus.publish(MessageV2.Event.PartDelta, input)
+      }
     })
 
     /** Finds the first message matching the predicate, searching newest-first.
@@ -918,6 +1039,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     return Service.of({
       create,
+      createManaged,
       fork,
       touch,
       setLastUserActivity,
@@ -928,7 +1050,6 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       setPermission,
       setGoal,
       setInteraction,
-      setComposeRoute,
       setRevert,
       clearRevert,
       setSummary,
@@ -936,6 +1057,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       messages,
       children,
       remove,
+      cleanupTemporary,
       updateMessage,
       removeMessage,
       removePart,
@@ -1087,11 +1209,7 @@ export function clearOrphanAssistants(input?: {
 
   for (const session of sessions) {
     const rows = Database.use((db) =>
-      db
-        .select()
-        .from(MessageTable)
-        .where(eq(MessageTable.session_id, session.id))
-        .all(),
+      db.select().from(MessageTable).where(eq(MessageTable.session_id, session.id)).all(),
     )
     for (const row of rows) {
       const info = MessageV2.Info.parse({
@@ -1105,14 +1223,13 @@ export function clearOrphanAssistants(input?: {
       const created = info.time.created ?? 0
       if (now - created < minAgeMs) continue
 
-      SyncEvent.run(MessageV2.Event.Updated, {
-        sessionID: info.sessionID,
-        info: {
-          ...info,
-          time: { ...info.time, completed: now },
-          error: info.error ?? new MessageV2.AbortedError({ message }).toObject(),
-        },
-      })
+      const updated = {
+        ...info,
+        time: { ...info.time, completed: now },
+        error: info.error ?? new MessageV2.AbortedError({ message }).toObject(),
+      }
+      const visible = MessageV2.isUserVisible(updated)
+      SyncEvent.run(MessageV2.Event.Updated, { sessionID: info.sessionID, info: updated }, { publish: visible, persist: visible })
       log.info("orphan-assistant-cleared", { sessionID: info.sessionID, messageID: info.id })
     }
   }

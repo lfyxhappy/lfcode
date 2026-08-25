@@ -2,8 +2,9 @@ import { Duration, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
   extractWebSearchSources,
-  getWebSearchProviderOrder,
   isRetryableWebSearchFailure,
+  normalizeWebSearchQuery,
+  type WebSearchQueryFidelity,
   type WebSearchFailureClass,
   type WebSearchProvider,
   type WebSearchSource,
@@ -47,14 +48,25 @@ export type LegacyWebSearchInput = {
   type?: "auto" | "fast" | "deep"
   contextMaxCharacters?: number
   timeout?: number
+  /** Explicit V2 compatibility mode. Without this flag callers should use a native/direct/browser route. */
+  compatProvider?: WebSearchProvider
 }
 
 export type LegacyWebSearchResult = {
+  route: WebSearchProvider | "compat"
   provider: WebSearchProvider
+  queryOriginal: string
+  queryPlanned?: string
+  querySent: string
+  queryFidelity: WebSearchQueryFidelity
   attemptedProviders: WebSearchProvider[]
   text: string
   sources: WebSearchSource[]
   warnings: string[]
+  limits: {
+    maxResults?: number
+    maxContextCharacters?: number
+  }
 }
 
 type SearchFailure = {
@@ -66,7 +78,13 @@ type SearchFailure = {
 
 function parseMcpText(body: string) {
   return Effect.gen(function* () {
-    const payloads = [body.trim(), ...body.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6))]
+    const payloads = [
+      body.trim(),
+      ...body
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice(6)),
+    ]
     for (const payload of payloads) {
       if (!payload.startsWith("{")) continue
       const decoded = yield* decodeMcpResult(payload).pipe(
@@ -95,15 +113,16 @@ function classifyFailure(provider: WebSearchProvider, error: unknown): SearchFai
     return { provider, classification, retryable: isRetryableWebSearchFailure(classification), status }
   }
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  const classification: WebSearchFailureClass = message.includes("timed_out") || message.includes("timeout")
-    ? "timeout"
-    : message.includes("credential") || message.includes("unauthorized") || message.includes("forbidden")
-      ? "missing_credentials"
-      : message.includes("parse")
-        ? "parse_failure"
-        : message.includes("empty")
-          ? "empty_response"
-          : "transport"
+  const classification: WebSearchFailureClass =
+    message.includes("timed_out") || message.includes("timeout")
+      ? "timeout"
+      : message.includes("credential") || message.includes("unauthorized") || message.includes("forbidden")
+        ? "missing_credentials"
+        : message.includes("parse")
+          ? "parse_failure"
+          : message.includes("empty")
+            ? "empty_response"
+            : "transport"
   return { provider, classification, retryable: isRetryableWebSearchFailure(classification) }
 }
 
@@ -134,7 +153,8 @@ const callMcp = <F extends Schema.Struct.Fields>(input: {
     return yield* Effect.gen(function* () {
       const response = yield* HttpClient.filterStatusOk(input.http).execute(request)
       const body = yield* response.text
-      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES) return yield* Effect.fail(new Error("response_too_large"))
+      if (Buffer.byteLength(body, "utf8") > MAX_RESPONSE_BYTES)
+        return yield* Effect.fail(new Error("response_too_large"))
       const text = yield* parseMcpText(body)
       if (!text?.trim()) return yield* Effect.fail(new Error("empty_response"))
       return text
@@ -143,11 +163,6 @@ const callMcp = <F extends Schema.Struct.Fields>(input: {
     )
   })
 
-const providerOverride = () => {
-  const value = process.env.LFCODE_WEBSEARCH_PROVIDER
-  return value === "exa" || value === "parallel" ? value : undefined
-}
-
 const callProvider = (input: {
   http: HttpClient.HttpClient
   provider: WebSearchProvider
@@ -155,33 +170,36 @@ const callProvider = (input: {
   query: LegacyWebSearchInput
 }) => {
   const timeout = Duration.seconds(Math.min(input.query.timeout ?? 20, 20))
-  const effect = input.provider === "exa"
-    ? callMcp({
-        http: input.http,
-        url: process.env.EXA_API_KEY ? `${EXA_URL}?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}` : EXA_URL,
-        tool: "web_search_exa",
-        args: ExaArgs,
-        value: {
-          query: input.query.query,
-          type: input.query.type ?? "auto",
-          numResults: input.query.numResults ?? 8,
-          livecrawl: input.query.livecrawl ?? "fallback",
-          contextMaxCharacters: input.query.contextMaxCharacters,
-        },
-        timeout,
-      })
-    : callMcp({
-        http: input.http,
-        url: PARALLEL_URL,
-        tool: "web_search",
-        args: ParallelArgs,
-        value: { objective: input.query.query, search_queries: [input.query.query], session_id: input.sessionID },
-        headers: {
-          "User-Agent": "lfcode",
-          ...(process.env.PARALLEL_API_KEY ? { Authorization: `Bearer ${process.env.PARALLEL_API_KEY}` } : {}),
-        },
-        timeout,
-      })
+  const effect =
+    input.provider === "exa"
+      ? callMcp({
+          http: input.http,
+          url: process.env.EXA_API_KEY
+            ? `${EXA_URL}?exaApiKey=${encodeURIComponent(process.env.EXA_API_KEY)}`
+            : EXA_URL,
+          tool: "web_search_exa",
+          args: ExaArgs,
+          value: {
+            query: input.query.query,
+            type: input.query.type ?? "auto",
+            numResults: input.query.numResults ?? 8,
+            livecrawl: input.query.livecrawl ?? "fallback",
+            contextMaxCharacters: input.query.contextMaxCharacters,
+          },
+          timeout,
+        })
+      : callMcp({
+          http: input.http,
+          url: PARALLEL_URL,
+          tool: "web_search",
+          args: ParallelArgs,
+          value: { objective: input.query.query, search_queries: [input.query.query], session_id: input.sessionID },
+          headers: {
+            "User-Agent": "lfcode",
+            ...(process.env.PARALLEL_API_KEY ? { Authorization: `Bearer ${process.env.PARALLEL_API_KEY}` } : {}),
+          },
+          timeout,
+        })
   return effect.pipe(Effect.mapError((error) => classifyFailure(input.provider, error)))
 }
 
@@ -190,14 +208,23 @@ export const runLegacyWebSearchWithFallback = Effect.fn("WebSearch.runLegacyWebS
   sessionID: string
   query: LegacyWebSearchInput
 }) {
+  const fidelity = normalizeWebSearchQuery(input.query.query)
+  const query = { ...input.query, query: fidelity.querySent }
   return yield* Effect.gen(function* () {
-    const providers = getWebSearchProviderOrder(providerOverride())
+    if (!input.query.compatProvider) {
+      return yield* Effect.fail({
+        provider: "exa",
+        classification: "missing_credentials",
+        retryable: false,
+      } satisfies SearchFailure)
+    }
+    const providers = [input.query.compatProvider]
     const attemptedProviders: WebSearchProvider[] = []
-    const warnings: string[] = []
+    const warnings: string[] = [...fidelity.warnings]
 
     for (const provider of providers) {
       attemptedProviders.push(provider)
-      const attempt = yield* callProvider({ ...input, provider }).pipe(
+      const attempt = yield* callProvider({ ...input, query, provider }).pipe(
         Effect.match({
           onFailure: (failure) => ({ ok: false as const, failure }),
           onSuccess: (text) => ({ ok: true as const, text }),
@@ -205,11 +232,19 @@ export const runLegacyWebSearchWithFallback = Effect.fn("WebSearch.runLegacyWebS
       )
       if (attempt.ok) {
         return {
+          route: "compat",
           provider,
+          queryOriginal: fidelity.queryOriginal,
+          querySent: fidelity.querySent,
+          queryFidelity: fidelity.queryFidelity,
           attemptedProviders,
           text: attempt.text,
           sources: extractWebSearchSources(attempt.text),
           warnings,
+          limits: {
+            maxResults: query.numResults ?? 8,
+            maxContextCharacters: query.contextMaxCharacters,
+          },
         } satisfies LegacyWebSearchResult
       }
       warnings.push(formatWebSearchFailure(attempt.failure))
@@ -220,13 +255,34 @@ export const runLegacyWebSearchWithFallback = Effect.fn("WebSearch.runLegacyWebS
   }).pipe(
     Effect.timeoutOrElse({
       duration: "45 seconds",
-      orElse: () => Effect.fail({ provider: "exa", classification: "timeout", retryable: true } satisfies SearchFailure),
+      orElse: () =>
+        Effect.fail({ provider: "exa", classification: "timeout", retryable: true } satisfies SearchFailure),
     }),
   )
 })
 
-export function formatLegacyWebSearchOutput(result: LegacyWebSearchResult) {
-  const sources = result.sources.slice(0, 12).map((source) => `- [${source.sourceTier}] ${source.title ?? source.domain}: ${source.url}`)
+/**
+ * Explicit compatibility entry point. The old helper remains available for
+ * callers that imported it before V2, but it now requires a provider so no
+ * call can silently fall through from Exa to Parallel.
+ */
+export const runCompatWebSearch = Effect.fn("WebSearch.runCompatWebSearch")(function* (input: {
+  http: HttpClient.HttpClient
+  sessionID: string
+  provider: WebSearchProvider
+  query: Omit<LegacyWebSearchInput, "compatProvider">
+}) {
+  return yield* runLegacyWebSearchWithFallback({
+    http: input.http,
+    sessionID: input.sessionID,
+    query: { ...input.query, compatProvider: input.provider },
+  })
+})
+
+export function formatLegacyWebSearchOutput(result: Pick<LegacyWebSearchResult, "provider" | "sources" | "text">) {
+  const sources = result.sources
+    .slice(0, 12)
+    .map((source) => `- [${source.sourceTier}] ${source.title ?? source.domain}: ${source.url}`)
   if (sources.length === 0) return result.text
   return `${result.text}\n\nSources (${result.provider}):\n${sources.join("\n")}`
 }

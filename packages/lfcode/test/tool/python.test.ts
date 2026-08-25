@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { PythonTool } from "../../src/tool/python"
 import { Agent } from "../../src/agent/agent"
@@ -8,9 +8,16 @@ import { AppFileSystem } from "@/filesystem"
 import { Plugin } from "../../src/plugin"
 import { resolveBasePythonCommand } from "../../src/python/runtime"
 import { Instance } from "../../src/project/instance"
+import { shellBackgroundRuntimeRef } from "../../src/background-job/runtime-ref"
+import type { Interface as ShellBackgroundRuntime } from "../../src/background-job/runtime"
 
 const runtime = ManagedRuntime.make(
-  Layer.mergeAll(AppFileSystem.defaultLayer, Plugin.defaultLayer, Truncate.defaultLayer, Agent.defaultLayer),
+  Layer.mergeAll(
+    AppFileSystem.defaultLayer,
+    Plugin.defaultLayer,
+    Truncate.defaultLayer,
+    Agent.defaultLayer,
+  ),
 )
 
 function initPython() {
@@ -29,9 +36,29 @@ const ctx = {
 }
 
 const python = resolveBasePythonCommand()
+let previousRuntime: ShellBackgroundRuntime | undefined
+let starts: Array<{ argv?: string[]; files?: { name: string; content: string }[] }> = []
+
+beforeEach(() => {
+  previousRuntime = shellBackgroundRuntimeRef.current
+  starts = []
+  shellBackgroundRuntimeRef.current = {
+    start: (input) => {
+      starts.push(input)
+      return Effect.succeed({ id: "job_python_test", status: "running", source: input.source } as never)
+    },
+    wait: () => Effect.succeed({ timedOut: true }),
+    cancel: () => Effect.succeed({} as never),
+    reattachRunningJobs: () => Effect.void,
+  }
+})
+
+afterEach(() => {
+  shellBackgroundRuntimeRef.current = previousRuntime
+})
 
 describe("tool.python", () => {
-  test("executes a basic script", async () => {
+  test("starts a basic script as a durable background job", async () => {
     if (!python) return
     await Instance.provide({
       directory: __dirname,
@@ -46,14 +73,18 @@ describe("tool.python", () => {
             ctx,
           ),
         )
-        expect(result.metadata.exit).toBe(0)
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
         expect(result.metadata.python).toBeTruthy()
-        expect(result.output).toContain("ok")
+        expect(result.output).toContain("Started tracked Python shell process")
+        expect(starts).toHaveLength(1)
+        expect(starts[0]?.argv?.at(-1)).toBe("{jobRoot}/script.py")
+        expect(starts[0]?.files).toEqual([{ name: "script.py", content: "print('ok')" }])
       },
     })
   })
 
-  test("reports timeout explicitly", async () => {
+  test("uses timeout only as a background reminder threshold", async () => {
     if (!python) return
     await Instance.provide({
       directory: __dirname,
@@ -62,20 +93,21 @@ describe("tool.python", () => {
         const result = await Effect.runPromise(
           tool.execute(
             {
-              code: ["import time", "time.sleep(5)"].join("\n"),
+              code: ["import time", "time.sleep(0.2)"].join("\n"),
               timeout: 100,
               description: "Sleep too long",
             },
             ctx,
           ),
         )
-        expect(result.metadata.timedOut).toBe(true)
-        expect(result.output).toContain("timed out after 100ms")
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
+        expect(result.output).toContain("tracked Python shell process")
       },
     })
   })
 
-  test("adds a dependency hint for missing modules", async () => {
+  test("starts module checks through the same process pool", async () => {
     if (!python) return
     await Instance.provide({
       directory: __dirname,
@@ -90,9 +122,9 @@ describe("tool.python", () => {
             ctx,
           ),
         )
-        expect(result.metadata.exit).not.toBe(0)
-        expect(result.output).toContain("Missing dependency detected")
-        expect(result.output).toContain("lfcode_missing_module_12345")
+        expect(result.metadata.jobID).toBeTruthy()
+        expect(result.metadata.status).toBe("running")
+        expect(result.output).toContain("tracked Python shell process")
       },
     })
   })

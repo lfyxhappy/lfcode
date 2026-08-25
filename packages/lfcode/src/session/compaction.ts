@@ -20,6 +20,8 @@ import { InstanceState } from "@/effect"
 import { isOverflow as overflow, usable } from "./overflow"
 import { makeRuntime } from "@/effect/run-service"
 import { fn } from "@/util/fn"
+import { dispatchHooks } from "@/hook/runtime"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 const log = Log.create({ service: "session.compaction" })
 
@@ -38,6 +40,8 @@ const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
+const COMPACTION_TEXT_CHAR_CAP = 12_000
+const COMPACTION_KEEP_TAIL_MESSAGES = 6
 
 function compactableMessages(messages: MessageV2.WithParts[]) {
   return messages.map((msg) => ({
@@ -51,10 +55,60 @@ function compactableMessages(messages: MessageV2.WithParts[]) {
     }),
   }))
 }
+
+function clipText(text: string, maxChars: number) {
+  if (text.length <= maxChars) return text
+  const head = Math.max(128, Math.floor(maxChars * 0.65))
+  return `${text.slice(0, head)}\n...[compaction input clipped]...\n${text.slice(-Math.max(64, maxChars - head))}`
+}
+
+/** Keep summary requests bounded even when one user/tool turn is enormous. */
+function boundedCompactionMessages(messages: MessageV2.WithParts[], budget: number) {
+  let result = compactableMessages(messages).map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => (part.type === "text" ? { ...part, text: clipText(part.text, COMPACTION_TEXT_CHAR_CAP) } : part)),
+  }))
+  if (Token.estimate(JSON.stringify(result)) <= budget) return result
+
+  const firstUser = result.findIndex((message) => message.info.role === "user")
+  const first = firstUser >= 0 ? result[firstUser] : result[0]
+  const tail = result.slice(-COMPACTION_KEEP_TAIL_MESSAGES)
+  result = first && !tail.includes(first) ? [first, ...tail] : tail
+  if (Token.estimate(JSON.stringify(result)) <= budget) return result
+
+  const reducedChars = Math.max(1024, Math.floor((COMPACTION_TEXT_CHAR_CAP * budget) / Math.max(1, Token.estimate(JSON.stringify(result)))))
+  return result.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) => (part.type === "text" ? { ...part, text: clipText(part.text, reducedChars) } : part)),
+  }))
+}
 type Turn = {
   start: number
   end: number
   id: MessageID
+}
+
+export function selectOverflowReplay(messages: MessageV2.WithParts[], boundaryID: MessageID) {
+  const boundaryIndex = messages.findIndex((message) => message.info.id === boundaryID)
+  if (boundaryIndex <= 0) return { history: messages }
+
+  for (let index = boundaryIndex - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (message.info.role !== "user" || message.parts.some((part) => part.type === "compaction")) continue
+    const history = messages.slice(0, index)
+    if (!history.some((item) => item.info.role === "user" && !item.parts.some((part) => part.type === "compaction"))) {
+      return { history: messages }
+    }
+    return {
+      history,
+      replay: {
+        info: message.info,
+        parts: message.parts,
+      },
+    }
+  }
+
+  return { history: messages }
 }
 
 function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
@@ -256,6 +310,7 @@ export const layer: Layer.Layer<
       overflow?: boolean
       agentID?: string
     }) {
+      const userExtensionsEnabled = !isUserHiddenSystemActorID(input.agentID)
       const clearCompacting =
         (input.agentID ?? "main") === "main"
           ? session.setCompacting({ sessionID: input.sessionID, time: null })
@@ -266,33 +321,25 @@ export const layer: Layer.Layer<
         if (!parent || parent.info.role !== "user") {
           throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
         }
+        const sessionInfo = yield* session.get(input.sessionID)
+        const beforeHook = userExtensionsEnabled
+          ? yield* Effect.promise(() =>
+              dispatchHooks({
+                event: "PreCompact",
+                sessionID: input.sessionID,
+                projectID: String(sessionInfo.projectID),
+                cwd: sessionInfo.directory,
+                payload: { auto: input.auto, overflow: input.overflow === true, agentID: input.agentID },
+              }),
+            )
+          : { blocked: false }
+        if (beforeHook.blocked) return "stop"
         const userMessage = parent.info
         const compactionPart = parent.parts.find((part): part is MessageV2.CompactionPart => part.type === "compaction")
 
-        let messages = input.messages
-        let replay:
-          | {
-              info: MessageV2.User
-              parts: MessageV2.Part[]
-            }
-          | undefined
-        if (input.overflow) {
-          const idx = input.messages.findIndex((m) => m.info.id === input.parentID)
-          for (let i = idx - 1; i >= 0; i--) {
-            const msg = input.messages[i]
-            if (msg.info.role === "user" && !msg.parts.some((p) => p.type === "compaction")) {
-              replay = { info: msg.info, parts: msg.parts }
-              messages = input.messages.slice(0, i)
-              break
-            }
-          }
-          const hasContent =
-            replay && messages.some((m) => m.info.role === "user" && !m.parts.some((p) => p.type === "compaction"))
-          if (!hasContent) {
-            replay = undefined
-            messages = input.messages
-          }
-        }
+        const overflowReplay = input.overflow ? selectOverflowReplay(input.messages, input.parentID) : undefined
+        const messages = overflowReplay?.history ?? input.messages
+        const replay = overflowReplay?.replay
 
         log.info("process phase", {
           sessionID: input.sessionID,
@@ -324,11 +371,13 @@ export const layer: Layer.Layer<
           selectedHeadCount: selected.head.length,
           tailStartID: selected.tail_start_id,
         })
-        const compacting = yield* plugin.trigger(
-          "experimental.session.compacting",
-          { sessionID: input.sessionID },
-          { context: [], prompt: undefined },
-        )
+        const compacting = userExtensionsEnabled
+          ? yield* plugin.trigger(
+              "experimental.session.compacting",
+              { sessionID: input.sessionID },
+              { context: [], prompt: undefined },
+            )
+          : { context: [], prompt: undefined }
         const defaultPrompt = `When constructing the summary, try to stick to this template:
 ---
 ## Goal
@@ -360,13 +409,14 @@ export const layer: Layer.Layer<
           phase: "transform-messages",
           messageCount: msgs.length,
         })
-        yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+        if (userExtensionsEnabled) yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
         log.info("process phase", {
           sessionID: input.sessionID,
           phase: "to-model-messages",
           transformedCount: msgs.length,
         })
-        const modelMessages = yield* Effect.catch(
+        const summaryLimit = usable({ cfg, model })
+        const initialModelMessages = yield* Effect.catch(
           MessageV2.toModelMessagesEffect(msgs, model, {
             stripMedia: true,
             compactToolResults: true,
@@ -377,6 +427,14 @@ export const layer: Layer.Layer<
               compactToolResults: true,
             }),
         )
+        const summaryBudget = summaryLimit > 0 ? Math.floor(summaryLimit * 0.65) : Number.POSITIVE_INFINITY
+        const modelMessages =
+          Token.estimate(JSON.stringify(initialModelMessages)) > summaryBudget
+            ? yield* MessageV2.toModelMessagesEffect(boundedCompactionMessages(msgs, summaryBudget), model, {
+                stripMedia: true,
+                compactToolResults: true,
+              })
+            : initialModelMessages
         log.info("process phase", {
           sessionID: input.sessionID,
           phase: "create-summary-message",
@@ -443,7 +501,7 @@ export const layer: Layer.Layer<
           return "stop"
         }
 
-        if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
+        if (compactionPart && compactionPart.tail_start_id !== selected.tail_start_id) {
           yield* session.updatePart({
             ...compactionPart,
             tail_start_id: selected.tail_start_id,
@@ -487,22 +545,24 @@ export const layer: Layer.Layer<
             })
             const info = yield* provider.getProvider(userMessage.model.providerID)
             const continueModel = yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
-            const autoContinue = yield* plugin.trigger(
-              "experimental.compaction.autocontinue",
-              {
-                sessionID: input.sessionID,
-                agent: userMessage.agent,
-                model: continueModel,
-                provider: {
-                  source: info.source,
-                  info,
-                  options: info.options,
-                },
-                message: userMessage,
-                overflow: input.overflow === true,
-              },
-              { enabled: true },
-            )
+            const autoContinue = userExtensionsEnabled
+              ? yield* plugin.trigger(
+                  "experimental.compaction.autocontinue",
+                  {
+                    sessionID: input.sessionID,
+                    agent: userMessage.agent,
+                    model: continueModel,
+                    provider: {
+                      source: info.source,
+                      info,
+                      options: info.options,
+                    },
+                    message: userMessage,
+                    overflow: input.overflow === true,
+                  },
+                  { enabled: true },
+                )
+              : { enabled: true }
             if (
               autoContinue.enabled
             ) {
@@ -541,7 +601,7 @@ export const layer: Layer.Layer<
         }
 
         if (processor.message.error) return "stop"
-        if (result === "continue") yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
+        if (result === "continue" && userExtensionsEnabled) yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
         return result
       }).pipe(Effect.ensuring(clearCompacting))
     })

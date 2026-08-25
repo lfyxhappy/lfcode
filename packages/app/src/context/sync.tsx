@@ -503,7 +503,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
             const hasSession = Binary.search(store.session, sessionID, (s) => s.id).found
             const cached = store.message[sessionID] !== undefined && meta.limit[key] !== undefined
-            if (cached && hasSession && !opts?.force) return
+            // Messages can survive a restart in the client cache while actor
+            // registrations do not. Keep the actor snapshot as an independent
+            // cache so reopening a session always hydrates the subagent rail.
+            const actorsCached = store.actor[sessionID] !== undefined
+            if (cached && hasSession && actorsCached && !opts?.force) return
 
             const limit = Math.max(meta.limit[key] ?? 0, initialMessagePageSize)
             const sessionReq = hasSession && !opts?.force
@@ -545,11 +549,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                   mode: string
                   status: string
                   description: string
+                  visible?: boolean
                   time: { created: number }
                   agent?: string
                   parentActorID?: string
                 }[]
-                setStore("actor", sessionID, list.sort((a, b) => a.time.created - b.time.created))
+                setStore("actor", sessionID, list.filter((actor) => actor.visible !== false).sort((a, b) => a.time.created - b.time.created))
               }),
               messagesReq,
             ])

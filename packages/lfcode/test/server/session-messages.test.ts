@@ -6,12 +6,17 @@ import { Session as SessionNs } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util"
+import { ActorRegistry } from "../../src/actor/registry"
 import { tmpdir } from "../fixture/fixture"
 
 void Log.init({ print: false })
 
 function run<A, E>(fx: Effect.Effect<A, E, SessionNs.Service>) {
   return Effect.runPromise(fx.pipe(Effect.provide(SessionNs.defaultLayer)))
+}
+
+function runActor<A, E>(fx: Effect.Effect<A, E, ActorRegistry.Service>) {
+  return Effect.runPromise(fx.pipe(Effect.provide(ActorRegistry.defaultLayer)))
 }
 
 const svc = {
@@ -190,6 +195,90 @@ describe("session messages endpoint", () => {
           expect(limited.status).toBe(200)
           const limitedBody = (await limited.json()) as MessageV2.WithParts[]
           expect(limitedBody.map((m) => m.info.id)).toEqual([...main, ...more])
+
+          await svc.remove(session.id)
+        },
+      }),
+    )
+  })
+
+  test("does not expose or mutate hidden context-reviewer messages by direct ID", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({})
+          const actorID = "context-reviewer-1"
+          await runActor(
+            ActorRegistry.Service.use((actors) =>
+              actors.register({
+                sessionID: session.id,
+                actorID,
+                mode: "subagent",
+                agent: "context-reviewer",
+                description: "internal review",
+                contextMode: "full",
+                background: true,
+                lifecycle: "ephemeral",
+              }),
+            ),
+          )
+          const [messageID] = await fill(session.id, 1, undefined, actorID)
+          const message = MessageV2.get({ sessionID: session.id, messageID })
+          const partID = message.parts[0]!.id
+          const app = Server.Default().app
+
+          const listed = await app.request(`/session/${session.id}/message?agent_id=*`)
+          expect(listed.status).toBe(200)
+          expect((await listed.json() as MessageV2.WithParts[]).map((item) => item.info.id)).not.toContain(messageID)
+          expect((await app.request(`/session/${session.id}/message/${messageID}`)).status).toBe(404)
+          expect((await app.request(`/session/${session.id}/message/${messageID}`, { method: "DELETE" })).status).toBe(404)
+          expect(
+            (await app.request(`/session/${session.id}/message/${messageID}/part/${partID}`, { method: "DELETE" })).status,
+          ).toBe(404)
+          expect(MessageV2.get({ sessionID: session.id, messageID }).parts[0]?.id).toBe(partID)
+
+          // A fork intentionally starts with no reviewer actor registry row.
+          // Persisted internal actor IDs must keep copied-session reads private.
+          const fork = await run(SessionNs.Service.use((service) => service.fork({ sessionID: session.id })))
+          const forkMessages = await run(
+            SessionNs.Service.use((service) => service.messages({ sessionID: fork.id, agentID: "*" })),
+          )
+          expect(forkMessages).toEqual([])
+
+          await svc.remove(fork.id)
+          await svc.remove(session.id)
+        },
+      }),
+    )
+  })
+
+  test("paginates visible messages before making a cursor", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({})
+          const visible = await fill(session.id, 2, (index) => 10 + index)
+          const [hidden] = await fill(session.id, 1, () => 20, "context-reviewer-1")
+          const app = Server.Default().app
+
+          const response = await app.request(`/session/${session.id}/message?limit=1&agent_id=*`)
+          expect(response.status).toBe(200)
+          expect((await response.json() as MessageV2.WithParts[]).map((item) => item.info.id)).toEqual([visible[1]])
+
+          const cursor = response.headers.get("x-next-cursor")
+          expect(cursor).toBeTruthy()
+          expect(MessageV2.cursor.decode(cursor!).id).toBe(visible[1])
+          expect(MessageV2.cursor.decode(cursor!).id).not.toBe(hidden)
+
+          const next = await app.request(
+            `/session/${session.id}/message?limit=1&agent_id=*&before=${encodeURIComponent(cursor!)}`,
+          )
+          expect((await next.json() as MessageV2.WithParts[]).map((item) => item.info.id)).toEqual([visible[0]])
+          expect(next.headers.get("x-next-cursor")).toBeNull()
 
           await svc.remove(session.id)
         },

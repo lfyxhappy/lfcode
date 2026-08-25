@@ -7,6 +7,7 @@ import type { Actor, ActorStatus, ActorOutcome, ContextMode, Lifecycle, SpawnMod
 import * as Events from "./events"
 import { Log } from "@/util"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
+import { isUserVisibleActor } from "./visibility"
 
 const log = Log.create({ service: "actor.registry" })
 
@@ -26,6 +27,7 @@ function fromRow(row: ActorRow): Actor {
     lifecycle: row.lifecycle,
     agent: row.agent,
     description: row.description,
+    visible: isUserVisibleActor({ agent: row.agent, actorID: row.actor_id }),
     contextMode: row.context_mode,
     contextWatermark: row.context_watermark ?? undefined,
     background: Boolean(row.background),
@@ -130,6 +132,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         description: input.description,
         agent: input.agent,
         background: input.background,
+        visible: isUserVisibleActor({ agent: input.agent, actorID: input.actorID }),
       })
       return fromRow(row)
     })
@@ -187,6 +190,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         turnCount: row.turn_count,
         lastTurnTime: row.last_turn_time,
         ...(row.last_error ? { error: row.last_error } : {}),
+        visible: isUserVisibleActor({ agent: row.agent, actorID: row.actor_id }),
       })
     })
 
@@ -225,6 +229,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     })
 
     const remove = Effect.fn("ActorRegistry.remove")(function* (sessionID: SessionID, actorID: string) {
+      const current = yield* get(sessionID, actorID)
       yield* Effect.sync(() =>
         Database.use((db) =>
           db
@@ -233,7 +238,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             .run(),
         ),
       )
-      yield* bus.publish(Events.ActorRemoved, { sessionID, actorID })
+      yield* bus.publish(Events.ActorRemoved, { sessionID, actorID, visible: current?.visible ?? true })
     })
 
     const listBySession = Effect.fn("ActorRegistry.listBySession")(function* (sessionID: SessionID) {
@@ -242,7 +247,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           db.select().from(ActorRegistryTable).where(eq(ActorRegistryTable.session_id, sessionID)).all(),
         ),
       )
-      return rows.map(fromRow)
+      return rows.map(fromRow).filter((actor) => actor.visible)
     })
 
     const listActive = Effect.fn("ActorRegistry.listActive")(function* () {
@@ -260,7 +265,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
             .all(),
         ),
       )
-      return rows.map(fromRow)
+      return rows.map(fromRow).filter((actor) => actor.visible)
     })
 
     const listByParent = Effect.fn("ActorRegistry.listByParent")(function* (
@@ -286,7 +291,9 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
 
     const renderForAgent = Effect.fn("ActorRegistry.renderForAgent")(function* (sessionID: SessionID) {
       const actors = yield* listBySession(sessionID)
-      const active = actors.filter((actor) => actor.background && (actor.status === "pending" || actor.status === "running"))
+      const active = actors.filter(
+        (actor) => actor.visible && actor.background && (actor.status === "pending" || actor.status === "running"),
+      )
       if (active.length === 0) return ""
 
       const lines: string[] = []
@@ -321,7 +328,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       if (actorID === "main") return false
       const actor = yield* get(sessionID, actorID)
       if (!actor) return false
-      return SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)
+      return !actor.visible
     })
 
     const allocateActorID = Effect.fn("ActorRegistry.allocateActorID")(function* (
@@ -393,6 +400,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
           description: entry.description,
           lastTurnTime: entry.lastTurnTime,
           stuckDuration: Date.now() - entry.lastTurnTime,
+          visible: entry.visible,
         })
       }
     })

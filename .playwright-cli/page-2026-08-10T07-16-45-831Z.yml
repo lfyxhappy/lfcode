@@ -1,0 +1,8 @@
+- generic [ref=f2e3]:
+  - generic [ref=f2e6]:
+    - heading "该网页无法正常运作" [level=1] [ref=f2e7]
+    - paragraph [ref=f2e8]:
+      - strong [ref=f2e9]: 192.168.10.23
+      - text: 目前无法处理此请求。
+    - generic [ref=f2e10]: HTTP ERROR 500
+  - button "重新加载" [ref=f2e13] [cursor=pointer]

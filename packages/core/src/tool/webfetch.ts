@@ -5,6 +5,7 @@ import { Duration, Effect, Layer, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import TurndownService from "turndown"
+import { canUseWindowsWebFetch, fetchWithWindowsPowerShell } from "@lfcode-ai/shared/windows-webfetch"
 import { PermissionV2 } from "../permission"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -154,7 +155,9 @@ const assertHttpUrl = (url: URL) => {
 const execute = (http: HttpClient.HttpClient, url: string, format: Format, userAgent = browserUserAgent) =>
   http.execute(request(url, format, userAgent)).pipe(Effect.flatMap(HttpClientResponse.filterStatusOk))
 
-const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
+type FetchBody = { readonly body: Buffer; readonly contentType: string }
+
+const collectBody = (response: HttpClientResponse.HttpClientResponse): Effect.Effect<FetchBody, Error> =>
   Effect.gen(function* () {
     const contentLength = response.headers["content-length"]
     if (contentLength && Number.parseInt(contentLength, 10) > MAX_RESPONSE_BYTES) {
@@ -170,8 +173,45 @@ const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
         return undefined
       }),
     )
-    return Buffer.concat(chunks, size)
+    return { body: Buffer.concat(chunks, size), contentType: response.headers["content-type"] || "" }
   })
+
+const statusFailure = (status: number) => {
+  if (status === 403) return "http_403"
+  if (status === 429) return "http_429"
+  if (status >= 500) return "http_5xx"
+  return "http_error"
+}
+
+export function shouldUseWindowsPowerShellFallback(error: unknown, platform = process.platform) {
+  if (!canUseWindowsWebFetch(platform)) return false
+  const failure = classifyWebFetchFailure(error)
+  return failure === "tls" || failure === "transport"
+}
+
+const collectPowerShellBody = (url: string, format: Format, timeoutSeconds: number) =>
+  Effect.tryPromise({
+    try: (signal) =>
+      fetchWithWindowsPowerShell(
+        {
+          url,
+          headers: headers(format, browserUserAgent),
+          maxResponseBytes: MAX_RESPONSE_BYTES,
+          maxRedirects: 5,
+          timeoutSeconds,
+        },
+        signal,
+      ),
+    catch: () => new Error("webfetch:transport"),
+  }).pipe(
+    Effect.flatMap((response) => {
+      if (response.status < 200 || response.status >= 300)
+        return Effect.fail(new Error(`webfetch:${statusFailure(response.status)}`))
+      const mime = mimeFrom(response.contentType)
+      if (isImageAttachment(mime) || !isTextualMime(mime)) return Effect.fail(new Error("webfetch:unsupported_content"))
+      return Effect.succeed({ body: response.body, contentType: response.contentType })
+    }),
+  )
 
 const mimeFrom = (contentType: string) => contentType.split(";", 1)[0]?.trim().toLowerCase() ?? ""
 const isImageAttachment = (mime: string) =>
@@ -231,19 +271,22 @@ export const layer = Layer.effectDiscard(
                 const response = yield* execute(http, input.url, input.format).pipe(
                   Effect.catchIf(isCloudflareChallenge, () => execute(http, input.url, input.format, "lfcode")),
                 )
-                const contentType = response.headers["content-type"] || ""
-                const mime = mimeFrom(contentType)
-                if (isImageAttachment(mime))
-                  return yield* Effect.fail(new Error("webfetch:unsupported_content"))
-                if (!isTextualMime(mime))
-                  return yield* Effect.fail(new Error("webfetch:unsupported_content"))
-                return { body: yield* collectBody(response), contentType }
+                return yield* collectBody(response)
               }).pipe(
+                Effect.catch((error) => {
+                  if (!shouldUseWindowsPowerShellFallback(error)) return Effect.fail(error)
+                  return collectPowerShellBody(input.url, input.format, input.timeout ?? DEFAULT_TIMEOUT_SECONDS)
+                }),
                 Effect.timeoutOrElse({
                   duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
                   orElse: () => Effect.fail(new Error("webfetch:timeout")),
                 }),
               )
+              const mime = mimeFrom(contentType)
+              if (isImageAttachment(mime))
+                return yield* Effect.fail(new Error("webfetch:unsupported_content"))
+              if (!isTextualMime(mime))
+                return yield* Effect.fail(new Error("webfetch:unsupported_content"))
               const content = convert(new TextDecoder().decode(body), contentType, input.format)
               return {
                 url: input.url,

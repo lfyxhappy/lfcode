@@ -27,7 +27,7 @@ export const AppBrowserDownloadResourceTool = Tool.define(
     description: "Download a resource referenced by the side browser, such as an image, audio, video, or direct asset URL.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("interactive")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post<{ ok?: boolean }>("/browser/download-resource", {

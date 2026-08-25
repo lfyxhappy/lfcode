@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { Shell } from "@/shell/shell"
 import { Log } from "@/util"
 import { sanitizedProcessEnv } from "@/util/process-metadata"
@@ -254,7 +255,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
         config: (typeof PLATFORM)[keyof typeof PLATFORM],
         target: string,
       ) {
-        const dir = yield* fs.makeTempDirectoryScoped({ directory: Global.Path.bin, prefix: "ripgrep-" })
+        const dir = yield* fs.makeTempDirectoryScoped({ directory: PluginPath.data("runtime-ripgrep"), prefix: "ripgrep-" })
 
         if (config.extension === "zip") {
           const shell = yield* Effect.sync(() => Shell.resolvePowerShell())
@@ -292,11 +293,11 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
       const filepath = yield* Effect.cached(
         Effect.gen(function* () {
+          const target = path.join(PluginPath.data("runtime-ripgrep"), `rg${process.platform === "win32" ? ".exe" : ""}`)
+          if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
+
           const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
           if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
-
-          const target = path.join(Global.Path.bin, `rg${process.platform === "win32" ? ".exe" : ""}`)
-          if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
 
           const platformKey = `${process.arch}-${process.platform}` as keyof typeof PLATFORM
           const config = PLATFORM[platformKey]
@@ -306,10 +307,10 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 
           const filename = `ripgrep-${VERSION}-${config.platform}.${config.extension}`
           const url = `https://github.com/BurntSushi/ripgrep/releases/download/${VERSION}/${filename}`
-          const archive = path.join(Global.Path.bin, filename)
+          const archive = path.join(PluginPath.data("runtime-ripgrep"), filename)
 
           log.info("downloading ripgrep", { url })
-          yield* fs.ensureDir(Global.Path.bin).pipe(Effect.orDie)
+          yield* fs.ensureDir(PluginPath.data("runtime-ripgrep")).pipe(Effect.orDie)
 
           const bytes = yield* HttpClientRequest.get(url).pipe(
             http.execute,

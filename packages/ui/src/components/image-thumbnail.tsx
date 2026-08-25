@@ -267,7 +267,7 @@ export function ThumbnailImage(props: {
     return props.previewSrc ?? (oversized() ? undefined : src)
   })
   const [resolvedSrc, setResolvedSrc] = createSignal<string | undefined>(immediateSrc())
-  const [active, setActive] = createSignal(!!props.previewSrc || typeof IntersectionObserver !== "function")
+  const [active, setActive] = createSignal(!!props.resolveSrc || !!props.previewSrc || typeof IntersectionObserver !== "function")
   let placeholderRef: HTMLDivElement | undefined
 
   createEffect(() => {

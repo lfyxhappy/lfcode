@@ -45,7 +45,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "Начните сообщение с {highlight}!{/highlight}, чтобы выполнить shell-команду напрямую (например, {highlight}!ls -la{/highlight})",
   "tui.tips.tab_agent":
-    "Нажмите {highlight}Tab{/highlight} или {highlight}Shift+Tab{/highlight}, чтобы переключаться между агентами Build, Plan и Compose",
+    "Нажмите {highlight}Tab{/highlight} или {highlight}Shift+Tab{/highlight}, чтобы переключаться между агентами Build и Plan",
   "tui.tips.theme_mode":
     "Выполните {highlight}/dark{/highlight} для тёмного режима или {highlight}/light{/highlight} для светлого",
   "tui.tips.doc": "Выполните {highlight}/doc{/highlight}, чтобы открыть пользовательскую документацию",
@@ -266,7 +266,6 @@ export const dict = {
   // App-level commands
   "tui.command.session.list.title": "Сменить сессию",
   "tui.command.session.new.title": "Новая сессия",
-  "tui.command.workflow.list.title": "Рабочие процессы",
   "tui.command.model.list.title": "Сменить модель",
   "tui.command.model.cycle_recent.title": "Цикл моделей",
   "tui.command.model.cycle_recent_reverse.title": "Цикл моделей (в обратном порядке)",

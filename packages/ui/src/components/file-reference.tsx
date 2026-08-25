@@ -20,6 +20,7 @@ export type FileReferenceProps = {
   allowContextMenu?: boolean
   onPreview?: (path: string) => void
   onOpenDefaultApp?: (path: string) => void
+  onOpenInApp?: (path: string) => void
   onOpenFolder?: (path: string) => void
   onOpenWith?: (path: string, app: string) => void
   onCopyPath?: (path: string) => void
@@ -43,6 +44,13 @@ export function FileReference(props: FileReferenceProps) {
   const canExternalOpen = createMemo(
     () => !!resolved() && !!(props.onOpenDefaultApp ?? context?.onOpenDefaultApp) && !!context?.canExternalOpenPaths,
   )
+  const canBrowseInApp = createMemo(
+    () =>
+      kind() === "directory" &&
+      !!resolved() &&
+      !!(props.onOpenInApp ?? context?.onOpenInApp) &&
+      (context ? !!context.canBrowseInAppPaths : !!props.onOpenInApp),
+  )
   const canOpenFolder = createMemo(
     () => kind() === "file" && !!resolved() && !!(props.onOpenFolder ?? context?.onOpenFolder),
   )
@@ -51,7 +59,7 @@ export function FileReference(props: FileReferenceProps) {
     () =>
       props.allowContextMenu ??
       context?.allowContextMenu ??
-      (canExternalOpen() || canOpenFolder() || canCopy()),
+      (canExternalOpen() || canBrowseInApp() || canOpenFolder() || canCopy()),
   )
   const openApps = createMemo(() => context?.openWithApps ?? [])
 
@@ -103,12 +111,25 @@ export function FileReference(props: FileReferenceProps) {
   if (!allowContextMenu()) return trigger
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) context?.onRequestOpenWithApps?.()
+      }}
+    >
       <ContextMenu.Trigger as="span">
         {trigger}
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content>
+      <Show when={canBrowseInApp()}>
+        <ContextMenu.Item
+          onSelect={() => {
+            ;(props.onOpenInApp ?? context?.onOpenInApp)?.(openTarget()!)
+          }}
+        >
+          <ContextMenu.ItemLabel>{i18n.t("ui.fileReference.browseInApp")}</ContextMenu.ItemLabel>
+        </ContextMenu.Item>
+      </Show>
       <Show when={canExternalOpen()}>
         <ContextMenu.Item
           onSelect={() => {

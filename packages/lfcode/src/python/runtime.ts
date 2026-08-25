@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "fs"
 import path from "path"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { Filesystem } from "@/util"
 import { which } from "@/util/which"
 
@@ -17,7 +17,7 @@ export type ManagedPythonCommand = PythonCommand & {
 }
 
 export function managedPythonRoot() {
-  return path.join(Global.Path.data, "python", "runtime")
+  return PluginPath.data("runtime-python")
 }
 
 export function managedPythonExecutable(root = managedPythonRoot()) {

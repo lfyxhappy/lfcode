@@ -90,6 +90,7 @@ describe("actor.status event payload", () => {
         expect(running.lastOutcome).toBeUndefined()
         expect(running.turnCount).toBe(0)
         expect(typeof running.lastTurnTime).toBe("number")
+        expect(running.visible).toBe(true)
 
         expect(idle.status).toBe("idle")
         expect(idle.lastOutcome).toBe("success")

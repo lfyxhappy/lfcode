@@ -22,6 +22,18 @@ export const Model = Schema.Struct({
   protocol: Schema.optional(Protocol),
   attachment: Schema.optional(Schema.Boolean),
   reasoning: Schema.optional(Schema.Boolean),
+  reasoning_options: Schema.optional(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          type: Schema.String,
+          values: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+          min: Schema.optional(Schema.Number),
+          max: Schema.optional(Schema.Number),
+        }),
+      ),
+    ),
+  ),
   temperature: Schema.optional(Schema.Boolean),
   tool_call: Schema.optional(Schema.Boolean),
   capabilities: Schema.optional(

@@ -2,7 +2,7 @@ import type { Event } from "@lfcode-ai/sdk/v2/client"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { batch, onCleanup, onMount } from "solid-js"
+import { batch, createSignal, onCleanup, onMount, type Accessor } from "solid-js"
 import z from "zod"
 import { createSdkForServer, type ServerSdkOptions } from "@/utils/server"
 import { useLanguage } from "./language"
@@ -15,12 +15,14 @@ const abortError = z.object({
 })
 
 type GlobalSDKEventBus = ReturnType<typeof createGlobalEmitter<{ [key: string]: Event }>>
+type GlobalSDKConnectionState = "connecting" | "connected" | "reconnecting"
 
 export type GlobalSDKContext = {
   url: string
   client: ReturnType<typeof createSdkForServer>
   event: Pick<GlobalSDKEventBus, "on" | "listen"> & {
     start: () => Promise<void> | undefined
+    connection: Accessor<GlobalSDKConnectionState>
   }
   createClient(opts: Omit<ServerSdkOptions, "server">): ReturnType<typeof createSdkForServer>
 }
@@ -55,6 +57,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     const emitter = createGlobalEmitter<{
       [key: string]: Event
     }>()
+    const [connection, setConnection] = createSignal<GlobalSDKConnectionState>("connecting")
 
     const FLUSH_FRAME_MS = 16
     const STREAM_YIELD_MS = 8
@@ -150,6 +153,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
             for await (const event of events.stream) {
               resetHeartbeat()
               streamErrorLogged = false
+              if (event.payload.type === "server.connected") setConnection("connected")
               const directory = event.directory ?? "global"
               if (event.payload.type === "sync") {
                 continue
@@ -177,6 +181,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
             abort.signal.removeEventListener("abort", onAbort)
             attempt = undefined
             clearHeartbeat()
+            if (!abort.signal.aborted && started) setConnection("reconnecting")
           }
 
           if (abort.signal.aborted || !started) return
@@ -223,6 +228,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
         on: emitter.on.bind(emitter),
         listen: emitter.listen.bind(emitter),
         start,
+        connection,
       },
       createClient(opts: Omit<Parameters<typeof createSdkForServer>[0], "server" | "fetch">) {
         const s = server.current

@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile)
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
 const fastPackage = process.env.LFCODE_FAST_PACKAGE === "true"
+const preRelease = process.env.LFCODE_PRE_RELEASE === "true"
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -29,7 +30,9 @@ const channel = "stable"
 const localConfigDir = path.join(rootDir, "packages", "desktop", "local-config")
 const localConfigFiles = process.platform === "win32" ? [{ from: localConfigDir, to: ".", filter: ["lfcode.jsonc"] }] : []
 const cliResourceDir = path.join(rootDir, "packages", "desktop", "resources", "cli")
+const pluginSdkDir = path.join(rootDir, "packages", "plugin")
 const windowsComputerUseBundleDir = path.join(rootDir, ".windows-computer-use-mcp", "bundle")
+const codegraphRuntimeDir = path.join(rootDir, ".codegraph-runtime")
 const bundledPwshDir = resolveBundledPwshDir()
 const bundledGitDir = resolveBundledGitStageDir() ?? resolveBundledGitSourceDir()
 const bundledPythonDir = resolveBundledPythonStageDir() ?? resolveBundledPythonSourceDir()
@@ -42,6 +45,13 @@ const windowsComputerUseResources =
           filter: ["**/*"],
         },
       ]
+    : []
+const codegraphResources =
+  process.platform === "win32" &&
+  (existsSync(path.join(codegraphRuntimeDir, "codegraph.exe")) ||
+    (existsSync(path.join(codegraphRuntimeDir, "node.exe")) &&
+      existsSync(path.join(codegraphRuntimeDir, "lib", "dist", "bin", "codegraph.js"))))
+    ? [{ from: codegraphRuntimeDir, to: "codegraph", filter: ["**/*"] }]
     : []
 const bundledPwshResources =
   process.platform === "win32"
@@ -75,6 +85,7 @@ const bundledPythonResources =
     : []
 const getBase = (): Configuration => ({
   artifactName: "lfcode-${os}-${arch}.${ext}",
+  executableName: preRelease ? "LfcodePre" : "Lfcode",
   ...(fastPackage
     ? {
         npmRebuild: false,
@@ -98,11 +109,17 @@ const getBase = (): Configuration => ({
       filter: ["**/*"],
     },
     {
+      from: pluginSdkDir,
+      to: "plugin-sdk",
+      filter: ["package.json", "dist/**/*"],
+    },
+    {
       from: "native/",
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
     },
     ...windowsComputerUseResources,
+    ...codegraphResources,
     ...bundledPwshResources,
     ...bundledGitResources,
     ...bundledPythonResources,
@@ -206,8 +223,8 @@ function getConfig() {
   if (channel === "stable") {
     return {
       ...base,
-      appId: "com.lfyxhappy.lfcode",
-      productName: "Lfcode",
+      appId: preRelease ? "com.lfyxhappy.lfcode.pre" : "com.lfyxhappy.lfcode",
+      productName: preRelease ? "Lfcode Pre" : "Lfcode",
       protocols: { name: "Lfcode", schemes: ["lfcode"] },
       publish: { provider: "github", owner: "lfyxhappy", repo: "lfcode", channel: "latest" },
     }

@@ -1,0 +1,8 @@
+- generic [ref=e3]:
+  - generic [ref=e6]:
+    - heading "找不到 192.168.10.23 的网页" [level=1] [ref=e7]
+    - paragraph [ref=e9]:
+      - text: 找不到与以下网址对应的网页：
+      - strong [ref=e10]: https://192.168.10.23:43173/
+    - generic [ref=e11]: HTTP ERROR 404
+  - button "重新加载" [ref=e14] [cursor=pointer]

@@ -14,7 +14,7 @@ export const AppFocusBrowserTabTool = Tool.define(
     description: "Focus an existing side browser tab in the local Lfcode desktop app.",
     execute: (args) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("interactive")
         const result = yield* Effect.promise(() =>
           client.post("/browser/focus-tab", {
             windowID: args.window_id,

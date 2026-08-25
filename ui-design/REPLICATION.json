@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "url|file|screenshot",
+    "reference": ""
+  },
+  "target": {
+    "entry": "",
+    "root": ""
+  },
+  "preserve": [
+    "hierarchy",
+    "responsive-layout",
+    "interactions",
+    "tokens"
+  ],
+  "deviations": [],
+  "evidence": {
+    "inspection_report": "",
+    "screenshots": []
+  }
+}

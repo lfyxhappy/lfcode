@@ -17,7 +17,7 @@ export const AppBrowserWaitTool = Tool.define(
     description: "Wait for text conditions or time-based settling inside the side browser.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post<{ matched?: boolean }>("/browser/wait", {

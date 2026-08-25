@@ -1,6 +1,6 @@
 import { useFilteredList } from "@lfcode-ai/ui/hooks"
 import { useSpring } from "@lfcode-ai/ui/motion-spring"
-import { createEffect, on, Component, Show, onCleanup, createMemo, createSignal, createResource } from "solid-js"
+import { createEffect, on, Component, For, Show, onCleanup, createMemo, createSignal, createResource } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { useFile } from "@/context/file"
@@ -16,10 +16,17 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
+import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
+import { useGlobalSync } from "@/context/global-sync"
 import { useComments } from "@/context/comments"
 import { DockShellForm, DockTray } from "@lfcode-ai/ui/dock-surface"
+import { Button } from "@lfcode-ai/ui/button"
 import { Icon } from "@lfcode-ai/ui/icon"
+import { IconButton, type IconButtonProps } from "@lfcode-ai/ui/icon-button"
+import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
+import { showToast } from "@lfcode-ai/ui/toast"
+import { Tooltip } from "@lfcode-ai/ui/tooltip"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { useProviders } from "@/hooks/use-providers"
 import { useCommand } from "@/context/command"
@@ -69,7 +76,6 @@ import { promptSlashSelectionResult } from "./prompt-input/slash-selection"
 import { isPromptInputBlank, promptInputText, shouldResetPromptInput } from "./prompt-input/state"
 import { promptHistoryCursor, shouldResetPromptHistoryNavigation } from "./prompt-input/history-state"
 import { PromptGoalBanner } from "./prompt-input/goal-banner"
-import { PromptGoalDialog } from "./prompt-input/goal-dialog"
 import { recentPromptPaths } from "./prompt-input/recent-paths"
 import { PromptControlStrip } from "./prompt-input/control-strip"
 import { PromptEditorSurface } from "./prompt-input/editor-surface"
@@ -85,12 +91,32 @@ import {
 import { ImagePreview } from "@lfcode-ai/ui/image-preview"
 import { useQueries } from "@tanstack/solid-query"
 import { loadAgentsQuery, loadProvidersQuery } from "@/context/global-sync/bootstrap"
+import { startVisiblePolling } from "@/utils/visible-poll"
 import { isSessionStreaming, isSessionWaiting } from "@/utils/session-status"
 import { formatGoalElapsed, formatGoalTokens, goalElapsedMs, goalStatusText } from "./prompt-input/goal-helpers"
 import { displayModelVariant } from "@/context/model-variant"
+import { ModelSelectorPopover } from "@/components/dialog-select-model"
+import { requestScheduledAutomation } from "@/automation/scheduled-task"
+import type { ExternalAgentPrompt } from "./prompt-input/external-agent"
+
+export type ExternalAgentControl = {
+  id: string
+  group: "model" | "permissions"
+  kind: "input" | "key"
+  icon: IconButtonProps["icon"]
+  label: string
+  shortcut: string
+  data: string
+  selected?: boolean
+  disabled?: boolean
+  permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions"
+}
 
 interface PromptInputProps {
   class?: string
+  presentation?: "plugin-conversation" | "external-agent"
+  placeholder?: string
+  submitLabel?: string
   ref?: (el: HTMLDivElement) => void
   suspendUntilReady?: boolean
   newSessionWorktree?: string
@@ -103,6 +129,140 @@ interface PromptInputProps {
   onSubmit?: () => void
   scope?: PromptScope
   dropRoot?: () => HTMLElement | undefined
+  externalSubmit?: (input: ExternalAgentPrompt) => Promise<void>
+  externalSubmitDisabled?: () => boolean
+  externalSubmitDisabledMessage?: () => string | undefined
+  externalImageUnsupported?: { title: string; description: string }
+  externalAgentLabel?: string
+  externalControls?: ExternalAgentControl[]
+  externalControlSubmit?: (control: ExternalAgentControl) => Promise<void>
+}
+
+type TavernCharacter = {
+  id: string
+  name: string
+  prompt: string
+  firstMessage?: string
+  alternateGreetings?: string[]
+  avatar?: string
+  tags?: string[]
+  worldbookIDs: string[]
+}
+type TavernWorldbook = { id: string; name: string; content: string }
+type TavernData = {
+  characters: TavernCharacter[]
+  worldbooks: TavernWorldbook[]
+  sessions?: Record<string, { characterID: string; worldbookIDs: string[] }>
+  settings?: { storyPrediction?: boolean }
+} & Record<string, unknown>
+
+function normalizeTavernData(value: unknown): TavernData {
+  if (!value || typeof value !== "object") return { characters: [], worldbooks: [] }
+  const data = value as Partial<TavernData>
+  return {
+    ...data,
+    characters: Array.isArray(data.characters) ? data.characters : [],
+    worldbooks: Array.isArray(data.worldbooks) ? data.worldbooks : [],
+  }
+}
+
+function tavernWorldbookPrompt(worldbook: TavernWorldbook, context: string) {
+  try {
+    const parsed: unknown = JSON.parse(worldbook.content)
+    if (!parsed || typeof parsed !== "object") return worldbook.content
+    const entries = "entries" in parsed ? parsed.entries : undefined
+    const list = Array.isArray(entries) ? entries : entries && typeof entries === "object" ? Object.values(entries) : []
+    const matched = list
+      .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+      .filter((entry) => entry.disable !== true && entry.enabled !== false)
+      .filter((entry) => {
+        if (entry.constant === true) return true
+        const keys = [entry.key, entry.keysecondary, entry.keys, entry.secondary_keys]
+          .flatMap((value) => (Array.isArray(value) ? value : []))
+          .filter((value): value is string => typeof value === "string" && !!value.trim())
+        return keys.some((key) => context.toLocaleLowerCase().includes(key.toLocaleLowerCase()))
+      })
+      .sort((a, b) => Number(b.order ?? b.insertion_order ?? 0) - Number(a.order ?? a.insertion_order ?? 0))
+      .slice(0, 24)
+      .map((entry) => (typeof entry.content === "string" ? entry.content : ""))
+      .filter(Boolean)
+    return matched.length ? matched.join("\n\n") : ""
+  } catch {
+    return worldbook.content
+  }
+}
+
+async function tavernFileBase64(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let value = ""
+  for (const byte of bytes) value += String.fromCharCode(byte)
+  return btoa(value)
+}
+
+function tavernRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
+}
+
+function tavernString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined
+}
+
+function tavernStrings(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()) : undefined
+}
+
+function tavernCharacterPrompt(data: Record<string, unknown>) {
+  return [
+    data.description,
+    data.personality,
+    data.scenario,
+    data.mes_example,
+    data.system_prompt,
+    data.post_history_instructions,
+  ]
+    .map(tavernString)
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+function tavernStoryHint(character: TavernCharacter | undefined, prompt: string) {
+  if (!character) return "先选择角色，再根据角色设定推进当前场景。"
+  const premise = character.prompt.split(/[。！？\n]/).find((item) => item.trim())?.trim()
+  const context = prompt.trim().replace(/\s+/g, " ").slice(0, 100)
+  return [
+    `建议让 ${character.name} 对当前信息作出有立场的回应。`,
+    premise ? `可延续设定：${premise.slice(0, 72)}` : "可通过行动、提问或环境变化推动情节。",
+    context ? `当前线索：${context}` : "发送一段行动或对白开始剧情。",
+  ].join(" ")
+}
+
+async function tavernCharacterCard(file: File): Promise<Record<string, unknown> | undefined> {
+  if (file.name.toLocaleLowerCase().endsWith(".json")) {
+    try {
+      return tavernRecord(JSON.parse(await file.text()))
+    } catch {
+      return
+    }
+  }
+  if (!file.name.toLocaleLowerCase().endsWith(".png")) return
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  for (let offset = 8; offset + 12 <= bytes.length; ) {
+    const length = view.getUint32(offset)
+    const end = offset + 12 + length
+    if (end > bytes.length) return
+    const type = new TextDecoder("latin1").decode(bytes.slice(offset + 4, offset + 8))
+    const chunk = bytes.slice(offset + 8, offset + 8 + length)
+    offset = end
+    if (type !== "tEXt") continue
+    const zero = chunk.indexOf(0)
+    if (zero === -1 || new TextDecoder("latin1").decode(chunk.slice(0, zero)) !== "chara") continue
+    try {
+      return tavernRecord(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(new TextDecoder("latin1").decode(chunk.slice(zero + 1))), (char) => char.charCodeAt(0)))))
+    } catch {
+      return
+    }
+  }
 }
 
 const EXAMPLES = [
@@ -135,8 +295,10 @@ const EXAMPLES = [
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const server = useServer()
 
   const sync = useSync()
+  const globalSync = useGlobalSync()
   const local = useLocal()
   const files = useFile()
   const promptContext = usePrompt()
@@ -173,6 +335,120 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     reset: () => promptContext.scope(props.scope).reset(),
   }
   const sessionID = createMemo(() => props.scope?.id ?? params.id)
+  const externalAgent = createMemo(() => !!props.externalSubmit)
+  const tavernSession = createMemo(() => {
+    const id = sessionID()
+    if (!id) return false
+    const projectExtension = sync.project?.extension
+    if (projectExtension?.pluginID !== "lfcode-tavern" || projectExtension.type !== "tavern") return false
+    const extension = sync.session.get(id)?.extension
+    return extension?.pluginID === "lfcode-tavern" && extension.type === "tavern"
+  })
+  const [tavernData, { mutate: setTavernData }] = createResource(
+    () => (tavernSession() ? "lfcode-tavern" : undefined),
+    async (pluginID) =>
+      normalizeTavernData(
+        (await sdk.client.plugin.dataGet({ pluginID }).catch(() => ({ data: { value: {} } }))).data?.value,
+      ),
+  )
+  const [tavernCharacterID, setTavernCharacterID] = createSignal<string>()
+  const [tavernWorldbookIDs, setTavernWorldbookIDs] = createSignal<string[]>([])
+  const selectedTavernCharacter = createMemo(() => tavernData()?.characters.find((item) => item.id === tavernCharacterID()))
+  const tavernSelection = createMemo(() => {
+    const character = selectedTavernCharacter()
+    if (!character) return
+    const worldbooks = tavernData()?.worldbooks.filter((item) => tavernWorldbookIDs().includes(item.id)) ?? []
+    const context = [character.name, character.prompt, ...prompt.current().map((item) => ("content" in item ? item.content : ""))].join("\n")
+    return {
+      projectID: sync.project?.id ?? "",
+      roleName: character.name,
+      system: [
+        "你正在进行酒馆角色扮演。不得调用工具、访问文件、执行命令或描述系统内部能力。",
+        `当前角色：${character.name}`,
+        character.prompt ? `角色设定：${character.prompt}` : "",
+        ...worldbooks.map((item) => {
+          const content = tavernWorldbookPrompt(item, context)
+          return content ? `世界书《${item.name}》：${content}` : ""
+        }),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    }
+  })
+
+  createEffect(() => {
+    const data = tavernData()
+    if (!data) return
+    const saved = sessionID() ? data.sessions?.[sessionID()!] : undefined
+    if (saved) {
+      if (tavernCharacterID() !== saved.characterID) setTavernCharacterID(saved.characterID)
+      if (tavernWorldbookIDs().join(",") !== saved.worldbookIDs.join(",")) setTavernWorldbookIDs(saved.worldbookIDs)
+      return
+    }
+    if (tavernCharacterID()) return
+    const character = data.characters[0]
+    if (!character) return
+    setTavernCharacterID(character.id)
+    setTavernWorldbookIDs(character.worldbookIDs)
+  })
+
+  const saveTavernData = async (next: TavernData) => {
+    setTavernData(next)
+    await sdk.client.plugin.dataSet({ pluginID: "lfcode-tavern", pluginData: { value: next } })
+  }
+
+  const persistTavernSelection = async (characterID: string | undefined, worldbookIDs: string[]) => {
+    const id = sessionID()
+    const current = tavernData()
+    if (!id || !current || !characterID) return
+    const saved = current.sessions?.[id]
+    if (saved?.characterID === characterID && saved.worldbookIDs.join(",") === worldbookIDs.join(",")) return
+    await saveTavernData({ ...current, sessions: { ...current.sessions, [id]: { characterID, worldbookIDs } } })
+  }
+  const tavernPrediction = createMemo(() => tavernStoryHint(selectedTavernCharacter(), promptInputText(prompt.current())))
+
+  let tavernCharacterFileInput: HTMLInputElement | undefined
+  let tavernWorldbookFileInput: HTMLInputElement | undefined
+  const addTavernCharacter = () => tavernCharacterFileInput?.click()
+  const addTavernWorldbook = () => tavernWorldbookFileInput?.click()
+
+  const importTavernCharacter = async (file: File) => {
+    const stored = await sdk.client.plugin.dataFilePut({
+      pluginID: "lfcode-tavern",
+      pluginDataFile: { kind: "characters", filename: file.name, base64: await tavernFileBase64(file) },
+    })
+    const card = await tavernCharacterCard(file)
+    if (!card) throw new Error("无法读取角色卡：仅支持 SillyTavern JSON 或 PNG 角色卡")
+    const data = tavernRecord(card.data) ?? card
+    const name = tavernString(data.name) ?? file.name.replace(/\.[^.]+$/, "")
+    const character = {
+      id: crypto.randomUUID(),
+      name,
+      prompt: tavernCharacterPrompt(data),
+      firstMessage: tavernString(data.first_mes),
+      alternateGreetings: tavernStrings(data.alternate_greetings),
+      avatar: stored.data?.path,
+      worldbookIDs: [],
+    }
+    const current = tavernData() ?? { characters: [], worldbooks: [] }
+    const next = { ...current, characters: [...current.characters.filter((item) => item.name !== character.name), character] }
+    await saveTavernData(next)
+    setTavernCharacterID(character.id)
+    setTavernWorldbookIDs([])
+  }
+
+  const importTavernWorldbook = async (file: File) => {
+    if (!file.name.toLocaleLowerCase().endsWith(".json")) throw new Error("世界书必须是 JSON 文件")
+    const content = await file.text()
+    JSON.parse(content)
+    const stored = await sdk.client.plugin.dataFilePut({
+      pluginID: "lfcode-tavern",
+      pluginDataFile: { kind: "worldbooks", filename: file.name, base64: await tavernFileBase64(file) },
+    })
+    const worldbook = { id: crypto.randomUUID(), name: file.name.replace(/\.json$/i, ""), content, source: stored.data?.path }
+    const current = tavernData() ?? { characters: [], worldbooks: [] }
+    await saveTavernData({ ...current, worldbooks: [...current.worldbooks.filter((item) => item.name !== worldbook.name), worldbook] })
+  }
   const sessionDirectory = createMemo(() => props.scope?.dir ?? sdk.directory)
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -326,9 +602,38 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     mode: "normal",
     applyingHistory: false,
   })
+  const [externalSubmitting, setExternalSubmitting] = createSignal(false)
+  const [externalControlSending, setExternalControlSending] = createSignal<string>()
   const [goalDraft, setGoalDraft] = createSignal("")
   const [goalSaving, setGoalSaving] = createSignal(false)
   const [goalNow, setGoalNow] = createSignal(Date.now())
+
+  const runExternalControl = async (control: ExternalAgentControl) => {
+    if (!props.externalControlSubmit || props.externalSubmitDisabled?.() || externalControlSending()) return
+    setExternalControlSending(control.id)
+    try {
+      await props.externalControlSubmit(control)
+    } catch (cause) {
+      showToast({
+        title: language.t("prompt.toast.promptSendFailed.title"),
+        description: cause instanceof Error ? cause.message : language.t("common.requestFailed"),
+      })
+    } finally {
+      setExternalControlSending(undefined)
+      restoreFocus()
+    }
+  }
+
+  const interruptExternalAgent = () =>
+    runExternalControl({
+      id: "interrupt",
+      group: "permissions",
+      kind: "key",
+      icon: "stop",
+      label: language.t("claudeCode.control.interrupt"),
+      shortcut: "Ctrl+C",
+      data: "\u0003",
+    })
 
   const goalStatusLabel = createMemo(() => goalStatusText(goalState()?.status))
   const goalElapsedLabel = createMemo(() => formatGoalElapsed(goalElapsedMs(goalState(), goalNow())))
@@ -336,35 +641,37 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const openGoalDialog = (mode: "create" | "edit") => {
     const current = goalState()
     setGoalDraft(mode === "edit" ? (current?.objective ?? current?.condition ?? "") : "")
-    dialog.show(() => (
-      <PromptGoalDialog
-        mode={mode}
-        value={goalDraft()}
-        saving={goalSaving()}
-        cancelLabel={language.t("common.cancel")}
-        saveLabel={language.t("common.save")}
-        onInput={setGoalDraft}
-        onCancel={() => dialog.close()}
-        onSave={() => {
-          const request = createPromptGoalCommandRequest({
-            sessionID: sessionID(),
-            arguments: goalDraft().trim(),
-            agent: local.agent.current(),
-            model: local.model.current(),
-            variant: local.model.variant.current(),
-          })
-          if (!request) return
-          setGoalSaving(true)
-          void sdk.client.session
-            .command(request)
-            .then(() => {
-              dialog.close()
-              restoreFocus()
+    void import("./prompt-input/goal-dialog").then((mod) => {
+      dialog.show(() => (
+        <mod.PromptGoalDialog
+          mode={mode}
+          value={goalDraft()}
+          saving={goalSaving()}
+          cancelLabel={language.t("common.cancel")}
+          saveLabel={language.t("common.save")}
+          onInput={setGoalDraft}
+          onCancel={() => dialog.close()}
+          onSave={() => {
+            const request = createPromptGoalCommandRequest({
+              sessionID: sessionID(),
+              arguments: goalDraft().trim(),
+              agent: local.agent.current(),
+              model: local.model.current(),
+              variant: local.model.variant.current(),
             })
-            .finally(() => setGoalSaving(false))
-        }}
-      />
-    ))
+            if (!request) return
+            setGoalSaving(true)
+            void sdk.client.session
+              .command(request)
+              .then(() => {
+                dialog.close()
+                restoreFocus()
+              })
+              .finally(() => setGoalSaving(false))
+          }}
+        />
+      ))
+    })
   }
 
   const runGoalCommand = (commandName: string) => {
@@ -464,6 +771,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const suggest = createMemo(() => !hasUserPrompt())
 
   const placeholder = createMemo(() =>
+    props.placeholder ??
     promptPlaceholder({
       mode: store.mode,
       commentCount: commentCount(),
@@ -513,7 +821,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const shellModeKey = PROMPT_SHELL_MODE_KEYBIND
   const normalModeKey = PROMPT_NORMAL_MODE_KEYBIND
 
-  if (!props.scope) {
+  if (!props.scope && !externalAgent()) {
     command.register("prompt-input", () =>
       buildPromptInputCommandOptions({
         normalMode: store.mode === "normal",
@@ -572,20 +880,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     sessionID()
     if (sessionID()) return
     if (!suggest()) return
-    const interval = setInterval(() => {
+    const stopPolling = startVisiblePolling(() => {
       setStore("placeholder", (prev) => (prev + 1) % EXAMPLES.length)
-    }, 6500)
-    onCleanup(() => clearInterval(interval))
+    }, 6500, { immediate: false })
+    onCleanup(stopPolling)
   })
 
   createEffect(() => {
     const state = goalState()
     if (state?.status !== "active" || !state.stats?.activeSince) return
     setGoalNow(Date.now())
-    const interval = setInterval(() => {
+    const stopPolling = startVisiblePolling(() => {
       setGoalNow(Date.now())
-    }, 30_000)
-    onCleanup(() => clearInterval(interval))
+    }, 30_000, { immediate: false })
+    onCleanup(stopPolling)
   })
 
   const [composing, setComposing] = createSignal(false)
@@ -769,6 +1077,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     const popover = detectPromptPopover({ mode: store.mode, rawText, cursorPosition })
+    if (externalAgent() && popover.popover !== "at") {
+      closePopover()
+      resetHistoryNavigation()
+      mirror.input = true
+      prompt.set([...rawParts, ...selectedText, ...images], cursorPosition)
+      queueScroll()
+      return
+    }
     if (popover.popover === "agent") {
       agentOnInput(popover.query ?? "")
       setStore("popover", "agent")
@@ -776,6 +1092,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       atOnInput(popover.query ?? "")
       setStore("popover", "at")
     } else if (popover.popover === "slash") {
+      if (!sync.data.command_ready) void globalSync.project.loadCommands(sessionDirectory())
       slashOnInput(popover.query ?? "")
       setStore("popover", "slash")
     } else {
@@ -996,6 +1313,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onQueue: props.onQueue,
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
+    tavernMode: tavernSession,
+    tavern: tavernSelection,
+    externalSubmit: props.externalSubmit,
+    externalSubmitDisabled: props.externalSubmitDisabled,
+    externalSubmitDisabledMessage: props.externalSubmitDisabledMessage,
+    externalImageUnsupported: props.externalImageUnsupported,
+    setExternalSubmitting,
   })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1024,7 +1348,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    if (event.key === "!" && store.mode === "normal") {
+    if (!externalAgent() && event.key === "!" && store.mode === "normal") {
       const cursorPosition = getCursorPosition(editorRef)
       if (cursorPosition === 0) {
         setStore("mode", "shell")
@@ -1182,6 +1506,79 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       .filter((value) => !!value)
       .join(" · "),
   )
+  const subagentDispatchReferences = createMemo(() => {
+    const active = activeFileTab()
+    const activePath = active ? files.pathFromTab(active) : undefined
+    return [
+      ...new Set([
+        ...prompt.current().flatMap((part) => (part.type === "file" ? [part.path] : [])),
+        ...prompt.context.items().flatMap((item) => (item.type === "file" ? [item.path] : [])),
+        ...(activePath ? [activePath] : []),
+      ]),
+    ]
+  })
+  const subagentDispatchModels = createMemo(() =>
+    local.model
+      .list()
+      .filter((model) => local.model.visible({ providerID: model.provider.id, modelID: model.id }))
+      .map((model) => ({
+        providerID: model.provider.id,
+        modelID: model.id,
+        label: `${model.provider.name} · ${model.name}`,
+      })),
+  )
+  const openSubagentDispatch = () => {
+    const id = sessionID()
+    if (!id) {
+      showToast({
+        title: language.t("subagent.dispatch.sessionRequired"),
+        description: language.t("subagent.dispatch.sessionRequired"),
+      })
+      return
+    }
+    if (!server.current?.http.url) {
+      showToast({
+        title: language.t("common.requestFailed"),
+        description: language.t("subagent.dispatch.connectionMissing"),
+      })
+      return
+    }
+    const model = local.model.current()
+    void import("./prompt-input/subagent-dispatch-panel").then((mod) => {
+      dialog.show(() => (
+        <mod.PromptSubagentDispatchPanel
+          sessionID={id}
+          connection={{
+            base: server.current?.http.url,
+            directory: sessionDirectory(),
+            username: server.current?.http.username,
+            password: server.current?.http.password,
+          }}
+          primaryAgent={local.agent.current()?.name}
+          primaryModel={model ? { providerID: model.provider.id, modelID: model.id } : undefined}
+          task={promptInputText(prompt.current())}
+          contextRefs={subagentDispatchReferences()}
+          declaredFiles={subagentDispatchReferences()}
+          models={subagentDispatchModels()}
+          onClose={() => {
+            dialog.close()
+            restoreFocus()
+          }}
+          onDispatched={() => prompt.reset()}
+        />
+      ))
+    })
+  }
+
+  const openScheduledAutomation = () => {
+    const id = sessionID()
+    if (!id) return
+    requestScheduledAutomation({
+      target: { kind: "session", sessionID: id },
+      sourceSessionID: id,
+      message: promptInputText(prompt.current()),
+    })
+  }
 
   const [promptReady] = createResource(
     () => prompt.ready().promise,
@@ -1191,9 +1588,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   return (
     <div class="relative size-full _max-h-[320px] flex flex-col gap-0">
       <Show when={props.suspendUntilReady !== false}>{(promptReady(), null)}</Show>
-      <Show when={goalState()}>
-        {(goal) => (
-          <PromptGoalBanner
+      <Show when={!externalAgent()}>
+        <Show when={goalState()}>
+          {(goal) => (
+            <PromptGoalBanner
             objective={goal().objective}
             condition={goal().condition}
             statusLabel={goalStatusLabel()}
@@ -1206,29 +1604,32 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             onPause={() => runGoalCommand("pause")}
             onResume={() => runGoalCommand("resume")}
             onDelete={() => runGoalCommand("delete")}
-          />
-        )}
+            />
+          )}
+        </Show>
       </Show>
-      <PromptPopover
-        popover={store.popover}
-        setSlashPopoverRef={(el) => (slashPopoverRef = el)}
-        atFlat={atFlat()}
-        atActive={atActive() ?? undefined}
-        atKey={atKey}
-        setAtActive={setAtActive}
-        onAtSelect={handleAtSelect}
-        agentFlat={agentFlat()}
-        agentActive={agentActive() ?? undefined}
-        agentKey={agentKey}
-        setAgentActive={setAgentActive}
-        onAgentSelect={handleAgentSelect}
-        slashFlat={slashFlat()}
-        slashActive={slashActive() ?? undefined}
-        setSlashActive={setSlashActive}
-        onSlashSelect={handleSlashSelect}
-        commandKeybind={command.keybind}
-        t={(key) => language.t(key as Parameters<typeof language.t>[0])}
-      />
+      <Show when={!tavernSession() && !externalAgent()}>
+        <PromptPopover
+          popover={store.popover}
+          setSlashPopoverRef={(el) => (slashPopoverRef = el)}
+          atFlat={atFlat()}
+          atActive={atActive() ?? undefined}
+          atKey={atKey}
+          setAtActive={setAtActive}
+          onAtSelect={handleAtSelect}
+          agentFlat={agentFlat()}
+          agentActive={agentActive() ?? undefined}
+          agentKey={agentKey}
+          setAgentActive={setAgentActive}
+          onAgentSelect={handleAgentSelect}
+          slashFlat={slashFlat()}
+          slashActive={slashActive() ?? undefined}
+          setSlashActive={setSlashActive}
+          onSlashSelect={handleSlashSelect}
+          commandKeybind={command.keybind}
+          t={(key) => language.t(key as Parameters<typeof language.t>[0])}
+        />
+      </Show>
       <div
         ref={(el) => (composerRef = el)}
         data-prompt-composer="true"
@@ -1237,6 +1638,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         onPaste={handlePaste}
         classList={{
           "group/prompt-input": true,
+          "rounded-xl border border-border-base bg-surface-raised-base shadow-sm": tavernSession(),
           "border-icon-info-active border-dashed": store.draggingType !== null,
           [props.class ?? ""]: !!props.class,
         }}
@@ -1309,7 +1711,178 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }}
           />
         </DockShellForm>
-        <Show when={store.mode === "normal" || store.mode === "shell"}>
+        <Show when={tavernSession()}>
+          <input
+            ref={(el) => (tavernCharacterFileInput = el)}
+            type="file"
+            accept=".json,image/png"
+            class="hidden"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ""
+              if (file) void importTavernCharacter(file).catch((error) => console.error("[tavern] character import failed", error))
+            }}
+          />
+          <input
+            ref={(el) => (tavernWorldbookFileInput = el)}
+            type="file"
+            accept="application/json,.json"
+            class="hidden"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ""
+              if (file) void importTavernWorldbook(file).catch((error) => console.error("[tavern] worldbook import failed", error))
+            }}
+          />
+          <DockTray attach="top" style={{ "z-index": 20, "background-color": "transparent", border: "0" }}>
+            <div class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-13-medium text-text-weak">
+              <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+                <ModelSelectorPopover
+                  model={local.model}
+                  triggerAs={Button}
+                  triggerProps={{ variant: "ghost", size: "small", class: "max-w-44 truncate px-2 text-left" }}
+                >
+                  {currentModelLabel() || "选择模型 / 思考强度"}
+                </ModelSelectorPopover>
+                <select
+                  class="max-w-32 rounded-md bg-transparent px-2 py-1 text-12-regular text-text-base outline-none hover:bg-surface-base-hover"
+                  value={tavernCharacterID() ?? ""}
+                  onChange={(event) => {
+                    const character = tavernData()?.characters.find((item) => item.id === event.currentTarget.value)
+                    setTavernCharacterID(character?.id)
+                    setTavernWorldbookIDs(character?.worldbookIDs ?? [])
+                    void persistTavernSelection(character?.id, character?.worldbookIDs ?? [])
+                  }}
+                  aria-label="选择角色"
+                >
+                  <option value="">选择角色</option>
+                  <For each={tavernData()?.characters ?? []}>{(item) => <option value={item.id}>{item.name}</option>}</For>
+                </select>
+                <button type="button" class="rounded-md px-2 py-1 text-12-regular hover:bg-surface-base-hover" onClick={addTavernCharacter}>
+                  新增角色
+                </button>
+                <select
+                  class="max-w-40 rounded-md bg-transparent px-2 py-1 text-12-regular text-text-base outline-none hover:bg-surface-base-hover"
+                  value=""
+                  onChange={(event) => {
+                    const id = event.currentTarget.value
+                    if (!id) return
+                    const next = tavernWorldbookIDs().includes(id) ? tavernWorldbookIDs().filter((item) => item !== id) : [...tavernWorldbookIDs(), id]
+                    setTavernWorldbookIDs(next)
+                    void persistTavernSelection(tavernCharacterID(), next)
+                    event.currentTarget.value = ""
+                  }}
+                  aria-label="选择世界书"
+                >
+                  <option value="">世界书{tavernWorldbookIDs().length ? ` ${tavernWorldbookIDs().length}` : ""}</option>
+                  <For each={tavernData()?.worldbooks ?? []}>{(item) => <option value={item.id}>{tavernWorldbookIDs().includes(item.id) ? "移除 " : "加入 "}{item.name}</option>}</For>
+                </select>
+                <button type="button" class="rounded-md px-2 py-1 text-12-regular hover:bg-surface-base-hover" onClick={addTavernWorldbook}>
+                  新增世界书
+                </button>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-lg bg-icon-info-base px-3 py-1.5 text-12-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!streaming() && blank()}
+                  onClick={requestSubmitPrompt}
+                >
+                  {streaming() && blank() ? language.t("prompt.action.stop") : props.submitLabel ?? language.t("prompt.action.send")}
+                </button>
+              </div>
+            </div>
+          </DockTray>
+          <Show when={tavernData()?.settings?.storyPrediction ?? true}>
+            <div class="mx-3 mb-2 rounded-lg border border-border-base bg-surface-raised-base px-3 py-2 text-12-regular text-text-weak">
+              <span class="mr-2 text-12-medium text-text-base">剧情预测</span>{tavernPrediction()}
+            </div>
+          </Show>
+        </Show>
+        <Show when={externalAgent()}>
+          <DockTray attach="top" style={{ "z-index": 20 }}>
+            <div data-prompt-control-strip="external-agent" class="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1.5">
+              <div class="flex min-w-0 items-center gap-1">
+                <span class="min-w-0 truncate px-1.5 font-mono text-12-medium text-text-weak">{props.externalAgentLabel ?? "External agent"}</span>
+                <For each={["model", "permissions"] as const}>
+                  {(group) => {
+                    const controls = () => (props.externalControls ?? []).filter((control) => control.group === group)
+                    const selected = () => controls().find((control) => control.selected)
+                    const label = () => selected()?.label ?? (group === "model" ? language.t("claudeCode.control.model") : language.t("claudeCode.control.permissions"))
+                    const icon = () => (group === "model" ? "models" : "shield")
+                    return (
+                      <DropdownMenu gutter={6} placement="bottom-start">
+                        <DropdownMenu.Trigger
+                          as={Button}
+                          type="button"
+                          variant="ghost"
+                          class="h-7 max-w-[min(42vw,220px)] min-w-0 px-2 text-12-medium text-text-weak hover:text-text-base"
+                          disabled={!!props.externalSubmitDisabled?.() || !!externalControlSending()}
+                          aria-label={label()}
+                          data-action={`claude-code-${group}-menu`}
+                          data-ui-control-group={group === "permissions" ? "claude-permission-mode" : "claude-model"}
+                          data-ui-control-intent={group === "permissions" ? "mode-switch" : "single-selection"}
+                          data-ui-control-presentation="dropdown"
+                          data-ui-option-count={controls().length}
+                        >
+                          <Icon name={icon()} size="small" />
+                          <span class="min-w-0 truncate">{label()}</span>
+                          <Icon name="chevron-down" size="small" class="shrink-0" />
+                        </DropdownMenu.Trigger>
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content class="min-w-[190px]">
+                            <DropdownMenu.RadioGroup
+                              value={selected()?.id ?? ""}
+                              onChange={(value) => {
+                                if (typeof value !== "string") return
+                                const control = controls().find((item) => item.id === value)
+                                if (control) void runExternalControl(control)
+                              }}
+                            >
+                              <For each={controls()}>
+                                {(control) => (
+                                  <DropdownMenu.RadioItem
+                                    value={control.id}
+                                    disabled={control.disabled}
+                                    data-action={`claude-code-control-${control.id}`}
+                                  >
+                                    <DropdownMenu.ItemLabel>{control.label}</DropdownMenu.ItemLabel>
+                                    <DropdownMenu.ItemIndicator>
+                                      <Icon name="check" size="small" />
+                                    </DropdownMenu.ItemIndicator>
+                                  </DropdownMenu.RadioItem>
+                                )}
+                              </For>
+                            </DropdownMenu.RadioGroup>
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu>
+                    )
+                  }}
+                </For>
+              </div>
+              <Tooltip placement="top" value={blank() ? language.t("claudeCode.control.interrupt") : props.submitLabel ?? language.t("prompt.action.send")}>
+                <IconButton
+                  data-action="prompt-submit-external-agent"
+                  type="button"
+                  disabled={externalSubmitting() || !!props.externalSubmitDisabled?.()}
+                  icon={blank() ? "stop" : "arrow-up"}
+                  variant="primary"
+                  class="size-7 rounded-full"
+                  aria-label={blank() ? language.t("claudeCode.control.interrupt") : props.submitLabel ?? language.t("prompt.action.send")}
+                  onClick={() => {
+                    if (!blank()) {
+                      requestSubmitPrompt()
+                      return
+                    }
+                    void interruptExternalAgent()
+                  }}
+                />
+              </Tooltip>
+            </div>
+          </DockTray>
+        </Show>
+        <Show when={!tavernSession() && !externalAgent() && (store.mode === "normal" || store.mode === "shell")}>
           <DockTray attach="top" style={{ "z-index": 20 }}>
             <PromptControlStrip
               shellMode={store.mode === "shell"}
@@ -1342,13 +1915,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               submitTooltip={tip()}
               submitTooltipInactive={!streaming() && blank()}
               submitDisabled={store.mode !== "normal" || (!streaming() && blank())}
-              submitLabel={language.t("prompt.action.send")}
+              submitLabel={props.submitLabel ?? language.t("prompt.action.send")}
               stopLabel={language.t("prompt.action.stop")}
               stopping={stopping()}
               submitStyle={buttons()}
               moreDisabled={store.mode !== "normal"}
               moreTabIndex={store.mode === "normal" ? undefined : -1}
               moreLabel={language.t("prompt.more")}
+              scheduleAutomationLabel={language.t("settings.automation.create")}
+              scheduleAutomationDisabled={!sessionID() || store.mode !== "normal"}
+              onScheduleAutomation={openScheduledAutomation}
+              subagentDispatchLabel={language.t("subagent.dispatch.open")}
+              subagentDispatchDisabled={!sessionID() || store.mode !== "normal"}
+              onSubagentDispatch={openSubagentDispatch}
               onSubmit={requestSubmitPrompt}
               hasGoal={!!goalState()}
               goalPaused={goalState()?.status === "paused"}

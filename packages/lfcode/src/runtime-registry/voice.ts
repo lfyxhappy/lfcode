@@ -1,6 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { Archive, Filesystem, Log } from "@/util"
 import { which } from "@/util/which"
 import { getRuntimeActivationTarget } from "./config"
@@ -54,7 +54,7 @@ export type RecorderCommand = {
 }
 
 export function managedVoiceRoot() {
-  return path.join(Global.Path.data, "runtime", "voice")
+  return PluginPath.data("runtime-voice")
 }
 
 export function managedRecorderRoot() {
@@ -348,7 +348,7 @@ function setOptionalEnv(key: string, value: string | undefined) {
 }
 
 async function installFromManagedVoiceSource(id: ManagedVoiceArtifactID, source: ManagedVoiceSource) {
-  const tempDir = path.join(Global.Path.cache, "runtime", "voice", id, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const tempDir = path.join(managedVoiceRoot(), "cache", id, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   const archivePath = path.join(tempDir, `${id}.zip`)
   const extractDir = path.join(tempDir, "extract")
   const targetRoot = rootForVoiceArtifact(id)

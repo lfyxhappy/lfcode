@@ -11,9 +11,15 @@ resort, e.g.:
   - you need verbatim recall of something the memory summary glossed over
   - debugging "did I already try X" across the project
 
-Two operations:
+Operations:
   - search: FTS BM25 over text/tool kinds (returns snippets + message_ids)
   - around: given a search hit's message_id, pull ±N surrounding messages from the raw store
   - session: read the raw recent messages for a session id, including whether a checkpoint exists
+  - event_search: search durable persisted events for a session (optional query/event_type; at most 100)
+  - event_read: read one durable event by session_id and event_seq; sensitive fields are redacted
+  - trace: inspect a session's durable parent/child lineage plus its Actor dispatches and background jobs
+
+Use trace after a useful search hit when you need relationships or completion state. It is read-only;
+do not busy-poll a running Actor or job—continue independent work and wait for its completion notice.
 
 Default scope is current project; pass scope="global" to search every project on this machine.

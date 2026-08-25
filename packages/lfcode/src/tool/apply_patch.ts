@@ -9,7 +9,7 @@ import { SessionCwd } from "./session-cwd"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertWriteAllowed } from "./external-directory"
-import { trimDiff } from "./edit"
+import { trimDiff } from "./diff"
 import { LSP } from "../lsp"
 import { AppFileSystem } from "@/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
@@ -26,7 +26,7 @@ function describePatchVerificationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes("missing Begin/End markers")) {
     return [
-      "apply_patch verification failed: Invalid patch format: missing Begin/End markers.",
+      "edit patch failed: invalid patch format; Begin/End markers are missing.",
       "Submit pure patch text only, with no explanation outside the patch.",
       "Required envelope:",
       "*** Begin Patch",
@@ -35,27 +35,27 @@ function describePatchVerificationError(error: unknown) {
       "-old line",
       "+new line",
       "*** End Patch",
-      'If you already know an exact span or symbol, prefer "replace_range" or "symbol_edit" instead of hand-writing a patch.',
+      'For one verified text block, use edit operation="replace" instead of a patch.',
     ].join("\n")
   }
   if (message.includes("no hunks found")) {
     return [
-      "apply_patch verification failed: no hunks found.",
+      "edit patch failed: no hunks found.",
       'Include at least one "*** Add File", "*** Update File", or "*** Delete File" section inside the patch envelope.',
     ].join("\n")
   }
   if (message.includes("Failed to find context")) {
     return [
-      "apply_patch verification failed: the supplied context does not match the current file.",
+      "edit patch failed: the supplied context does not match the current file.",
       message,
       "Recovery protocol:",
       "1. Read the target file again and copy the exact current lines before attempting another edit.",
       "2. Do not retry with guessed headings, remembered text, or text that was only planned to be added.",
-      '3. Prefer "replace_range" for a verified exact span, or "symbol_edit" for a verified symbol.',
+      '3. Use edit operation="replace" for one verified text block, or make one corrected edit operation="patch" call.',
       "4. Do not bypass this failed patch by writing the same target through shell, Python, or another terminal command.",
     ].join("\n")
   }
-  return `apply_patch verification failed: ${message}`
+  return `edit patch failed: ${message}`
 }
 
 export const ApplyPatchTool = Tool.define(
@@ -138,14 +138,12 @@ export const ApplyPatchTool = Tool.define(
             // Check if file exists for update
             const stats = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
             if (!stats || stats.type === "Directory") {
-              return yield* Effect.fail(
-                new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`),
-              )
+              return yield* Effect.fail(new Error(`edit patch failed: Failed to read file to update: ${filePath}`))
             }
 
             const currentBytes = yield* afs.readFile(filePath)
             const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, currentBytes)
-            if (recoveryError) return yield* Effect.fail(new Error(`apply_patch recovery blocked: ${recoveryError}`))
+            if (recoveryError) return yield* Effect.fail(new Error(`edit patch recovery blocked: ${recoveryError}`))
 
             const oldContent = yield* afs.readFileString(filePath)
             let newContent = oldContent
@@ -189,15 +187,13 @@ export const ApplyPatchTool = Tool.define(
           case "delete": {
             const currentBytes = yield* afs.readFile(filePath)
             const recoveryError = PatchRecovery.requireFreshRead(ctx.sessionID, ctx.messageID, filePath, currentBytes)
-            if (recoveryError) return yield* Effect.fail(new Error(`apply_patch recovery blocked: ${recoveryError}`))
+            if (recoveryError) return yield* Effect.fail(new Error(`edit patch recovery blocked: ${recoveryError}`))
             const contentToDelete = yield* afs
               .readFileString(filePath)
               .pipe(
                 Effect.catch((error) =>
                   Effect.fail(
-                    new Error(
-                      `apply_patch verification failed: ${error instanceof Error ? error.message : String(error)}`,
-                    ),
+                    new Error(`edit patch failed: ${error instanceof Error ? error.message : String(error)}`),
                   ),
                 ),
               )

@@ -1,4 +1,3 @@
-import path from "path"
 import { Provider } from "@/provider"
 import { Log } from "@/util"
 import { Context, Duration, Effect, Layer, Record, Schedule, Ref } from "effect"
@@ -21,8 +20,6 @@ import { Bus } from "@/bus"
 import { Wildcard } from "@/util"
 import { SessionID } from "@/session/schema"
 import * as Session from "@/session/session"
-import { migrateProjectMemory } from "./checkpoint-paths"
-import { ProjectID } from "@/project/schema"
 import { Auth } from "@/auth"
 import { InstallationVersion } from "@/installation/version"
 import { EffectBridge } from "@/effect"
@@ -32,16 +29,41 @@ import { ActorRegistry } from "@/actor/registry"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
 import { describeUnavailableTool, findAvailableToolByNormalizedName, repairToolCallAlias } from "./tool-call-repair"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 type Result = Awaited<ReturnType<typeof streamText>>
-const migratedProjectMemory = new Set<string>()
 
 export async function* gateProviderStreamChunks<A>(stream: AsyncIterable<A>, abortSignal: AbortSignal) {
   for await (const chunk of stream) {
     if (abortSignal.aborted) return
     yield chunk
+  }
+}
+
+export async function* normalizeTextLifecycle(stream: AsyncIterable<Event>) {
+  let textID: string | undefined
+  for await (const event of stream) {
+    if (event.type === "text-start") {
+      textID = event.id
+      yield event
+      continue
+    }
+    if (event.type === "text-delta" && !textID) {
+      textID = event.id ?? "implicit-text"
+      yield {
+        type: "text-start",
+        id: textID,
+        providerMetadata: event.providerMetadata,
+      } as Event
+    }
+    if (event.type === "text-end") textID = undefined
+    if (event.type === "finish-step" && textID) {
+      yield { type: "text-end", id: textID } as Event
+      textID = undefined
+    }
+    yield event
   }
 }
 
@@ -87,69 +109,17 @@ export const persistentRetrySchedule = Schedule.exponential("500 millis", 2).pip
 )
 
 /**
- * Memory-system instructions appended to the main agent's system prompt.
- *
- * Keeps the persistent-memory contract short in the hot path:
- * - where durable project, session, notes, and global memory live
- * - what the main agent may edit directly
- * - how to avoid re-reading rebuild dumps unnecessarily
- *
- * `memoryRoot` is the same absolute root returned by Memory.root(), so these
- * paths match the files used by checkpoint restore and memory/task detection.
+ * Saved-context policy appended to interactive agent prompts. It deliberately
+ * contains no memory locations or recovery workflow, so it cannot turn saved
+ * context into an automatic preflight step.
  */
-function buildMemoryInstructions(input: {
-  sessionID: SessionID
-  projectID: ProjectID
-  memoryRoot: string
-  capability: Memory.MemoryCapability
-}): string {
-  const sessionID = input.sessionID
-  const projectID = input.projectID
-  const memoryRoot = input.memoryRoot
-  const memoryFile = path.join(memoryRoot, "projects", projectID, "MEMORY.md")
-  const checkpointFile = path.join(memoryRoot, "sessions", sessionID, "checkpoint.md")
-  const sessionMemoryDir = path.join(memoryRoot, "sessions", sessionID)
-  const globalMemoryFile = path.join(memoryRoot, "global", "MEMORY.md")
-  const notesFile = path.join(sessionMemoryDir, "notes.md")
-  if (!input.capability.root_exists || !input.capability.has_indexed_entries) {
-    return `# Memory system
+function buildMemoryInstructions(): string {
+  return `# Saved context
 
-Memory is currently not initialized as a reliable searchable corpus for this instance.
-
-- Memory root: \`${memoryRoot}\`
-- Searchable entries available: ${input.capability.has_indexed_entries ? "yes" : "no"}
-
-Do not treat memory as available background context here.
-For normal work, rely on the current repo, runtime state, logs, tests, and conversation history instead.
-Only attempt memory access if the user explicitly asks about memory or you first confirm that durable memory content actually exists.`
-  }
-  return `# Memory system
-
-You have a persistent file-based memory system:
-
-- Project memory at \`${memoryFile}\` for durable project rules, architecture decisions, and cross-session knowledge.
-- Session checkpoint at \`${checkpointFile}\` for current session state. The checkpoint writer maintains it.
-- Session notes at \`${notesFile}\` as your only scratchpad for durable loose notes.
-- Global memory at \`${globalMemoryFile}\` for cross-project user preferences.
-
-You may Edit \`MEMORY.md\` when the user states a durable project rule, an architectural decision, or another cross-session fact worth saving immediately.
-Append to \`notes.md\` for unresolved questions, durable quotes, or future-self notes.
-Do not create other ad-hoc memory files.
-Avoid editing \`checkpoint.md\` unless a higher-priority instruction explicitly requires it.
-
-## Active recall protocol
-
-Do NOT treat memory as a mandatory pre-flight checklist. For ordinary implementation, debugging, editing, or tool use in the current turn, proceed directly unless you specifically need cross-session recall.
-Only consult memory when you need durable project rules, prior decisions, exact past constraints, or other context that is likely to have been recorded from earlier work.
-Do not reply with meta-steps like "先确认 memory 状态" unless the user explicitly asked you to inspect memory itself.
-If \`checkpoint.md\`, \`MEMORY.md\`, \`notes.md\`, \`global/MEMORY.md\`, or relevant topic memory are already injected into the current context, do not Read them again as whole files.
-Use \`search(kind="content")\` or targeted \`read(offset)\` only for the specific missing detail you need.
-If a memory dump says it was truncated, only Read the missing tail on demand.
-Memory entries can contain stale paths, functions, or flags. Treat them as historical claims and verify before acting.
-`
+The memory tool is opt-in. Do not search, read, or mention saved memory unless the current user explicitly asks to search, recall, or inspect it. Do not use memory to start, resume, plan, debug, or verify ordinary work; use the active conversation, repository, runtime state, and direct evidence instead.`
 }
 
-function repairToolInputJSON(input: string) {
+export function repairToolInputJSON(input: string) {
   const candidates = [input, unwrapJsonFence(input)]
     .flatMap((text) => {
       const trimmed = text.trim()
@@ -380,50 +350,23 @@ const live: Layer.Layer<
           .join("\n"),
       )
 
-      // v5: memory-instructions section. Teaches the main agent how/where/when
-      // to maintain `MEMORY.md` and `checkpoint.md` directly via Edit. Project
-      // ID is resolved from the ALS-bound Instance with a safe fallback to
-      // `ProjectID.global` (mirrors the pattern in session/checkpoint.ts so the
-      // path the prompt advertises matches the path the writer actually writes).
-      // Skip for system-spawned actors (e.g. checkpoint-writer): they shouldn't
-      // see the user-facing memory instructions.
+      // System-maintenance actors do not need the interactive saved-context
+      // policy. Normal turns receive only the opt-in constraint below.
       const isSystemActor = input.agentID
         ? yield* actorReg.isSystemSpawned(SessionID.make(input.sessionID), input.agentID)
         : false
       if (!isSystemActor) {
-        const projectID =
-          (yield* Effect.try({
-            try: () => Instance.current?.project?.id as ProjectID | undefined,
-            catch: () => undefined,
-          }).pipe(Effect.orElseSucceed(() => undefined))) ?? ProjectID.global
-        // Bootstrap the memory.md → MEMORY.md migration at session start so a
-        // legacy lowercase file is renamed before the agent's first direct
-        // Edit/Write (which would otherwise miss it on a case-sensitive FS, or
-        // create an uppercase sibling and orphan the legacy content). The two
-        // checkpoint-flow call sites cover the writer/rebuild paths; this covers
-        // the "agent edits MEMORY.md before any checkpoint" path. Idempotent.
-        if (!migratedProjectMemory.has(projectID)) {
-          yield* Effect.promise(() => migrateProjectMemory(projectID)).pipe(Effect.ignore)
-          migratedProjectMemory.add(projectID)
-        }
-        const memoryRoot = yield* memory.root()
-        const memoryCapability = yield* memory.capability()
-        system.push(
-          buildMemoryInstructions({
-            sessionID: SessionID.make(input.sessionID),
-            projectID,
-            memoryRoot,
-            capability: memoryCapability,
-          }),
-        )
+        system.push(buildMemoryInstructions())
       }
 
       const header = system[0]
-      yield* plugin.trigger(
-        "experimental.chat.system.transform",
-        { sessionID: input.sessionID, model: input.model },
-        { system },
-      )
+      if (!isUserHiddenSystemActorID(input.agentID)) {
+        yield* plugin.trigger(
+          "experimental.chat.system.transform",
+          { sessionID: input.sessionID, model: input.model },
+          { system },
+        )
+      }
       // rejoin to maintain 2-part structure for caching if header unchanged
       if (system.length > 2 && system[0] === header) {
         const rest = system.slice(1)
@@ -435,6 +378,7 @@ const live: Layer.Layer<
     })
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
+      const userExtensionsEnabled = !isUserHiddenSystemActorID(input.agentID)
       const l = log
         .clone()
         .tag("providerID", input.model.providerID)
@@ -508,39 +452,51 @@ const live: Layer.Layer<
               ...input.messages,
             ]
 
-      const params = yield* plugin.trigger(
-        "chat.params",
-        {
-          sessionID: input.sessionID,
-          agent: input.agent.name,
-          model: input.model,
-          provider: item,
-          message: input.user,
-        },
-        {
-          temperature: input.model.capabilities.temperature
-            ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
-            : undefined,
-          topP: input.agent.topP ?? ProviderTransform.topP(input.model),
-          topK: ProviderTransform.topK(input.model),
-          maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
-          options,
-        },
-      )
+      const params = userExtensionsEnabled
+        ? yield* plugin.trigger(
+            "chat.params",
+            {
+              sessionID: input.sessionID,
+              agent: input.agent.name,
+              model: input.model,
+              provider: item,
+              message: input.user,
+            },
+            {
+              temperature: input.model.capabilities.temperature
+                ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
+                : undefined,
+              topP: input.agent.topP ?? ProviderTransform.topP(input.model),
+              topK: ProviderTransform.topK(input.model),
+              maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
+              options,
+            },
+          )
+        : {
+            temperature: input.model.capabilities.temperature
+              ? (input.agent.temperature ?? ProviderTransform.temperature(input.model))
+              : undefined,
+            topP: input.agent.topP ?? ProviderTransform.topP(input.model),
+            topK: ProviderTransform.topK(input.model),
+            maxOutputTokens: ProviderTransform.maxOutputTokens(input.model),
+            options,
+          }
 
-      const { headers } = yield* plugin.trigger(
-        "chat.headers",
-        {
-          sessionID: input.sessionID,
-          agent: input.agent.name,
-          model: input.model,
-          provider: item,
-          message: input.user,
-        },
-        {
-          headers: {},
-        },
-      )
+      const { headers } = userExtensionsEnabled
+        ? yield* plugin.trigger(
+            "chat.headers",
+            {
+              sessionID: input.sessionID,
+              agent: input.agent.name,
+              model: input.model,
+              provider: item,
+              message: input.user,
+            },
+            {
+              headers: {},
+            },
+          )
+        : { headers: {} }
 
       const tools = resolveTools(input)
 
@@ -752,14 +708,11 @@ const live: Layer.Layer<
               reason: aliasRepair.reason,
               availableTools: activeToolNames,
             })
-            return {
-              ...failed.toolCall,
-              input: JSON.stringify({
-                tool: failed.toolCall.toolName,
-                error: aliasRepair.error,
-              }),
-              toolName: "invalid",
-            }
+            // Returning null preserves the original tool call and lets the AI SDK
+            // emit its native invalid/no-such-tool error with the requested name.
+            // Never route an unrecoverable call through the internal `invalid`
+            // placeholder: it is intentionally excluded from activeTools.
+            return null
           }
           if (repairedTool && repairedTool !== failed.toolCall.toolName) {
             l.info("repairing tool call", {
@@ -777,14 +730,10 @@ const live: Layer.Layer<
             availableTools: activeToolNames,
             error: failed.error.message,
           })
-          return {
-            ...failed.toolCall,
-            input: JSON.stringify({
-              tool: failed.toolCall.toolName,
-              error: describeUnavailableTool(failed.toolCall.toolName, activeToolNames),
-            }),
-            toolName: "invalid",
-          }
+          // The call is not safely repairable. Returning null is important here:
+          // the SDK then keeps the original tool name and surfaces the real parse
+          // or availability error instead of producing "unavailable tool invalid".
+          return null
         },
         temperature: params.temperature,
         topP: params.topP,
@@ -946,7 +895,7 @@ const live: Layer.Layer<
                   request: {},
                   warnings: [],
                 } as Event
-                for await (const chunk of gateProviderStreamChunks(result.fullStream, ctrl.signal)) {
+                for await (const chunk of normalizeTextLifecycle(gateProviderStreamChunks(result.fullStream, ctrl.signal))) {
                   if (!sawFirstChunk) {
                     sawFirstChunk = true
                     const elapsedMs = Date.now() - consumeStartTs

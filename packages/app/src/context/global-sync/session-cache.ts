@@ -7,7 +7,7 @@ import type {
   SnapshotFileDiff,
   Todo,
 } from "@lfcode-ai/sdk/v2/client"
-import type { SessionGoal } from "./types"
+import type { HookRunActivity, SessionGoal } from "./types"
 import {
   dropInlineImageCacheForParts,
   dropInlineImageCacheForSessions,
@@ -24,6 +24,7 @@ export const SESSION_CACHE_BYTES_LIMIT = 64 * 1024 * 1024
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
   session_goal?: Record<string, SessionGoal | undefined>
+  hook_run?: Record<string, HookRunActivity[] | undefined>
   session_diff: Record<string, SnapshotFileDiff[] | undefined>
   todo: Record<string, Todo[] | undefined>
   message: Record<string, Message[] | undefined>
@@ -71,6 +72,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.session_diff[sessionID]
     delete store.session_status[sessionID]
     if (store.session_goal) delete store.session_goal[sessionID]
+    if (store.hook_run) delete store.hook_run[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]
   }

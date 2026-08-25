@@ -84,9 +84,16 @@ export function CorsMiddleware(opts?: { cors?: string[] }): MiddlewareHandler {
 
 const zipped = compress()
 export const CompressionMiddleware: MiddlewareHandler = (c, next) => {
+  if (process.env.LFCODE_WEB_UI_DIR) return next()
   const path = c.req.path
   const method = c.req.method
   if (path === "/event" || path === "/global/event") return next()
   if (method === "POST" && /\/session\/[^/]+\/(message|prompt_async)$/.test(path)) return next()
+  // The packaged Web UI is served as immutable renderer bytes. Bun's response
+  // adapter can advertise gzip for a Uint8Array body without producing a
+  // decodable stream, so leave the UI asset path uncompressed.
+  const acceptsHtml = c.req.header("accept")?.includes("text/html") ?? false
+  const isStaticAsset = /\.[a-z0-9]+$/i.test(path)
+  if (process.env.LFCODE_WEB_UI_DIR && (path === "/" || acceptsHtml || isStaticAsset)) return next()
   return zipped(c, next)
 }

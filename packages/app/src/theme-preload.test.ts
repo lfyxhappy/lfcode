@@ -19,28 +19,36 @@ beforeEach(() => {
 })
 
 describe("theme preload", () => {
-  test("migrates legacy oc-1 to oc-2 before mount", () => {
-    localStorage.setItem("lfcode-theme-id", "oc-1")
+  test("migrates historical built-in themes to lfcode before mount", () => {
+    localStorage.setItem("lfcode-theme-id", "nightowl")
     localStorage.setItem("lfcode-theme-css-light", "--background-base:#fff;")
     localStorage.setItem("lfcode-theme-css-dark", "--background-base:#000;")
 
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("oc-2")
-    expect(document.documentElement.dataset.colorScheme).toBe("light")
-    expect(localStorage.getItem("lfcode-theme-id")).toBe("oc-2")
+    expect(document.documentElement.dataset.theme).toBe("lfcode")
+    expect(document.documentElement.dataset.colorScheme).toBe("dark")
+    expect(localStorage.getItem("lfcode-theme-id")).toBe("lfcode")
     expect(localStorage.getItem("lfcode-theme-css-light")).toBeNull()
     expect(localStorage.getItem("lfcode-theme-css-dark")).toBeNull()
     expect(document.getElementById("oc-theme-preload")).toBeNull()
   })
 
-  test("keeps cached css for non-default themes", () => {
-    localStorage.setItem("lfcode-theme-id", "nightowl")
+  test("uses dark mode before the first browser preference is saved", () => {
+    run()
+
+    expect(document.documentElement.dataset.theme).toBe("lfcode")
+    expect(document.documentElement.dataset.colorScheme).toBe("dark")
+  })
+
+  test("keeps cached css for registered extension themes", () => {
+    localStorage.setItem("lfcode-theme-id", "plugin-theme")
+    localStorage.setItem("lfcode-color-scheme", "light")
     localStorage.setItem("lfcode-theme-css-light", "--background-base:#fff;")
 
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("nightowl")
+    expect(document.documentElement.dataset.theme).toBe("plugin-theme")
     expect(document.getElementById("oc-theme-preload")?.textContent).toContain("--background-base:#fff;")
   })
 })

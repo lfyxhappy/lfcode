@@ -30,6 +30,7 @@ export const Actor = z
     lifecycle: Lifecycle,
     agent: z.string(),
     description: z.string(),
+    visible: z.boolean(),
     contextMode: ContextMode,
     contextWatermark: MessageID.zod.optional(),
     background: z.boolean(),

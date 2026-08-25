@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { HTTPException } from "hono/http-exception"
 import { stream } from "hono/streaming"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import { SessionID, MessageID, PartID } from "@/session/schema"
@@ -8,6 +9,7 @@ import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionRunState } from "@/session/run-state"
 import { SessionCompaction } from "@/session/compaction"
+import { SessionContextStatus } from "@/session/context-status"
 import { SessionRevert } from "@/session/revert"
 import { SessionShare } from "@/share"
 import { SessionStatus } from "@/session/status"
@@ -33,6 +35,8 @@ import { lazy } from "@/util/lazy"
 import { Bus } from "@/bus"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { jsonRequest, runRequest } from "./trace"
+import { RoadwayInput, RoadwayResult, generateRoadway } from "@/session/tavern-roadway"
+import { ClaudeCode } from "@/claude-code"
 
 const log = Log.create({ service: "server" })
 
@@ -63,6 +67,16 @@ export const resolveCurrentAgent = (sessionID: SessionID, defaultAgent: string) 
     }
     return defaultAgent
   })
+
+function userVisibleMessage(sessionID: SessionID, messageID: MessageID) {
+  return Effect.gen(function* () {
+    const message = MessageV2.get({ sessionID, messageID })
+    if (!MessageV2.isUserVisible(message.info)) {
+      throw new NotFoundError({ message: `Message not found: ${messageID}` })
+    }
+    return message
+  })
+}
 
 export const SessionRoutes = lazy(() =>
   new Hono()
@@ -301,6 +315,156 @@ export const SessionRoutes = lazy(() =>
           return yield* svc.create(body)
         }),
     )
+    .post(
+      "/managed",
+      describeRoute({
+        summary: "Create managed session",
+        description: "Create a session owned by the specified plugin extension and managed project.",
+        operationId: "session.createManaged",
+        responses: {
+          ...errors(400, 404),
+          200: {
+            description: "Successfully created managed session",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info),
+              },
+            },
+          },
+        },
+      }),
+      validator("json", Session.CreateManagedInput),
+      async (c) =>
+        jsonRequest("SessionRoutes.createManaged", c, function* () {
+          const svc = yield* Session.Service
+          return yield* svc.createManaged(c.req.valid("json"))
+        }),
+    )
+    .post(
+      "/import-history",
+      describeRoute({
+        summary: "Import managed session history",
+        description: "Create a managed plugin session and persist its imported text history.",
+        operationId: "session.importHistory",
+        responses: {
+          ...errors(400, 404),
+          200: {
+            description: "Imported managed session",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info),
+              },
+            },
+          },
+        },
+      }),
+      validator("json", Session.ImportHistoryInput),
+      async (c) =>
+        jsonRequest("SessionRoutes.importHistory", c, function* () {
+          const input = c.req.valid("json")
+          const session = yield* Session.Service
+          const created = input.sessionID ? yield* session.get(input.sessionID) : yield* session.createManaged(input)
+          if (
+            created.projectID !== input.projectID ||
+            created.extension?.pluginID !== input.extension.pluginID ||
+            created.extension?.type !== input.extension.type
+          ) {
+            throw new Error("Imported history session does not match the managed plugin target")
+          }
+          if (input.sessionID) {
+            const imported = input.messages.filter((entry) => entry.role === "assistant")
+            const existing = (yield* session.messages({ sessionID: created.id, agentID: "*" })).filter(
+              (message) => message.info.role === "assistant",
+            )
+            for (const [index, message] of existing.entries()) {
+              const entry = imported[index]
+              if (!entry?.swipes || entry.swipes.length <= 1) continue
+              const part = message.parts.find((part) => part.type === "text" && !part.synthetic)
+              if (!part || part.type !== "text") continue
+              yield* session.updatePart({
+                ...part,
+                metadata: { ...part.metadata, tavern: { swipes: entry.swipes, swipeID: entry.swipeID ?? 0 } },
+              })
+            }
+            return created
+          }
+          let parentID: MessageID | undefined
+
+          for (const entry of input.messages) {
+            const time = entry.time ?? Date.now()
+            if (entry.role === "user") {
+              const id = MessageID.ascending()
+              yield* session.updateMessage({
+                id,
+                sessionID: created.id,
+                role: "user",
+                time: { created: time },
+                agent: "tavern",
+                model: { providerID: ProviderID.make("tavern"), modelID: ModelID.make("history") },
+              })
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                sessionID: created.id,
+                messageID: id,
+                type: "text",
+                text: entry.text,
+              })
+              parentID = id
+              continue
+            }
+
+            // Tavern permits character opening messages before the player has
+            // replied. Keep a hidden parent so the normal message schema can
+            // represent that assistant turn without showing a fake bubble.
+            if (!parentID) {
+              parentID = MessageID.ascending()
+              yield* session.updateMessage({
+                id: parentID,
+                sessionID: created.id,
+                role: "user",
+                time: { created: time },
+                agent: "tavern",
+                model: { providerID: ProviderID.make("tavern"), modelID: ModelID.make("history") },
+              })
+              yield* session.updatePart({
+                id: PartID.ascending(),
+                sessionID: created.id,
+                messageID: parentID,
+                type: "text",
+                text: "",
+                synthetic: true,
+              })
+            }
+
+            const id = MessageID.ascending()
+            yield* session.updateMessage({
+              id,
+              sessionID: created.id,
+              role: "assistant",
+              parentID,
+              time: { created: time, completed: time },
+              modelID: ModelID.make("history"),
+              providerID: ProviderID.make("tavern"),
+              mode: "tavern-history",
+              agent: "tavern",
+              path: { cwd: created.directory, root: created.directory },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            })
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              sessionID: created.id,
+              messageID: id,
+              type: "text",
+              text: entry.text,
+              metadata: entry.swipes && entry.swipes.length > 1
+                ? { tavern: { swipes: entry.swipes, swipeID: entry.swipeID ?? 0 } }
+                : undefined,
+            })
+          }
+          return created
+        }),
+    )
     .delete(
       "/:sessionID",
       describeRoute({
@@ -328,6 +492,8 @@ export const SessionRoutes = lazy(() =>
       async (c) =>
         jsonRequest("SessionRoutes.delete", c, function* () {
           const sessionID = c.req.valid("param").sessionID
+          const claude = yield* ClaudeCode.Service
+          yield* claude.close(sessionID)
           const svc = yield* Session.Service
           yield* svc.remove(sessionID)
           return true
@@ -374,6 +540,7 @@ export const SessionRoutes = lazy(() =>
           const sessionID = c.req.valid("param").sessionID
           const updates = c.req.valid("json")
           const session = yield* Session.Service
+          const state = yield* SessionRunState.Service
           const current = yield* session.get(sessionID)
 
           if (updates.title !== undefined) {
@@ -387,6 +554,7 @@ export const SessionRoutes = lazy(() =>
           }
           if (updates.time && "archived" in updates.time) {
             yield* session.setArchived({ sessionID, time: updates.time.archived })
+            if (updates.time.archived !== null) yield* state.cancelAll(sessionID)
           }
 
           return yield* session.get(sessionID)
@@ -672,6 +840,36 @@ export const SessionRoutes = lazy(() =>
         }),
     )
     .get(
+      "/:sessionID/context-status",
+      describeRoute({
+        summary: "Get session context status",
+        description:
+          "Returns context pressure and recovery diagnostics without exposing prompt, attachment, or tool-result content.",
+        operationId: "session.contextStatus",
+        responses: {
+          200: {
+            description: "Session context status",
+            content: {
+              "application/json": {
+                schema: resolver(SessionContextStatus.Info),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.contextStatus", c, function* () {
+          return yield* SessionContextStatus.get(c.req.valid("param").sessionID)
+        }),
+    )
+    .get(
       "/:sessionID/message",
       describeRoute({
         summary: "Get session messages",
@@ -749,7 +947,8 @@ export const SessionRoutes = lazy(() =>
             Effect.gen(function* () {
               const session = yield* Session.Service
               yield* session.get(sessionID)
-              return yield* session.messages({ sessionID, agentID })
+              const items = yield* session.messages({ sessionID, agentID })
+              return items.filter((item) => MessageV2.isUserVisible(item.info))
             }),
           )
           return c.json(messages)
@@ -760,6 +959,7 @@ export const SessionRoutes = lazy(() =>
           limit: query.limit,
           before: query.before,
           agentID,
+          userVisible: true,
         })
         if (page.cursor) {
           const url = new URL(c.req.url)
@@ -804,10 +1004,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const params = c.req.valid("param")
-        const message = await MessageV2.get({
-          sessionID: params.sessionID,
-          messageID: params.messageID,
-        })
+        const message = await runRequest("SessionRoutes.message", c, userVisibleMessage(params.sessionID, params.messageID))
         return c.json(message)
       },
     )
@@ -842,6 +1039,7 @@ export const SessionRoutes = lazy(() =>
           const params = c.req.valid("param")
           const state = yield* SessionRunState.Service
           const session = yield* Session.Service
+          yield* userVisibleMessage(params.sessionID, params.messageID)
           yield* state.assertNotBusy(params.sessionID)
           yield* session.removeMessage({
             sessionID: params.sessionID,
@@ -879,6 +1077,7 @@ export const SessionRoutes = lazy(() =>
         jsonRequest("SessionRoutes.deletePart", c, function* () {
           const params = c.req.valid("param")
           const svc = yield* Session.Service
+          yield* userVisibleMessage(params.sessionID, params.messageID)
           yield* svc.removePart({
             sessionID: params.sessionID,
             messageID: params.messageID,
@@ -923,6 +1122,7 @@ export const SessionRoutes = lazy(() =>
         }
         return jsonRequest("SessionRoutes.updatePart", c, function* () {
           const svc = yield* Session.Service
+          yield* userVisibleMessage(params.sessionID, params.messageID)
           return yield* svc.updatePart(body)
         })
       },
@@ -1035,17 +1235,18 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
+        let abortSignal: AbortSignal | undefined
         if (body.delivery !== "steer") {
-          await runRequest(
-            "SessionRoutes.prompt_async.assertNotBusy",
+          abortSignal = await runRequest(
+            "SessionRoutes.prompt_async.reserve",
             c,
-            SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+            SessionRunState.Service.use((svc) => svc.reserveAsync(sessionID)),
           )
         }
         void runRequest(
           "SessionRoutes.prompt_async",
           c,
-          SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID })),
+          SessionPrompt.Service.use((svc) => svc.prompt({ ...body, sessionID }, { abortSignal })),
         ).catch((err) => {
           log.error("prompt_async failed", {
             sessionID,
@@ -1056,9 +1257,114 @@ export const SessionRoutes = lazy(() =>
             sessionID,
             error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
           })
+        }).finally(() => {
+          if (!abortSignal) return
+          void runRequest(
+            "SessionRoutes.prompt_async.release",
+            c,
+            SessionRunState.Service.use((svc) => svc.releaseAsync(sessionID, abortSignal!)),
+          ).catch((err) => {
+            log.warn("prompt_async release failed", {
+              sessionID,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          })
         })
 
         return c.body(null, 204)
+      },
+    )
+    .post(
+      "/:sessionID/tavern-continuation",
+      describeRoute({
+        summary: "Continue a Tavern character turn",
+        description: "Create an internal Tavern-only continuation boundary and generate the next character reply without displaying a player message.",
+        operationId: "session.tavernContinuation",
+        responses: {
+          204: { description: "Continuation accepted" },
+          ...errors(400, 403, 404, 409),
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", z.object({
+        agent: z.string(),
+        model: z.object({ providerID: ProviderID.zod, modelID: ModelID.zod }),
+        variant: z.string().optional(),
+        system: z.string(),
+        tavernContext: MessageV2.TavernContext.optional(),
+        nudge: z.string().min(1).max(1_000),
+      })),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        const body = c.req.valid("json")
+        await runRequest(
+          "SessionRoutes.tavernContinuation.authorize",
+          c,
+          Session.Service.use((session) =>
+            session.get(sessionID).pipe(
+              Effect.flatMap((current) => {
+                if (current.extension?.pluginID === "lfcode-tavern" && current.extension.type === "tavern") return Effect.void
+                return Effect.fail(new HTTPException(403, { message: "Tavern continuation is only available to managed Tavern sessions" }))
+              }),
+            ),
+          ),
+        )
+        await runRequest(
+          "SessionRoutes.tavernContinuation.assertNotBusy",
+          c,
+          SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+        )
+        await runRequest("SessionRoutes.tavernContinuation", c, Effect.gen(function* () {
+          const prompt = yield* SessionPrompt.Service
+          yield* prompt.prompt({
+            sessionID,
+            agent: body.agent,
+            model: body.model,
+            variant: body.variant,
+            system: body.system,
+            tavernContext: body.tavernContext,
+            parts: [{ type: "text", text: body.nudge, synthetic: true }],
+          })
+        }))
+        return c.body(null, 204)
+      },
+    )
+    .post(
+      "/:sessionID/regenerate",
+      describeRoute({
+        summary: "Regenerate last response",
+        description:
+          "Run the current session from its last user message without creating another user message. Callers should fork to that user-message boundary first.",
+        operationId: "session.regenerate",
+        responses: {
+          200: {
+            description: "Regenerated assistant message",
+            content: {
+              "application/json": {
+                schema: resolver(MessageV2.WithParts),
+              },
+            },
+          },
+          ...errors(400, 404, 409),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) => {
+        const sessionID = c.req.valid("param").sessionID
+        await runRequest(
+          "SessionRoutes.regenerate.assertNotBusy",
+          c,
+          SessionRunState.Service.use((svc) => svc.assertNotBusy(sessionID)),
+        )
+        return jsonRequest("SessionRoutes.regenerate", c, function* () {
+          const svc = yield* SessionPrompt.Service
+          return yield* svc.loop({ sessionID })
+        })
       },
     )
     .post(
@@ -1167,6 +1473,39 @@ export const SessionRoutes = lazy(() =>
           const body = c.req.valid("json")
           const svc = yield* SessionPrompt.Service
           return yield* svc.shell({ ...body, sessionID })
+        }),
+    )
+    .post(
+      "/:sessionID/roadway",
+      describeRoute({
+        summary: "Generate Tavern Roadway suggestions",
+        description:
+          "Generate side-effect-free Tavern action suggestions or an impersonated player reply without writing helper output into the session transcript.",
+        operationId: "session.roadway",
+        responses: {
+          200: {
+            description: "Generated Roadway result",
+            content: {
+              "application/json": {
+                schema: resolver(RoadwayResult),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator("json", RoadwayInput.omit({ sessionID: true })),
+      async (c) =>
+        jsonRequest("SessionRoutes.roadway", c, function* () {
+          const sessionID = c.req.valid("param").sessionID
+          const body = c.req.valid("json")
+          return yield* generateRoadway({ ...body, sessionID })
         }),
     )
     .post(

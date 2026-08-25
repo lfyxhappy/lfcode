@@ -35,6 +35,11 @@ export function isPathLike(value: string) {
   return false
 }
 
+export function isAbsoluteFileReferencePath(value: string) {
+  const next = stripTrailingPathPunctuation(value.trim())
+  return WINDOWS_ABSOLUTE.test(next) || POSIX_ABSOLUTE.test(next)
+}
+
 export function looksLikeCommand(value: string) {
   const next = value.trim()
   if (!next) return false

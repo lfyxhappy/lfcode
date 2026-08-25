@@ -6,13 +6,48 @@ import { createEffect, createMemo, onCleanup, onMount, type ParentProps, Show } 
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
 import { useLanguage } from "@/context/language"
-import { LocalProvider } from "@/context/local"
+import { LocalProvider, useLocal } from "@/context/local"
 import { PromptProvider } from "@/context/prompt"
 import { SDKProvider } from "@/context/sdk"
 import { SyncProvider, useSync } from "@/context/sync"
 import { TerminalProvider } from "@/context/terminal"
+import AppLayout from "@/pages/layout"
+import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { useProviders } from "@/hooks/use-providers"
+import { ProviderQuotaSidebarAction } from "@/components/provider-quota-popover"
+import { quotaAuthProviderID, quotaProviderIDs } from "@/components/provider-quota-capability"
 import { decode64 } from "@/utils/base64"
+import { normalizeWorkspacePath } from "@/utils/persist"
 import { installSessionViewportNavigationBridge } from "@/pages/session/session-viewport-registry"
+
+function DirectoryAppLayout(props: ParentProps) {
+  const local = useLocal()
+  const providers = useProviders()
+  const dialog = useDialog()
+  const provider = createMemo(() => {
+    const providerID = local.model.current()?.provider.id
+    if (!providerID || !quotaProviderIDs.has(providerID)) return
+    const connected = providers.connected().find((item) => item.id === providerID)
+    if (!connected) return
+    return { id: connected.id, name: connected.name }
+  })
+  const providerID = () => provider()?.id
+  const providerName = () => provider()?.name
+  const quotaAction = () => (
+    <ProviderQuotaSidebarAction
+      providerID={providerID}
+      providerName={providerName}
+      onConfigure={() => {
+        const current = provider()
+        if (!current) return
+        void import("@/components/dialog-connect-provider").then((x) => {
+          dialog.show(() => <x.DialogConnectProvider provider={quotaAuthProviderID(current.id)} />)
+        })
+      }}
+    />
+  )
+  return <AppLayout quotaAction={quotaAction}>{props.children}</AppLayout>
+}
 
 function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
   const location = useLocation()
@@ -25,7 +60,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
 
   createEffect(() => {
     const next = sync.data.path.directory
-    if (!next || next === props.directory) return
+    if (!next || normalizeWorkspacePath(next) === normalizeWorkspacePath(props.directory)) return
     const path = location.pathname.slice(slug().length + 1)
     navigate(`/${base64Encode(next)}${path}${location.search}${location.hash}`, { replace: true })
   })
@@ -37,7 +72,9 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
       onNavigateToSession={(sessionID: string) => navigate(`/${slug()}/session/${sessionID}`)}
       onSessionHref={(sessionID: string) => `/${slug()}/session/${sessionID}`}
     >
-      <LocalProvider>{props.children}</LocalProvider>
+      <LocalProvider>
+        <DirectoryAppLayout>{props.children}</DirectoryAppLayout>
+      </LocalProvider>
     </DataProvider>
   )
 }

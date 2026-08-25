@@ -24,6 +24,15 @@ function formatSeconds(value: number, locale: string) {
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)}s`
 }
 
+export function formatResponseTokenCount(value: number, locale: string) {
+  const absolute = Math.abs(value)
+  const precise = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  if (absolute < 1_000) return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value)
+  if (absolute < 1_000_000) return `${precise.format(value / 1_000)}K`
+  if (absolute < 1_000_000_000) return `${precise.format(value / 1_000_000)}M`
+  return `${precise.format(value / 1_000_000_000)}B`
+}
+
 export function getTurnResponseMetricsLine(input: {
   locale: string
   labels: Labels
@@ -71,14 +80,13 @@ export function getTurnResponseMetricsLine(input: {
   if (!(totalSeconds > 0)) return
   const firstSeconds = Math.max(0, (firstTokenAt - input.startedAt) / 1000)
   const outputSeconds = (finishedAt - firstTokenAt) / 1000
-  const formatInt = new Intl.NumberFormat(input.locale)
   const formatTps = new Intl.NumberFormat(input.locale, { maximumFractionDigits: 1 })
   const time = new Intl.DateTimeFormat(input.locale, { timeStyle: "medium" }).format(finishedAt)
 
   const line = [
     `${input.labels.ended} ${time}`,
     `${input.labels.first} ${formatSeconds(firstSeconds, input.locale)} / ${input.labels.total} ${formatSeconds(totalSeconds, input.locale)}`,
-    `${input.labels.tokens} ${formatInt.format(totalTokens)} (${input.labels.in} ${formatInt.format(totals.input)} / ${input.labels.out} ${formatInt.format(totals.output)} / ${input.labels.hit} ${formatInt.format(totals.hit)} / ${input.labels.write} ${formatInt.format(totals.write)})`,
+    `${input.labels.tokens} ${formatResponseTokenCount(totalTokens, input.locale)} (${input.labels.in} ${formatResponseTokenCount(totals.input, input.locale)} / ${input.labels.out} ${formatResponseTokenCount(totals.output, input.locale)} / ${input.labels.hit} ${formatResponseTokenCount(totals.hit, input.locale)} / ${input.labels.write} ${formatResponseTokenCount(totals.write, input.locale)})`,
   ]
 
   if (outputSeconds > 0) {

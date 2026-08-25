@@ -2,14 +2,19 @@ import { Button } from "@lfcode-ai/ui/button"
 import { useFileComponent } from "@lfcode-ai/ui/context/file"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { Markdown } from "@lfcode-ai/ui/markdown"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { createMemo, createSignal, Show } from "solid-js"
+import { createMemo, createResource, createSignal, Show } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { createMessageBlockDraftState, type MessageBlockDraftState } from "@/pages/session/message-block-draft-state"
-import { createMessageCodeScratchPath } from "@/pages/session/message-code-block-path"
+import {
+  createMessageCodeScratchPath,
+  messageCodeFileStatus,
+  readMessageCodeFile,
+} from "@/pages/session/message-code-block-path"
 import { MessageEditableCodeBlock } from "@/pages/session/message-editable-code-block"
 import { isFileChecksumConflict } from "@/pages/session/file-write-state"
 import { createLfcodeEditorPath } from "@/pages/session/file-tab-navigation"
@@ -23,22 +28,37 @@ type MessageCodeBlockProps = {
   blockIndex: number
   languageID: string
   code: string
+  raw: string
+  projectPath?: string
+  title?: string
 }
 
 const cache = new Map<string, MessageBlockDraftState>()
 
 export function MessageCodeBlock(props: MessageCodeBlockProps) {
+  const sdk = useSDK()
   const [editing, setEditing] = createSignal(false)
+  const [projectFile] = createResource(
+    () => props.projectPath,
+    (path) => (path ? readMessageCodeFile(sdk.client.file.read, path) : undefined),
+  )
 
   return (
-    <Show when={editing()} fallback={<StaticMessageCodeBlockPreview {...props} onEdit={() => setEditing(true)} />}>
-      <EditableMessageCodeBlock {...props} />
+    <Show
+      when={props.projectPath && messageCodeFileStatus(projectFile()) === "exists"}
+      fallback={<Markdown text={props.raw} cacheKey={`${props.blockKey}:markdown`} streaming={false} />}
+    >
+      <Show when={editing()} fallback={<StaticMessageCodeBlockPreview {...props} onEdit={() => setEditing(true)} />}>
+        <EditableMessageCodeBlock {...props} projectPath={props.projectPath!} />
+      </Show>
     </Show>
   )
 }
 
 export function StaticMessageCodeBlockPreview(
-  props: Pick<MessageCodeBlockProps, "blockKey" | "languageID" | "code"> & { onEdit: VoidFunction },
+  props: Pick<MessageCodeBlockProps, "blockKey" | "languageID" | "code" | "projectPath" | "title"> & {
+    onEdit: VoidFunction
+  },
 ) {
   const language = useLanguage()
   const fileComponent = useFileComponent()
@@ -47,10 +67,15 @@ export function StaticMessageCodeBlockPreview(
     <section
       data-automation-id="message-code-block-preview"
       data-block-key={props.blockKey}
-      class="overflow-hidden rounded-xl border border-border-weak-base bg-background-base"
+      class="overflow-hidden rounded-lg border border-border-weak-base bg-background-base"
     >
       <div class="flex items-center justify-between gap-3 border-b border-border-weak-base px-3 py-2">
-        <span class="min-w-0 truncate font-mono text-11-medium text-text-weak">{props.languageID}</span>
+        <div class="min-w-0 truncate">
+          <span class="font-mono text-11-medium text-text-weak">{props.languageID || "text"}</span>
+          <Show when={props.projectPath}>
+            <span class="ml-2 text-11-regular text-text-weak">{props.projectPath}</span>
+          </Show>
+        </div>
         <Button
           type="button"
           size="small"
@@ -76,7 +101,7 @@ export function StaticMessageCodeBlockPreview(
   )
 }
 
-function EditableMessageCodeBlock(props: MessageCodeBlockProps) {
+function EditableMessageCodeBlock(props: MessageCodeBlockProps & { projectPath: string }) {
   const language = useLanguage()
   const sdk = useSDK()
   const file = useFile()
@@ -89,7 +114,7 @@ function EditableMessageCodeBlock(props: MessageCodeBlockProps) {
     openTab: tabs().open,
     setActiveTab: tabs().setActive,
   })
-  const initialPath = createMessageCodeScratchPath({
+  const initialPath = props.projectPath || createMessageCodeScratchPath({
     sessionID: props.sessionID,
     messageID: props.messageID,
     partID: props.partID,

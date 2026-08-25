@@ -4,6 +4,7 @@ import { Database } from "../../src/storage"
 import { HistoryFtsTable } from "../../src/history/fts.sql"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
 import { ProjectTable } from "../../src/project/project.sql"
+import { EventSequenceTable, EventTable } from "../../src/sync/event.sql"
 import { History } from "../../src/history"
 import { Instance } from "../../src/project/instance"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -12,6 +13,8 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 
 afterEach(async () => {
   Database.use((db) => {
+    db.delete(EventTable).run()
+    db.delete(EventSequenceTable).run()
     db.delete(HistoryFtsTable).run()
     db.delete(PartTable).run()
     db.delete(MessageTable).run()
@@ -204,6 +207,108 @@ describe("History.around", () => {
         const svc = yield* History.Service
         const ctx = yield* svc.around({ message_id: "nope" })
         expect(ctx.messages).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("never returns hidden reviewer anchors or neighbors", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable).values({ id: "p_hidden" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any).run()
+          db.insert(SessionTable)
+            .values({ id: "ses_hidden" as any, project_id: "p_hidden" as any, slug: "x", directory: "/tmp", title: "t", version: "1", time_created: now, time_updated: now })
+            .run()
+          for (const [id, agentID] of [["m_main", "main"], ["m_reviewer", "context-reviewer-1"], ["m_after", "main"]] as const) {
+            db.insert(MessageTable).values({ id: id as any, session_id: "ses_hidden" as any, agent_id: agentID, data: { role: "assistant" } as any, time_created: now + (id === "m_main" ? 0 : id === "m_reviewer" ? 1 : 2), time_updated: now }).run()
+            db.insert(PartTable).values({ id: `p_${id}` as any, message_id: id as any, session_id: "ses_hidden" as any, data: { type: "text", text: id } as any, time_created: now, time_updated: now }).run()
+          }
+        })
+        const svc = yield* History.Service
+        expect((yield* svc.around({ message_id: "m_reviewer" })).messages).toEqual([])
+        const around = yield* svc.around({ message_id: "m_main", before: 0, after: 2 })
+        expect(around.messages.map((message) => message.message_id)).toEqual(["m_main", "m_after"])
+        const snapshot = yield* svc.session({ session_id: "ses_hidden", agent_scope: "all" })
+        expect(snapshot.messages.map((message) => message.message_id)).toEqual(["m_main", "m_after"])
+      }),
+    ),
+  )
+})
+
+describe("History durable events", () => {
+  it.live("searches persisted session events in sequence order and redacts sensitive data", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({ id: "p_events" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any)
+            .run()
+          db.insert(SessionTable)
+            .values({ id: "ses_events" as any, project_id: "p_events" as any, slug: "x", directory: "/tmp", title: "t", version: "1", time_created: now, time_updated: now })
+            .run()
+          db.insert(EventSequenceTable).values({ aggregate_id: "ses_events", seq: 101 }).run()
+          for (const seq of Array.from({ length: 102 }, (_, index) => index)) {
+            db.insert(EventTable)
+              .values({
+                id: `evt_${seq}`,
+                aggregate_id: "ses_events",
+                seq,
+                type: seq === 0 ? "message.updated.1" : "message.part.updated.1",
+                data: {
+                  note: seq === 0 ? "needle" : `event ${seq}`,
+                  authorization: "Bearer should-not-leak",
+                  nested: { token: "should-not-leak" },
+                },
+              })
+              .run()
+          }
+        })
+
+        const svc = yield* History.Service
+        const all = yield* svc.eventSearch({ session_id: "ses_events", limit: 500 })
+        expect(all.session_found).toBe(true)
+        expect(all.events).toHaveLength(100)
+        expect(all.events.map((event) => event.sequence)).toEqual(Array.from({ length: 100 }, (_, index) => index))
+        expect(all.events[0]?.data).toEqual({
+          note: "needle",
+          authorization: "[REDACTED]",
+          nested: { token: "[REDACTED]" },
+        })
+
+        const filtered = yield* svc.eventSearch({ session_id: "ses_events", type: "message.updated.1", query: "needle" })
+        expect(filtered.events.map((event) => event.sequence)).toEqual([0])
+      }),
+    ),
+  )
+
+  it.live("reads one persisted event without returning events for a missing session", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({ id: "p_event_read" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any)
+            .run()
+          db.insert(SessionTable)
+            .values({ id: "ses_event_read" as any, project_id: "p_event_read" as any, slug: "x", directory: "/tmp", title: "t", version: "1", time_created: now, time_updated: now })
+            .run()
+          db.insert(EventSequenceTable).values({ aggregate_id: "ses_event_read", seq: 7 }).run()
+          db.insert(EventTable)
+            .values({ id: "evt_read", aggregate_id: "ses_event_read", seq: 7, type: "session.updated.1", data: { password: "nope", state: "done" } })
+            .run()
+        })
+
+        const svc = yield* History.Service
+        const found = yield* svc.eventRead({ session_id: "ses_event_read", sequence: 7 })
+        expect(found).toMatchObject({
+          session_found: true,
+          event_found: true,
+          event: { sequence: 7, data: { password: "[REDACTED]", state: "done" } },
+        })
+        const missing = yield* svc.eventRead({ session_id: "missing", sequence: 7 })
+        expect(missing).toEqual({ session_found: false, event_found: false, session_id: "missing" })
       }),
     ),
   )

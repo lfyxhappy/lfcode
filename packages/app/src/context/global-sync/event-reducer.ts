@@ -20,6 +20,19 @@ import { dropInlineImageCacheForSessionParts, sanitizeSessionPart } from "../ses
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
+// Defense in depth for an interrupted/replayed server stream. The runtime is
+// authoritative and filters these messages before transport; the renderer must
+// still never retain a context-reviewer turn if one reaches it unexpectedly.
+function isUserVisibleMessage(info: Pick<Message, "agentID">) {
+  return !/^context-reviewer(?:-|$)/.test(info.agentID ?? "")
+}
+
+function storedMessage(input: { store: State }, messageID: string) {
+  return Object.values(input.store.message)
+    .flat()
+    .find((message) => message.id === messageID)
+}
+
 export function applyGlobalEvent(input: {
   event: { type: string; properties?: unknown }
   project: Project[]
@@ -200,8 +213,30 @@ export function applyDirectoryEvent(input: {
       )
       break
     }
+    case "hook.run.completed": {
+      const props = event.properties as {
+        sessionID?: string
+        hookID: string
+        hookName: string
+        event: string
+        status: "completed" | "blocked" | "failed" | "timeout" | "skipped" | "started"
+        durationMs: number
+        summary: string
+        timeCreated: number
+      }
+      if (!props.sessionID) break
+      input.setStore(
+        produce((draft) => {
+          const runs = (draft.hook_run ??= {})[props.sessionID!] ?? []
+          const next = [props, ...runs.filter((run) => run.timeCreated !== props.timeCreated || run.hookID !== props.hookID)].slice(0, 6)
+          draft.hook_run![props.sessionID!] = next
+        }),
+      )
+      break
+    }
     case "message.updated": {
       const info = clean((event.properties as { info: Message }).info)
+      if (!isUserVisibleMessage(info)) break
       const messages = input.store.message[info.sessionID]
       if (!messages) {
         input.setStore("message", info.sessionID, [info])
@@ -239,6 +274,8 @@ export function applyDirectoryEvent(input: {
     case "message.part.updated": {
       const raw = (event.properties as { part: Part }).part
       const part = sanitizeSessionPart(raw)
+      const owner = storedMessage(input, part.messageID)
+      if (owner && !isUserVisibleMessage(owner)) break
       if (SKIP_PARTS.has(part.type)) break
       const parts = input.store.part[part.messageID]
       if (!parts) {
@@ -293,6 +330,51 @@ export function applyDirectoryEvent(input: {
           const field = props.field as keyof typeof part
           const existing = part[field] as string | undefined
           ;(part[field] as string) = (existing ?? "") + props.delta
+        }),
+      )
+      break
+    }
+    case "actor.registered": {
+      const props = event.properties as {
+        sessionID: string
+        actorID: string
+        mode: string
+        parentActorID?: string
+        description: string
+        agent?: string
+        visible?: boolean
+      }
+      if (props.visible === false) break
+      input.setStore(
+        produce((draft) => {
+          const actors = (draft.actor[props.sessionID] ??= [])
+          const existing = actors.find((actor) => actor.actorID === props.actorID)
+          if (existing) {
+            Object.assign(existing, props)
+            return
+          }
+          actors.push({
+            actorID: props.actorID,
+            sessionID: props.sessionID,
+            mode: props.mode,
+            status: "pending",
+            description: props.description,
+            visible: props.visible,
+            agent: props.agent,
+            parentActorID: props.parentActorID,
+            time: { created: Date.now() },
+          })
+          actors.sort((a, b) => a.time.created - b.time.created)
+        }),
+      )
+      break
+    }
+    case "actor.status": {
+      const props = event.properties as { sessionID: string; actorID: string; status: string }
+      input.setStore(
+        produce((draft) => {
+          const actor = draft.actor[props.sessionID]?.find((item) => item.actorID === props.actorID)
+          if (actor) actor.status = props.status
         }),
       )
       break

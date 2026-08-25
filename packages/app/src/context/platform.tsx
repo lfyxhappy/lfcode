@@ -13,6 +13,30 @@ import type {
 import type { Accessor } from "solid-js"
 import { ServerConnection } from "./server"
 
+export type LanAccessStatus = {
+  enabled: boolean
+  hostID?: string
+  port?: number
+  spkiSha256?: string
+  endpoints?: string[]
+  certificateStale?: boolean
+  pendingEndpoints?: string[]
+  certificateUpdated?: { at: number; reason: "network_changed" | "manual_reset" }
+}
+
+export type LanAccessDevice = {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  revokedAt?: number
+}
+
+export type LanBrowserPairing = {
+  url: string
+  expiresAt: number
+}
+
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
 type OpenFilePickerOptions = { title?: string; multiple?: boolean; accept?: string[]; extensions?: string[] }
@@ -28,6 +52,16 @@ type BrowserGuestTarget = {
 }
 type BrowserGuestReadyTarget = BrowserGuestTarget & {
   guestID: number
+}
+type BrowserStateSync = {
+  sessionKey: string
+  tabID: string
+  url?: string
+  input?: string
+  title?: string
+  loading?: boolean
+  error?: string
+  closed?: true
 }
 type BrowserSiteDataResult = {
   url: string
@@ -51,7 +85,7 @@ type BrowserOpenRequestDetail = {
   sessionID?: string
   reason?: "human" | "tool"
 }
-type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
+type DetachedSidePanelKind = "file" | "browser" | "review"
 type DetachedSidePanelRecord = {
   detachedWindowID: string
   sessionKey: string
@@ -130,8 +164,15 @@ export type Platform = {
 
   setActiveBrowserTab?(target: BrowserGuestTarget & { active: boolean }): Promise<void>
 
+  reportBrowserState?(input: BrowserStateSync): Promise<void>
+
+  onBrowserState?(cb: (event: BrowserStateSync) => void): () => void
+
   /** Open a local path in a local app (desktop only) */
   openPath?(path: string, app?: string): Promise<void>
+
+  /** Check a local path from the desktop main process without exposing it through the server. */
+  statPath?(path: string): Promise<{ exists: boolean; kind: "file" | "directory" | "unknown" }>
 
   /** Restart the app  */
   restart(): Promise<void>
@@ -187,6 +228,15 @@ export type Platform = {
   /** Set the preferred display backend (desktop only) */
   setDisplayBackend?(backend: DisplayBackend): Promise<void>
 
+  getLanAccessStatus?(): Promise<LanAccessStatus>
+  enableLanAccess?(): Promise<LanAccessStatus>
+  disableLanAccess?(): Promise<LanAccessStatus>
+  applyLanAccessNetworkChange?(): Promise<LanAccessStatus>
+  listLanDevices?(): Promise<LanAccessDevice[]>
+  createLanBrowserPairing?(): Promise<LanBrowserPairing>
+  revokeLanDevice?(deviceID: string): Promise<void>
+  resetLanAccessCertificate?(): Promise<void>
+
   /** Parse markdown to HTML using native parser (desktop only, returns unprocessed code blocks) */
   parseMarkdown?(markdown: string): Promise<string>
 
@@ -218,6 +268,7 @@ export type Platform = {
     tab: string
     kind: DetachedSidePanelKind
     title?: string
+    background?: boolean
   }): Promise<void>
   redockDetachedSidePanelWindow?(
     detachedWindowID: string,

@@ -4,6 +4,24 @@ import { Icon } from "@lfcode-ai/ui/icon"
 import { For, Show, type Component, type JSX } from "solid-js"
 import type { PromptFeature } from "@/utils/prompt-features"
 
+const PromptMoreMenuRow: Component<{
+  icon: "brain" | "checklist" | "circle-check" | "task" | "trash" | "window-cursor"
+  label: string
+  description?: string
+}> = (props) => (
+  <>
+    <Icon name={props.icon} size="small" class="mt-0.5 shrink-0 text-icon-weak" />
+    <div class="min-w-0 flex-1">
+      <DropdownMenu.ItemLabel class="text-13-medium text-text-base">{props.label}</DropdownMenu.ItemLabel>
+      <Show when={props.description}>
+        <DropdownMenu.ItemDescription class="mt-0.5 whitespace-normal break-words text-12-regular text-text-weak">
+          {props.description}
+        </DropdownMenu.ItemDescription>
+      </Show>
+    </div>
+  </>
+)
+
 type PromptMoreMenuFeature = {
   id: PromptFeature
   label: string
@@ -16,6 +34,12 @@ export const PromptMoreMenu: Component<{
   disabled: boolean
   tabIndex?: number
   moreLabel: string
+  scheduleAutomationLabel: string
+  scheduleAutomationDisabled: boolean
+  onScheduleAutomation: VoidFunction
+  subagentDispatchLabel: string
+  subagentDispatchDisabled: boolean
+  onSubagentDispatch: VoidFunction
   hasGoal: boolean
   goalPaused: boolean
   features: PromptMoreMenuFeature[]
@@ -41,33 +65,43 @@ export const PromptMoreMenu: Component<{
         <Icon name="chevron-down" size="small" class="shrink-0" />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content class="min-w-[280px]">
+        <DropdownMenu.Content class="w-[360px] max-w-[calc(100vw-24px)] whitespace-normal">
           <DropdownMenu.Group>
             <DropdownMenu.GroupLabel>{props.moreLabel}</DropdownMenu.GroupLabel>
-            <DropdownMenu.Item onSelect={props.onGoalOpen}>
-              <div class="flex min-w-0 flex-col">
-                <DropdownMenu.ItemLabel class="text-13-medium text-text-base">
-                  {props.hasGoal ? "编辑 Goal" : "创建 Goal"}
-                </DropdownMenu.ItemLabel>
-                <DropdownMenu.ItemDescription class="text-12-regular text-text-weak whitespace-normal">
-                  {props.hasGoal
+            <DropdownMenu.Item
+              data-action="prompt-schedule-automation"
+              disabled={props.scheduleAutomationDisabled}
+              onSelect={props.onScheduleAutomation}
+              class="min-w-0 items-start py-2"
+            >
+              <PromptMoreMenuRow icon="task" label={props.scheduleAutomationLabel} />
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              data-action="prompt-subagent-dispatch"
+              disabled={props.subagentDispatchDisabled}
+              onSelect={props.onSubagentDispatch}
+              class="min-w-0 items-start py-2"
+            >
+              <PromptMoreMenuRow icon="brain" label={props.subagentDispatchLabel} />
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onSelect={props.onGoalOpen} class="min-w-0 items-start py-2">
+              <PromptMoreMenuRow
+                icon="checklist"
+                label={props.hasGoal ? "编辑 Goal" : "创建 Goal"}
+                description={
+                  props.hasGoal
                     ? "修改当前会话 goal，并保留累计统计。"
-                    : "让模型持续工作，直到当前 goal 满足、阻塞或被你手动结束。"}
-                </DropdownMenu.ItemDescription>
-              </div>
+                    : "让模型持续工作，直到当前 goal 满足、阻塞或被你手动结束。"
+                }
+              />
             </DropdownMenu.Item>
             <Show when={props.hasGoal}>
-              <DropdownMenu.Item onSelect={props.onGoalPauseToggle}>
-                <div class="flex min-w-0 flex-col">
-                  <DropdownMenu.ItemLabel class="text-13-medium text-text-base">
-                    {props.goalPaused ? "恢复 Goal" : "暂停 Goal"}
-                  </DropdownMenu.ItemLabel>
-                </div>
+              <DropdownMenu.Item onSelect={props.onGoalPauseToggle} class="min-w-0 items-start py-2">
+                <PromptMoreMenuRow icon="circle-check" label={props.goalPaused ? "恢复 Goal" : "暂停 Goal"} />
               </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={props.onGoalDelete}>
-                <div class="flex min-w-0 flex-col">
-                  <DropdownMenu.ItemLabel class="text-13-medium text-text-base">删除 Goal</DropdownMenu.ItemLabel>
-                </div>
+              <DropdownMenu.Item onSelect={props.onGoalDelete} class="min-w-0 items-start py-2">
+                <PromptMoreMenuRow icon="trash" label="删除 Goal" />
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
             </Show>
@@ -76,21 +110,12 @@ export const PromptMoreMenu: Component<{
                 <DropdownMenu.CheckboxItem
                   checked={feature.checked}
                   onChange={(checked) => props.onFeatureChange(feature.id, checked)}
-                  class="min-w-0"
+                  class="min-w-0 items-start py-2"
                 >
-                  <div class="flex items-start gap-2 min-w-0">
-                    <DropdownMenu.ItemIndicator class="pt-0.5 text-icon-primary-base">
-                      <Icon name="check" size="small" />
-                    </DropdownMenu.ItemIndicator>
-                    <div class="min-w-0">
-                      <DropdownMenu.ItemLabel class="text-13-medium text-text-base">
-                        {feature.label}
-                      </DropdownMenu.ItemLabel>
-                      <DropdownMenu.ItemDescription class="text-12-regular text-text-weak whitespace-normal">
-                        {feature.description}
-                      </DropdownMenu.ItemDescription>
-                    </div>
-                  </div>
+                  <PromptMoreMenuRow icon="window-cursor" label={feature.label} description={feature.description} />
+                  <DropdownMenu.ItemIndicator class="text-icon-primary-base">
+                    <Icon name="check" size="small" />
+                  </DropdownMenu.ItemIndicator>
                 </DropdownMenu.CheckboxItem>
               )}
             </For>

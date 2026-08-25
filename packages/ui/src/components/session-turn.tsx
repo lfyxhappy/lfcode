@@ -354,21 +354,9 @@ export function SessionTurn(
     () => assistantMessages().find((m) => m.error && m.error.name !== "MessageAbortedError")?.error,
   )
   const showAssistantCopyPartID = createMemo(() => {
-    const messages = assistantMessages()
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i]
-      if (!message) continue
-
-      const parts = list(data.store.part?.[message.id], emptyParts)
-      for (let j = parts.length - 1; j >= 0; j--) {
-        const part = parts[j]
-        if (!part || part.type !== "text" || !part.text?.trim()) continue
-        return part.id
-      }
-    }
-
-    return undefined
+    return assistantParts()
+      .findLast((part) => part.type === "text" && !!part.text?.trim())
+      ?.id
   })
   const errorText = createMemo(() => {
     const msg = error()?.data?.message
@@ -423,15 +411,13 @@ export function SessionTurn(
     let visible = 0
     let reason: string | undefined
     const show = showReasoningSummaries()
-    for (const message of assistantMessages()) {
-      for (const part of list(data.store.part?.[message.id], emptyParts)) {
-        if (partState(part, show) === "visible") {
-          visible++
-        }
-        if (part.type === "reasoning" && part.text) {
-          const h = heading(part.text)
-          if (h) reason = h
-        }
+    for (const part of assistantParts()) {
+      if (partState(part, show) === "visible") {
+        visible++
+      }
+      if (part.type === "reasoning" && part.text) {
+        const h = heading(part.text)
+        if (h) reason = h
       }
     }
     return { visible, reason }

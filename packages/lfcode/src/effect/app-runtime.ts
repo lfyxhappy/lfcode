@@ -46,17 +46,19 @@ import { Project } from "@/project"
 import { Vcs } from "@/project"
 import { Worktree } from "@/worktree"
 import { Pty } from "@/pty"
+import { ClaudeCode } from "@/claude-code"
 import { Installation } from "@/installation"
 import { ShareNext } from "@/share"
 import { SessionShare } from "@/share"
 import { Npm } from "@/npm"
 import { ActorRegistry } from "@/actor/registry"
 import { ActorWaiter } from "@/actor/waiter"
+import { ActorDispatch } from "@/actor/dispatch"
 import { Actor } from "@/actor/spawn"
 import { TaskRegistry } from "@/task/registry"
-import { WorkflowRuntime } from "@/workflow/runtime"
 import { History } from "@/history"
 import { Memory } from "@/memory"
+import { ContextReview } from "@/context-review"
 import * as BashInteractive from "@/tool/bash-interactive"
 import { defaultLayer as ShellBackgroundRuntimeLayer } from "@/background-job/runtime"
 import { memoMap } from "./memo-map"
@@ -65,62 +67,70 @@ import { memoMap } from "./memo-map"
 // first use instead of running at module load — same TDZ fix as Actor.defaultLayer.
 export const AppLayer = Layer.suspend(() =>
   Layer.mergeAll(
-    Npm.defaultLayer,
-    AppFileSystem.defaultLayer,
-    Bus.defaultLayer,
-    Auth.defaultLayer,
-    Account.defaultLayer,
-    Config.defaultLayer,
-    Git.defaultLayer,
-    Ripgrep.defaultLayer,
-    File.defaultLayer,
-    FileWatcher.defaultLayer,
-    Storage.defaultLayer,
-    Plugin.defaultLayer,
-    Provider.defaultLayer,
-    ProviderAuth.defaultLayer,
-    Agent.defaultLayer,
-    Skill.defaultLayer,
-    Discovery.defaultLayer,
-    Question.defaultLayer,
-    Permission.defaultLayer,
-    Todo.defaultLayer,
-    Session.defaultLayer,
-    SessionStatus.defaultLayer,
-    SessionRunState.defaultLayer,
-    Goal.defaultLayer,
-    SessionProcessor.defaultLayer,
-    SessionCompaction.defaultLayer,
-    SessionPrune.defaultLayer,
-    SessionRevert.defaultLayer,
-    SessionSummary.defaultLayer,
-    SessionPrompt.defaultLayer,
-    SessionCheckpoint.defaultLayer,
-    Instruction.defaultLayer,
-    LLM.defaultLayer,
-    LSP.defaultLayer,
-    MCP.defaultLayer,
-    McpAuth.defaultLayer,
-    McpCatalog.defaultLayer,
-    Command.defaultLayer,
-    Truncate.defaultLayer,
-    ToolRegistry.defaultLayer,
-    Format.defaultLayer,
-    Project.defaultLayer,
-    Vcs.defaultLayer,
-    Worktree.defaultLayer,
-    Pty.defaultLayer,
-    Installation.defaultLayer,
-    ShareNext.defaultLayer,
-    SessionShare.defaultLayer,
-    ActorRegistry.defaultLayer,
-    ActorWaiter.defaultLayer,
-    Actor.defaultLayer,
-    TaskRegistry.defaultLayer,
-    WorkflowRuntime.defaultLayer,
-    Memory.defaultLayer,
-    History.defaultLayer,
-    ShellBackgroundRuntimeLayer,
+    Layer.mergeAll(
+      Npm.defaultLayer,
+      AppFileSystem.defaultLayer,
+      Bus.defaultLayer,
+      Auth.defaultLayer,
+      Account.defaultLayer,
+      Config.defaultLayer,
+      Git.defaultLayer,
+      Ripgrep.defaultLayer,
+      File.defaultLayer,
+      FileWatcher.defaultLayer,
+      Storage.defaultLayer,
+      Plugin.defaultLayer,
+      Provider.defaultLayer,
+      ProviderAuth.defaultLayer,
+      Agent.defaultLayer,
+      Skill.defaultLayer,
+      Discovery.defaultLayer,
+      Question.defaultLayer,
+      Permission.defaultLayer,
+      Todo.defaultLayer,
+    ),
+    Layer.mergeAll(
+      Session.defaultLayer,
+      SessionStatus.defaultLayer,
+      SessionRunState.defaultLayer,
+      Goal.defaultLayer,
+      SessionProcessor.defaultLayer,
+      SessionCompaction.defaultLayer,
+      SessionPrune.defaultLayer,
+      SessionRevert.defaultLayer,
+      SessionSummary.defaultLayer,
+      SessionPrompt.defaultLayer,
+      SessionCheckpoint.defaultLayer,
+      Instruction.defaultLayer,
+      LLM.defaultLayer,
+      LSP.defaultLayer,
+      MCP.defaultLayer,
+      McpAuth.defaultLayer,
+      McpCatalog.defaultLayer,
+      Command.defaultLayer,
+    ),
+    Layer.mergeAll(
+      Truncate.defaultLayer,
+      ToolRegistry.defaultLayer,
+      Format.defaultLayer,
+      Project.defaultLayer,
+      Vcs.defaultLayer,
+      Worktree.defaultLayer,
+      Pty.defaultLayer,
+      ClaudeCode.layer.pipe(Layer.provide(Pty.defaultLayer)),
+      Installation.defaultLayer,
+      ShareNext.defaultLayer,
+      SessionShare.defaultLayer,
+      ActorRegistry.defaultLayer,
+      ActorWaiter.defaultLayer,
+      ActorDispatch.defaultLayer,
+      Actor.defaultLayer,
+      TaskRegistry.defaultLayer,
+      Memory.defaultLayer,
+      ContextReview.layer,
+      History.defaultLayer,
+      ShellBackgroundRuntimeLayer,
+    ),
   ).pipe(Layer.provideMerge(Observability.layer), Layer.provideMerge(BashInteractive.defaultLayer)),
 )
 

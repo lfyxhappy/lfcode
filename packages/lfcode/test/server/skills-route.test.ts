@@ -3,9 +3,12 @@ import fs from "fs/promises"
 import os from "os"
 import { setTimeout as sleep } from "node:timers/promises"
 import path from "path"
+import matter from "gray-matter"
+import { HTTPException } from "hono/http-exception"
 import { Global } from "../../src/global"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
+import { assertDiscoveryInstallInput, skillImportError } from "../../src/server/routes/instance/skills"
 import { cleanupTmpdir, tmpdir } from "../fixture/fixture"
 
 const originalFetch = globalThis.fetch
@@ -29,8 +32,12 @@ describe("skills routes", () => {
         directory: tmp.path,
         fn: async () => {
           await Bun.write(
-            path.join(tmp.path, "skills", "route-skill", "SKILL.md"),
+            path.join(tmp.path, "global-home", ".lfcode", "skills", "route-skill", "SKILL.md"),
             `---\nname: route-skill\ndescription: Route test skill.\n---\n\n# Route Skill\n`,
+          )
+          await Bun.write(
+            path.join(tmp.path, "global-home", ".lfcode", "skills", "route-skill", "agents", "openai.yaml"),
+            'interface:\n  display_name: "Route Skill UI"\n  short_description: "Route Skill metadata"\n  default_prompt: "Use $route-skill"\n',
           )
 
           const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
@@ -46,9 +53,11 @@ describe("skills routes", () => {
 
           expect(response.status).toBe(200)
 
-          const body = (await response.json()) as Array<{ name: string; description: string }>
+          const body = (await response.json()) as Array<{ name: string; description: string; displayName?: string; shortDescription?: string }>
           expect(body.map((skill) => skill.name)).toContain("route-skill")
           expect(body.find((skill) => skill.name === "route-skill")?.description).toBe("Route test skill.")
+          expect(body.find((skill) => skill.name === "route-skill")?.displayName).toBe("Route Skill UI")
+          expect(body.find((skill) => skill.name === "route-skill")?.shortDescription).toBe("Route Skill metadata")
         },
       })
     })
@@ -62,12 +71,16 @@ describe("skills routes", () => {
         directory: tmp.path,
         fn: async () => {
           await Bun.write(
-            path.join(tmp.path, "skills", "local-only", "SKILL.md"),
-            `---\nname: local-only\ndescription: Local only skill.\nhidden: true\n---\n\n# Local Only\n`,
+            path.join(tmp.path, "global-home", ".lfcode", "skills", "local-only", "SKILL.md"),
+            `---\nname: local-only\ndescription: Local only skill.\n---\n\n# Local Only\n`,
           )
           await Bun.write(
             path.join(tmp.path, ".lfcode", "skills", "project-local", "SKILL.md"),
             `---\nname: project-local\ndescription: Project local skill.\n---\n\n# Project Local\n`,
+          )
+          await Bun.write(
+            path.join(tmp.path, "global-home", ".lfcode", "skills", "local-only", "agents", "openai.yaml"),
+            'interface:\n  display_name: "Local Skill"\n  short_description: "Managed local Skill"\n  default_prompt: "Use $local-only"\npolicy:\n  allow_implicit_invocation: true\n',
           )
 
           const previous = process.env["LFCODE_DISABLE_COMPOSE_SKILLS"]
@@ -83,13 +96,37 @@ describe("skills routes", () => {
 
           expect(response.status).toBe(200)
 
-          const body = (await response.json()) as Array<{ name: string; hidden?: boolean; directory: string }>
+          const body = (await response.json()) as Array<{ name: string; directory: string; displayName?: string; shortDescription?: string }>
           expect(body.map((skill) => skill.name)).toEqual(["local-only"])
-          expect(body[0]?.hidden).toBe(true)
           expect(body[0]?.directory).toBe("local-only")
+          expect(body[0]?.displayName).toBe("Local Skill")
+          expect(body[0]?.shortDescription).toBe("Managed local Skill")
         },
       })
     })
+    await disposeTestInstance(tmp.path)
+  })
+
+  test("POST /skills/create safely serializes YAML-special descriptions", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/create", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-lfcode-directory": tmp.path,
+        },
+        body: JSON.stringify({ name: "yaml-safe", description: "Create: validate # YAML safely" }),
+      }),
+    )
+
+    await expectOk(response)
+    const content = await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "yaml-safe", "SKILL.md")).text()
+    const parsed = matter(content)
+    expect(parsed.data).toMatchObject({ name: "yaml-safe", description: "Create: validate # YAML safely" })
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "yaml-safe", "agents", "openai.yaml")).text()).toBe(
+      'interface:\n  display_name: "Yaml Safe"\n  short_description: "Create: validate # YAML safely"\n  default_prompt: "Use $yaml-safe for: Create: validate # YAML safely"\npolicy:\n  allow_implicit_invocation: true\n',
+    )
     await disposeTestInstance(tmp.path)
   })
 
@@ -163,7 +200,7 @@ describe("skills routes", () => {
         directory: tmp.path,
         fn: async () => {
           await Bun.write(
-            path.join(tmp.path, "skills", "alpha-skill", "SKILL.md"),
+            path.join(tmp.path, "global-home", ".lfcode", "skills", "alpha-skill", "SKILL.md"),
             `---\nname: alpha-skill\ndescription: Alpha local skill.\n---\n\n# Alpha Skill\n`,
           )
 
@@ -216,7 +253,39 @@ describe("skills routes", () => {
     const body = (await response.json()) as Array<{ name: string; location: string }>
     expect(body.map((skill) => skill.name)).toEqual(["single-import"])
     expect(body[0]?.location).toContain(path.join("skills", "single", "SKILL.md"))
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "single", "SKILL.md")).text()).not.toContain("auto_activate")
     await disposeTestInstance(tmp.path)
+  })
+
+  test("discovery install accepts only exact skills.sh URLs and maps remote failures to 400", () => {
+    expect(() =>
+      assertDiscoveryInstallInput({
+        url: "https://127.0.0.1/private-skill",
+        owner: "private",
+        repo: "repo",
+        skill: "private-skill",
+      }),
+    ).toThrow("exact HTTPS skills.sh entry URL")
+    expect(() =>
+      assertDiscoveryInstallInput({
+        url: "https://www.skills.sh/owner/repo/remote-skill?redirect=1",
+        owner: "owner",
+        repo: "repo",
+        skill: "remote-skill",
+      }),
+    ).toThrow("exact HTTPS skills.sh entry URL")
+    expect(
+      assertDiscoveryInstallInput({
+        url: "https://www.skills.sh/owner/repo/remote-skill",
+        owner: "owner",
+        repo: "repo",
+        skill: "remote-skill",
+      }),
+    ).toMatchObject({ skill: "remote-skill" })
+    const remoteFailure = skillImportError(new Error("Remote 404"))
+    expect(remoteFailure).toBeInstanceOf(HTTPException)
+    if (!(remoteFailure instanceof HTTPException)) throw new Error("Expected a client import error")
+    expect(remoteFailure.getResponse().status).toBe(400)
   })
 
   test("POST /skills/import imports multiple skill child directories", async () => {
@@ -270,6 +339,97 @@ describe("skills routes", () => {
     expect(await Bun.file(path.join(tmp.path, "tmp", "skill-import")).exists()).toBe(false)
     await disposeTestInstance(tmp.path)
   })
+
+  test("POST /skills/import rejects directory imports that exceed bounded file, size, or depth limits", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const sources = path.join(tmp.path, "external")
+    const tooMany = path.join(sources, "too-many")
+    await writeSkill(tooMany, "too-many", "Too many files.")
+    await Promise.all(
+      Array.from({ length: 128 }, (_, index) => Bun.write(path.join(tooMany, `reference-${index}.md`), "x")),
+    )
+    const tooLarge = path.join(sources, "too-large")
+    await writeSkill(tooLarge, "too-large", "Large file.")
+    await Bun.write(path.join(tooLarge, "reference.bin"), Buffer.alloc(1024 * 1024 + 1))
+    const tooDeep = path.join(sources, "too-deep")
+    await writeSkill(tooDeep, "too-deep", "Deep path.")
+    const deepFile = path.join(tooDeep, ...Array.from({ length: 13 }, (_, index) => `nested-${index}`), "reference.md")
+    await fs.mkdir(path.dirname(deepFile), { recursive: true })
+    await Bun.write(deepFile, "x")
+
+    for (const source of [tooMany, tooLarge, tooDeep]) {
+      const response = await withManagedPaths(tmp.path, () =>
+        Server.Default().app.request("/skills/import", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-lfcode-directory": tmp.path,
+          },
+          body: JSON.stringify({ kind: "folder", source }),
+        }),
+      )
+      expect(response.status).toBe(400)
+    }
+
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "too-many", "SKILL.md")).exists()).toBe(false)
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "too-large", "SKILL.md")).exists()).toBe(false)
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "too-deep", "SKILL.md")).exists()).toBe(false)
+    await disposeTestInstance(tmp.path)
+  }, 20_000)
+
+  test("POST /skills/import rejects unsafe and over-budget zip entries before extraction", async () => {
+    await using tmp = await tmpdir(tmpdirWithGit)
+    const sources = [
+      {
+        name: "unsafe-path.zip",
+        files: { "../outside/SKILL.md": "---\nname: outside\ndescription: Unsafe path.\n---\n" },
+      },
+      {
+        name: "too-many.zip",
+        files: Object.fromEntries(
+          Array.from({ length: 129 }, (_, index) => [
+            `too-many/${index === 0 ? "SKILL.md" : `reference-${index}.md`}`,
+            index === 0 ? "---\nname: too-many\ndescription: Too many zip entries.\n---\n" : "x",
+          ]),
+        ),
+      },
+      {
+        name: "too-large.zip",
+        files: {
+          "too-large/SKILL.md": "---\nname: too-large\ndescription: Large zip entry.\n---\n",
+          "too-large/reference.bin": Buffer.alloc(1024 * 1024 + 1),
+        },
+      },
+      {
+        name: "case-collision.zip",
+        files: {
+          "case-collision/SKILL.md": "---\nname: case-collision\ndescription: First entry.\n---\n",
+          "Case-Collision/SKILL.md": "---\nname: case-collision\ndescription: Second entry.\n---\n",
+        },
+      },
+    ]
+    for (const source of sources) {
+      const zipPath = path.join(tmp.path, source.name)
+      await Bun.write(zipPath, createStoredZip(source.files))
+      const response = await withManagedPaths(tmp.path, () =>
+        Server.Default().app.request("/skills/import", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-lfcode-directory": tmp.path,
+          },
+          body: JSON.stringify({ kind: "zip", source: zipPath }),
+        }),
+      )
+      expect(response.status).toBe(400)
+    }
+
+    expect(await Bun.file(path.join(tmp.path, "outside", "SKILL.md")).exists()).toBe(false)
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "too-many", "SKILL.md")).exists()).toBe(false)
+    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "too-large", "SKILL.md")).exists()).toBe(false)
+    expect(await Bun.file(path.join(tmp.path, "tmp", "skill-import")).exists()).toBe(false)
+    await disposeTestInstance(tmp.path)
+  }, 20_000)
 
   test("POST /skills/import returns a clear error for missing preset skill roots", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
@@ -358,7 +518,7 @@ describe("skills routes", () => {
   test("POST /skills/import overwrites duplicate target directories and refreshes", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
     await withManagedPaths(tmp.path, async () => {
-      await writeSkill(path.join(tmp.path, "skills", "dup"), "old-dup", "Old duplicate.")
+      await writeSkill(path.join(tmp.path, "global-home", ".lfcode", "skills", "dup"), "old-dup", "Old duplicate.")
       await writeSkill(path.join(tmp.path, "external", "dup"), "new-dup", "New duplicate.")
     })
 
@@ -384,43 +544,31 @@ describe("skills routes", () => {
     await disposeTestInstance(tmp.path)
   })
 
-  test("PATCH /skills/manage/update toggles hidden frontmatter and refreshes", async () => {
+  test("POST /skills/import keeps an existing skill when the replacement frontmatter is invalid", async () => {
     await using tmp = await tmpdir(tmpdirWithGit)
     await withManagedPaths(tmp.path, async () => {
-      await writeSkill(path.join(tmp.path, "skills", "managed"), "managed-skill", "Managed skill.")
+      await writeSkill(path.join(tmp.path, "global-home", ".lfcode", "skills", "dup"), "old-dup", "Old duplicate.")
+      await Bun.write(
+        path.join(tmp.path, "external", "dup", "SKILL.md"),
+        `---\nname: invalid skill\ndescription: ${"A".repeat(1_025)}\n---\n\n# Invalid\n`,
+      )
     })
 
-    const hideResponse = await withManagedPaths(tmp.path, () =>
-      Server.Default().app.request("/skills/manage/update", {
-        method: "PATCH",
+    const response = await withManagedPaths(tmp.path, () =>
+      Server.Default().app.request("/skills/import", {
+        method: "POST",
         headers: {
           "content-type": "application/json",
           "x-lfcode-directory": tmp.path,
         },
-        body: JSON.stringify({ directory: "managed", hidden: true }),
+        body: JSON.stringify({ kind: "folder", source: path.join(tmp.path, "external", "dup") }),
       }),
     )
 
-    await expectOk(hideResponse)
-    const hidden = (await hideResponse.json()) as { hidden?: boolean }
-    expect(hidden.hidden).toBe(true)
-    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "managed", "SKILL.md")).text()).toContain("hidden: true")
-
-    const showResponse = await withManagedPaths(tmp.path, () =>
-      Server.Default().app.request("/skills/manage/update", {
-        method: "PATCH",
-        headers: {
-          "content-type": "application/json",
-          "x-lfcode-directory": tmp.path,
-        },
-        body: JSON.stringify({ directory: "managed", hidden: null }),
-      }),
-    )
-
-    await expectOk(showResponse)
-    const shown = (await showResponse.json()) as { hidden?: boolean }
-    expect(shown.hidden).toBeUndefined()
-    expect(await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "managed", "SKILL.md")).text()).not.toContain("hidden: true")
+    expect(response.status).toBe(400)
+    const existing = await Bun.file(path.join(tmp.path, "global-home", ".lfcode", "skills", "dup", "SKILL.md")).text()
+    expect(existing).toContain("name: old-dup")
+    expect(existing).toContain("Old duplicate.")
     await disposeTestInstance(tmp.path)
   })
 
@@ -435,7 +583,7 @@ describe("skills routes", () => {
       await Bun.$`git commit --allow-empty -m "root commit ${root}"`.cwd(root).quiet()
 
       await withManagedPaths(root, async () => {
-        await writeSkill(path.join(root, "skills", "managed"), "managed-skill", "Managed skill.")
+        await writeSkill(path.join(root, "global-home", ".lfcode", "skills", "managed"), "managed-skill", "Managed skill.")
       })
 
       const response = await withManagedPaths(root, () =>
@@ -523,14 +671,14 @@ async function retryRemove(target: string) {
   })
 }
 
-function createStoredZip(files: Record<string, string>) {
+function createStoredZip(files: Record<string, string | Buffer>) {
   const localParts: Buffer[] = []
   const centralParts: Buffer[] = []
   let offset = 0
 
   for (const [name, content] of Object.entries(files)) {
     const nameBuffer = Buffer.from(name.replaceAll("\\", "/"))
-    const data = Buffer.from(content)
+    const data = typeof content === "string" ? Buffer.from(content) : Buffer.from(content)
     const crc = crc32(data)
     const local = Buffer.alloc(30)
     local.writeUInt32LE(0x04034b50, 0)

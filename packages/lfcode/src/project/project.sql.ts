@@ -1,6 +1,7 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 import { Timestamps } from "../storage/schema.sql"
 import type { ProjectID } from "./schema"
+import type { ProjectExtension } from "./project"
 
 export const ProjectTable = sqliteTable("project", {
   id: text().$type<ProjectID>().primaryKey(),
@@ -14,4 +15,8 @@ export const ProjectTable = sqliteTable("project", {
   time_initialized: integer(),
   sandboxes: text({ mode: "json" }).notNull().$type<string[]>(),
   commands: text({ mode: "json" }).$type<{ start?: string }>(),
-})
+  extension: text({ mode: "json" }).$type<ProjectExtension>(),
+}, (table) => [
+  index("project_extension_idx").on(table.extension),
+  uniqueIndex("project_extension_unique_idx").on(table.extension),
+])

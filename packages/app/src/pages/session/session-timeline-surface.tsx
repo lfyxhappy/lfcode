@@ -1,5 +1,6 @@
 import { onCleanup } from "solid-js"
 import type { VirtualizerHandle } from "virtua/solid"
+import { MarkedProvider } from "@lfcode-ai/ui/context/marked"
 import { MessageTimeline, type MessageTimelineProps } from "./message-timeline"
 import { sessionViewSurfaceKey, type SessionSurface } from "./session-view-state"
 import { readSessionVirtualCache, rememberSessionVirtualCache } from "./session-virtual-cache"
@@ -62,16 +63,18 @@ export function SessionTimelineSurface(props: SessionTimelineSurfaceProps) {
   onCleanup(remember)
 
   return (
-    <MessageTimeline
-      {...props}
-      onVirtualizerRef={bindVirtualizer}
-      virtualizerCache={() => {
-        return readSessionVirtualCache({
-          key: surfaceKey,
-          turnIDs: props.turnIDs(),
-          revision: props.contentRevision(),
-        })
-      }}
-    />
+    <MarkedProvider>
+      <MessageTimeline
+        {...props}
+        onVirtualizerRef={bindVirtualizer}
+        virtualizerCache={() => {
+          return readSessionVirtualCache({
+            key: surfaceKey,
+            turnIDs: props.turnIDs(),
+            revision: props.contentRevision(),
+          })
+        }}
+      />
+    </MarkedProvider>
   )
 }

@@ -172,6 +172,9 @@ export function createChildStoreManager(input: {
             projectMeta: initialMeta,
             icon: initialIcon,
             provider_ready: false,
+            command_ready: false,
+            permission_ready: false,
+            permission_error: false,
             provider: { all: [], connected: [], default: {} },
             config: {},
             get path() {
@@ -186,6 +189,7 @@ export function createChildStoreManager(input: {
             sessionTotal: 0,
             session_status: {},
             session_goal: {},
+            hook_run: {},
             session_diff: {},
             todo: {},
             permission: {},
@@ -243,6 +247,8 @@ export function createChildStoreManager(input: {
     pinForOwner(directory)
     const shouldBootstrap = options.bootstrap ?? true
     if (shouldBootstrap && childStore[0].status === "loading") {
+      // Admit synchronously so sibling providers cannot all launch the same initial bootstrap.
+      childStore[1]("status", "partial")
       input.onBootstrap(directory)
     }
     return childStore
@@ -255,6 +261,7 @@ export function createChildStoreManager(input: {
     mark(directory)
     const shouldBootstrap = options.bootstrap ?? true
     if (shouldBootstrap && childStore[0].status === "loading") {
+      childStore[1]("status", "partial")
       input.onBootstrap(directory)
     }
     return childStore
@@ -265,6 +272,7 @@ export function createChildStoreManager(input: {
     const childStore = ensureChild(directory)
     const shouldBootstrap = options.bootstrap ?? true
     if (shouldBootstrap && childStore[0].status === "loading") {
+      childStore[1]("status", "partial")
       input.onBootstrap(directory)
     }
     return childStore

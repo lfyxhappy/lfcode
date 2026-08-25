@@ -19,6 +19,8 @@ export type AutomationDiscovery = {
   token: string
   userData: string
   version: string
+  protocolVersion?: number
+  instanceID?: string
 }
 
 export function resolveAutomationStateFile(env = process.env) {
@@ -82,6 +84,17 @@ function parseAutomationDiscovery(value: unknown): AutomationDiscovery {
   if (typeof value.token !== "string" || !value.token) throw new Error("Invalid automation discovery token")
   if (typeof value.userData !== "string" || !value.userData) throw new Error("Invalid automation discovery user data")
   if (typeof value.version !== "string" || !value.version) throw new Error("Invalid automation discovery version")
+  if (
+    value.protocolVersion !== undefined &&
+    (typeof value.protocolVersion !== "number" ||
+      !Number.isSafeInteger(value.protocolVersion) ||
+      value.protocolVersion <= 0)
+  ) {
+    throw new Error("Invalid automation discovery protocol version")
+  }
+  if (value.instanceID !== undefined && (typeof value.instanceID !== "string" || !value.instanceID)) {
+    throw new Error("Invalid automation discovery instance ID")
+  }
   return {
     host: value.host,
     pid: value.pid,
@@ -90,6 +103,8 @@ function parseAutomationDiscovery(value: unknown): AutomationDiscovery {
     token: value.token,
     userData: value.userData,
     version: value.version,
+    ...(value.protocolVersion === undefined ? {} : { protocolVersion: value.protocolVersion }),
+    ...(value.instanceID === undefined ? {} : { instanceID: value.instanceID }),
   }
 }
 

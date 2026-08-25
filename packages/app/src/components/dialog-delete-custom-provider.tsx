@@ -23,11 +23,8 @@ export function DialogRemoveProvider(props: Props) {
   const [pending, setPending] = createSignal(false)
 
   const close = () => {
-    if (props.onClose) {
-      props.onClose()
-      return
-    }
     dialog.close()
+    props.onClose?.()
   }
 
   const handleDelete = async () => {

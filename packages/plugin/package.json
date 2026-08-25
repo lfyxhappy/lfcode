@@ -12,11 +12,27 @@
     "build": "tsc"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./library": "./src/library.ts",
-    "./manifest": "./src/manifest.ts",
-    "./tool": "./src/tool.ts",
-    "./tui": "./src/tui.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./library": {
+      "bun": "./src/library.ts",
+      "default": "./dist/library.js"
+    },
+    "./manifest": {
+      "bun": "./src/manifest.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./tool": {
+      "bun": "./src/tool.ts",
+      "default": "./dist/tool.js"
+    },
+    "./tui": {
+      "bun": "./src/tui.ts",
+      "default": "./dist/tui.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"

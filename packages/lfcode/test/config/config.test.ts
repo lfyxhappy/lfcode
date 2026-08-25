@@ -637,6 +637,9 @@ test("saveGlobalPersonalization writes managed instructions and appends the abso
             dreamEnabled: false,
             distillEnabled: true,
           },
+          contextReview: {
+            enabled: false,
+          },
         })
 
         const managedFile = path.join(globalTmp.path, "instructions", "personalization.md")
@@ -649,6 +652,7 @@ test("saveGlobalPersonalization writes managed instructions and appends the abso
         expect(saved.config.instructions).toEqual(["C:/shared/one.md", "C:/shared/two.md", managedFile])
         expect(saved.config.memory?.cc_index).toBe(true)
         expect(saved.config.dream?.auto).toBe(false)
+        expect(saved.config.context_review?.enabled).toBe(false)
         expect(await fs.readFile(managedFile, "utf8")).toBe("Always explain tradeoffs.")
       },
     })
@@ -702,12 +706,16 @@ test("saveGlobalPersonalization removes only the managed path and preserves unre
             dreamEnabled: true,
             distillEnabled: true,
           },
+          contextReview: {
+            enabled: true,
+          },
         })
 
         expect(saved.customInstructions).toBe("")
         expect(saved.config.instructions).toEqual(["C:/shared/one.md", "C:/shared/two.md"])
         expect(saved.config.memory?.cc_index).toBe(false)
         expect(saved.config.dream?.auto).toBe(true)
+        expect(saved.config.context_review?.enabled).toBe(true)
         expect(await fs.access(managedFile).then(() => true).catch(() => false)).toBe(false)
       },
     })
@@ -739,6 +747,9 @@ test("getGlobalPersonalization returns effective memory defaults from global con
           schedulerEnabled: true,
           dreamEnabled: true,
           distillEnabled: true,
+        })
+        expect(personalization.contextReview).toEqual({
+          enabled: true,
         })
       },
     })
@@ -915,6 +926,46 @@ test("removes custom providers from global lfcode.jsonc and clears auth", async 
     expect(written).toContain('"openai"')
     expect(written).toContain('"disabled_providers"')
     expect(written).toContain('"openai"')
+  } finally {
+    await Instance.disposeAll()
+    ;(Global.Path as { config: string }).config = prev
+    await clear()
+  }
+})
+
+test("removes legacy custom providers without configured models", async () => {
+  await using globalTmp = await tmpdir()
+  await using tmp = await tmpdir()
+  const prev = Global.Path.config
+  ;(Global.Path as { config: string }).config = globalTmp.path
+  await clear()
+  try {
+    const file = path.join(globalTmp.path, "lfcode.jsonc")
+    await Filesystem.write(
+      file,
+      `{
+        "provider": {
+          "legacy-provider": {
+            "name": "Legacy Provider",
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "baseURL": "https://legacy.example.com/v1"
+            }
+          }
+        }
+      }`,
+    )
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const next = await removeGlobalCustomProvider("legacy-provider")
+        expect(next.provider?.["legacy-provider"]).toBeUndefined()
+        expect(removedAuthProviders).toEqual(["legacy-provider"])
+      },
+    })
+
+    expect(await fs.readFile(file, "utf-8")).not.toContain('"legacy-provider"')
   } finally {
     await Instance.disposeAll()
     ;(Global.Path as { config: string }).config = prev
@@ -2938,6 +2989,24 @@ describe("deduplicatePluginOrigins", () => {
         )
 
         await Filesystem.write(path.join(pluginDir, "my-plugin.js"), "export default {}")
+
+        const packaged = path.join(pluginDir, "packaged-plugin")
+        await fs.mkdir(packaged, { recursive: true })
+        await Filesystem.write(
+          path.join(packaged, "package.json"),
+          JSON.stringify({
+            name: "packaged-plugin",
+            private: true,
+            type: "module",
+            lfcode: {
+              apiVersion: 2,
+              id: "packaged-plugin",
+              entrypoints: { location: "./index.ts" },
+              storage: { data: true },
+            },
+          }),
+        )
+        await Filesystem.write(path.join(packaged, "index.ts"), "export default {}")
       },
     })
 
@@ -2949,6 +3018,7 @@ describe("deduplicatePluginOrigins", () => {
 
         expect(plugins.some((p) => ConfigPlugin.pluginSpecifier(p) === "my-plugin@1.0.0")).toBe(true)
         expect(plugins.some((p) => ConfigPlugin.pluginSpecifier(p).startsWith("file://"))).toBe(true)
+        expect(plugins.some((p) => ConfigPlugin.pluginSpecifier(p) === pathToFileURL(path.join(tmp.path, "project", ".lfcode", "plugin", "packaged-plugin")).href)).toBe(true)
       },
     })
   })

@@ -6,26 +6,18 @@ import DESCRIPTION from "./pip.txt"
 import { AppFileSystem } from "@/filesystem"
 import { ensureManagedPythonCommand } from "@/python/environment"
 import { formatPythonCommand } from "@/python/runtime"
-import { Process } from "@/util"
 import { SessionCwd } from "./session-cwd"
-import { startForegroundJob } from "@/background-job/foreground"
-
-const DEFAULT_TIMEOUT = 2 * 60 * 1000
+import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
 
 const Parameters = z.object({
-  action: z
-    .enum(["install", "uninstall", "upgrade", "list", "show", "freeze"])
-    .describe("The pip action to perform."),
+  action: z.enum(["install", "uninstall", "upgrade", "list", "show", "freeze"]).describe("The pip action to perform."),
   packages: z
     .array(z.string())
     .optional()
     .describe("Package names for install, uninstall, upgrade, or show. Omit for list and freeze."),
   extraArgs: z.array(z.string()).optional().describe("Optional extra pip CLI arguments."),
-  timeout: z.number().optional().describe("Optional timeout in milliseconds. Defaults to 120000."),
-  workdir: z
-    .string()
-    .optional()
-    .describe("Optional working directory. Defaults to the current session directory."),
+  timeout: z.number().optional().describe("Optional reminder threshold in milliseconds. It never terminates pip."),
+  workdir: z.string().optional().describe("Optional working directory. Defaults to the current session directory."),
   description: z.string().describe("Clear, concise description of what this pip command does in 5-10 words."),
 })
 
@@ -48,7 +40,8 @@ function renderOutput(input: { stdout: string; stderr: string; exit: number; tim
   const sections = [input.stdout, input.stderr].filter(Boolean)
   const output = sections.join(sections.length === 2 ? "\n\n" : "")
   if (!output && input.exit === 0) return "pip command completed with no output."
-  if (!output && input.exit !== 0 && !input.timedOut) return `pip command failed with exit code ${input.exit} and no output.`
+  if (!output && input.exit !== 0 && !input.timedOut)
+    return `pip command failed with exit code ${input.exit} and no output.`
   if (!input.timedOut) return output
   const timeoutLine = `pip command timed out after ${input.timeout}ms.`
   return output ? `${output}\n\n${timeoutLine}` : timeoutLine
@@ -87,54 +80,32 @@ export const PipTool = Tool.define(
             },
           })
 
-          const timeout = params.timeout ?? DEFAULT_TIMEOUT
-          const timeoutAbort = AbortSignal.timeout(timeout)
-          const abort = AbortSignal.any([ctx.abort, timeoutAbort])
-          const job = startForegroundJob({
+          const runtime = shellBackgroundRuntimeRef.current
+          if (!runtime) throw new Error("Shell background runtime is not available in this process.")
+          const job = yield* runtime.start({
             sessionID: ctx.sessionID,
             source: "pip",
             title: params.description || `pip ${params.action}`,
             cwd: normalized,
-            payload: {
-              command: [python.command, ...python.args, ...args],
-              tool: "pip",
-            },
+            env: Object.fromEntries(
+              Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            ),
+            shell: "",
+            shellName: "argv",
+            argv: [python.command, ...python.args, ...args],
+            ...(params.timeout !== undefined ? { remindAfterMs: params.timeout } : {}),
             ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
             ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
-          })
-          const result = yield* Effect.promise(() =>
-            Process.run([python.command, ...python.args, ...args], {
-              cwd: normalized,
-              abort,
-              nothrow: true,
-              onSpawn: (process) => job.attach(process.pid),
-              onOutput: (entry) => job.append(entry.stream, entry.chunk.toString("utf8")),
-            }),
-          )
-
-          const stdout = result.stdout.toString("utf8").trimEnd()
-          const stderr = result.stderr.toString("utf8").trimEnd()
-          const timedOut = timeoutAbort.aborted && !ctx.abort.aborted
-          job.complete({
-            status: ctx.abort.aborted ? "cancelled" : timedOut || result.code !== 0 ? "failed" : "completed",
-            exitCode: result.code,
-            ...(timedOut ? { error: `pip command timed out after ${timeout}ms.` } : {}),
           })
 
           return {
             title: params.description || `pip ${params.action}`,
-            output: renderOutput({
-              stdout,
-              stderr,
-              exit: result.code,
-              timeout,
-              timedOut,
-            }),
+            output: `Started tracked pip shell process.\n<job_id>${job.id}</job_id>\n<status>${job.status}</status>\nCompletion is reported automatically; use shell_process only when inspection is needed. Only shell_process.cancel after an explicit user request can terminate it.`,
             metadata: {
               action: params.action,
-              exit: result.code,
               python: formatPythonCommand(python),
-              timedOut,
+              jobID: job.id,
+              status: job.status,
             },
           }
         }).pipe(Effect.scoped, Effect.orDie),

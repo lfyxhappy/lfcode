@@ -1,5 +1,5 @@
-import { Effect, Deferred, Context, Fiber, Layer, Scope, Cause } from "effect"
-import type { SessionID, MessageID } from "@/session/schema"
+import { Effect, Deferred, Context, Fiber, Layer, Option, Queue, Scope, Cause } from "effect"
+import { MessageID, PartID, type SessionID } from "@/session/schema"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import type { Tool as AITool, ModelMessage } from "ai"
 import { Session } from "@/session"
@@ -11,6 +11,8 @@ import { TaskGate, MAX_TASK_GATE_SUBAGENT_REACT } from "@/task/gate"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import type { SpawnMode, ContextMode, ToolWhitelist, Lifecycle } from "@/actor/schema"
+import { dispatchRef } from "@/actor/dispatch-ref"
+import type { Payload as DispatchPayload, Record as DispatchRecord } from "@/actor/dispatch"
 import { runTurn } from "@/actor/turn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { Bus } from "@/bus"
@@ -20,6 +22,9 @@ import { renderActorNotification } from "@/inbox/render"
 import { Plugin, HookEvent } from "@/plugin"
 import { parseReturnHeader, type ReturnStatus } from "./return-header"
 import { Log } from "@/util"
+import { InstanceState } from "@/effect"
+import type { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
+import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
 
 const log = Log.create({ service: "actor.spawn" })
 
@@ -32,6 +37,7 @@ const log = Log.create({ service: "actor.spawn" })
 export const MAX_PRE_REACT = 3
 /** Cap on postStop ReAct re-entries per spawn. See MAX_PRE_REACT TODO. */
 export const MAX_POST_REACT = 3
+const MAX_RESEARCH_COORDINATOR_REACT = 6
 const RETURN_FORMAT_INSTRUCTION = `
 
 ---
@@ -53,6 +59,56 @@ If applicable, also include below the deliverable:
 This format lets the spawning agent and the checkpoint writer extract your progress without parsing free-form prose. Do NOT precede the header with an introduction — your final message must start with "**Status**:".
 `
 
+const WRITE_TOOLS = new Set(["apply_patch", "edit", "replace_range", "write"])
+
+function requiredResearcherCount(research: ResearchDispatchSnapshot | undefined) {
+  if (!research) return 0
+  if (research.depth === "quick") return 1
+  if (research.depth === "standard") return 2
+  return 3
+}
+
+function researchCoordinatorReentry(input: {
+  required: number
+  current: number
+  phase: "delegate" | "wait" | "synthesize"
+}) {
+  if (input.phase === "delegate") {
+    return [
+      "This deep-research coordination task cannot finish yet.",
+      "You have created " + input.current + " of the required " + input.required + " read-only researcher investigations.",
+      "Do not reply with a plan or narrative. Use the actor tool now with action=spawn, subagent_type=researcher, and execution=background for the remaining independent research lines.",
+      "Never select deep-research-coordinator as a subagent.",
+    ].join("\n")
+  }
+  if (input.phase === "wait") {
+    return [
+      "The delegated researchers are still running.",
+      "Do not finish the coordination task. Use actor.wait for each researcher, then read the delivered evidence before writing the final report.",
+    ].join("\n")
+  }
+  return [
+    "All delegated researchers have settled.",
+    "Read their delivered evidence and now produce the final Chinese research report with facts, inferences, unknowns, source URLs, conflicts, and caveats. Do not delegate more agents.",
+  ].join("\n")
+}
+
+function actualFilesFromPart(part: MessageV2.Part) {
+  if (part.type !== "tool" || !WRITE_TOOLS.has(part.tool) || part.state.status !== "completed") return []
+  const direct = [part.state.input.filePath, part.state.input.filepath, part.state.input.file, part.state.input.path]
+  const metadataFiles = Array.isArray(part.state.metadata.files)
+    ? part.state.metadata.files.flatMap((file: unknown) => {
+        if (typeof file === "string") return [file]
+        if (!file || typeof file !== "object") return []
+        const value = file as Record<string, unknown>
+        return [value.filePath, value.filepath, value.file, value.path]
+      })
+    : []
+  return [...direct, ...metadataFiles].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  )
+}
+
 export interface ForkContext {
   readonly system: string[]
   /**
@@ -69,7 +125,7 @@ export interface ForkContext {
    */
   readonly tools: Record<string, AITool>
   /**
-   * Parent agent's permission ruleset, captured at spawn. The fork evaluates
+   * Parent agent's effective permission ruleset, captured at spawn. The fork evaluates
    * permissions and filters its LLM-visible tool list against THIS (the parent's)
    * ruleset rather than the checkpoint-writer agent's own — restoring prompt-cache
    * tool-visibility parity with the parent and keeping permission semantics
@@ -132,9 +188,26 @@ export interface SpawnInput {
   tools: ToolWhitelist
   model?: { providerID: ProviderID; modelID: ModelID }
   background: boolean
+  /** Return after registration; callers that need completion await `outcome`. */
+  immediate?: boolean
+  /**
+   * Internal-only escape hatch for runtime agents whose live fork context or
+   * executable structured-output contract cannot be serialized by dispatch.
+   * It deliberately does not share `immediate`: ordinary background agents
+   * may return immediately to their caller but must still use durable dispatch.
+   */
+  bypassDispatch?: boolean
   parentActorID?: string
   task_id?: string // Spec ②: bound user-task ID for postStop progress.md validation
   cwd?: string
+  parentAgent?: string
+  parentModel?: { providerID: ProviderID; modelID: ModelID }
+  contextRefs?: readonly string[]
+  declaredFiles?: readonly string[]
+  research?: ResearchDispatchSnapshot
+  /** The previous dispatch attempt when a user manually resumes it. */
+  resumedFrom?: string
+  attempt?: number
   forkContext?: ForkContext // NEW
   lifecycle?: Lifecycle
   /**
@@ -150,11 +223,8 @@ export interface SpawnInput {
    * Effect — right after the actor is registered, BEFORE its work fiber detaches
    * (forkWork forks into the actor scope). Lets a caller record the child id the
    * instant the actor exists, closing the window where an in-flight spawn would
-   * otherwise be invisible to a concurrent cancel/reclaim. The WorkflowRuntime
-   * uses this to add the id to its reclaim set before detach (MR104 #2). Best-
-   * effort: a throw is swallowed so a buggy callback can't fail the spawn. Only
-   * the subagent path invokes it (the workflow spawns subagents); spawnPeer does
-   * not — peers are not orchestrated by the workflow runtime.
+   * otherwise be invisible to a concurrent cancel/reclaim. Best-effort: a throw
+   * is swallowed so a buggy callback can't fail the spawn.
    */
   onActorID?: (actorID: string) => void
 }
@@ -163,11 +233,15 @@ export interface SpawnResult {
   actorID: string
   sessionID: SessionID
   outcome: Deferred.Deferred<AgentOutcome>
+  dispatchID?: string
 }
 
 export interface Interface {
   readonly spawn: (input: SpawnInput) => Effect.Effect<SpawnResult>
   readonly cancel: (sessionID: SessionID, actorID: string, mode: "graceful" | "forced") => Effect.Effect<void>
+  readonly cancelDispatch?: (sessionID: SessionID, dispatchID: string) => Effect.Effect<DispatchRecord | undefined>
+  readonly receiveDispatch?: (sessionID: SessionID, dispatchID: string) => Effect.Effect<DispatchRecord | undefined>
+  readonly resumeDispatch?: (sessionID: SessionID, dispatchID: string) => Effect.Effect<SpawnResult | undefined>
   readonly getForkContext: (actorID: string) => Effect.Effect<ForkContext | undefined>
 }
 
@@ -191,6 +265,50 @@ export const layer = Layer.effect(
     // (contextMode = "full"). Read by fork's runLoop (see prompt.ts) and
     // cleared on terminal status. Fiber tracking moved to SessionRunState.
     const forkContexts = new Map<string, ForkContext>()
+    const dispatchKey = (sessionID: SessionID, actorID: string) => `${sessionID}\0${actorID}`
+
+    const dispatchState = yield* InstanceState.make<{
+      outcomes: Map<string, Deferred.Deferred<AgentOutcome>>
+      running: Map<string, { id: string; actorID: string; sessionID: SessionID }>
+    }>(
+      Effect.fn("Actor.dispatchState")(function* () {
+        const events = yield* Queue.unbounded<{ part: MessageV2.Part }>()
+        const running = new Map<string, { id: string; actorID: string; sessionID: SessionID }>()
+
+        yield* bus.subscribeCallback(MessageV2.Event.PartUpdated, (event) => {
+          if (actualFilesFromPart(event.properties.part).length === 0) return
+          Queue.offerUnsafe(events, { part: event.properties.part })
+        })
+
+        yield* Effect.forever(
+          Effect.gen(function* () {
+            const event = yield* Queue.take(events)
+            const dispatch = dispatchRef.current
+            if (!dispatch) return
+            const candidates = [...running.values()].filter((item) => item.sessionID === event.part.sessionID)
+            const target = yield* Effect.findFirst(candidates, (candidate) =>
+              session
+                .messages({ sessionID: candidate.sessionID, agentID: candidate.actorID })
+                .pipe(Effect.map((messages) => messages.some((message) => message.info.id === event.part.messageID))),
+            )
+            if (Option.isNone(target)) return
+            const files = actualFilesFromPart(event.part)
+            if (files.length > 0) yield* dispatch.recordActualFiles(target.value.id, files)
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => log.warn("failed to record actual actor files", { cause: String(cause) })),
+            ),
+          ),
+        ).pipe(Effect.forkScoped)
+
+        return { outcomes: new Map<string, Deferred.Deferred<AgentOutcome>>(), running }
+      }),
+    )
+
+    const actualFiles = Effect.fn("Actor.actualFiles")(function* (sessionID: SessionID, actorID: string) {
+      const messages = yield* session.messages({ sessionID, agentID: actorID })
+      return [...new Set(messages.flatMap((message) => message.parts).flatMap(actualFilesFromPart))]
+    })
 
     // Real agent loop: marks the actor running, then drives a SessionPrompt.prompt
     // turn. The user message persisted by SessionPrompt carries the actor's
@@ -248,14 +366,26 @@ export const layer = Layer.effect(
       model?: { providerID: ProviderID; modelID: ModelID }
       lifecycle: "ephemeral" | "persistent"
       task_id?: string
+      research?: ResearchDispatchSnapshot
+      onResearchProgress?: (input: {
+        phase: ResearchDispatchSnapshot["phase"]
+        subtaskCount?: number
+      }) => Effect.Effect<void>
       // True for non-specialized subagents (those that received
       // RETURN_FORMAT_INSTRUCTION). Only these are subject to the completion
       // gate; specialized/system agents and peers create no user tasks.
       gateEligible?: boolean
       format?: MessageV2.OutputFormat
+      outcome?: Deferred.Deferred<AgentOutcome>
+      suppressNotification?: boolean
+      onTerminal?: (input: {
+        status: "completed" | "failed" | "cancelled"
+        result?: string
+        error?: string
+      }) => Effect.Effect<void>
     }) =>
       Effect.gen(function* () {
-        const outcome = yield* Deferred.make<AgentOutcome>()
+        const outcome = input.outcome ?? (yield* Deferred.make<AgentOutcome>())
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
         // beginning work. Status transition is a structural side-effect of spawn,
@@ -275,21 +405,34 @@ export const layer = Layer.effect(
           status: "completed" | "failed" | "cancelled",
           extra: { result?: string; error?: string; reportedStatus?: ReturnStatus; reportedSummary?: string },
         ) =>
-          input.background && input.agentType !== "checkpoint-writer"
-            ? inbox
-                .send({
+          input.background && !input.suppressNotification && !SYSTEM_SPAWNED_AGENT_TYPES.has(input.agentType)
+            ? (inbox.sendCompletion
+                ? inbox.sendCompletion({
                   receiverSessionID: input.parentSessionID,
                   receiverActorID: input.parentActorID ?? "main",
                   senderSessionID: input.sessionID,
                   senderActorID: input.actorID,
-                  type: "actor_notification",
-                  content: renderActorNotification({
-                    actorID: input.actorID,
-                    description,
+                  notification: {
+                    source: "actor",
+                    id: input.actorID,
                     status,
-                    ...extra,
-                  }),
+                    summary:
+                      status === "completed"
+                        ? extra.reportedSummary ?? extra.result ?? `${description} completed`
+                        : extra.error ?? `${description} ${status}`,
+                    finishedAt: Date.now(),
+                    collectAction: `Use actor status ${input.actorID} or actor wait ${input.actorID} when the result is needed.`,
+                    dedupeKey: `actor:${input.parentSessionID}:${input.actorID}:${status}`,
+                  },
                 })
+                : inbox.send({
+                    receiverSessionID: input.parentSessionID,
+                    receiverActorID: input.parentActorID ?? "main",
+                    senderSessionID: input.sessionID,
+                    senderActorID: input.actorID,
+                    type: "actor_notification",
+                    content: renderActorNotification({ actorID: input.actorID, description, status, ...extra }),
+                  }))
                 .pipe(Effect.ignore)
             : Effect.void
 
@@ -317,8 +460,15 @@ export const layer = Layer.effect(
           let lastDecision:
             | { reason: string; contributingPluginNames: string[]; contributingHookIDs: string[] }
             | undefined
+          let researchSynthesisRequested = false
 
           while (true) {
+            if (input.research && researchSynthesisRequested && input.onResearchProgress) {
+              yield* input.onResearchProgress({
+                phase: "synthesizing",
+                subtaskCount: requiredResearcherCount(input.research),
+              })
+            }
             const reentryDecision = iteration > 0 ? lastDecision : undefined
             const turn = yield* runTurn(
               input.sessionID,
@@ -341,6 +491,73 @@ export const layer = Layer.effect(
             structured = turn.structured
 
             iteration++
+            const required = requiredResearcherCount(input.research)
+            if (required > 0) {
+              const researchers = (yield* actorReg.listByParent(input.sessionID, input.actorID)).filter(
+                (actor) => actor.agent === "researcher",
+              )
+              if (researchers.length < required) {
+                if (input.onResearchProgress) {
+                  yield* input.onResearchProgress({ phase: "planning", subtaskCount: researchers.length })
+                }
+                if (iteration > MAX_RESEARCH_COORDINATOR_REACT) {
+                  yield* Effect.fail(
+                    new Error(
+                      "Deep Research coordinator stopped after creating " +
+                        researchers.length +
+                        "/" +
+                        required +
+                        " researcher investigations",
+                    ),
+                  )
+                }
+                lastDecision = {
+                  reason: researchCoordinatorReentry({
+                    required,
+                    current: researchers.length,
+                    phase: "delegate",
+                  }),
+                  contributingPluginNames: [],
+                  contributingHookIDs: [],
+                }
+                continue
+              }
+              if (researchers.some((actor) => actor.status !== "idle")) {
+                if (input.onResearchProgress) {
+                  yield* input.onResearchProgress({ phase: "retrieving", subtaskCount: researchers.length })
+                }
+                if (iteration > MAX_RESEARCH_COORDINATOR_REACT) {
+                  yield* Effect.fail(new Error("Deep Research coordinator stopped before its researchers settled"))
+                }
+                lastDecision = {
+                  reason: researchCoordinatorReentry({
+                    required,
+                    current: researchers.length,
+                    phase: "wait",
+                  }),
+                  contributingPluginNames: [],
+                  contributingHookIDs: [],
+                }
+                continue
+              }
+              if (!researchSynthesisRequested) {
+                if (input.onResearchProgress) {
+                  yield* input.onResearchProgress({ phase: "verifying", subtaskCount: researchers.length })
+                }
+                researchSynthesisRequested = true
+                lastDecision = {
+                  reason: researchCoordinatorReentry({
+                    required,
+                    current: researchers.length,
+                    phase: "synthesize",
+                  }),
+                  contributingPluginNames: [],
+                  contributingHookIDs: [],
+                }
+                continue
+              }
+            }
+
             if (iteration > MAX_PRE_REACT) {
               yield* bus.publish(HookEvent.ReActMaxReached, {
                 phase: "pre",
@@ -354,6 +571,9 @@ export const layer = Layer.effect(
               break
             }
 
+            // System-spawned actors are intentionally invisible and must not be
+            // observable or steerable through user-installed plugin hooks.
+            if (SYSTEM_SPAWNED_AGENT_TYPES.has(input.agentType)) break
             const decision = yield* plugin.triggerActorPreStop({
               sessionID: input.sessionID,
               parentSessionID: input.parentSessionID,
@@ -486,6 +706,9 @@ export const layer = Layer.effect(
                   | undefined
 
                 while (true) {
+                  // See the matching pre-stop guard above. The post-stop path
+                  // otherwise lets a plugin observe and re-enter internal work.
+                  if (SYSTEM_SPAWNED_AGENT_TYPES.has(input.agentType)) break
                   const decision = yield* plugin.triggerActorPostStop({
                     sessionID: input.sessionID,
                     parentSessionID: input.parentSessionID,
@@ -567,6 +790,9 @@ export const layer = Layer.effect(
                 }
 
                 yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                if (input.onTerminal) {
+                  yield* input.onTerminal({ status: "completed", result: deliveryText }).pipe(Effect.ignore)
+                }
               }),
             onFailure: (cause) =>
               Effect.gen(function* () {
@@ -578,12 +804,125 @@ export const layer = Layer.effect(
                   cancelled ? { status: "cancelled" as const } : { status: "failure" as const, error },
                 )
                 yield* Effect.sync(() => forkContexts.delete(input.actorID))
+                if (input.onTerminal) {
+                  yield* input
+                    .onTerminal({
+                      status: cancelled ? "cancelled" : "failed",
+                      ...(cancelled ? {} : { error }),
+                    })
+                    .pipe(Effect.ignore)
+                }
               }),
           }),
         )
         const fiber = yield* work.pipe(Effect.forkIn(scope))
         return { fiber, outcome }
       })
+
+    const pumpDispatch: (sessionID: SessionID) => Effect.Effect<void> = Effect.fn("Actor.pumpDispatch")(function* (
+      sessionID: SessionID,
+    ) {
+      const dispatch = dispatchRef.current
+      if (!dispatch) return
+      const runtime = yield* InstanceState.get(dispatchState)
+
+      while (true) {
+        const record = yield* dispatch.claimNext(sessionID)
+        if (!record) return
+
+        runtime.running.set(dispatchKey(record.sessionID, record.actorID), {
+          id: record.id,
+          actorID: record.actorID,
+          sessionID: record.sessionID,
+        })
+        const outcome = runtime.outcomes.get(record.id) ?? (yield* Deferred.make<AgentOutcome>())
+        runtime.outcomes.set(record.id, outcome)
+        const targetSessionID = record.sessionID as SessionID
+        const agentInfo = yield* agents.get(record.payload.agent)
+        const gateEligible =
+          agentInfo?.mode === "subagent" && !agentInfo.prompt && record.payload.agent !== "checkpoint-writer"
+        const task = gateEligible ? record.payload.task + RETURN_FORMAT_INSTRUCTION : record.payload.task
+
+        yield* forkWork({
+          sessionID: targetSessionID,
+          parentSessionID: (record.payload.parentSessionID as SessionID | undefined) ?? targetSessionID,
+          parentActorID: record.parentActorID,
+          actorID: record.actorID,
+          agentType: record.agent,
+          task,
+          description: record.description,
+          background: true,
+          model: record.model as { providerID: ProviderID; modelID: ModelID } | undefined,
+          lifecycle: "ephemeral",
+          task_id: record.payload.taskID,
+          research: record.payload.research,
+          format: record.payload.format,
+          onResearchProgress: ({ phase, subtaskCount }) =>
+            Effect.gen(function* () {
+              const current = dispatchRef.current
+              if (!current) return
+              yield* current.updateResearch({
+                id: record.id,
+                phase,
+                ...(subtaskCount !== undefined ? { subtaskCount } : {}),
+              })
+            }),
+          gateEligible,
+          outcome,
+          suppressNotification: true,
+          onTerminal: ({ status, result, error }) =>
+            Effect.gen(function* () {
+              const current = dispatchRef.current
+              if (!current) return
+              const files = yield* actualFiles(targetSessionID, record.actorID).pipe(
+                Effect.catch(() => Effect.succeed([])),
+              )
+              const subtaskCount = record.payload.research
+                ? (yield* actorReg.listByParent(targetSessionID, record.actorID)).filter(
+                    (actor) => actor.agent === "researcher",
+                  ).length
+                : undefined
+              if (files.length > 0) yield* current.recordActualFiles(record.id, files)
+              const settled = yield* current.complete({
+                id: record.id,
+                status,
+                ...(subtaskCount !== undefined ? { subtaskCount } : {}),
+                ...(result ? { result } : {}),
+                ...(error ? { error } : {}),
+              })
+              // Dispatch-backed actors suppress forkWork's direct notification
+              // so the durable dispatch settlement is the single authority.
+              // Notify only when that compare-and-set actually settled; a
+              // cancelled/received/reconciled dispatch cannot re-notify later.
+              if (settled && inbox.sendCompletion) {
+                yield* inbox
+                  .sendCompletion({
+                    receiverSessionID: record.sessionID,
+                    receiverActorID: record.parentActorID ?? "main",
+                    senderSessionID: targetSessionID,
+                    senderActorID: record.actorID,
+                    notification: {
+                      source: "actor",
+                      id: record.id,
+                      status,
+                      summary:
+                        status === "completed"
+                          ? result ?? `${record.description} completed`
+                          : error ?? `${record.description} ${status}`,
+                      finishedAt: settled.time.completed ?? Date.now(),
+                      collectAction: `Use actor dispatch get ${record.id} or receive ${record.id} when the result is needed.`,
+                      dedupeKey: `actor-dispatch:${record.id}:${status}`,
+                    },
+                  })
+                  .pipe(Effect.ignore)
+              }
+              runtime.running.delete(dispatchKey(targetSessionID, record.actorID))
+              runtime.outcomes.delete(record.id)
+              yield* pumpDispatch(targetSessionID)
+            }),
+        })
+      }
+    })
 
     const spawnPeer = Effect.fn("Actor.spawnPeer")(function* (input: SpawnInput) {
       const child = yield* session.create({
@@ -619,9 +958,10 @@ export const layer = Layer.effect(
         model: input.model,
         lifecycle: input.lifecycle ?? "persistent",
         task_id: input.task_id,
+        research: input.research,
         format: input.format,
       })
-      if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
+      if (!input.background && !input.immediate) yield* Fiber.join(fiber).pipe(Effect.ignore)
       return { actorID: child.id, sessionID: child.id, outcome }
     })
 
@@ -662,6 +1002,68 @@ export const layer = Layer.effect(
         agentInfo?.mode === "subagent" && !agentInfo?.prompt && input.agentType !== "checkpoint-writer"
       const taskWithFormat = gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task
 
+      const dispatch = dispatchRef.current
+      // Context-reviewer is the sole internal caller that needs a live fork
+      // context and structured-output contract the dispatcher cannot serialize.
+      // `immediate` only controls whether the caller waits; it must not bypass
+      // durable dispatch for ordinary user background actors or manual resume.
+      if (input.background && dispatch && !input.bypassDispatch) {
+        if (input.agentType === "researcher" && input.parentActorID) {
+          const parentResearch = (yield* dispatch.list(input.sessionID)).find(
+            (record) => record.actorID === input.parentActorID && record.research,
+          )
+          if (parentResearch) {
+            const subtaskCount = (yield* actorReg.listByParent(input.sessionID, input.parentActorID)).filter(
+              (actor) => actor.agent === "researcher",
+            ).length
+            yield* dispatch.updateResearch({
+              id: parentResearch.id,
+              phase: "retrieving",
+              subtaskCount,
+            })
+          }
+        }
+        const outcome = yield* Deferred.make<AgentOutcome>()
+        const runtime = yield* InstanceState.get(dispatchState)
+        const payload = {
+          ...(input.parentSessionID ? { parentSessionID: input.parentSessionID } : {}),
+          ...(input.parentActorID ? { parentActorID: input.parentActorID } : {}),
+          agent: input.agentType,
+          task: input.task,
+          description: input.description ?? input.agentType,
+          context: input.context,
+          tools: input.tools,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.task_id ? { taskID: input.task_id } : {}),
+          ...(input.cwd ? { cwd: input.cwd } : {}),
+          ...(input.parentAgent ? { parentAgent: input.parentAgent } : {}),
+          ...(input.parentModel ? { parentModel: input.parentModel } : {}),
+          ...(input.contextRefs ? { contextRefs: [...input.contextRefs] } : {}),
+          ...(input.declaredFiles ? { declaredFiles: [...input.declaredFiles] } : {}),
+          ...(input.research ? { research: input.research } : {}),
+          ...(input.format ? { format: input.format } : {}),
+        } satisfies DispatchPayload
+        const record = yield* dispatch.enqueue({
+          sessionID: input.sessionID,
+          actorID,
+          ...(input.parentActorID ? { parentActorID: input.parentActorID } : {}),
+          agent: input.agentType,
+          description: input.description ?? input.agentType,
+          context: input.context,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.contextRefs ? { contextRefs: input.contextRefs } : {}),
+          ...(input.declaredFiles ? { declaredFiles: input.declaredFiles } : {}),
+          ...(input.research ? { research: input.research } : {}),
+          writeAccess: agentInfo ? !Permission.disabled(["write"], agentInfo.permission).has("write") : true,
+          payload,
+          ...(input.resumedFrom ? { resumedFrom: input.resumedFrom } : {}),
+          ...(input.attempt ? { attempt: input.attempt } : {}),
+        })
+        runtime.outcomes.set(record.id, outcome)
+        yield* pumpDispatch(input.sessionID)
+        return { actorID, sessionID: input.sessionID, outcome, dispatchID: record.id }
+      }
+
       const { fiber, outcome } = yield* forkWork({
         sessionID: input.sessionID,
         parentSessionID: input.parentSessionID ?? input.sessionID,
@@ -677,7 +1079,7 @@ export const layer = Layer.effect(
         gateEligible,
         format: input.format,
       })
-      if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
+      if (!input.background && !input.immediate) yield* Fiber.join(fiber).pipe(Effect.ignore)
       return { actorID, sessionID: input.sessionID, outcome }
     })
 
@@ -693,18 +1095,158 @@ export const layer = Layer.effect(
           concurrency: "unbounded",
           discard: true,
         })
+        const dispatch = dispatchRef.current
+        if (dispatch) {
+          yield* dispatch.cancel({ sessionID, actorID, reason: "Cancelled" }).pipe(Effect.ignore)
+        }
         yield* state.cancelActor(sessionID, actorID)
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)
         yield* Effect.sync(() => forkContexts.delete(actorID))
+        yield* pumpDispatch(sessionID)
       })
+
+    const cancelDispatch = Effect.fn("Actor.cancelDispatch")(function* (sessionID: SessionID, dispatchID: string) {
+      const dispatch = dispatchRef.current
+      if (!dispatch) return
+      const current = yield* dispatch.getForSession(sessionID, dispatchID)
+      if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return current
+      const cancelled = yield* dispatch.cancel({ sessionID, id: dispatchID, reason: "Cancelled" })
+      if (!cancelled) return
+      yield* cancel(sessionID, cancelled.actorID, "graceful")
+      yield* inbox
+        .send({
+          receiverSessionID: sessionID,
+          receiverActorID: cancelled.parentActorID ?? "main",
+          senderSessionID: sessionID,
+          senderActorID: cancelled.actorID,
+          type: "actor_notification",
+          content: renderActorNotification({
+            actorID: cancelled.actorID,
+            description: cancelled.description,
+            status: "cancelled",
+          }),
+          wake: false,
+        })
+        .pipe(Effect.catchTag("InboxReceiverNotFound", () => Effect.void))
+      return cancelled
+    })
+
+    const receiveDispatch = Effect.fn("Actor.receiveDispatch")(function* (sessionID: SessionID, dispatchID: string) {
+      const dispatch = dispatchRef.current
+      if (!dispatch) return
+      const current = yield* dispatch.getForSession(sessionID, dispatchID)
+      if (!current || !current.unread) return current
+      if (current.status !== "completed" && current.status !== "failed") return current
+      const parentActorID = current.parentActorID ?? "main"
+      const content = renderActorNotification({
+        actorID: current.actorID,
+        description: current.description,
+        status: current.status,
+        ...(current.result ? { result: current.result } : {}),
+        ...(current.error ? { error: current.error } : {}),
+      })
+      const parentMessages = yield* session.messages({ sessionID, agentID: parentActorID })
+      const lastReal = parentMessages.findLast(
+        (message) =>
+          (message.info.role === "user" || message.info.role === "assistant") &&
+          "model" in message.info &&
+          message.info.model !== undefined &&
+          "agent" in message.info &&
+          message.info.agent !== undefined,
+      )
+      if (
+        lastReal &&
+        "model" in lastReal.info &&
+        lastReal.info.model &&
+        "agent" in lastReal.info &&
+        lastReal.info.agent
+      ) {
+        const messageID = MessageID.ascending()
+        const now = Date.now()
+        yield* session.updateMessage({
+          id: messageID,
+          role: "user" as const,
+          sessionID,
+          agentID: parentActorID,
+          time: { created: now },
+          agent: lastReal.info.agent,
+          model: lastReal.info.model,
+        })
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID,
+          sessionID,
+          type: "text" as const,
+          synthetic: true,
+          text: content,
+        })
+      } else {
+        yield* inbox
+          .send({
+            receiverSessionID: sessionID,
+            receiverActorID: parentActorID,
+            senderSessionID: sessionID,
+            senderActorID: current.actorID,
+            type: "actor_notification",
+            content,
+            wake: false,
+          })
+          .pipe(Effect.catchTag("InboxReceiverNotFound", () => Effect.void))
+      }
+      return yield* dispatch.receive(sessionID, dispatchID)
+    })
+
+    const resumeDispatch = Effect.fn("Actor.resumeDispatch")(function* (sessionID: SessionID, dispatchID: string) {
+      const dispatch = dispatchRef.current
+      if (!dispatch) return
+      const current = yield* dispatch.getForSession(sessionID, dispatchID)
+      if (
+        !current ||
+        !current.manualResume ||
+        (current.status !== "queued" && current.status !== "interrupted")
+      ) {
+        return
+      }
+      yield* dispatch.resume(sessionID, dispatchID)
+      // A resumed dispatch receives a new actor ID. Retire the original
+      // registry entry before queuing that attempt so it cannot remain visible
+      // as a pending actor beside its replacement.
+      yield* actorReg
+        .updateStatus(sessionID, current.actorID, { status: "idle", lastOutcome: "cancelled" })
+        .pipe(Effect.ignore)
+      return yield* spawn({
+        mode: "subagent",
+        sessionID,
+        parentSessionID: current.payload.parentSessionID as SessionID | undefined,
+        agentType: current.agent,
+        task: current.payload.task,
+        description: current.description,
+        context: current.context,
+        tools: current.payload.tools,
+        model: current.model as { providerID: ProviderID; modelID: ModelID } | undefined,
+        background: true,
+        immediate: true,
+        parentActorID: current.parentActorID,
+        task_id: current.payload.taskID,
+        cwd: current.payload.cwd,
+        parentAgent: current.payload.parentAgent,
+        parentModel: current.payload.parentModel as { providerID: ProviderID; modelID: ModelID } | undefined,
+        contextRefs: current.contextRefs,
+        declaredFiles: current.declaredFiles,
+        research: current.payload.research,
+        format: current.payload.format,
+        resumedFrom: current.id,
+        attempt: current.attempt + 1,
+      })
+    })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (actorID: string) {
       return forkContexts.get(actorID)
     })
 
-    const impl = Service.of({ spawn, cancel, getForkContext })
+    const impl = Service.of({ spawn, cancel, cancelDispatch, receiveDispatch, resumeDispatch, getForkContext })
     // Late-bind the impl so SessionCheckpoint.tryStartCheckpointWriter can resolve it
     // without forming a layer cycle. See spawn-ref.ts for rationale.
     spawnRef.current = impl

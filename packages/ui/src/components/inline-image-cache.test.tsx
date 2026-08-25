@@ -56,6 +56,7 @@ describe("inline image cache", () => {
 
     expect(isInlineImageCacheUrl(small.url)).toBe(false)
     expect(isInlineImageCacheUrl(text.url)).toBe(false)
+    expect(resolveInlineImageUrl(small)).toBe("data:image/png;base64,QUJD")
   })
 
   test("drops cached originals by part or session", () => {

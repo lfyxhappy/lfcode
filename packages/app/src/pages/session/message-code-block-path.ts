@@ -1,5 +1,31 @@
 import { getCodeEditorFenceExtension } from "@/components/code-editor/core/language"
 
+export type MessageCodeFileResult =
+  | {
+      status: "exists"
+      data: { exists?: boolean; content: string; checksum?: string }
+    }
+  | { status: "missing" }
+  | { status: "error" }
+
+export type MessageCodeFileRead = (input: { path: string }) => Promise<{
+  data?: { exists?: boolean; content: string; checksum?: string }
+}>
+
+export async function readMessageCodeFile(read: MessageCodeFileRead, path: string): Promise<MessageCodeFileResult> {
+  try {
+    const result = await read({ path })
+    if (result.data?.exists !== true) return { status: "missing" }
+    return { status: "exists", data: result.data }
+  } catch {
+    return { status: "error" }
+  }
+}
+
+export function messageCodeFileStatus(result?: MessageCodeFileResult) {
+  return result?.status ?? "pending"
+}
+
 export function createMessageCodeScratchPath(input: {
   sessionID: string
   messageID: string

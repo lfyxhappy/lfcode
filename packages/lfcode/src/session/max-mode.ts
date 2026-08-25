@@ -50,6 +50,8 @@ export type MaxStepInput = {
   prebuiltSystem?: string[]
   /** Model messages for this step. */
   messages: ModelMessage[]
+  /** Session-run cancellation signal shared by candidates, judge and fallback. */
+  abortSignal?: AbortSignal
   /** Execute-bearing tools from resolveTools — used to run the winner. */
   tools: Record<string, AITool>
   agentID?: string
@@ -126,6 +128,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       messages: input.messages,
       tools: schemaOnly,
       agentID: input.agentID,
+      abortSignal: input.abortSignal,
     })
 
     yield* Stream.runForEach(stream, (event: LLM.Event) => {
@@ -263,6 +266,7 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
       tools: {},
       toolChoice: "none",
       agentID: input.agentID,
+      abortSignal: input.abortSignal,
     })
 
     yield* Stream.runForEach(stream, (event: LLM.Event) => {
@@ -342,6 +346,7 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
         tools: input.tools,
         model: input.model,
         agentID: input.agentID,
+        abortSignal: input.abortSignal,
       })
     }
 

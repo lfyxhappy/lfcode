@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import z from "zod"
 import { Memory } from "@/memory"
+import { isExplicitMemoryRequest } from "@/memory/intent"
 import * as Session from "@/session/session"
 import DESCRIPTION from "./memory.txt"
 import * as Tool from "./tool"
@@ -38,8 +39,8 @@ type MemoryMetadata = {
   path?: string
   freshness?: string
   count?: number
-  status?: "unavailable" | "empty" | "ok"
-  reason?: "root-missing" | "index-empty" | "empty-query" | "no-match"
+  status?: "blocked" | "unavailable" | "empty" | "ok"
+  reason?: "not-requested" | "root-missing" | "index-empty" | "empty-query" | "no-match"
   capability?: Memory.MemoryCapability
 }
 
@@ -104,6 +105,15 @@ export const MemoryTool = Tool.define(
               title: "Dream memory record written",
               output: `Stored the canonical memory record and refreshed its Markdown projection: ${record.path}`,
               metadata: { path: record.path, freshness: record.freshness },
+            }
+          }
+          const contextReviewApproved = ctx.agent === "context-reviewer" || ctx.extra?.contextReviewMemory === true
+          if (!contextReviewApproved && !isExplicitMemoryRequest(ctx.messages)) {
+            return {
+              title: "Memory search skipped",
+              output:
+                "Memory search is opt-in. The current user did not explicitly ask to search or recall saved memory. Continue with the current conversation, repository, and runtime state instead.",
+              metadata: { status: "blocked", reason: "not-requested" },
             }
           }
           const gate = decideCapabilityOperation({

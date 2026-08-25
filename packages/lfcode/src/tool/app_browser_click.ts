@@ -14,7 +14,7 @@ export const AppBrowserClickTool = Tool.define(
     description: "Click an element in the side browser by its stable ref.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("interactive")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/click", {

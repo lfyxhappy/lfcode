@@ -2,8 +2,10 @@ Search installed skills by keyword, or load one by exact name.
 
 Use this tool to inject a skill's instructions and bundled resources into the current conversation.
 
-Do not use this tool just to ask what skills are currently available; that list is already present in the conversation context.
-Use this tool when you need to search for a relevant skill by topic, or load one exact skill into the conversation.
+Use this tool when you need to list, search, or load installed Skills. Never use `search_tool` for this: `search_tool` only searches extension tools.
+
+To list installed Skills, call `skill` with `name: "可用技能"` (or an equivalent list request).
+To search installed Skills, call `skill` with a concise topic keyword such as `name: "解压"`.
 
 If you pass an exact installed skill name, the tool loads it.
 If you pass keywords instead, the tool returns matching skill candidates so you can load one by exact name in a second call.

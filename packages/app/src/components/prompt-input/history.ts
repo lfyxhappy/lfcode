@@ -170,6 +170,7 @@ function isPromptEqual(promptA: PromptHistoryStoredEntry, promptB: PromptHistory
     }
     if (partA.type === "selected-text") {
       if (partA.text !== (partB.type === "selected-text" ? partB.text : "")) return false
+      if (partA.comment !== (partB.type === "selected-text" ? partB.comment : undefined)) return false
       if (partA.messageID !== (partB.type === "selected-text" ? partB.messageID : undefined)) return false
       const a = partA.selection
       const b = partB.type === "selected-text" ? partB.selection : undefined

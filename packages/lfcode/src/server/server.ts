@@ -16,6 +16,10 @@ import { GlobalRoutes } from "./routes/global"
 import { WorkspaceRouterMiddleware } from "./workspace"
 import { InstanceMiddleware } from "./routes/instance/middleware"
 import { WorkspaceRoutes } from "./routes/control/workspace"
+import { AppRuntime } from "@/effect/app-runtime"
+import { Session } from "@/session"
+import { SourceRefreshScheduler } from "@/research/scheduler"
+import { startScheduledTaskRuntime } from "./scheduled-task-runtime"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -100,6 +104,16 @@ export async function listen(opts: {
 }): Promise<Listener> {
   const built = create(opts)
   const server = await built.runtime.listen(opts)
+  const sourceRefreshScheduler = new SourceRefreshScheduler()
+  sourceRefreshScheduler.start()
+  const scheduledTaskRuntime =
+    Flag.LFCODE_CLIENT === "desktop" && !Flag.LFCODE_WORKSPACE_ID ? await startScheduledTaskRuntime() : undefined
+
+  if (Flag.LFCODE_CLIENT === "desktop") {
+    await AppRuntime.runPromise(Session.Service.use((service) => service.cleanupTemporary())).catch((error) => {
+      log.warn("temporary session startup cleanup failed", { error })
+    })
+  }
 
   const next = new URL("http://localhost")
   next.hostname = opts.hostname
@@ -126,6 +140,8 @@ export async function listen(opts: {
     stop(close?: boolean) {
       closing ??= (async () => {
         if (mdns) MDNS.unpublish()
+        scheduledTaskRuntime?.stop()
+        sourceRefreshScheduler.stop()
         await server.stop(close)
       })()
       return closing

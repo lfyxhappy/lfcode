@@ -1,4 +1,4 @@
-import { batch, createEffect, createMemo, onCleanup } from "solid-js"
+import { batch, createEffect, createMemo, on, onCleanup } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { showToast } from "@lfcode-ai/ui/toast"
@@ -83,6 +83,39 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       },
     })
 
+    const normalizeReferencePath = (input: string) => {
+      if (/^[A-Za-z]:[\\/]*$/u.test(input)) return input.slice(0, 2) + "\\"
+      if (/^[\\/]+$/u.test(input)) return "/"
+      return input.replace(/[\\/]+$/u, "")
+    }
+    const canonicalReferencePath = (input: string) => {
+      const normalized = normalizeReferencePath(input).replace(/\\/g, "/")
+      return /^[A-Za-z]:/u.test(normalized) || normalized.startsWith("//") ? normalized.toLowerCase() : normalized
+    }
+    const referenceGrants = new Map<string, string>()
+    const referenceToken = (input: string) => {
+      const target = canonicalReferencePath(input)
+      return [...referenceGrants.entries()]
+        .sort(([left], [right]) => right.length - left.length)
+        .find(([root]) => target === root || target.startsWith(root.endsWith("/") ? root : root + "/"))?.[1]
+    }
+    const referenceTree = createFileTreeStore({
+      scope: () => layout.fileTree.referencePath() ?? "",
+      normalizeDir: normalizeReferencePath,
+      list: (dir) => {
+        const token = referenceToken(dir)
+        if (!token) return Promise.reject(new Error("Reference access expired. Open the directory again to continue."))
+        return sdk.client.file.referenceTree({ path: dir, token }).then((x) => x.data ?? [])
+      },
+      onError: (message) => {
+        showToast({
+          variant: "error",
+          title: language.t("toast.file.listFailed.title"),
+          description: message,
+        })
+      },
+    })
+
     const evictContent = (keep?: Set<string>) => {
       evictContentLru(keep, (target) => {
         if (!store.file[target]) return
@@ -106,6 +139,29 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         tree.reset()
       })
     })
+
+    createEffect(
+      on(
+        () => layout.fileTree.referencePath(),
+        (target) => {
+          referenceTree.reset()
+          if (target) void referenceTree.listDir(target)
+        },
+        { defer: true },
+      ),
+    )
+
+    createEffect(
+      on(
+        scope,
+        () => {
+          referenceGrants.clear()
+          referenceTree.reset()
+          layout.fileTree.clearReference()
+        },
+        { defer: true },
+      ),
+    )
 
     const viewCache = createFileViewCache()
     const view = createMemo(() => viewCache.load(scope(), params.id))
@@ -158,6 +214,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
     const load = (input: string, options?: { force?: boolean }) => {
       const file = path.normalize(input)
       if (!file) return Promise.resolve()
+      startWatching()
 
       const directory = scope()
       const key = `${directory}\n${file}`
@@ -172,7 +229,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       setLoading(file)
 
       const promise = sdk.client.file
-        .read({ path: file })
+        .read({ path: file, reference_token: referenceToken(file) })
         .then((x) => {
           if (scope() !== directory) return
           const content = x.data
@@ -211,6 +268,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         return Promise.reject(new Error("Invalid file path"))
       }
 
+      startWatching()
       ensure(file)
       return sdk.client.file
         .write({
@@ -229,21 +287,25 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         })
     }
 
-    const stop = sdk.event.listen((e) => {
-      invalidateFromWatcher(e.details, {
-        normalize: path.normalize,
-        hasFile: (file) => Boolean(store.file[file]),
-        isOpen: (file) => tabs.all().some((tab) => path.pathFromTab(tab) === file),
-        loadFile: (file) => {
-          void load(file, { force: true })
-        },
-        node: tree.node,
-        isDirLoaded: tree.isLoaded,
-        refreshDir: (dir) => {
-          void tree.listDir(dir, { force: true })
-        },
+    let stop: VoidFunction | undefined
+    const startWatching = () => {
+      if (stop) return
+      stop = sdk.event.listen((e) => {
+        invalidateFromWatcher(e.details, {
+          normalize: path.normalize,
+          hasFile: (file) => Boolean(store.file[file]),
+          isOpen: (file) => tabs.all().some((tab) => path.pathFromTab(tab) === file),
+          loadFile: (file) => {
+            void load(file, { force: true })
+          },
+          node: tree.node,
+          isDirLoaded: tree.isLoaded,
+          refreshDir: (dir) => {
+            void tree.listDir(dir, { force: true })
+          },
+        })
       })
-    })
+    }
 
     const get = (input: string) => {
       const file = path.normalize(input)
@@ -270,7 +332,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       withPath(input, (file) => view().setSelectedLines(file, range))
 
     onCleanup(() => {
-      stop()
+      stop?.()
       viewCache.clear()
     })
 
@@ -280,8 +342,14 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       tab: path.tab,
       pathFromTab: path.pathFromTab,
       tree: {
-        list: tree.listDir,
-        refresh: (input: string) => tree.listDir(input, { force: true }),
+        list(input: string) {
+          startWatching()
+          return tree.listDir(input)
+        },
+        refresh(input: string) {
+          startWatching()
+          return tree.listDir(input, { force: true })
+        },
         state: tree.dirState,
         children: tree.children,
         expand: tree.expandDir,
@@ -293,6 +361,21 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
           }
           tree.expandDir(input)
         },
+      },
+      referenceTree: {
+        authorize(root: string, token: string) {
+          referenceGrants.set(canonicalReferencePath(root), token)
+        },
+        list: referenceTree.listDir,
+        refresh(input: string) {
+          return referenceTree.listDir(input, { force: true })
+        },
+        state: referenceTree.dirState,
+        children: referenceTree.children,
+        expand: referenceTree.expandDir,
+        collapse: referenceTree.collapseDir,
+        normalize: normalizeReferencePath,
+        reset: referenceTree.reset,
       },
       get,
       load,

@@ -1,6 +1,7 @@
 export * as TuiConfig from "./tui"
 
 import path from "path"
+import { fileURLToPath } from "url"
 import z from "zod"
 import { mergeDeep, unique } from "remeda"
 import { Context, Effect, Exit, Fiber, Layer } from "effect"
@@ -89,7 +90,8 @@ async function resolvePlugins(config: Info, configFilepath: string) {
 
 function localPluginDir() {
   try {
-    return path.dirname(import.meta.resolve("@lfcode-ai/plugin/package.json"))
+    const resolved = import.meta.resolve("@lfcode-ai/plugin/package.json")
+    return path.dirname(resolved.startsWith("file:") ? fileURLToPath(resolved) : resolved)
   } catch {
     return
   }

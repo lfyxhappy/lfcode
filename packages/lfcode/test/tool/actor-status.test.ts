@@ -11,6 +11,7 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, type SessionID } from "../../src/session/schema"
 import { ActorTool } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
+import { ActorDispatch } from "../../src/actor/dispatch"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { Team } from "../../src/team"
@@ -34,6 +35,7 @@ const it = testEffect(
     Truncate.defaultLayer,
     ToolRegistry.defaultLayer,
     ActorRegistry.defaultLayer,
+    ActorDispatch.defaultLayer,
     ActorWaiter.layer.pipe(Layer.provide(Bus.layer), Layer.provide(ActorRegistry.defaultLayer), Layer.provide(Session.defaultLayer)),
     Team.defaultLayer,
     SessionCheckpoint.defaultLayer,
@@ -47,10 +49,24 @@ interface StatusResponse {
   description?: string
   agent?: string
   background?: boolean
+  context?: "none" | "state" | "full"
   turnCount?: number
   lastTurnTime?: number
   error?: string
   time?: { created: number; updated: number; completed?: number }
+  dispatch?: {
+    id: string
+    status: "queued" | "running" | "interrupted" | "completed" | "failed" | "cancelled"
+    contextRefs: string[]
+    declaredFiles: string[]
+    actualFiles: string[]
+    conflicts: string[]
+    writeAccess: boolean
+    unread: boolean
+    manualResume: boolean
+    attempt: number
+    time: { created: number; updated: number; started?: number; completed?: number }
+  }
 }
 
 function parseOutput(output: string): StatusResponse {
@@ -163,10 +179,69 @@ describe("actor tool — status action", () => {
         expect(snap.description).toBe("inspect bug")
         expect(snap.agent).toBe("general")
         expect(snap.background).toBe(true)
+        expect(snap.context).toBe("none")
         expect(snap.turnCount).toBe(0)
         expect(typeof snap.lastTurnTime).toBe("number")
         expect(snap.time).toBeDefined()
         expect(snap.time?.created).toBeGreaterThan(0)
+      }),
+    ),
+  )
+
+  it.live(
+    "status projects durable dispatch context and queue state for a background actor",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const dispatch = yield* ActorDispatch.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const actorID = yield* registry.allocateActorID(chat.id, "explore")
+        yield* registry.register({
+          sessionID: chat.id,
+          actorID,
+          mode: "subagent",
+          agent: "explore",
+          description: "inspect dispatch context",
+          contextMode: "state",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+        const queued = yield* dispatch.enqueue({
+          sessionID: chat.id,
+          actorID,
+          agent: "explore",
+          description: "inspect dispatch context",
+          context: "state",
+          contextRefs: ["specs/agent.md"],
+          declaredFiles: ["packages/lfcode/src/tool/actor.ts"],
+          writeAccess: false,
+          payload: {
+            agent: "explore",
+            task: "inspect dispatch context",
+            description: "inspect dispatch context",
+            context: "state",
+            tools: "INHERIT",
+            contextRefs: ["specs/agent.md"],
+            declaredFiles: ["packages/lfcode/src/tool/actor.ts"],
+          },
+        })
+
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const result = yield* def.execute(
+          { operation: { action: "status", actor_id: actorID } },
+          ctxFor(chat.id),
+        )
+
+        const snap = parseOutput(result.output)
+        expect(snap.context).toBe("state")
+        expect(snap.dispatch?.id).toBe(queued.id)
+        expect(snap.dispatch?.status).toBe("queued")
+        expect(snap.dispatch?.contextRefs).toEqual(["specs/agent.md"])
+        expect(snap.dispatch?.declaredFiles).toEqual(["packages/lfcode/src/tool/actor.ts"])
+        expect(snap.dispatch?.writeAccess).toBe(false)
+        expect(snap.dispatch?.attempt).toBe(1)
       }),
     ),
   )

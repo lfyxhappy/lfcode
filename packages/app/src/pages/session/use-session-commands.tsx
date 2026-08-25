@@ -11,6 +11,7 @@ import { usePlatform } from "@/context/platform"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
+import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { showToast } from "@lfcode-ai/ui/toast"
@@ -19,6 +20,8 @@ import { BROWSER_COMMAND_EVENT, BROWSER_REQUEST_OPEN_EVENT, createBrowserRequest
 import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@lfcode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { requestScheduledAutomation } from "@/automation/scheduled-task"
+import { canUseTerminal } from "@/pages/session/runtime-capabilities"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -45,6 +48,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const prompt = usePrompt()
   const sdk = useSDK()
   const settings = useSettings()
+  const server = useServer()
   const sync = useSync()
   const terminal = useTerminal()
   const layout = useLayout()
@@ -74,6 +78,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     platform.platform !== "desktop" ||
     import.meta.env.VITE_LFCODE_CHANNEL !== "beta" ||
     settings.general.showFileTree()
+  const terminalAvailable = () => canUseTerminal(platform.platform, server.isLocal())
 
   const idle = { type: "idle" as const }
   const status = () => sync.data.session_status[params.id ?? ""] ?? idle
@@ -339,6 +344,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const openTerminal = () => {
+    if (!terminalAvailable()) return
     if (terminal.all().length > 0) terminal.new()
     view().terminal.open()
   }
@@ -389,8 +395,9 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     const parts = sync.data.part[message.id]
     if (parts) {
       const restored = extractPromptFromParts(parts, { directory: sdk.directory })
-      prompt.set(restored)
+      prompt.set(restored, undefined, { dir: sdk.directory, id: sessionID })
     }
+    requestAnimationFrame(focusInput)
 
     const prev = findLast(userMessages(), (x) => x.id < message.id)
     setActiveMessage(prev)
@@ -406,7 +413,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     const next = userMessages().find((x) => x.id > revertMessageID)
     if (!next) {
       await sdk.client.session.unrevert({ sessionID })
-      prompt.reset()
+      prompt.reset({ dir: sdk.directory, id: sessionID })
       const last = findLast(userMessages(), (x) => x.id >= revertMessageID)
       setActiveMessage(last)
       return
@@ -474,6 +481,21 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       keybind: "mod+shift+s",
       slash: "new",
       onSelect: () => navigate(`/${params.dir}/session`),
+    }),
+    sessionCommand({
+      id: "session.scheduleAutomation",
+      title: language.t("settings.automation.create"),
+      description: language.t("settings.automation.description"),
+      slash: "schedule",
+      disabled: !params.id,
+      onSelect: () => {
+        const sessionID = params.id
+        if (!sessionID) return
+        requestScheduledAutomation({
+          target: { kind: "session", sessionID },
+          sourceSessionID: sessionID,
+        })
+      },
     }),
     sessionCommand({
       id: "session.undo",
@@ -590,13 +612,17 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   ]
 
   const viewCmds = () => [
-    viewCommand({
-      id: "terminal.toggle",
-      title: language.t("command.terminal.toggle"),
-      keybind: "ctrl+`",
-      slash: "terminal",
-      onSelect: () => view().terminal.toggle(),
-    }),
+    ...(terminalAvailable()
+      ? [
+          viewCommand({
+            id: "terminal.toggle",
+            title: language.t("command.terminal.toggle"),
+            keybind: "ctrl+`",
+            slash: "terminal",
+            onSelect: () => view().terminal.toggle(),
+          }),
+        ]
+      : []),
     viewCommand({
       id: "review.toggle",
       title: language.t("command.review.toggle"),
@@ -624,15 +650,18 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  const terminalCmds = () => [
-    terminalCommand({
-      id: "terminal.new",
-      title: language.t("command.terminal.new"),
-      description: language.t("command.terminal.new.description"),
-      keybind: "ctrl+alt+t",
-      onSelect: openTerminal,
-    }),
-  ]
+  const terminalCmds = () =>
+    terminalAvailable()
+      ? [
+          terminalCommand({
+            id: "terminal.new",
+            title: language.t("command.terminal.new"),
+            description: language.t("command.terminal.new.description"),
+            keybind: "ctrl+alt+t",
+            onSelect: openTerminal,
+          }),
+        ]
+      : []
 
   const messageCmds = () => [
     sessionCommand({

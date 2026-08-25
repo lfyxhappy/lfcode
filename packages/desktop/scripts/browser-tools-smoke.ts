@@ -205,8 +205,6 @@ try {
 
   await client.post("/browser/clear", { sessionKey, selector: "#text-input" })
   await client.post("/browser/type", { sessionKey, ref: inputRef, text: "browser tools smoke text" })
-  await client.post("/browser/focus", { sessionKey, selector: "#text-input" })
-  await client.post("/browser/hover", { sessionKey, selector: "#next-link" })
   await client.post("/browser/select-option", { sessionKey, selector: "#picker", value: "b" })
   await client.post("/browser/scroll", { sessionKey, direction: "down", amount: 900 })
 

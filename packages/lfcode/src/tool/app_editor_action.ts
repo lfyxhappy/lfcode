@@ -85,7 +85,7 @@ const shared = z.object({
 
 const parameters = z.union([
   shared.extend({
-    action: z.literal("focus"),
+    action: z.literal("reveal"),
   }),
   shared.extend({
     action: z.literal("run"),
@@ -129,11 +129,11 @@ export const AppEditorActionTool = Tool.define<typeof parameters, Metadata, Conf
     const config = yield* Config.Service
     return {
       description:
-        "Control the visible in-app code editor: focus it, run shared editor commands, set the selection, write content, or jump to a normalized navigation target.",
+        "Control the visible in-app code editor without taking keyboard focus: reveal it, run semantic editor commands, set the selection, write content, or jump to a normalized navigation target.",
       parameters,
       execute: (args: z.infer<typeof parameters>) =>
         Effect.gen(function* () {
-          const current = yield* config.get()
+          const current = yield* config.getGlobal()
           ensureAppControlAccess(current, "session_control")
           const client = yield* Effect.promise(() => createAppControlClient())
           if (args.action === "set_value") {
@@ -164,8 +164,8 @@ export const AppEditorActionTool = Tool.define<typeof parameters, Metadata, Conf
           const result = yield* Effect.promise(() =>
             client.post("/ui/editor", {
               ...buildEditorBody(args),
-              ...(args.action === "focus"
-                ? { action: "focus" }
+              ...(args.action === "reveal"
+                ? { action: "reveal" }
                 : args.action === "run"
                   ? { action: args.command }
                   : args.action === "set_selection"
@@ -175,8 +175,8 @@ export const AppEditorActionTool = Tool.define<typeof parameters, Metadata, Conf
           )
           return {
             title:
-              args.action === "focus"
-                ? "Focused app editor"
+              args.action === "reveal"
+                ? "Revealed app editor"
                 : args.action === "run"
                   ? `Ran editor command ${args.command}`
                   : args.action === "set_selection"

@@ -13,7 +13,7 @@ export const AppCloseBrowserTabTool = Tool.define(
     description: "Close the current side browser tab for a session.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("interactive")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/close", {

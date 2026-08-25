@@ -3494,3 +3494,23 @@ describe("ProviderTransform.schema - openai discriminated-union flatten", () => 
     expect(result.properties.value.anyOf).toHaveLength(2)
   })
 })
+
+describe("ProviderTransform.supportsRequiredToolChoice", () => {
+  test("allows required tool choice for ordinary models", () => {
+    expect(
+      ProviderTransform.supportsRequiredToolChoice({
+        providerID: ProviderID.make("openai"),
+        capabilities: { reasoning: true },
+      } as Provider.Model),
+    ).toBe(true)
+  })
+
+  test("disables required tool choice for OpenCode Go reasoning models", () => {
+    expect(
+      ProviderTransform.supportsRequiredToolChoice({
+        providerID: ProviderID.make("opencode-go"),
+        capabilities: { reasoning: true },
+      } as Provider.Model),
+    ).toBe(false)
+  })
+})

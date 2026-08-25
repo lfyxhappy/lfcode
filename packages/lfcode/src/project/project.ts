@@ -1,6 +1,7 @@
 import z from "zod"
 import * as nodeFs from "fs/promises"
 import * as nodePath from "path"
+import { randomUUID } from "crypto"
 import { and, Database, desc, eq, inArray, sql } from "../storage"
 import { ProjectTable } from "./project.sql"
 import { SessionTable } from "../session/session.sql"
@@ -66,6 +67,12 @@ const ProjectTime = Schema.Struct({
   initialized: Schema.optional(Schema.Number),
 })
 
+export const ProjectExtension = Schema.Struct({
+  pluginID: Schema.String,
+  type: Schema.String,
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export type ProjectExtension = Types.DeepMutable<Schema.Schema.Type<typeof ProjectExtension>>
+
 export const Info = Schema.Struct({
   id: ProjectID,
   worktree: Schema.String,
@@ -73,6 +80,7 @@ export const Info = Schema.Struct({
   name: Schema.optional(Schema.String),
   icon: Schema.optional(ProjectIcon),
   commands: Schema.optional(ProjectCommands),
+  extension: Schema.optional(ProjectExtension),
   time: ProjectTime,
   sandboxes: Schema.Array(Schema.String),
 })
@@ -95,6 +103,7 @@ export function fromRow(row: Row): Info {
     vcs: row.vcs ? Schema.decodeUnknownSync(ProjectVcs)(row.vcs) : undefined,
     name: row.name ?? undefined,
     icon,
+    extension: row.extension ?? undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -114,6 +123,15 @@ export const UpdateInput = z.object({
 })
 export type UpdateInput = z.infer<typeof UpdateInput>
 
+export const CreateManagedInput = z.object({
+  extension: ProjectExtension.zod,
+  worktree: z.string().min(1),
+  name: z.string().optional(),
+  icon: zod(ProjectIcon).optional(),
+  commands: zod(ProjectCommands).optional(),
+})
+export type CreateManagedInput = z.infer<typeof CreateManagedInput>
+
 // ---------------------------------------------------------------------------
 // Effect service
 // ---------------------------------------------------------------------------
@@ -124,6 +142,9 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
   readonly get: (id: ProjectID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info>
+  readonly createManagedProject: (input: CreateManagedInput) => Effect.Effect<Info>
+  readonly getManagedProject: (extension: ProjectExtension) => Effect.Effect<Info | undefined>
+  readonly removeManagedProject: (extension: ProjectExtension) => Effect.Effect<boolean>
   readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
   readonly setInitialized: (id: ProjectID) => Effect.Effect<void>
   readonly sandboxes: (id: ProjectID) => Effect.Effect<string[]>
@@ -177,6 +198,14 @@ export const layer: Layer.Layer<
 
     const fakeVcs = Schema.decodeUnknownSync(Schema.optional(ProjectVcs))(Flag.LFCODE_FAKE_VCS)
 
+    const managedProject = Effect.fn("Project.managedProject")(function* (extension: ProjectExtension) {
+      const rows = yield* db((d) => d.select().from(ProjectTable).all())
+      const row = rows.find(
+        (item) => item.extension?.pluginID === extension.pluginID && item.extension.type === extension.type,
+      )
+      return row ? fromRow(row) : undefined
+    })
+
     const resolveGitPath = (cwd: string, name: string) => {
       if (!name) return cwd
       name = name.replace(/[\r\n]+$/, "")
@@ -193,6 +222,22 @@ export const layer: Layer.Layer<
       type DiscoveryResult = { id: ProjectID; worktree: string; sandbox: string; vcs: Info["vcs"] }
 
       const data: DiscoveryResult = yield* Effect.gen(function* () {
+        const target = pathSvc.resolve(directory)
+        const managed = (yield* db((d) => d.select().from(ProjectTable).all()))
+          .filter((row) => row.extension)
+          .map(fromRow)
+          .map((project) => ({ project, worktree: pathSvc.resolve(project.worktree) }))
+          .filter(({ worktree }) => target === worktree || target.startsWith(`${worktree}${pathSvc.sep}`))
+          .sort((a, b) => b.worktree.length - a.worktree.length)[0]?.project
+        if (managed) {
+          return {
+            id: managed.id,
+            worktree: managed.worktree,
+            sandbox: target,
+            vcs: undefined,
+          }
+        }
+
         if (Flag.LFCODE_DISABLE_GIT) {
           return {
             id: ProjectID.global,
@@ -308,6 +353,7 @@ export const layer: Layer.Layer<
             time_initialized: result.time.initialized,
             sandboxes: result.sandboxes,
             commands: result.commands,
+            extension: result.extension,
           })
           .onConflictDoUpdate({
             target: ProjectTable.id,
@@ -322,6 +368,7 @@ export const layer: Layer.Layer<
               time_initialized: result.time.initialized,
               sandboxes: result.sandboxes,
               commands: result.commands,
+              extension: result.extension,
             },
           })
           .run(),
@@ -405,6 +452,55 @@ export const layer: Layer.Layer<
       return data
     })
 
+    const createManagedProject = Effect.fn("Project.createManagedProject")(function* (input: CreateManagedInput) {
+      const existing = yield* managedProject(input.extension)
+      if (existing) return existing
+
+      const worktree = pathSvc.resolve(input.worktree)
+      yield* fs.makeDirectory(worktree, { recursive: true }).pipe(Effect.orDie)
+      const result: Info = {
+        id: ProjectID.make(randomUUID()),
+        worktree,
+        name: input.name,
+        icon: input.icon,
+        commands: input.commands,
+        extension: input.extension,
+        sandboxes: [],
+        time: { created: Date.now(), updated: Date.now() },
+      }
+      yield* db((d) =>
+        d
+          .insert(ProjectTable)
+          .values({
+            id: result.id,
+            worktree: result.worktree,
+            vcs: null,
+            name: result.name,
+            icon_url: result.icon?.url,
+            icon_color: result.icon?.color,
+            time_created: result.time.created,
+            time_updated: result.time.updated,
+            sandboxes: result.sandboxes,
+            commands: result.commands,
+            extension: result.extension,
+          })
+          .run(),
+      )
+      yield* emitUpdated(result)
+      return result
+    })
+
+    const getManagedProject = Effect.fn("Project.getManagedProject")(function* (extension: ProjectExtension) {
+      return yield* managedProject(extension)
+    })
+
+    const removeManagedProject = Effect.fn("Project.removeManagedProject")(function* (extension: ProjectExtension) {
+      const project = yield* managedProject(extension)
+      if (!project) return false
+      yield* db((d) => d.delete(ProjectTable).where(eq(ProjectTable.id, project.id)).run())
+      return true
+    })
+
     const initGit = Effect.fn("Project.initGit")(function* (input: { directory: string; project: Info }) {
       if (input.project.vcs === "git") return input.project
       if (!(yield* Effect.sync(() => which(gitCommand)))) throw new Error("Git is not installed")
@@ -476,6 +572,9 @@ export const layer: Layer.Layer<
       list,
       get,
       update,
+      createManagedProject,
+      getManagedProject,
+      removeManagedProject,
       initGit,
       setInitialized,
       sandboxes,
@@ -511,5 +610,66 @@ export function setInitialized(id: ProjectID) {
   Database.use((db) =>
     db.update(ProjectTable).set({ time_initialized: Date.now() }).where(eq(ProjectTable.id, id)).run(),
   )
+}
+
+export async function ensureManagedProject(input: CreateManagedInput): Promise<Info> {
+  const existing = Database.use((db) =>
+    db
+      .select()
+      .from(ProjectTable)
+      .all()
+      .find((item) => item.extension?.pluginID === input.extension.pluginID && item.extension.type === input.extension.type),
+  )
+  if (existing) return fromRow(existing)
+
+  const worktree = nodePath.resolve(input.worktree)
+  await nodeFs.mkdir(worktree, { recursive: true })
+  const result: Info = {
+    id: ProjectID.make(randomUUID()),
+    worktree,
+    name: input.name,
+    icon: input.icon,
+    commands: input.commands,
+    extension: input.extension,
+    sandboxes: [],
+    time: { created: Date.now(), updated: Date.now() },
+  }
+  Database.use((db) =>
+    db
+      .insert(ProjectTable)
+      .values({
+        id: result.id,
+        worktree: result.worktree,
+        vcs: null,
+        name: result.name,
+        icon_url: result.icon?.url,
+        icon_color: result.icon?.color,
+        time_created: result.time.created,
+        time_updated: result.time.updated,
+        sandboxes: result.sandboxes,
+        commands: result.commands,
+        extension: result.extension,
+      })
+      .run(),
+  )
+  GlobalBus.emit("event", {
+    directory: "global",
+    project: result.id,
+    payload: { type: Event.Updated.type, properties: result },
+  })
+  return result
+}
+
+export async function removeManagedProject(extension: ProjectExtension): Promise<boolean> {
+  const project = Database.use((db) =>
+    db
+      .select()
+      .from(ProjectTable)
+      .all()
+      .find((item) => item.extension?.pluginID === extension.pluginID && item.extension.type === extension.type),
+  )
+  if (!project) return false
+  Database.use((db) => db.delete(ProjectTable).where(eq(ProjectTable.id, project.id)).run())
+  return true
 }
 

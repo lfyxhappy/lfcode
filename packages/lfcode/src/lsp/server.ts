@@ -14,6 +14,7 @@ import { which } from "../util/which"
 import { Module } from "@lfcode-ai/shared/util/module"
 import { spawn } from "./launch"
 import { Npm } from "../npm"
+import { PluginPath } from "@/plugin/path"
 import { installManagedJavaArtifact, resolvePreferredJavaBinary } from "@/runtime-registry"
 
 const log = Log.create({ service: "lsp.server" })
@@ -708,14 +709,16 @@ export const CSharp: Info = {
   async spawn(root) {
     let bin = which("csharp-ls")
     if (!bin) {
-      if (!which("dotnet")) {
+      const preferred = path.join(PluginPath.data("runtime-dotnet"), process.platform === "win32" ? "dotnet.exe" : "dotnet")
+      const dotnet = (await Filesystem.exists(preferred)) ? preferred : which("dotnet")
+      if (!dotnet) {
         log.error(".NET SDK is required to install csharp-ls")
         return
       }
 
       if (Flag.LFCODE_DISABLE_LSP_DOWNLOAD) return
       log.info("installing csharp-ls via dotnet tool")
-      const proc = Process.spawn(["dotnet", "tool", "install", "csharp-ls", "--tool-path", Global.Path.bin], {
+      const proc = Process.spawn([dotnet, "tool", "install", "csharp-ls", "--tool-path", Global.Path.bin], {
         stdout: "pipe",
         stderr: "pipe",
         stdin: "pipe",
@@ -745,14 +748,16 @@ export const FSharp: Info = {
   async spawn(root) {
     let bin = which("fsautocomplete")
     if (!bin) {
-      if (!which("dotnet")) {
+      const preferred = path.join(PluginPath.data("runtime-dotnet"), process.platform === "win32" ? "dotnet.exe" : "dotnet")
+      const dotnet = (await Filesystem.exists(preferred)) ? preferred : which("dotnet")
+      if (!dotnet) {
         log.error(".NET SDK is required to install fsautocomplete")
         return
       }
 
       if (Flag.LFCODE_DISABLE_LSP_DOWNLOAD) return
       log.info("installing fsautocomplete via dotnet tool")
-      const proc = Process.spawn(["dotnet", "tool", "install", "fsautocomplete", "--tool-path", Global.Path.bin], {
+      const proc = Process.spawn([dotnet, "tool", "install", "fsautocomplete", "--tool-path", Global.Path.bin], {
         stdout: "pipe",
         stderr: "pipe",
         stdin: "pipe",

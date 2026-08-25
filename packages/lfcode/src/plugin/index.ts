@@ -10,9 +10,11 @@ import {
   type ActorStopOutput,
   type ActorMatcher,
 } from "@lfcode-ai/plugin"
+import path from "path"
+import { mkdir } from "fs/promises"
 import { z } from "zod"
 import { matchesActor } from "./matcher"
-import { Config } from "../config"
+import { Config, ConfigMarkdown } from "../config"
 import { ConfigPlugin } from "../config/plugin"
 import { Bus } from "../bus"
 import { BusEvent } from "../bus/bus-event"
@@ -38,8 +40,38 @@ import { registerAdaptor } from "@/control-plane/adaptors"
 import type { WorkspaceAdaptor } from "@/control-plane/types"
 import { getRuntimeManageState } from "@/runtime-registry"
 import { Skill } from "@/skill"
+import { Project } from "@/project"
+import { backend, createPluginSecureStorage } from "./secure-storage"
+import { MessageV2 } from "@/session/message-v2"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 const log = Log.create({ service: "plugin" })
+const EXTERNAL_PLUGIN_STARTUP_TIMEOUT_MS = 5_000
+
+function isUserVisiblePluginEvent(input: { type: string; properties: Record<string, unknown> }) {
+  if (input.properties.visible === false) return false
+  if (typeof input.properties.actorID === "string" && isUserHiddenSystemActorID(input.properties.actorID)) return false
+  if (input.type === "message.updated") {
+    const info = input.properties.info
+    return !!info && typeof info === "object" && MessageV2.isUserVisible(info as MessageV2.Info)
+  }
+  if (input.type === "message.part.updated") {
+    const part = input.properties.part
+    if (!part || typeof part !== "object" || !("sessionID" in part) || !("messageID" in part)) return false
+    return MessageV2.isUserVisibleMessage({
+      sessionID: part.sessionID as MessageV2.Info["sessionID"],
+      messageID: part.messageID as MessageV2.Info["id"],
+    })
+  }
+  if (input.type === "message.part.delta" || input.type === "message.part.removed" || input.type === "message.removed") {
+    if (typeof input.properties.sessionID !== "string" || typeof input.properties.messageID !== "string") return false
+    return MessageV2.isUserVisibleMessage({
+      sessionID: input.properties.sessionID as MessageV2.Info["sessionID"],
+      messageID: input.properties.messageID as MessageV2.Info["id"],
+    })
+  }
+  return true
+}
 
 export const HookEvent = {
   Executed: BusEvent.define(
@@ -96,7 +128,11 @@ type State = {
   hooks: Hooks[]
   hooksWithMeta: HookEntry[]
   status: RuntimeStatus[]
+  data: Map<string, string>
+  actions: Map<string, Map<string, PluginAction>>
 }
+
+type PluginAction = NonNullable<Hooks["action"]>[string]
 
 export type ActorStopAggregatedDecision = ActorStopOutput & {
   contributingPluginNames: string[]
@@ -120,6 +156,8 @@ export interface Interface {
   ) => Effect.Effect<Output>
   readonly list: () => Effect.Effect<Hooks[]>
   readonly status: () => Effect.Effect<RuntimeStatus[]>
+  readonly data: (pluginID: string) => Effect.Effect<string | undefined>
+  readonly action: (pluginID: string, name: string, input: unknown) => Effect.Effect<unknown>
   readonly reload: () => Effect.Effect<void>
   readonly init: () => Effect.Effect<void>
   readonly triggerActorPreStop: (
@@ -174,51 +212,115 @@ async function applyPlugin(
   input: PluginInput,
   hooks: Hooks[],
   hooksWithMeta: HookEntry[],
+  data: Map<string, string>,
+  actions: Map<string, Map<string, PluginAction>>,
   skill: Skill.Interface,
 ): Promise<RuntimeStatus[]> {
-  await requirePluginRuntimeDependencies(load)
-  await requirePluginSkillRequirements(load, skill)
-  const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
-  if (plugin) {
-    const pluginName = await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
-    const hookObj = await (plugin as PluginModule).server(input, load.options)
-    hooks.push(hookObj)
-    hooksWithMeta.push({
-      hook: hookObj,
-      pluginName,
-      hookIDFor: (event: string) => `${pluginName}#${event}`,
-    })
-    return [
-      {
+  const bundledSkillOwner = await registerPluginBundledSkills(load, skill)
+  try {
+    await requirePluginRuntimeDependencies(load)
+    await requirePluginSkillRequirements(load, skill)
+    const pluginInput = await withPluginDataDirectory(load, input)
+    if (pluginInput.data) {
+      const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+      for (const id of [load.spec, load.pkg?.json.name, manifest?.id]) {
+        if (typeof id === "string" && id) data.set(id, pluginInput.data)
+      }
+    }
+    const plugin = readV1Plugin(load.mod, load.spec, "server", "detect")
+    if (plugin) {
+      const pluginName = await resolvePluginId(load.source, load.spec, load.target, readPluginId(plugin.id, load.spec), load.pkg)
+      const hookObj = await (plugin as PluginModule).server(pluginInput, load.options)
+      registerPluginActions(pluginName, hookObj, actions)
+      hooks.push(hookObj)
+      hooksWithMeta.push({
+        hook: hookObj,
+        pluginName,
+        hookIDFor: (event: string) => `${pluginName}#${event}`,
+      })
+      return [
+        {
+          id: pluginName,
+          spec: load.spec,
+          source: load.source,
+          lifecycle: "active",
+        },
+      ]
+    }
+
+    const status: RuntimeStatus[] = []
+    for (const server of getLegacyPlugins(load.mod)) {
+      const fnName = (server as { name?: string }).name
+      const fallbackID = fnName && fnName !== "default" && fnName !== "" ? fnName : undefined
+      const pluginName = await resolvePluginId(load.source, load.spec, load.target, fallbackID, load.pkg)
+      const hookObj = await server(pluginInput, load.options)
+      registerPluginActions(pluginName, hookObj, actions)
+      hooks.push(hookObj)
+      hooksWithMeta.push({
+        hook: hookObj,
+        pluginName,
+        hookIDFor: (event: string) => `${pluginName}#${event}`,
+      })
+      if (pluginInput.data) data.set(pluginName, pluginInput.data)
+      status.push({
         id: pluginName,
         spec: load.spec,
         source: load.source,
         lifecycle: "active",
-      },
-    ]
+      })
+    }
+    return status
+  } catch (error) {
+    if (bundledSkillOwner) await Effect.runPromise(skill.unregisterPluginSkills(bundledSkillOwner))
+    throw error
   }
+}
 
-  const status: RuntimeStatus[] = []
-  for (const server of getLegacyPlugins(load.mod)) {
-    const fnName = (server as { name?: string }).name
-    const pluginName = fnName && fnName !== "default" && fnName !== ""
-      ? fnName
-      : (load.pkg?.pkg ?? load.spec)
-    const hookObj = await server(input, load.options)
-    hooks.push(hookObj)
-    hooksWithMeta.push({
-      hook: hookObj,
-      pluginName,
-      hookIDFor: (event: string) => `${pluginName}#${event}`,
-    })
-    status.push({
-      id: pluginName,
-      spec: load.spec,
-      source: load.source,
-      lifecycle: "active",
-    })
-  }
-  return status
+async function registerPluginBundledSkills(load: PluginLoader.Loaded, skill: Skill.Interface) {
+  const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+  if (!manifest?.bundledSkills?.length) return
+  if (!manifest.id || !load.pkg) throw new Error(`Plugin ${load.spec} must declare an id before bundling Skills`)
+
+  const root = path.resolve(load.pkg.dir)
+  const entries = await Promise.all(
+    manifest.bundledSkills.map(async (entry) => {
+      const location = path.resolve(root, entry.path)
+      const relative = path.relative(root, location)
+      if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        throw new Error(`Plugin ${load.spec} bundled Skill resolves outside the plugin package: ${entry.path}`)
+      }
+      const markdown = await ConfigMarkdown.parse(location)
+      const parsed = Skill.Info.safeParse({
+        ...markdown.data,
+        location,
+        content: markdown.content,
+      })
+      if (!parsed.success) throw new Error(`Plugin ${load.spec} has invalid bundled Skill ${entry.path}`)
+      if (parsed.data.name !== entry.id) {
+        throw new Error(`Plugin ${load.spec} bundled Skill ${entry.path} must declare name: ${entry.id}`)
+      }
+      return parsed.data
+    }),
+  )
+  await Effect.runPromise(skill.registerPluginSkills({ pluginID: manifest.id, skills: entries }))
+  return manifest.id
+}
+
+async function withPluginDataDirectory(load: PluginLoader.Loaded, input: PluginInput): Promise<PluginInput> {
+  const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+  if (load.source !== "file" || !load.pkg || !manifest?.storage?.data) return input
+  if (!new Set(["plugin", "plugins"]).has(path.basename(path.dirname(load.pkg.dir)).toLowerCase())) return input
+
+  const data = path.join(load.pkg.dir, "data")
+  await mkdir(data, { recursive: true })
+  return { ...input, data, secureStorage: createPluginSecureStorage(data, backend()) }
+}
+
+function registerPluginActions(pluginID: string, hook: Hooks, actions: Map<string, Map<string, PluginAction>>) {
+  if (!hook.action) return
+  const registered = actions.get(pluginID) ?? new Map<string, PluginAction>()
+  for (const [name, action] of Object.entries(hook.action)) registered.set(name, action)
+  actions.set(pluginID, registered)
 }
 
 async function requirePluginRuntimeDependencies(load: PluginLoader.Loaded) {
@@ -253,6 +355,8 @@ export const layer = Layer.effect(
         const hooks: Hooks[] = []
         const hooksWithMeta: HookEntry[] = []
         const status: RuntimeStatus[] = []
+        const data = new Map<string, string>()
+        const actions = new Map<string, Map<string, PluginAction>>()
         const bridge = yield* EffectBridge.make()
 
         function publishPluginError(message: string) {
@@ -260,6 +364,7 @@ export const layer = Layer.effect(
         }
 
         const { Server } = yield* Effect.promise(() => import("../server/server"))
+        const sdkV2 = yield* Effect.promise(() => import("@lfcode-ai/sdk/v2"))
 
         const client = createLfcodeClient({
           baseUrl: "http://localhost:4096",
@@ -269,14 +374,39 @@ export const layer = Layer.effect(
                 Authorization: `Basic ${Buffer.from(`${Flag.LFCODE_SERVER_USERNAME ?? "lfcode"}:${Flag.LFCODE_SERVER_PASSWORD}`).toString("base64")}`,
               }
             : undefined,
-          fetch: async (...args) => (await Server.Default()).app.fetch(...args),
+          fetch: Object.assign(
+            (request: RequestInfo | URL, init?: RequestInit) => Server.Default().app.fetch(new Request(request, init)),
+            globalThis.fetch,
+          ),
+        })
+        const clientV2 = sdkV2.createLfcodeClient({
+          baseUrl: "http://localhost:4096",
+          directory: ctx.directory,
+          headers: Flag.LFCODE_SERVER_PASSWORD
+            ? {
+                Authorization: `Basic ${Buffer.from(`${Flag.LFCODE_SERVER_USERNAME ?? "lfcode"}:${Flag.LFCODE_SERVER_PASSWORD}`).toString("base64")}`,
+              }
+            : undefined,
+          fetch: Object.assign(
+            (request: RequestInfo | URL, init?: RequestInit) => Server.Default().app.fetch(new Request(request, init)),
+            globalThis.fetch,
+          ),
         })
         const cfg = yield* config.get()
         const input: PluginInput = {
           client,
+          clientV2,
           project: ctx.project,
           worktree: ctx.worktree,
           directory: ctx.directory,
+          secureStorage: {
+            status: () => "unavailable",
+            get: async () => undefined,
+            set: async () => {
+              throw new Error("Secure credential storage is only available to installed local plugins")
+            },
+            remove: async () => {},
+          },
           experimental_workspace: {
             register(type: string, adaptor: PluginWorkspaceAdaptor) {
               registerAdaptor(ctx.project.id, type, adaptor as WorkspaceAdaptor)
@@ -393,9 +523,34 @@ export const layer = Layer.effect(
 
           // Keep plugin execution sequential so hook registration and execution
           // order remains deterministic across plugin runs.
-          yield* Effect.tryPromise({
-            try: () => applyPlugin(load, input, hooks, hooksWithMeta, skill),
-            catch: (err) => {
+          // Plugin startup runs while the current Instance is booting. Keep its
+          // hooks isolated until initialization succeeds so a bad plugin cannot
+          // hold every instance-scoped route (sessions, projects, MCPs) forever.
+          const pluginHooks: Hooks[] = []
+          const pluginHooksWithMeta: HookEntry[] = []
+          const outcome = yield* Effect.tryPromise({
+            try: () =>
+              new Promise<{ status: "completed"; items: RuntimeStatus[] } | { status: "timed_out" }>(
+                (resolve, reject) => {
+                  const timeout = setTimeout(
+                    () => resolve({ status: "timed_out" }),
+                    EXTERNAL_PLUGIN_STARTUP_TIMEOUT_MS,
+                  )
+                  void applyPlugin(load, input, pluginHooks, pluginHooksWithMeta, data, actions, skill).then(
+                    (items) => {
+                      clearTimeout(timeout)
+                      resolve({ status: "completed", items })
+                    },
+                    (error) => {
+                      clearTimeout(timeout)
+                      reject(error)
+                    },
+                  )
+                },
+              ),
+            catch: (err) => err,
+          }).pipe(
+            Effect.catch((err) => {
               const message = errorMessage(err)
               log.error("failed to load plugin", { path: load.spec, error: message })
               status.push({
@@ -405,18 +560,44 @@ export const layer = Layer.effect(
                 lifecycle: "degraded",
                 error: message,
               })
-              return []
-            },
-          }).pipe(
-            Effect.tap((items) => Effect.sync(() => status.push(...items))),
-            Effect.catch(() => {
-              // TODO: make proper events for this
-              // bus.publish(Session.Event.Error, {
-              //   error: new NamedError.Unknown({
-              //     message: `Failed to load plugin ${load.spec}: ${message}`,
-              //   }).toObject(),
-              // })
-              return Effect.void
+              return Effect.succeed({ status: "failed" as const })
+            }),
+          )
+          if (outcome.status === "failed") continue
+          if (outcome.status === "timed_out") {
+            const message = `Plugin startup timed out after ${EXTERNAL_PLUGIN_STARTUP_TIMEOUT_MS}ms`
+            log.error("plugin startup timed out", { path: load.spec, timeout: EXTERNAL_PLUGIN_STARTUP_TIMEOUT_MS })
+            status.push({
+              id: load.spec,
+              spec: load.spec,
+              source: load.source,
+              lifecycle: "degraded",
+              error: message,
+            })
+            publishPluginError(`Failed to load plugin ${load.spec}: ${message}`)
+            continue
+          }
+          hooks.push(...pluginHooks)
+          hooksWithMeta.push(...pluginHooksWithMeta)
+          status.push(...outcome.items)
+
+          const manifest = load.pkg ? readLfcodePluginManifest(load.pkg.json.lfcode, load.spec) : undefined
+          const managedProject = manifest?.managedProject
+          const pluginID = manifest?.id ?? outcome.items[0]?.id
+          // ImageMaker used to own a managed workspace. Retire only that legacy
+          // project index; its plugin-private gallery and secure configuration stay intact.
+          if (!managedProject && pluginID === "lfcode-imagemaker") {
+            yield* Effect.promise(() =>
+              Project.removeManagedProject({ pluginID: "lfcode-imagemaker", type: "imagemaker" }),
+            )
+          }
+          const dataDirectory = pluginID ? data.get(pluginID) : undefined
+          if (!managedProject || !pluginID || !dataDirectory) continue
+          yield* Effect.promise(() =>
+            Project.ensureManagedProject({
+              extension: { pluginID, type: managedProject.type },
+              worktree: path.join(dataDirectory, managedProject.worktree),
+              name: managedProject.name,
             }),
           )
         }
@@ -435,6 +616,7 @@ export const layer = Layer.effect(
         yield* bus.subscribeAll().pipe(
           Stream.runForEach((input) =>
             Effect.sync(() => {
+              if (!isUserVisiblePluginEvent(input as { type: string; properties: Record<string, unknown> })) return
               for (const hook of hooks) {
                 void hook["event"]?.({ event: input as any })
               }
@@ -443,7 +625,7 @@ export const layer = Layer.effect(
           Effect.forkScoped,
         )
 
-        return { hooks, hooksWithMeta, status }
+        return { hooks, hooksWithMeta, status, data, actions }
       }),
     )
 
@@ -580,7 +762,18 @@ export const layer = Layer.effect(
       return (yield* InstanceState.get(state)).status.map((item) => ({ ...item }))
     })
 
+    const dataForPlugin = Effect.fn("Plugin.data")(function* (pluginID: string) {
+      return (yield* InstanceState.get(state)).data.get(pluginID)
+    })
+
+    const action = Effect.fn("Plugin.action")(function* (pluginID: string, name: string, input: unknown) {
+      const registered = (yield* InstanceState.get(state)).actions.get(pluginID)?.get(name)
+      if (!registered) throw new Error(`Plugin action '${name}' is unavailable for ${pluginID}`)
+      return yield* Effect.promise(() => registered.execute(registered.input.parse(input)))
+    })
+
     const reload = Effect.fn("Plugin.reload")(function* () {
+      yield* skill.clearPluginSkills()
       yield* InstanceState.invalidate(state)
       yield* InstanceState.get(state)
     })
@@ -589,7 +782,7 @@ export const layer = Layer.effect(
       yield* InstanceState.get(state)
     })
 
-    return Service.of({ trigger, list, status, reload, init, triggerActorPreStop, triggerActorPostStop })
+    return Service.of({ trigger, list, status, data: dataForPlugin, action, reload, init, triggerActorPreStop, triggerActorPostStop })
   }),
 )
 

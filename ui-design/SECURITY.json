@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "allow_raw_html": false,
+  "allow_code_evaluation": false,
+  "allow_javascript_url": false,
+  "allow_inline_script": false,
+  "require_csp": false,
+  "allowed_origins": [],
+  "a2ui": {
+    "allowed_catalog_ids": []
+  }
+}

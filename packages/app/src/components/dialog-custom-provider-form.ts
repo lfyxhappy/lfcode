@@ -1,5 +1,6 @@
 import {
   inferModelCapabilities,
+  inferModelProfile,
   normalizeModelCapabilities,
   protocolPackage,
   ProviderProtocol,
@@ -14,6 +15,18 @@ import {
   VOLCENGINE_CODING_PLAN_PRESET_ID,
   VOLCENGINE_CODING_PLAN_PROVIDER_ID,
 } from "@lfcode-ai/shared/volcengine-coding-plan"
+import {
+  OPENCODE_GO_BASE_URL,
+  OPENCODE_GO_NAME,
+  OPENCODE_GO_PRESET_ID,
+  OPENCODE_GO_PROVIDER_ID,
+} from "@lfcode-ai/shared/opencode-go"
+import {
+  OPENCODE_BASE_URL,
+  OPENCODE_NAME,
+  OPENCODE_PRESET_ID,
+  OPENCODE_PROVIDER_ID,
+} from "@lfcode-ai/shared/opencode"
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 
@@ -24,6 +37,16 @@ export const PROTOCOLS = [
   ProviderProtocol.Gemini,
 ] as const
 export type Protocol = (typeof PROTOCOLS)[number]
+
+export const A6API_MODEL_PROTOCOLS = [
+  ProviderProtocol.OpenAIChat,
+  ProviderProtocol.OpenAIResponses,
+  ProviderProtocol.AnthropicMessages,
+] as const
+
+export const A6API_PROVIDER_ID = "a6api"
+export const A6API_BASE_URL = "https://a6api.com/v1"
+export { OPENCODE_GO_PROVIDER_ID }
 
 export const CAPABILITY_KEYS = MODEL_CAPABILITY_KEYS
 export type CapabilityKey = (typeof CAPABILITY_KEYS)[number]
@@ -49,11 +72,14 @@ export type ModelRow = {
   row: string
   id: string
   name: string
+  protocol?: Protocol
+  available?: boolean
   limit?: {
     context: string
     output: string
   }
   capabilities: ModelCapabilities
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
   manual: ModelCapabilityManual
   err: ModelErr
 }
@@ -86,6 +112,7 @@ export type CustomProviderPresetID = "custom" | (typeof CUSTOM_PROVIDER_PRESETS)
 type CustomProviderPresetModel = {
   id: string
   name: string
+  protocol?: Protocol
   limit: {
     context: number
     output: number
@@ -95,6 +122,14 @@ type CustomProviderPresetModel = {
 
 export const CUSTOM_PROVIDER_PRESETS = [
   {
+    id: A6API_PROVIDER_ID,
+    providerID: A6API_PROVIDER_ID,
+    name: "A6API",
+    protocol: ProviderProtocol.OpenAIChat,
+    baseURL: A6API_BASE_URL,
+    models: [],
+  },
+  {
     id: VOLCENGINE_CODING_PLAN_PRESET_ID,
     providerID: VOLCENGINE_CODING_PLAN_PROVIDER_ID,
     name: VOLCENGINE_CODING_PLAN_NAME,
@@ -102,11 +137,36 @@ export const CUSTOM_PROVIDER_PRESETS = [
     baseURL: VOLCENGINE_CODING_PLAN_BASE_URL,
     models: VOLCENGINE_CODING_PLAN_MODELS.map((model) => volcengineModel(model.id, model.context, model.image)),
   },
+  {
+    id: OPENCODE_PRESET_ID,
+    providerID: OPENCODE_PROVIDER_ID,
+    name: OPENCODE_NAME,
+    protocol: ProviderProtocol.OpenAIChat,
+    baseURL: OPENCODE_BASE_URL,
+    models: [],
+  },
+  {
+    id: OPENCODE_GO_PRESET_ID,
+    providerID: OPENCODE_GO_PROVIDER_ID,
+    name: OPENCODE_GO_NAME,
+    protocol: ProviderProtocol.OpenAIChat,
+    baseURL: OPENCODE_GO_BASE_URL,
+    models: [],
+  },
 ] as const
 
 export const CUSTOM_PROVIDER_PRESET_OPTIONS = [
   "custom",
 ] as CustomProviderPresetID[]
+
+export function apiKeyForPresetChange(input: {
+  current?: CustomProviderPresetID
+  next: CustomProviderPresetID
+  apiKey: string
+}) {
+  if ((input.current ?? "custom") === input.next) return input.apiKey
+  return ""
+}
 
 type ValidateArgs = {
   form: FormState
@@ -137,6 +197,8 @@ export function validateCustomProvider(input: ValidateArgs) {
     ? input.t("provider.custom.error.baseURL.required")
     : !/^https?:\/\//.test(baseURL)
       ? input.t("provider.custom.error.baseURL.format")
+      : providerID === A6API_PROVIDER_ID && baseURL !== A6API_BASE_URL
+        ? input.t("provider.custom.a6api.error.baseURL")
       : undefined
 
   const disabled = input.disabledProviders.includes(providerID)
@@ -151,12 +213,18 @@ export function validateCustomProvider(input: ValidateArgs) {
     const id = m.id.trim()
     const idError = !id
       ? input.t("provider.custom.error.required")
+      : providerID === A6API_PROVIDER_ID && !isA6ApiModelID(id)
+        ? input.t("provider.custom.a6api.error.unsupportedModel")
       : seenModels.has(id)
         ? input.t("provider.custom.error.duplicate")
         : (() => {
             seenModels.add(id)
             return undefined
           })()
+    const protocolError =
+      providerID === A6API_PROVIDER_ID && !isA6ApiProtocol(m.protocol ?? protocol)
+        ? input.t("provider.custom.a6api.error.unsupportedProtocol")
+        : undefined
     const nameError = !m.name.trim() ? input.t("provider.custom.error.required") : undefined
     const context = m.limit?.context.trim() ?? ""
     const output = m.limit?.output.trim() ?? ""
@@ -172,7 +240,7 @@ export function validateCustomProvider(input: ValidateArgs) {
         : output && !positiveInt(output)
           ? input.t("provider.custom.error.positiveInteger")
           : undefined
-    return { id: idError, name: nameError, context: contextError, output: outputError }
+    return { id: idError ?? protocolError, name: nameError, context: contextError, output: outputError }
   })
   const modelsValid = models.every((m) => !m.id && !m.name && !m.context && !m.output)
   const modelConfig = Object.fromEntries(
@@ -183,8 +251,10 @@ export function validateCustomProvider(input: ValidateArgs) {
         m.id.trim(),
         {
           name: m.name.trim(),
+          protocol: m.protocol ?? protocol,
           ...(context && output ? { limit: { context: Number(context), output: Number(output) } } : {}),
           capabilities: Object.fromEntries(CAPABILITY_KEYS.map((key) => [key, m.capabilities[key]])),
+          ...(m.reasoning_options?.length ? { reasoning_options: m.reasoning_options } : {}),
         },
       ]
     }),
@@ -268,12 +338,14 @@ export const defaultCapabilities = (): ModelCapabilities => ({
 export const inferCapabilities = (input: {
   id: string
   name: string
+  providerID?: string
   protocol?: Protocol
+  explicit?: Partial<ModelCapabilities>
   current?: ModelCapabilities
   manual?: ModelCapabilityManual
 }) => {
   const normalized = normalizeModelCapabilities({
-    inferred: inferModelCapabilities({ modelID: input.id, apiID: input.name, protocol: input.protocol }),
+    inferred: inferModelCapabilities({ modelID: input.id, apiID: input.name }),
     explicit: input.current && input.manual ? toManualConfig(input.current, input.manual) : undefined,
   })
   return {
@@ -288,13 +360,85 @@ export const inferCapabilities = (input: {
     patch_editing: normalized.patch_editing,
     native_web: normalized.native_web,
     temperature: normalized.temperature,
+    ...input.explicit,
   }
 }
 
-export const modelRow = (): ModelRow => ({
+export type A6ApiDiscoveredModel = {
+  id: string
+  name: string
+  protocol: (typeof A6API_MODEL_PROTOCOLS)[number]
+  capabilities?: Partial<ModelCapabilities>
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
+}
+
+export function isA6ApiModelID(input: string) {
+  const modelID = input.trim().toLowerCase()
+  return (
+    modelID.startsWith("gpt-5.6") ||
+    modelID.startsWith("grok-4.6") ||
+    modelID.startsWith("claude-5") ||
+    modelID.startsWith("deepseek")
+  )
+}
+
+export function isA6ApiProtocol(input: Protocol): input is (typeof A6API_MODEL_PROTOCOLS)[number] {
+  return A6API_MODEL_PROTOCOLS.includes(input as (typeof A6API_MODEL_PROTOCOLS)[number])
+}
+
+export function mergeA6ApiModelRows(input: {
+  current: readonly ModelRow[]
+  discovered: readonly A6ApiDiscoveredModel[]
+  providerID?: string
+}): ModelRow[] {
+  const discovered = new Map(input.discovered.map((model) => [model.id, model]))
+  const current = input.current.map((model) => {
+    const candidate = discovered.get(model.id)
+    if (!candidate) return { ...model, available: false }
+
+    // The discovery response is the source of truth for the wire format of a
+    // model. A stale row can contain the provider's old default protocol, but
+    // that must not override a model-level protocol returned by the catalog.
+    const protocol = candidate.protocol
+    const profile = inferModelProfile({ modelID: model.id, apiID: model.name })
+    const capabilities = inferCapabilities({
+      id: model.id,
+      name: model.name,
+      providerID: input.providerID,
+      protocol,
+      explicit: candidate.capabilities,
+      current: model.capabilities,
+      manual: model.manual,
+    })
+    return {
+      ...model,
+      protocol,
+      available: true,
+      limit: {
+        context: model.limit?.context || String(profile.limit.context),
+        output: model.limit?.output || String(profile.limit.output),
+      },
+      capabilities: {
+        ...model.capabilities,
+        ...Object.fromEntries(CAPABILITY_KEYS.filter((key) => !model.manual[key]).map((key) => [key, capabilities[key]])),
+      },
+      reasoning_options: candidate.reasoning_options,
+    }
+  })
+  const currentIDs = new Set(input.current.map((model) => model.id))
+  return [
+    ...current,
+    ...input.discovered
+      .filter((model) => !currentIDs.has(model.id))
+      .map((model) => a6ApiModelRow(model, input.providerID)),
+  ]
+}
+
+export const modelRow = (protocol: Protocol = ProviderProtocol.OpenAIChat): ModelRow => ({
   row: nextRow(),
   id: "",
   name: "",
+  protocol,
   limit: {
     context: "",
     output: "",
@@ -305,11 +449,34 @@ export const modelRow = (): ModelRow => ({
 })
 export const headerRow = (): HeaderRow => ({ row: nextRow(), key: "", value: "", err: {} })
 
-export function presetModelRow(input: CustomProviderPresetModel): ModelRow {
+function a6ApiModelRow(input: A6ApiDiscoveredModel, providerID?: string): ModelRow {
+  const profile = inferModelProfile({ modelID: input.id, apiID: input.name })
+  return {
+    ...modelRow(input.protocol),
+    id: input.id,
+    name: input.name,
+    available: true,
+    limit: {
+      context: String(profile.limit.context),
+      output: String(profile.limit.output),
+    },
+    capabilities: inferCapabilities({
+      id: input.id,
+      name: input.name,
+      providerID,
+      protocol: input.protocol,
+      explicit: input.capabilities,
+    }),
+    reasoning_options: input.reasoning_options,
+  }
+}
+
+export function presetModelRow(input: CustomProviderPresetModel, protocol?: Protocol): ModelRow {
   return {
     row: nextRow(),
     id: input.id,
     name: input.name,
+    protocol: input.protocol ?? protocol,
     limit: {
       context: String(input.limit.context),
       output: String(input.limit.output),

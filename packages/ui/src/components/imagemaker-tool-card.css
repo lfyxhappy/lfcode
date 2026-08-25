@@ -1,0 +1,52 @@
+@layer components {
+  [data-component="imagemaker-tool-card"] {
+    display: grid;
+    gap: 10px;
+    padding: 4px 4px 2px 28px;
+  }
+
+  [data-slot="imagemaker-tool-card-image"] {
+    position: relative;
+    display: grid;
+    width: min(100%, 420px);
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--border-base);
+    border-radius: 10px;
+    background: var(--background-base);
+    cursor: zoom-in;
+  }
+
+  [data-slot="imagemaker-tool-card-image"] img {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    background: var(--background-stronger);
+  }
+
+  [data-slot="imagemaker-tool-card-image"] span {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--background-base) 82%, transparent);
+    color: var(--text-strong);
+    font-size: var(--font-size-small);
+  }
+
+  [data-slot="imagemaker-tool-card-meta"] {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    color: var(--text-weak);
+    font-size: var(--font-size-small);
+  }
+
+  [data-slot="imagemaker-tool-card-pending"] {
+    margin: 0;
+    color: var(--text-weak);
+    font-size: var(--font-size-small);
+  }
+}

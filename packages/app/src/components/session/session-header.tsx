@@ -4,6 +4,7 @@ import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Keybind } from "@lfcode-ai/ui/keybind"
+import { Popover } from "@lfcode-ai/ui/popover"
 import { Spinner } from "@lfcode-ai/ui/spinner"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { Tooltip, TooltipKeybind } from "@lfcode-ai/ui/tooltip"
@@ -11,14 +12,12 @@ import { getFilename } from "@lfcode-ai/shared/util/path"
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
-import { useSearchParams } from "@solidjs/router"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
-import { useGlobalSDK } from "@/context/global-sdk"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { focusTerminalById } from "@/pages/session/helpers"
@@ -28,8 +27,11 @@ import { decode64 } from "@/utils/base64"
 import { formatServerError } from "@/utils/server-errors"
 import { Persist, persisted } from "@/utils/persist"
 import { StatusPopover } from "../status-popover"
+import { ContextStatusPill } from "./context-status-pill"
+import { DialogSelectFileContent } from "../dialog-select-file"
 import { MaintenanceStatusPill } from "./maintenance-status-pill"
 import { BROWSER_REQUEST_OPEN_EVENT, createBrowserRequestID, DEFAULT_BROWSER_URL } from "@/pages/session/helpers"
+import { canUseTerminal } from "@/pages/session/runtime-capabilities"
 import { LINUX_APPS, MAC_APPS, OPEN_APPS, type OpenApp, WINDOWS_APPS } from "./session-open-apps"
 type OS = "macos" | "windows" | "linux" | "unknown"
 
@@ -58,19 +60,9 @@ export function SessionHeader() {
   const platform = usePlatform()
   const language = useLanguage()
   const settings = useSettings()
-  const globalSDK = useGlobalSDK()
   const sync = useSync()
   const terminal = useTerminal()
   const { params, view, sessionKey } = useSessionLayout()
-  const [searchParams, setSearchParams] = useSearchParams<{ agentID?: string }>()
-  const sessionActors = createMemo(() => (params.id ? sync.data.actor[params.id] ?? [] : []))
-  const subagents = createMemo(() => sessionActors().filter((actor) => actor.mode === "subagent").toSorted((a, b) => a.time.created - b.time.created))
-  const activeView = createMemo(() => {
-    const agentID = searchParams.agentID ?? "main"
-    if (agentID === "main") return "main"
-    if (subagents().some((actor) => actor.actorID === agentID)) return agentID
-    return "main"
-  })
 
   const projectDirectory = createMemo(() => decode64(params.dir) ?? "")
   const project = createMemo(() => {
@@ -88,7 +80,9 @@ export function SessionHeader() {
   const isDesktopBeta = platform.platform === "desktop" && import.meta.env.VITE_LFCODE_CHANNEL === "beta"
   const search = createMemo(() => !isDesktopBeta || settings.general.showSearch())
   const tree = createMemo(() => !isDesktopBeta || settings.general.showFileTree())
-  const term = createMemo(() => !isDesktopBeta || settings.general.showTerminal())
+  const term = createMemo(() =>
+    canUseTerminal(platform.platform, server.isLocal()) && (!isDesktopBeta || settings.general.showTerminal()),
+  )
   const status = createMemo(() => !isDesktopBeta || settings.general.showStatus())
 
   const [exists, setExists] = createStore<Partial<Record<OpenApp, boolean>>>({
@@ -107,7 +101,10 @@ export function SessionHeader() {
     return { label: "session.header.open.fileManager", icon: "finder" as const }
   })
 
-  createEffect(() => {
+  let appsRequested = false
+  const requestApps = () => {
+    if (appsRequested) return
+    appsRequested = true
     if (platform.platform !== "desktop") return
     if (!platform.checkAppExists) return
 
@@ -125,7 +122,7 @@ export function SessionHeader() {
     ).then((entries) => {
       setExists(Object.fromEntries(entries) as Partial<Record<OpenApp, boolean>>)
     })
-  })
+  }
 
   const options = createMemo(() => {
     return [
@@ -163,7 +160,6 @@ export function SessionHeader() {
 
   const [prefs, setPrefs] = persisted(Persist.global("open.app"), createStore({ app: "finder" as OpenApp }))
   const [menu, setMenu] = createStore({ open: false })
-  const [viewMenu, setViewMenu] = createStore({ open: false })
   const [openRequest, setOpenRequest] = createStore({
     app: undefined as OpenApp | undefined,
   })
@@ -217,26 +213,9 @@ export function SessionHeader() {
       .catch((err: unknown) => showRequestError(language, err))
   }
 
-  const viewLabel = (agentID: string) => {
-    if (agentID === "main") return "返回主对话"
-    return subagents().find((actor) => actor.actorID === agentID)?.description ?? agentID
-  }
-
-  const destroySubagent = async (actorID: string) => {
-    if (!params.id) return
-    const actor = subagents().find((item) => item.actorID === actorID)
-    if (!actor) return
-    if (!window.confirm(`销毁子对话 "${actor.description}"？`)) return
-    try {
-      await globalSDK.client.session.deleteActor({ sessionID: params.id, actorID })
-      if (searchParams.agentID === actorID) setSearchParams({ agentID: undefined })
-    } catch (err) {
-      showRequestError(language, err)
-    }
-  }
-
   const [centerMount, setCenterMount] = createSignal<HTMLElement | null>(null)
   const [rightMount, setRightMount] = createSignal<HTMLElement | null>(null)
+  const [searchOpen, setSearchOpen] = createSignal(false)
   onMount(() => {
     setCenterMount(document.getElementById("lfcode-titlebar-center"))
     setRightMount(document.getElementById("lfcode-titlebar-right"))
@@ -247,30 +226,44 @@ export function SessionHeader() {
       <Show when={search() && centerMount()}>
         {(mount) => (
           <Portal mount={mount()}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              class="hidden md:flex w-[240px] max-w-full min-w-0 items-center gap-2 justify-between rounded-md border border-border-weak-base bg-surface-panel shadow-none cursor-default"
-              onClick={() => command.trigger("file.open")}
-              aria-label={language.t("session.header.searchFiles")}
-            >
-              <div class="flex min-w-0 flex-1 items-center overflow-visible">
-                <span class="flex-1 min-w-0 text-12-regular text-text-weak truncate text-left">
-                  {language.t("session.header.search.placeholder", {
-                    project: name(),
-                  })}
-                </span>
-              </div>
+            <Popover
+              open={searchOpen()}
+              onOpenChange={setSearchOpen}
+              placement="bottom"
+              gutter={6}
+              triggerAs={Button}
+              triggerProps={{
+                type: "button",
+                variant: "ghost",
+                size: "small",
+                class:
+                  "hidden md:flex w-[240px] max-w-full min-w-0 items-center gap-2 justify-between rounded-md border border-border-weak-base bg-surface-panel shadow-none",
+                "aria-label": language.t("session.header.searchFiles"),
+                "aria-expanded": searchOpen(),
+              }}
+              class="z-50 w-[min(560px,calc(100vw-32px))] max-h-[min(480px,calc(100vh-64px))] overflow-hidden rounded-lg border border-border-weak-base bg-background-panel p-2 shadow-lg [&_[data-slot=popover-body]]:p-0"
+              trigger={
+                <>
+                  <div class="flex min-w-0 flex-1 items-center overflow-visible">
+                    <span class="flex-1 min-w-0 text-12-regular text-text-weak truncate text-left">
+                      {language.t("session.header.search.placeholder", {
+                        project: name(),
+                      })}
+                    </span>
+                  </div>
 
-              <Show when={hotkey()}>
-                {(keybind) => (
-                  <Keybind class="shrink-0 !border-0 !bg-transparent !shadow-none px-0 text-text-weaker">
-                    {keybind()}
-                  </Keybind>
-                )}
-              </Show>
-            </Button>
+                  <Show when={hotkey()}>
+                    {(keybind) => (
+                      <Keybind class="shrink-0 !border-0 !bg-transparent !shadow-none px-0 text-text-weaker">
+                        {keybind()}
+                      </Keybind>
+                    )}
+                  </Show>
+                </>
+              }
+            >
+              <DialogSelectFileContent onClose={() => setSearchOpen(false)} />
+            </Popover>
           </Portal>
         )}
       </Show>
@@ -320,7 +313,10 @@ export function SessionHeader() {
                           gutter={4}
                           placement="bottom-end"
                           open={menu.open}
-                          onOpenChange={(open) => setMenu("open", open)}
+                          onOpenChange={(open) => {
+                            setMenu("open", open)
+                            if (open) requestApps()
+                          }}
                         >
                           <DropdownMenu.Trigger
                             as={IconButton}
@@ -392,66 +388,8 @@ export function SessionHeader() {
                 </div>
               </Show>
               <div class="flex items-center gap-1">
+                <ContextStatusPill sessionID={params.id} directory={projectDirectory()} />
                 <MaintenanceStatusPill sessionID={params.id} />
-                <Show when={params.id && sessionActors().length > 0}>
-                  <DropdownMenu gutter={4} placement="bottom-end" open={viewMenu.open} onOpenChange={(open) => setViewMenu("open", open)}>
-                    <DropdownMenu.Trigger
-                      as={Button}
-                      variant="ghost"
-                      class="h-6 max-w-[180px] gap-1.5 px-2 text-12-medium text-text-strong border border-border-weak-base bg-surface-panel shadow-none"
-                      aria-label={language.t("session.header.open.menu")}
-                    >
-                      <span class="truncate">{viewLabel(activeView())}</span>
-                      <Icon name="chevron-down" size="small" class="text-icon-weak" />
-                    </DropdownMenu.Trigger>
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content class="min-w-[220px]">
-                        <DropdownMenu.RadioGroup
-                          value={activeView()}
-                          onChange={(value) => {
-                            setSearchParams({ agentID: value === "main" ? undefined : `${value}` })
-                            setViewMenu("open", false)
-                          }}
-                        >
-                          <DropdownMenu.RadioItem value="main" class="font-medium">
-                            <DropdownMenu.ItemLabel>返回主对话</DropdownMenu.ItemLabel>
-                            <DropdownMenu.ItemIndicator>
-                              <Icon name="check-small" size="small" class="text-icon-weak" />
-                            </DropdownMenu.ItemIndicator>
-                          </DropdownMenu.RadioItem>
-                          <For each={subagents()}>
-                            {(actor) => (
-                              <DropdownMenu.RadioItem value={actor.actorID}>
-                                <div class="flex flex-col min-w-0">
-                                  <DropdownMenu.ItemLabel class="truncate">{actor.description}</DropdownMenu.ItemLabel>
-                                  <div class="text-11-regular text-text-weak">
-                                    {actor.actorID} · {actor.status}
-                                  </div>
-                                </div>
-                                <DropdownMenu.ItemIndicator>
-                                  <Icon name="check-small" size="small" class="text-icon-weak" />
-                                </DropdownMenu.ItemIndicator>
-                              </DropdownMenu.RadioItem>
-                            )}
-                          </For>
-                        </DropdownMenu.RadioGroup>
-                        <DropdownMenu.Separator />
-                        <For each={subagents()}>
-                          {(actor) => (
-                            <DropdownMenu.Item
-                              onSelect={async () => {
-                                setViewMenu("open", false)
-                                await destroySubagent(actor.actorID)
-                              }}
-                            >
-                              <DropdownMenu.ItemLabel>销毁 {actor.description}</DropdownMenu.ItemLabel>
-                            </DropdownMenu.Item>
-                          )}
-                        </For>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
-                  </DropdownMenu>
-                </Show>
                 <Show when={status()}>
                   <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
               <StatusPopover directory={projectDirectory()} sessionID={params.id} />
@@ -464,7 +402,7 @@ export function SessionHeader() {
                   >
                     <Button
                       variant="ghost"
-                      class="group/terminal-toggle titlebar-icon w-8 h-6 p-0 box-border shrink-0"
+                      class="group/terminal-toggle titlebar-icon !size-9 p-1 box-border shrink-0"
                       onClick={toggleTerminal}
                       aria-label={language.t("command.terminal.toggle")}
                       aria-expanded={view().terminal.opened()}
@@ -479,7 +417,7 @@ export function SessionHeader() {
                   <Tooltip placement="bottom" value={language.t("command.browser.open")}>
                     <Button
                       variant="ghost"
-                      class="titlebar-icon w-8 h-6 p-0 box-border"
+                      class="titlebar-icon !size-9 p-1 box-border"
                       onClick={openBrowser}
                       aria-label={language.t("command.browser.open")}
                       aria-controls="review-panel"
@@ -491,7 +429,7 @@ export function SessionHeader() {
                     <Tooltip placement="bottom" value={language.t("session.header.summary.toggle")}>
                       <Button
                         variant="ghost"
-                        class="titlebar-icon w-8 h-6 p-0 box-border"
+                        class="titlebar-icon !size-9 p-1 box-border"
                         data-action="session-summary-toggle"
                         onClick={() => view().summaryCard.toggle()}
                         title={language.t("session.header.summary.toggle")}
@@ -516,7 +454,7 @@ export function SessionHeader() {
                   >
                     <Button
                       variant="ghost"
-                      class="group/review-toggle titlebar-icon w-8 h-6 p-0 box-border"
+                      class="group/review-toggle titlebar-icon !size-9 p-1 box-border"
                       onClick={() => {
                         if (!view().reviewPanel.opened()) view().setReviewEnabled(true)
                         view().reviewPanel.toggle()
@@ -536,7 +474,7 @@ export function SessionHeader() {
                     >
                       <Button
                         variant="ghost"
-                        class="titlebar-icon w-8 h-6 p-0 box-border"
+                        class="titlebar-icon !size-9 p-1 box-border"
                         onClick={() => layout.fileTree.toggle()}
                         aria-label={language.t("command.fileTree.toggle")}
                         aria-expanded={layout.fileTree.opened()}

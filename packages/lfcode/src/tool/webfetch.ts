@@ -5,10 +5,28 @@ import * as Tool from "./tool"
 import TurndownService from "turndown"
 import DESCRIPTION from "./webfetch.txt"
 import { isImageAttachment } from "@/util/media"
+import { extractTextFromHTML } from "./webfetch-html"
+import { canUseWindowsWebFetch, fetchWithWindowsPowerShell } from "@lfcode-ai/shared/windows-webfetch"
 
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+
+const isHttpStatusError = (error: unknown) => {
+  if (!error || typeof error !== "object" || !("reason" in error)) return false
+  const reason = error.reason
+  return !!reason && typeof reason === "object" && "_tag" in reason && reason._tag === "StatusCodeError"
+}
+
+const shouldUseWindowsPowerShellFallback = (error: unknown) => {
+  if (!canUseWindowsWebFetch()) return false
+  if (isHttpStatusError(error)) return false
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  if (message.includes("timeout") || message.includes("timed out") || message.includes("response too large")) return false
+  return true
+}
+
+const statusError = (status: number) => new Error(`HTTP ${status}`)
 
 const parameters = z.object({
   url: z.string().describe("The URL to fetch content from"),
@@ -73,40 +91,60 @@ export const WebFetchTool = Tool.define(
 
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
 
-          // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
-          const response = yield* httpOk.execute(request).pipe(
-            Effect.catchIf(
-              (err) =>
-                err.reason._tag === "StatusCodeError" &&
-                err.reason.response.status === 403 &&
-                err.reason.response.headers["cf-mitigated"] === "challenge",
-              () =>
-                httpOk.execute(
-                  HttpClientRequest.get(params.url).pipe(
-                    HttpClientRequest.setHeaders({ ...headers, "User-Agent": "lfcode" }),
+          const fetched = yield* Effect.gen(function* () {
+            const response = yield* httpOk.execute(request).pipe(
+              Effect.catchIf(
+                (err) =>
+                  err.reason._tag === "StatusCodeError" &&
+                  err.reason.response.status === 403 &&
+                  err.reason.response.headers["cf-mitigated"] === "challenge",
+                () =>
+                  httpOk.execute(
+                    HttpClientRequest.get(params.url).pipe(
+                      HttpClientRequest.setHeaders({ ...headers, "User-Agent": "lfcode" }),
+                    ),
                   ),
-                ),
-            ),
+              ),
+            )
+            const contentLength = response.headers["content-length"]
+            if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE)
+              return yield* Effect.fail(new Error("Response too large (exceeds 5MB limit)"))
+            const bytes = new Uint8Array(yield* response.arrayBuffer)
+            if (bytes.byteLength > MAX_RESPONSE_SIZE)
+              return yield* Effect.fail(new Error("Response too large (exceeds 5MB limit)"))
+            return { bytes, contentType: response.headers["content-type"] || "" }
+          }).pipe(
+            Effect.catch((error) => {
+              if (!shouldUseWindowsPowerShellFallback(error)) return Effect.fail(error)
+              return Effect.tryPromise({
+                try: (signal) =>
+                  fetchWithWindowsPowerShell(
+                    {
+                      url: params.url,
+                      headers,
+                      maxResponseBytes: MAX_RESPONSE_SIZE,
+                      maxRedirects: 5,
+                      timeoutSeconds: Math.ceil(timeout / 1000),
+                    },
+                    signal,
+                  ),
+                catch: () => error,
+              }).pipe(
+                Effect.flatMap((response) => {
+                  if (response.status < 200 || response.status >= 300) return Effect.fail(statusError(response.status))
+                  return Effect.succeed({ bytes: response.body, contentType: response.contentType })
+                }),
+              )
+            }),
             Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.die(new Error("Request timed out")) }),
           )
 
-          // Check content length
-          const contentLength = response.headers["content-length"]
-          if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
-            throw new Error("Response too large (exceeds 5MB limit)")
-          }
-
-          const arrayBuffer = yield* response.arrayBuffer
-          if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
-            throw new Error("Response too large (exceeds 5MB limit)")
-          }
-
-          const contentType = response.headers["content-type"] || ""
+          const contentType = fetched.contentType
           const mime = contentType.split(";")[0]?.trim().toLowerCase() || ""
           const title = `${params.url} (${contentType})`
 
           if (isImageAttachment(mime)) {
-            const base64Content = Buffer.from(arrayBuffer).toString("base64")
+            const base64Content = Buffer.from(fetched.bytes).toString("base64")
             return {
               title,
               output: "Image fetched successfully",
@@ -121,7 +159,7 @@ export const WebFetchTool = Tool.define(
             }
           }
 
-          const content = new TextDecoder().decode(arrayBuffer)
+          const content = new TextDecoder().decode(fetched.bytes)
 
           // Handle content based on requested format and actual content type
           switch (params.format) {
@@ -138,7 +176,7 @@ export const WebFetchTool = Tool.define(
 
             case "text":
               if (contentType.includes("text/html")) {
-                const text = yield* Effect.promise(() => extractTextFromHTML(content))
+                const text = extractTextFromHTML(content)
                 return { output: text, title, metadata: {} }
               }
               return { output: content, title, metadata: {} }
@@ -153,38 +191,6 @@ export const WebFetchTool = Tool.define(
     }
   }),
 )
-
-async function extractTextFromHTML(html: string) {
-  let text = ""
-  let skipContent = false
-
-  const rewriter = new HTMLRewriter()
-    .on("script, style, noscript, iframe, object, embed", {
-      element() {
-        skipContent = true
-      },
-      text() {
-        // Skip text content inside these elements
-      },
-    })
-    .on("*", {
-      element(element) {
-        // Reset skip flag when entering other elements
-        if (!["script", "style", "noscript", "iframe", "object", "embed"].includes(element.tagName)) {
-          skipContent = false
-        }
-      },
-      text(input) {
-        if (!skipContent) {
-          text += input.text
-        }
-      },
-    })
-    .transform(new Response(html))
-
-  await rewriter.text()
-  return text.trim()
-}
 
 function convertHTMLToMarkdown(html: string): string {
   const turndownService = new TurndownService({

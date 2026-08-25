@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "recipes": [
+    {
+      "recipe_id": "button",
+      "component": "Button",
+      "slots": [
+        "root",
+        "label",
+        "leading-icon",
+        "trailing-icon"
+      ],
+      "variants": [
+        "solid",
+        "outline",
+        "ghost",
+        "danger"
+      ],
+      "sizes": [
+        "sm",
+        "md",
+        "lg"
+      ],
+      "states": [
+        "default",
+        "hover",
+        "focus",
+        "pressed",
+        "loading",
+        "disabled"
+      ],
+      "tokens": [
+        "color.primary",
+        "color.text-on-primary",
+        "space.2",
+        "radius.md",
+        "motion.fast"
+      ],
+      "compound_variants": [
+        {
+          "when": {
+            "variant": "danger",
+            "state": "disabled"
+          },
+          "tokens": [
+            "color.danger-muted"
+          ]
+        }
+      ]
+    },
+    {
+      "recipe_id": "field",
+      "component": "Field",
+      "slots": [
+        "root",
+        "label",
+        "control",
+        "hint",
+        "error"
+      ],
+      "variants": [
+        "default",
+        "filled",
+        "inline"
+      ],
+      "sizes": [
+        "sm",
+        "md",
+        "lg"
+      ],
+      "states": [
+        "default",
+        "hover",
+        "focus",
+        "error",
+        "success",
+        "disabled",
+        "loading"
+      ],
+      "tokens": [
+        "color.surface",
+        "color.text",
+        "color.border",
+        "color.danger",
+        "space.2",
+        "radius.md"
+      ],
+      "compound_variants": []
+    },
+    {
+      "recipe_id": "card",
+      "component": "Card",
+      "slots": [
+        "root",
+        "header",
+        "body",
+        "footer"
+      ],
+      "variants": [
+        "default",
+        "muted",
+        "interactive",
+        "selected"
+      ],
+      "sizes": [
+        "sm",
+        "md",
+        "lg"
+      ],
+      "states": [
+        "default",
+        "hover",
+        "focus",
+        "selected",
+        "disabled",
+        "empty",
+        "error"
+      ],
+      "tokens": [
+        "color.surface",
+        "color.border",
+        "radius.lg",
+        "shadow.sm",
+        "space.4"
+      ],
+      "compound_variants": []
+    }
+  ]
+}

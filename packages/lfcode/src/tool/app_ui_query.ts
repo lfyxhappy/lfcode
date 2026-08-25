@@ -6,6 +6,10 @@ import { createAppControlClient, ensureAppControlAccess } from "@/app-control/cl
 import { appUiShared, buildAppUiBody } from "./app_ui_shared"
 
 const parameters = z.union([
+  z.object({
+    action: z.literal("catalog"),
+    window_id: z.number().optional().describe("Optional desktop window ID. Defaults to an available Lfcode window."),
+  }),
   appUiShared.extend({
     action: z.literal("query"),
   }),
@@ -26,14 +30,17 @@ export const AppUiQueryTool = Tool.define(
     const config = yield* Config.Service
     return {
       description:
-        "Read stable UI-driver state from the local desktop app: snapshot a token, read its current text/value, or wait for it to appear or change visibility.",
+        "Discover stable UI-driver tokens or read their state from the local desktop app. Query a token, read its current text/value, or wait for it to appear or change visibility.",
       parameters,
       execute: (args: z.infer<typeof parameters>) =>
         Effect.gen(function* () {
-          const current = yield* config.get()
+          const current = yield* config.getGlobal()
           ensureAppControlAccess(current, "read_only")
           const client = yield* Effect.promise(() => createAppControlClient())
           const result = yield* Effect.promise(() => {
+            if (args.action === "catalog") {
+              return client.get(`/ui/catalog${args.window_id === undefined ? "" : `?windowID=${args.window_id}`}`)
+            }
             if (args.action === "query") return client.post("/ui/query", buildAppUiBody(args))
             if (args.action === "read_text") return client.post("/ui/read-text", buildAppUiBody(args))
             return client.post("/ui/wait", {
@@ -45,17 +52,18 @@ export const AppUiQueryTool = Tool.define(
           })
           return {
             title:
-              args.action === "query"
+              args.action === "catalog"
+                ? "Listed available UI tokens"
+                : args.action === "query"
                 ? "Read UI token snapshot"
                 : args.action === "read_text"
                   ? "Read UI token text"
                   : "Waited for UI token",
             output: typeof result === "string" ? result : JSON.stringify(result, null, 2),
             metadata: {
-              token: args.token,
-              blockKey: args.block_key,
               windowID: args.window_id,
               action: args.action,
+              ...(args.action === "catalog" ? {} : { token: args.token, blockKey: args.block_key }),
             },
           }
         }),

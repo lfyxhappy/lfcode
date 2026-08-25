@@ -2,6 +2,8 @@ import { type Part as PartType, type ToolPart } from "@lfcode-ai/sdk/v2"
 import { PART_MAPPING } from "./message-part-registry"
 
 const CONTEXT_GROUP_TOOLS = new Set(["read", "glob", "grep", "list"])
+const COMMAND_GROUP_TOOLS = new Set(["bash", "shell", "shell_process"])
+const COMMAND_START_TOOLS = new Set(["bash", "shell"])
 const HIDDEN_TOOLS = new Set(["todowrite"])
 
 export function list<T>(value: T[] | undefined | null, fallback: T[]) {
@@ -30,6 +32,16 @@ export type PartGroup =
   | {
       key: string
       type: "context"
+      refs: PartRef[]
+    }
+  | {
+      key: string
+      type: "command"
+      refs: PartRef[]
+    }
+  | {
+      key: string
+      type: "tool"
       refs: PartRef[]
     }
   | {
@@ -65,6 +77,8 @@ export function sameGroups(a: readonly PartGroup[] | undefined, b: readonly Part
 export function groupParts(parts: { messageID: string; part: PartType }[]) {
   const result: PartGroup[] = []
   let contextStart = -1
+  let commandGroup: { index: number; refs: PartRef[] } | undefined
+  let toolGroup: { index: number; tool: string; refs: PartRef[] } | undefined
   let errorStart = -1
   let errorSignature: string | undefined
 
@@ -108,9 +122,85 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
     errorSignature = undefined
   }
 
+  const resetCommandGroup = () => {
+    commandGroup = undefined
+  }
+
+  const resetToolGroup = () => {
+    toolGroup = undefined
+  }
+
+  const appendCommand = (item: (typeof parts)[number]) => {
+    const ref = { messageID: item.messageID, partID: item.part.id }
+    if (!commandGroup) {
+      result.push({ key: `part:${item.messageID}:${item.part.id}`, type: "part", ref })
+      commandGroup = { index: result.length - 1, refs: [ref] }
+      return
+    }
+
+    const current = result[commandGroup.index]
+    if (!current) return
+    if (current.type === "part") {
+      result[commandGroup.index] = {
+        key: `command:${current.ref.partID}`,
+        type: "command",
+        refs: [...commandGroup.refs, ref],
+      }
+      commandGroup.refs.push(ref)
+      return
+    }
+    if (current.type === "command") {
+      current.refs.push(ref)
+      commandGroup.refs.push(ref)
+    }
+  }
+
+  const appendProcessUpdate = (item: (typeof parts)[number]) => {
+    if (!commandGroup) {
+      result.push({
+        key: `part:${item.messageID}:${item.part.id}`,
+        type: "part",
+        ref: { messageID: item.messageID, partID: item.part.id },
+      })
+      return
+    }
+    const current = result[commandGroup.index]
+    commandGroup.refs.push({ messageID: item.messageID, partID: item.part.id })
+    if (current?.type === "command") {
+      current.refs.push({ messageID: item.messageID, partID: item.part.id })
+    }
+  }
+
+  const appendTool = (item: { messageID: string; part: ToolPart }) => {
+    const ref = { messageID: item.messageID, partID: item.part.id }
+    if (!toolGroup || toolGroup.tool !== item.part.tool) {
+      result.push({ key: `part:${item.messageID}:${item.part.id}`, type: "part", ref })
+      toolGroup = { index: result.length - 1, tool: item.part.tool, refs: [ref] }
+      return
+    }
+
+    const current = result[toolGroup.index]
+    if (!current) return
+    if (current.type === "part") {
+      result[toolGroup.index] = {
+        key: `tool:${toolGroup.tool}:${current.ref.partID}`,
+        type: "tool",
+        refs: [...toolGroup.refs, ref],
+      }
+      toolGroup.refs.push(ref)
+      return
+    }
+    if (current.type === "tool") {
+      current.refs.push(ref)
+      toolGroup.refs.push(ref)
+    }
+  }
+
   parts.forEach((item, index) => {
     const signature = toolErrorSignature(item.part)
     if (signature) {
+      resetCommandGroup()
+      resetToolGroup()
       flushContext(index - 1)
       if (errorStart < 0) {
         errorStart = index
@@ -125,20 +215,54 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
     }
 
     flushErrors(index - 1)
+    if (item.part.type === "tool" && COMMAND_START_TOOLS.has(item.part.tool)) {
+      resetToolGroup()
+      flushContext(index - 1)
+      appendCommand(item)
+      return
+    }
+
+    if (item.part.type === "tool" && item.part.tool === "shell_process") {
+      resetToolGroup()
+      flushContext(index - 1)
+      appendProcessUpdate(item)
+      return
+    }
+
+    if (item.part.type !== "tool") {
+      flushContext(index - 1)
+      result.push({
+        key: `part:${item.messageID}:${item.part.id}`,
+        type: "part",
+        ref: {
+          messageID: item.messageID,
+          partID: item.part.id,
+        },
+      })
+      return
+    }
+
+    resetCommandGroup()
+    if (item.part.tool === "actor") {
+      resetToolGroup()
+      flushContext(index - 1)
+      result.push({
+        key: `part:${item.messageID}:${item.part.id}`,
+        type: "part",
+        ref: { messageID: item.messageID, partID: item.part.id },
+      })
+      return
+    }
+
     if (isContextGroupTool(item.part)) {
+      resetToolGroup()
       if (contextStart < 0) contextStart = index
       return
     }
 
+    if (!isGroupedTool(item.part)) return
     flushContext(index - 1)
-    result.push({
-      key: `part:${item.messageID}:${item.part.id}`,
-      type: "part",
-      ref: {
-        messageID: item.messageID,
-        partID: item.part.id,
-      },
-    })
+    appendTool({ messageID: item.messageID, part: item.part })
   })
 
   flushContext(parts.length - 1)
@@ -174,7 +298,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
 }
 
 export function toolDefaultOpen(tool: string, shell = false, edit = false) {
-  if (tool === "bash") return shell
+  if (COMMAND_GROUP_TOOLS.has(tool)) return shell
   if (tool === "edit" || tool === "write" || tool === "apply_patch") return edit
 }
 
@@ -185,6 +309,14 @@ export function partDefaultOpen(part: PartType, shell = false, edit = false) {
 
 export function isContextGroupTool(part: PartType): part is ToolPart {
   return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
+}
+
+export function isCommandGroupTool(part: PartType): part is ToolPart {
+  return part.type === "tool" && COMMAND_GROUP_TOOLS.has(part.tool)
+}
+
+export function isGroupedTool(part: PartType): part is ToolPart {
+  return part.type === "tool" && !COMMAND_GROUP_TOOLS.has(part.tool) && !CONTEXT_GROUP_TOOLS.has(part.tool)
 }
 
 function toolErrorSignature(part: PartType) {

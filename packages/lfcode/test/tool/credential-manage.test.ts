@@ -24,7 +24,7 @@ describe("tool.credential_manage", () => {
         const tool = (yield* registry.tools({
           providerID: "lfcode" as never,
           modelID: "gpt-5" as never,
-          agent: { name: "build", mode: "primary", permission: [], options: {} },
+          agent: { name: "build", mode: "primary", permission: [], options: {}, toolAllowlist: [CredentialManageTool.id] },
         })).find((item) => item.id === CredentialManageTool.id)
         if (!tool) throw new Error("credential_manage tool not found")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []

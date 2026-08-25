@@ -57,6 +57,33 @@ function baseInput(llm: LLM.Interface): MaxStepInput {
 }
 
 describe("max-mode ECONNRESET handling (integration)", () => {
+  test("candidate and judge receive the session cancellation signal", async () => {
+    const seen: AbortSignal[] = []
+    const llm = {
+      buildSystemArray: () => Effect.succeed([]),
+      stream: (input: { abortSignal?: AbortSignal }): Stream.Stream<LLM.Event, unknown> => {
+        if (input.abortSignal) seen.push(input.abortSignal)
+        return Stream.fromIterable([
+          { type: "text-delta", text: "0" } as LLM.Event,
+          { type: "finish-step", finishReason: "stop", usage: {} } as LLM.Event,
+        ])
+      },
+    } as unknown as LLM.Interface
+    const controller = new AbortController()
+    const input = { ...baseInput(llm), abortSignal: controller.signal }
+
+    await Effect.runPromise(runCandidate(input, 0))
+    await Effect.runPromise(
+      judge(input, [
+        { index: 0, reasoning: "", text: "a", toolCalls: [], finishReason: "stop" },
+        { index: 1, reasoning: "", text: "b", toolCalls: [], finishReason: "stop" },
+      ] as any),
+    )
+
+    expect(seen).toHaveLength(2)
+    expect(seen.every((signal) => signal === controller.signal)).toBe(true)
+  })
+
   test("candidate retries a transient error part and recovers with a fresh accumulator", async () => {
     // Each attempt's "good" path emits text then finishes. On failing attempts
     // we ALSO emit a text-delta before the error part, to prove the retry does

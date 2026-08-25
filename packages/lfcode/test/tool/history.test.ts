@@ -4,6 +4,7 @@ import { Database } from "../../src/storage"
 import { HistoryFtsTable } from "../../src/history/fts.sql"
 import { MessageTable, PartTable, SessionTable } from "../../src/session/session.sql"
 import { ProjectTable } from "../../src/project/project.sql"
+import { EventSequenceTable, EventTable } from "../../src/sync/event.sql"
 import { HistoryTool } from "../../src/tool/history"
 import { History } from "../../src/history"
 import { Truncate } from "../../src/tool"
@@ -17,6 +18,8 @@ import { CapabilityPersistence } from "../../src/capability/persistence"
 
 afterEach(async () => {
   Database.use((db) => {
+    db.delete(EventTable).run()
+    db.delete(EventSequenceTable).run()
     db.delete(HistoryFtsTable).run()
     db.delete(PartTable).run()
     db.delete(MessageTable).run()
@@ -301,6 +304,44 @@ describe("HistoryTool", () => {
         expect(result.metadata.session_found).toBe(true)
         expect(result.metadata.checkpoint_found).toBe(false)
         expect(result.output).toContain("plain raw history")
+      }),
+    ),
+  )
+
+  it.live("event operations expose only sanitized durable event data", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        Database.use((db) => {
+          db.insert(ProjectTable)
+            .values({ id: "p_tool_event" as any, worktree: "/tmp", sandboxes: [] as any, time_created: now, time_updated: now } as any)
+            .run()
+          db.insert(SessionTable)
+            .values({ id: "ses_tool_event" as any, project_id: "p_tool_event" as any, slug: "x", directory: "/tmp", title: "t", version: "1", time_created: now, time_updated: now })
+            .run()
+          db.insert(EventSequenceTable).values({ aggregate_id: "ses_tool_event", seq: 3 }).run()
+          db.insert(EventTable)
+            .values({
+              id: "evt_tool",
+              aggregate_id: "ses_tool_event",
+              seq: 3,
+              type: "message.updated.1",
+              data: { state: "completed", cookie: "should-not-leak" },
+            })
+            .run()
+        })
+        const info = yield* HistoryTool
+        const tool = yield* info.init()
+        const search = yield* tool.execute({ operation: "event_search", session_id: "ses_tool_event" }, ctx as any)
+        expect(search.metadata).toMatchObject({ count: 1, session_found: true })
+        expect(search.output).toContain("message.updated.1")
+        expect(search.output).toContain("[REDACTED]")
+        expect(search.output).not.toContain("should-not-leak")
+
+        const read = yield* tool.execute({ operation: "event_read", session_id: "ses_tool_event", event_seq: 3 }, ctx as any)
+        expect(read.metadata).toMatchObject({ count: 1, session_found: true })
+        expect(read.output).toContain('"sequence": 3')
+        expect(read.output).not.toContain("should-not-leak")
       }),
     ),
   )

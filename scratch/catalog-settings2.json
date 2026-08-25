@@ -1,0 +1,400 @@
+{
+  "windowID": 1,
+  "window": {
+    "id": 1,
+    "title": "Lfcode",
+    "url": "oc://renderer/index.html#/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session",
+    "focused": true,
+    "visible": true,
+    "minimized": false,
+    "destroyed": false,
+    "detached": false,
+    "bounds": {
+      "x": 68,
+      "y": 50,
+      "width": 1280,
+      "height": 808
+    }
+  },
+  "catalog": [
+    {
+      "token": "settings.toggle",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "settings.dialog",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "settings.tab.editor",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "settings.tab.plugins",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "settings.tab.app-control",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "settings.app-control.save",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.enabled",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.permission",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.browser.enabled",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.browser.permission",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.metadata",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.refresh-events",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.events",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.capture-diagnostics",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.diagnostics",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "settings.app-control.copy-diagnostics",
+      "available": false,
+      "operations": []
+    },
+    {
+      "token": "project.sidebar.menu",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "project.sidebar.new-temporary-session",
+      "available": true,
+      "source": "layout",
+      "operations": [
+        "query",
+        "click",
+        "readText",
+        "wait"
+      ]
+    },
+    {
+      "token": "session.summary.toggle",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "composer.main.input",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "composer.main.submit",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "sidechat.active.input",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "sidechat.active.submit",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.panel",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.editor",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.mode.edit",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.mode.preview",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.mode.save",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "filetab.active.command-menu",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.root",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.editor",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.edit",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.preview",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.save",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.reload",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.open-sidebar",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    },
+    {
+      "token": "messageblock.mode.bind-file",
+      "available": true,
+      "source": "session",
+      "operations": [
+        "query",
+        "click",
+        "type",
+        "readText",
+        "wait",
+        "editor"
+      ]
+    }
+  ]
+}

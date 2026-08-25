@@ -345,7 +345,7 @@ describe("checkpoint writer child-session isolation", () => {
       Effect.gen(function* () {
         yield* resetSpawnLog
         const svc = yield* SessionCheckpoint.Service
-        const { info, endMessageID } = yield* seedParentSession()
+        const { info } = yield* seedParentSession()
 
         // Start a writer; outcome is collected in pendingOutcomes for explicit
         // settlement after we've confirmed the lock is held.
@@ -387,16 +387,14 @@ describe("checkpoint writer child-session isolation", () => {
         expect(r2).toBe("started")
         expect(spawnLog.count).toBe(2)
 
-        // Sanity: the parent's last_checkpoint_message_id was advanced by the
-        // settle watcher even on failure (current behavior — bookkeeping is
-        // unconditional in checkpoint.ts:801-808). Asserted here so a future
-        // change to gate the update on success would surface as a test diff.
+        // A failed writer must not advance the parent's watermark; the next
+        // attempt must include the failed range again.
         const parentRow = yield* Effect.sync(() =>
           Database.use((d) =>
             d.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get(),
           ),
         )
-        expect(parentRow?.last_checkpoint_message_id).toBe(endMessageID)
+        expect(parentRow?.last_checkpoint_message_id ?? null).toBeNull()
       }),
       { config: { checkpoint: { fork: true } } },
     ),
@@ -419,15 +417,15 @@ describe("checkpoint writer child-session isolation", () => {
           providerID: ProviderID.make("test"),
           id: ModelID.make("test-model"),
         })
-        // Tokens above the FIRST threshold only (default thresholds for the
-        // fake model's 200K window: 20%/40%/60%/80% = 40K/80K/120K/160K).
+        // Tokens above the FIRST threshold only (default layered thresholds
+        // are 55%/70% of usable context).
         // We deliberately stop at one crossed threshold per call: triggering
         // multiple in the same call would queue pending writers (1-slot
         // queue, see checkpoint.ts:508-517), and the settle watcher would
         // drain pending into a fresh spawn — masking the failure-counter
         // gate by re-populating the writers Map.
         const oneOverFirstThreshold = {
-          input: 50_000,
+          input: 110_000,
           output: 0,
           reasoning: 0,
           cache: { read: 0, write: 0 },

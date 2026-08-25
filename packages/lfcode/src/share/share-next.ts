@@ -275,7 +275,9 @@ export const layer = Layer.effect(
       log.info("full sync", { sessionID })
       const info = yield* session.get(sessionID)
       const diffs = yield* session.diff(sessionID)
-      const messages = yield* Effect.sync(() => Array.from(MessageV2.stream(sessionID, { agentID: "*" })))
+      const messages = yield* Effect.sync(() =>
+        Array.from(MessageV2.stream(sessionID, { agentID: "*" })).filter((message) => MessageV2.isUserVisible(message.info)),
+      )
       const models = yield* Effect.forEach(
         Array.from(
           new Map(

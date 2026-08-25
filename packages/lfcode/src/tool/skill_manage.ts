@@ -10,12 +10,18 @@ import { completeCapabilityOperation, decideCapabilityOperation, requireCapabili
 import * as Tool from "./tool"
 
 const Parameters = z.object({
-  action: z.enum(["list", "create", "update", "set_hidden", "delete"]),
+  action: z.enum(["list", "create", "update", "delete"]),
   name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional(),
   description: z.string().min(1).optional(),
   content: z.string().optional(),
-  hidden: z.boolean().optional(),
-  reason: z.string().min(1).describe("Short reason for this Skill management action."),
+  reason: z.string().min(1).optional().describe("Required short audit reason for every mutating Skill management action."),
+}).superRefine((input, ctx) => {
+  if (input.action === "list" || input.reason) return
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["reason"],
+    message: `skill_manage ${input.action} requires a reason`,
+  })
 })
 
 export const SkillManageTool = Tool.define(
@@ -24,14 +30,13 @@ export const SkillManageTool = Tool.define(
     const fs = yield* AppFileSystem.Service
     const skill = yield* Skill.Service
     return {
-      description: "List, create, update, hide, or delete Skills in the managed global Skill directory. Mutations are audited and require confirmation.",
+      description: "List, create, update, or delete Skills in the managed global Skill directory. Mutations are audited and require confirmation.",
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
           if (params.action !== "list" && !params.name) throw new Error(`skill_manage ${params.action} requires name`)
-          if (params.action === "create" && !params.description) throw new Error("skill_manage create requires description")
           if (params.action === "update" && !params.content && !params.description) throw new Error("skill_manage update requires content or description")
-          if (params.action === "set_hidden" && params.hidden === undefined) throw new Error("skill_manage set_hidden requires hidden")
+          const reason = params.reason ?? "List managed Skills"
 
           const gate = decideCapabilityOperation({
             caller: "tool:skill_manage",
@@ -45,16 +50,12 @@ export const SkillManageTool = Tool.define(
                   ? "install"
                   : params.action === "delete"
                     ? "delete"
-                    : params.action === "set_hidden"
-                      ? params.hidden
-                        ? "disable"
-                        : "enable"
-                      : "update",
+                    : "update",
             previewed: true,
             reversible: params.action !== "delete",
             target: params.name,
             sessionID: ctx.sessionID,
-            reason: params.reason,
+            reason,
           })
           requireCapabilityDecision(gate.decision)
           if (gate.decision === "confirm") {
@@ -69,17 +70,22 @@ export const SkillManageTool = Tool.define(
           if (params.action === "list") {
             const items = yield* skill.all()
             completeCapabilityOperation(gate.auditID, `completed (${items.length} skills)`)
-            return result(params.reason, items.map((item) => ({ name: item.name, description: item.description, location: item.location, hidden: item.hidden ?? false })))
+            return result(reason, items.map((item) => ({ name: item.name, description: item.description, location: item.location })))
           }
 
           const directory = path.join(globalSkillRoot(), params.name!)
           const file = path.join(directory, "SKILL.md")
           if (params.action === "create") {
             if (yield* fs.existsSafe(directory)) throw new Error(`Skill already exists: ${params.name}`)
-            yield* fs.writeWithDirs(file, matter.stringify(params.content ?? `# ${params.name}\n`, { name: params.name, description: params.description }))
+            const parsed = params.content ? matter(params.content) : undefined
+            const description = params.description ?? parsed?.data.description
+            if (typeof description !== "string" || description.trim() === "") {
+              throw new Error("skill_manage create requires description or valid SKILL.md frontmatter")
+            }
+            yield* fs.writeWithDirs(file, matter.stringify(parsed?.content || `# ${params.name}\n`, { name: params.name, description }))
             yield* skill.refresh()
             completeCapabilityOperation(gate.auditID, "completed", { action: "delete", skill: params.name })
-            return result(params.reason, { created: params.name })
+            return result(reason, { created: params.name })
           }
 
           if (!(yield* fs.existsSafe(file))) throw new Error(`Managed Skill not found: ${params.name}`)
@@ -87,20 +93,18 @@ export const SkillManageTool = Tool.define(
             yield* fs.remove(directory, { recursive: true })
             yield* skill.refresh()
             completeCapabilityOperation(gate.auditID, "completed")
-            return result(params.reason, { deleted: params.name })
+            return result(reason, { deleted: params.name })
           }
 
           const parsed = yield* Effect.promise(() => ConfigMarkdown.parse(file))
-          const data = { ...parsed.data } as Record<string, unknown>
-          if (params.action === "set_hidden") {
-            if (params.hidden) data.hidden = true
-            else delete data.hidden
-          }
-          if (params.description) data.description = params.description
-          yield* fs.writeWithDirs(file, matter.stringify(params.content ?? parsed.content, data))
+          const frontmatter = Skill.Frontmatter.parse({
+            name: params.name,
+            description: params.description ?? parsed.data.description,
+          })
+          yield* fs.writeWithDirs(file, matter.stringify(params.content ?? parsed.content, frontmatter))
           yield* skill.refresh()
           completeCapabilityOperation(gate.auditID, "completed")
-          return result(params.reason, { updated: params.name, hidden: data.hidden === true })
+          return result(reason, { updated: params.name })
         }).pipe(Effect.orDie),
     }
   }),

@@ -5,20 +5,22 @@ import { NamedError } from "@lfcode-ai/shared/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, RetryError, type ModelMessage, type UIMessage } from "ai"
 import { LSP } from "../lsp"
 import { SyncEvent } from "../sync"
-import { Database, NotFoundError, and, asc, desc, eq, gt, gte, inArray, lt, lte, or, sql } from "@/storage"
+import { Database, NotFoundError, and, asc, desc, eq, gt, gte, inArray, like, lt, lte, not, or, sql } from "@/storage"
 import { Vcs } from "../project"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import { ProviderError } from "@/provider"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
 import { isMedia } from "@/util/media"
-import { Log } from "@/util"
+import { Log, Token } from "@/util"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect } from "effect"
 import { EffectLogger } from "@/effect"
 import { hydrateStoredPart } from "./part-blob"
+import { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
+import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -234,13 +236,18 @@ export const SubtaskPart = PartBase.extend({
   prompt: z.string(),
   description: z.string(),
   agent: z.string(),
+  execution: z.enum(["wait", "background"]).default("wait"),
+  context: z.enum(["none", "state", "full"]).default("state"),
   model: z
     .object({
       providerID: ProviderID.zod,
       modelID: ModelID.zod,
     })
     .optional(),
+  contextRefs: z.array(z.string().min(1).max(4096)).max(128).default([]),
+  declaredFiles: z.array(z.string().min(1).max(4096)).max(128).default([]),
   command: z.string().optional(),
+  research: ResearchDispatchSnapshot.optional(),
 }).meta({
   ref: "SubtaskPart",
 })
@@ -402,16 +409,36 @@ const Base = z.object({
   agentID: z.string().optional(),
 })
 
-export const Provenance = z
+export const HookProvenance = z
   .object({
     hookPhase: z.enum(["pre", "post"]),
     hookIteration: z.number().int().nonnegative(),
     pluginNames: z.array(z.string()),
     hookIDs: z.array(z.string()),
   })
+  .strict()
+  .meta({ ref: "HookProvenance" })
+
+export const AutomationProvenance = z
+  .object({
+    taskID: z.string().min(1),
+    runID: z.string().min(1),
+  })
+  .strict()
+  .meta({ ref: "AutomationProvenance" })
+
+export const Provenance = z
+  .union([HookProvenance, AutomationProvenance])
   .meta({ ref: "Provenance" })
 export type Provenance = z.infer<typeof Provenance>
 
+export const TavernContext = z.object({
+  depth: z.array(z.object({
+    content: z.string().min(1).max(16_000),
+    depth: z.number().int().min(0).max(100),
+  })).max(32),
+}).meta({ ref: "TavernContext" })
+export type TavernContext = z.infer<typeof TavernContext>
 export const User = Base.extend({
   role: z.literal("user"),
   time: z.object({
@@ -432,7 +459,9 @@ export const User = Base.extend({
     variant: z.string().optional(),
   }),
   system: z.string().optional(),
+  tavernContext: TavernContext.optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
+  source: z.enum(["user", "spawn", "hook", "automation"]).optional(),
   provenance: Provenance.optional(),
 }).meta({
   ref: "UserMessage",
@@ -571,6 +600,25 @@ export const WithParts = z.object({
 })
 export type WithParts = z.infer<typeof WithParts>
 
+/**
+ * User-hidden actor IDs are durable message metadata. Keep this predicate at
+ * the message boundary so API, sync, export, sharing, and forks cannot
+ * accidentally rely on a live ActorRegistry row that may no longer exist.
+ */
+export function isUserVisible(info: Pick<Info, "agentID">) {
+  return !isUserHiddenSystemActorID(info.agentID)
+}
+
+export function isUserVisibleMessage(input: { sessionID: SessionID; messageID: MessageID }) {
+  try {
+    return isUserVisible(get(input).info)
+  } catch {
+    // Event filtering must fail closed: an unavailable owner must never turn an
+    // internal message/part event into a user-visible payload.
+    return false
+  }
+}
+
 const Cursor = z.object({
   id: MessageID.zod,
   time: z.number(),
@@ -702,6 +750,16 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 ) {
   const result: UIMessage[] = []
   const toolNames = new Set<string>()
+  const excludedLegacyRecallMessages = new Set<string>()
+  for (const message of input) {
+    if (isLegacyAutomaticRecallReminder(message)) {
+      excludedLegacyRecallMessages.add(message.info.id)
+      continue
+    }
+    if (message.info.role === "assistant" && excludedLegacyRecallMessages.has(message.info.parentID)) {
+      excludedLegacyRecallMessages.add(message.info.id)
+    }
+  }
   // Track media from tool results that need to be injected as user messages
   // for providers that don't support media in tool results.
   //
@@ -756,6 +814,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
 
   for (const msg of input) {
     if (msg.parts.length === 0) continue
+    if (excludedLegacyRecallMessages.has(msg.info.id)) continue
 
     if (msg.info.role === "user") {
       const userMessage: UIMessage = {
@@ -978,7 +1037,18 @@ export function toModelMessages(
   return Effect.runPromise(toModelMessagesEffect(input, model, options).pipe(Effect.provide(EffectLogger.layer)))
 }
 
-export function page(input: { sessionID: SessionID; limit: number; before?: string; agentID?: string }) {
+export function page(input: {
+  sessionID: SessionID
+  limit: number
+  before?: string
+  agentID?: string
+  /**
+   * Apply the durable user-visibility boundary before calculating the page
+   * cursor. Filtering a completed page afterwards can otherwise produce an
+   * empty page and a cursor whose decoded ID belongs to an internal actor.
+   */
+  userVisible?: boolean
+}) {
   const before = input.before ? cursor.decode(input.before) : undefined
   // Slice contract: agentID `undefined` (default) ⇒ main slice only;
   // `"*"` ⇒ every slice (full-stream opt-out for export/stats/share/etc.);
@@ -988,6 +1058,9 @@ export function page(input: { sessionID: SessionID; limit: number; before?: stri
     eq(MessageTable.session_id, input.sessionID),
     ...(before ? [older(before)] : []),
     ...(agent ? [agent] : []),
+    ...(input.userVisible
+      ? [not(or(eq(MessageTable.agent_id, "context-reviewer"), like(MessageTable.agent_id, "context-reviewer-%"))!)]
+      : []),
   )
   const rows = Database.use((db) =>
     db
@@ -1148,6 +1221,100 @@ export type ContinuationContext = {
   }
 }
 
+export type ActiveContextProjection = {
+  messages: WithParts[]
+  stats: {
+    media: number
+    reasoning: number
+    toolResults: number
+  }
+}
+
+/**
+ * Produces the model-only hot context. Stored messages remain untouched so
+ * timeline replay, export, and future recovery always retain the source data.
+ */
+export function projectActiveContext(input: WithParts[], options?: { tailTurns?: number; maxTailTokens?: number }): ActiveContextProjection {
+  const tailTurns = options?.tailTurns ?? 2
+  const maxTailTokens = options?.maxTailTokens ?? Number.POSITIVE_INFINITY
+  const userIndexes = input.flatMap((message, index) => (message.info.role === "user" ? [index] : []))
+  const tailStart =
+    userIndexes.length === 0 ? 0 : tailTurns <= 0 ? userIndexes.at(-1)! : (userIndexes.at(-tailTurns) ?? 0)
+  const stats = { media: 0, reasoning: 0, toolResults: 0 }
+
+  const projected = input.map((message, index) => {
+      if (index >= tailStart) return message
+      let changed = false
+      const parts = message.parts.flatMap((part): Part[] => {
+        if (part.type === "reasoning") {
+          changed = true
+          stats.reasoning += 1
+          return []
+        }
+        if (part.type === "file" && isMedia(part.mime)) {
+          changed = true
+          stats.media += 1
+          return [
+            {
+              id: part.id,
+              sessionID: part.sessionID,
+              messageID: part.messageID,
+              type: "text",
+              text: `[Earlier attachment omitted: ${part.mime}${part.filename ? ` (${part.filename})` : ""}]`,
+              synthetic: true,
+            },
+          ]
+        }
+        if (part.type === "tool" && part.state.status === "completed") {
+          changed = true
+          stats.toolResults += 1
+          return [
+            {
+              ...part,
+              state: {
+                ...part.state,
+                output: `[Earlier ${part.tool} result omitted from active context]`,
+                attachments: undefined,
+              },
+            },
+          ]
+        }
+        return [part]
+      })
+      return changed ? { ...message, parts } : message
+    })
+
+  let remaining = maxTailTokens
+  const messages = projected.map((message, index) => {
+    if (index < tailStart) return message
+    const estimated = Token.estimate(JSON.stringify(message.parts))
+    if (estimated <= remaining) {
+      remaining -= estimated
+      return message
+    }
+    const parts = message.parts.map((part) => {
+      if (part.type === "text" && part.text.length > 2048) {
+        const keep = Math.max(512, Math.floor((remaining * 4) / Math.max(1, message.parts.length)))
+        const head = Math.floor(keep * 0.65)
+        return { ...part, text: `${part.text.slice(0, head)}\n...[context clipped]...\n${part.text.slice(-Math.max(128, keep - head))}` }
+      }
+      if (part.type === "tool" && part.state.status === "completed" && part.state.output.length > 2048) {
+        const keep = Math.max(512, Math.floor((remaining * 4) / Math.max(1, message.parts.length)))
+        const head = Math.floor(keep * 0.65)
+        return { ...part, state: { ...part.state, output: `${part.state.output.slice(0, head)}\n...[tool result clipped]...\n${part.state.output.slice(-Math.max(128, keep - head))}` } }
+      }
+      return part
+    })
+    remaining = Math.max(0, remaining - Token.estimate(JSON.stringify(parts)))
+    return { ...message, parts }
+  })
+
+  return {
+    messages,
+    stats,
+  }
+}
+
 function isLaterMessage(a: WithParts, b: WithParts) {
   if (a.info.time.created !== b.info.time.created) return a.info.time.created > b.info.time.created
   return a.info.id > b.info.id
@@ -1165,15 +1332,67 @@ function hasVisibleText(parts: Part[]) {
 function hasCheckpointBody(msg: WithParts) {
   const checkpointIndex = msg.parts.findIndex((part) => part.type === "checkpoint")
   if (checkpointIndex < 0) return false
+  const checkpoint = msg.parts[checkpointIndex]
+  if (checkpoint.type !== "checkpoint") return false
   return msg.parts.slice(checkpointIndex + 1).some((part) => part.type === "text" && !!part.text.trim())
 }
 
+function checkpointCoverageIsValid(messages: WithParts[], boundary: WithParts) {
+  const checkpoint = boundary.parts.find((part): part is CheckpointPart => part.type === "checkpoint")
+  if (!checkpoint) return false
+  const coveredIndex = messages.findIndex((message) => message.info.id === checkpoint.coveredUpTo)
+  const boundaryIndex = messages.findIndex((message) => message.info.id === boundary.info.id)
+  if (coveredIndex < 0 || boundaryIndex < 0 || coveredIndex >= boundaryIndex) return false
+  const covered = messages[coveredIndex]
+  return (
+    covered.info.sessionID === boundary.info.sessionID &&
+    (covered.info.agentID ?? "main") === (boundary.info.agentID ?? "main")
+  )
+}
+
 function hasCompactionSummary(messages: WithParts[], boundaryIndex: number) {
-  return messages.slice(boundaryIndex + 1).some((msg) => msg.info.role === "assistant" && hasVisibleText(msg.parts))
+  const summary = messages[boundaryIndex + 1]
+  if (!summary || summary.info.role !== "assistant" || !hasVisibleText(summary.parts)) return false
+  return summary.info.summary === true || summary.info.mode === "compaction"
 }
 
 function describeBoundaryFallback(boundary: NonNullable<ContinuationContext["boundary"]>) {
   return `${boundary.kind}: ${boundary.reason ?? "invalid continuation boundary"}`
+}
+
+function compactionContext(
+  messages: WithParts[],
+  boundaryIndex: number,
+  boundary: WithParts,
+): { messages?: WithParts[]; reason?: string } {
+  const part = boundary.parts.find((item): item is CompactionPart => item.type === "compaction")
+  if (!part?.tail_start_id) return { messages: messages.slice(boundaryIndex) }
+  const tailStart = messages.findIndex((item) => item.info.id === part.tail_start_id)
+  if (tailStart < 0) return { reason: "tail start not found" }
+  if (tailStart >= boundaryIndex) return { reason: "tail does not precede compaction boundary" }
+
+  const tail = messages[tailStart]
+  if (tail.info.role !== "user") return { reason: "tail start is not a user message" }
+  if (tail.info.sessionID !== boundary.info.sessionID) return { reason: "tail belongs to another session" }
+  if ((tail.info.agentID ?? "main") !== (boundary.info.agentID ?? "main")) {
+    return { reason: "tail belongs to another actor" }
+  }
+
+  const summaryIndex = boundaryIndex + 1
+  const summary = messages[summaryIndex]
+  if (!summary || summary.info.role !== "assistant" || !hasVisibleText(summary.parts)) {
+    return { reason: "missing summary assistant after compaction boundary" }
+  }
+  if (summary.info.summary !== true && summary.info.mode !== "compaction") {
+    return { reason: "summary assistant is not attached to compaction boundary" }
+  }
+  return {
+    messages: [
+      ...messages.slice(boundaryIndex, summaryIndex + 1),
+      ...messages.slice(tailStart, boundaryIndex),
+      ...messages.slice(summaryIndex + 1),
+    ],
+  }
 }
 
 export function selectContinuationMessages(messages: WithParts[]): ContinuationContext {
@@ -1185,7 +1404,7 @@ export function selectContinuationMessages(messages: WithParts[]): ContinuationC
     if (msg.info.role !== "user") continue
 
     if (msg.parts.some((part) => part.type === "checkpoint")) {
-      if (!hasCheckpointBody(msg)) {
+      if (!hasCheckpointBody(msg) || !checkpointCoverageIsValid(ordered, msg)) {
         log.info("continuation_boundary_invalid", {
           sessionID: msg.info.sessionID,
           messageID: msg.info.id,
@@ -1229,8 +1448,24 @@ export function selectContinuationMessages(messages: WithParts[]): ContinuationC
         }
         continue
       }
+      const context = compactionContext(ordered, i, msg)
+      if (!context.messages) {
+        log.info("continuation_boundary_invalid", {
+          sessionID: msg.info.sessionID,
+          messageID: msg.info.id,
+          kind: "compaction",
+          reason: context.reason,
+        })
+        latestInvalidBoundary ??= {
+          messageID: msg.info.id,
+          kind: "compaction",
+          valid: false,
+          reason: context.reason,
+        }
+        continue
+      }
       return {
-        messages: ordered.slice(i),
+        messages: context.messages,
         source: "compaction",
         fallbackReason: latestInvalidBoundary ? describeBoundaryFallback(latestInvalidBoundary) : undefined,
         boundary: {
@@ -1293,6 +1528,19 @@ export const loadContinuationContextEffect = Effect.fnUntraced(function* (
     parent: parentContext,
   }
 })
+
+function isLegacyAutomaticRecallReminder(message: WithParts) {
+  if (message.info.role !== "user") return false
+  const text = message.parts
+    .filter((part): part is TextPart => part.type === "text" && part.synthetic === true)
+    .map((part) => part.text)
+    .join("\n")
+  return (
+    text.includes("This session may already have recorded state.") &&
+    text.includes("Before asking the user to repeat prior context") &&
+    text.includes("<system-reminder>")
+  )
+}
 
 export const filterCompactedEffect = Effect.fnUntraced(function* (
   sessionID: SessionID,

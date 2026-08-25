@@ -99,6 +99,13 @@
       /*   color: var(--icon-active); */
       /* } */
     }
+    &[aria-expanded="true"] {
+      background-color: var(--surface-base-active);
+
+      [data-slot="icon-svg"] {
+        color: var(--icon-strong-base);
+      }
+    }
     &:selected:not(:disabled) {
       background-color: var(--surface-base-active);
       /* [data-slot="icon-svg"] { */

@@ -18,7 +18,9 @@ export type BrowserOpenRequestDetail = {
   url?: string
   sessionKey?: string
   sessionID?: string
+  title?: string
   reason?: "human" | "tool"
+  presentation?: "headless" | "detached" | "sidebar"
   requestID?: string
 }
 
@@ -110,7 +112,6 @@ export const createSessionTabs = (input: TabsInput) => {
   const hasReview = input.hasReview ?? (() => false)
   const detachedTabs = input.detachedTabs ?? (() => emptyTabs)
   const forcedTab = input.forcedTab ?? (() => undefined)
-  const contextOpen = createMemo(() => input.tabs().active() === "context" || input.tabs().all().includes("context"))
   const openedTabs = createMemo(
     () => {
       const seen = new Set<string>()
@@ -119,7 +120,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .all()
         .flatMap((tab) => {
           if (detachedTabs().includes(tab)) return []
-          if (tab === "context" || tab === "review") return []
+          if (tab === "review") return []
           if (isBrowserTab(tab) || isSideChatTab(tab)) return seen.has(tab) ? [] : (seen.add(tab), [tab])
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
@@ -137,18 +138,15 @@ export const createSessionTabs = (input: TabsInput) => {
     if (detachedTabs().includes(active ?? "")) {
       const first = openedTabs()[0]
       if (first) return first
-      if (contextOpen()) return "context"
       if (review() && hasReview()) return "review"
       return "empty"
     }
-    if (active === "context") return active
     if (active === "review" && review()) return active
     if (active && (isBrowserTab(active) || isSideChatTab(active))) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
     const first = openedTabs()[0]
     if (first) return first
-    if (contextOpen()) return "context"
     if (review() && hasReview()) return "review"
     return "empty"
   })
@@ -160,14 +158,12 @@ export const createSessionTabs = (input: TabsInput) => {
   })
   const closableTab = createMemo(() => {
     const active = activeTab()
-    if (active === "context") return active
     if (isBrowserTab(active) || isSideChatTab(active)) return active
     if (!openedTabs().includes(active)) return
     return active
   })
 
   return {
-    contextOpen,
     openedTabs,
     activeTab,
     activeFileTab,

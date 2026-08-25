@@ -255,7 +255,15 @@ export type DesktopBrowserAutomationWaitResult = {
 
 export interface DesktopBrowserAutomationBridge {
   getTarget(input: { sessionKey: string }): DesktopBrowserAutomationTarget | undefined
-  navigate(input: { sessionKey: string; sessionID?: string; url: string }): Promise<DesktopBrowserAutomationTarget>
+  navigate(
+    input: {
+      sessionKey: string
+      sessionID?: string
+      url: string
+      title?: string
+      presentation?: "headless" | "detached" | "sidebar"
+    },
+  ): Promise<DesktopBrowserAutomationTarget>
   snapshot(input: { sessionKey: string }): Promise<DesktopBrowserAutomationSnapshot>
   screenshot(input: { sessionKey: string }): Promise<DesktopBrowserAutomationScreenshot>
   readPage(input: { sessionKey: string }): Promise<DesktopBrowserAutomationPage>
@@ -294,7 +302,13 @@ export interface DesktopBrowserAutomationBridge {
       amount?: number
     },
   ): Promise<DesktopBrowserAutomationTarget>
+  /**
+   * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than simulating pointer input.
+   */
   hover(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
+  /**
+   * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than moving focus.
+   */
   focus(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
   clear(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
   selectOption(
@@ -303,6 +317,9 @@ export interface DesktopBrowserAutomationBridge {
   uploadFile(
     input: { sessionKey: string; ref?: string; selector?: string; files: string[] },
   ): Promise<DesktopBrowserAutomationTarget>
+  /**
+   * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than injecting key events.
+   */
   pressKey(input: { sessionKey: string; key: string }): Promise<DesktopBrowserAutomationTarget>
   back(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget>
   forward(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget>

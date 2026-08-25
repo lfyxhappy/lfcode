@@ -1,7 +1,6 @@
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect"
 import { EffectBridge } from "@/effect"
-import { Flag } from "@/flag/flag"
 import type { InstanceContext } from "@/project/instance"
 import { SessionID, MessageID } from "@/session/schema"
 import { Effect, Layer, Context } from "effect"
@@ -48,6 +47,45 @@ export const Info = z
 // for some reason zod is inferring `string` for z.promise(z.string()).or(z.string()) so we have to manually override it
 export type Info = Omit<z.infer<typeof Info>, "template"> & { template: Promise<string> | string }
 
+/**
+ * Public command discovery is metadata-only. Command templates may include
+ * arbitrary local instructions, and must never be serialized by `/command`.
+ */
+export const PublicInfo = Info.omit({ template: true })
+export type PublicInfo = z.infer<typeof PublicInfo>
+
+export function publicInfo(info: Info): PublicInfo {
+  return {
+    name: info.name,
+    ...(info.description ? { description: info.description } : {}),
+    ...(info.agent ? { agent: info.agent } : {}),
+    ...(info.model ? { model: info.model } : {}),
+    ...(info.source ? { source: info.source } : {}),
+    ...(info.subtask !== undefined ? { subtask: info.subtask } : {}),
+    hints: info.hints,
+  }
+}
+
+/**
+ * `/command` is global and has no session or temporary permission scope.
+ * Skill slash commands must therefore stay out of this response: advertising
+ * them here could disclose a Skill that the next session-local load denies.
+ */
+export function publicList(commands: Info[]) {
+  return commands.filter((command) => command.source !== "skill").map(publicInfo)
+}
+
+/**
+ * Session command lookup has no permission-aware command catalog. Never use
+ * the global slash-Skill list as an "unknown command" hint: doing so would
+ * disclose Skill names that may be denied by the current session rules.
+ * Explicit Skill discovery remains available through the permission-filtered
+ * `skill` tool and the request-local Skill catalog.
+ */
+export function unknownCommandHints(commands: Info[]) {
+  return commands.filter((command) => command.source !== "skill").map((command) => command.name)
+}
+
 export function hints(template: string) {
   const result: string[] = []
   const numbered = template.match(/\$\d+/g)
@@ -67,30 +105,28 @@ export const Default = {
   DEEP_RESEARCH: "deep-research",
 } as const
 
-export function deepResearchTemplate(): string {
-  return [
-    "The user wants a deep, multi-source, fact-checked research report.",
-    "",
-    "Research request:",
-    "$ARGUMENTS",
-    "",
-    "If the request is underspecified (missing scope, constraints, region, time range, etc.),",
-    "ask 2-3 brief clarifying questions FIRST, then weave the answers into a refined question.",
-    "",
-    "When the request is specific enough, run the built-in deep-research workflow:",
-    '  workflow({ operation: "run", name: "deep-research", args: "<the refined research question>" })',
-    "",
-    "Pass the full refined question as `args`. The workflow fans out web searches, fetches sources,",
-    "adversarially verifies claims, and returns a cited report; relay its result to the user.",
-  ].join("\n")
-}
-
 export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
   readonly list: () => Effect.Effect<Info[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/Command") {}
+
+function skillCommand(item: Skill.Info): Info {
+  return {
+    name: item.name,
+    description: item.description,
+    ...(item.name === Default.DEEP_RESEARCH ? { agent: "deep-research-coordinator", subtask: true } : {}),
+    source: "skill",
+    // This value is deliberately resolved from the current Skill state rather
+    // than retained in Command state. A create/update/delete followed by
+    // Skill.refresh() must take effect for the next slash command immediately.
+    get template() {
+      return item.content
+    },
+    hints: [],
+  }
+}
 
 export const layer = Layer.effect(
   Service,
@@ -175,20 +211,6 @@ export const layer = Layer.effect(
         },
         hints: ["$ARGUMENTS"],
       }
-
-      if (Flag.LFCODE_EXPERIMENTAL_WORKFLOW_TOOL) {
-        commands[Default.DEEP_RESEARCH] = {
-          name: Default.DEEP_RESEARCH,
-          description: "deep multi-source, fact-checked research report (runs the deep-research workflow)",
-          source: "command",
-          subtask: false,
-          get template() {
-            return deepResearchTemplate()
-          },
-          hints: ["$ARGUMENTS"],
-        }
-      }
-
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
         commands[name] = {
           name,
@@ -233,19 +255,6 @@ export const layer = Layer.effect(
         }
       }
 
-      for (const item of yield* skill.all()) {
-        if (commands[item.name]) continue
-        commands[item.name] = {
-          name: item.name,
-          description: item.description,
-          source: "skill",
-          get template() {
-            return item.content
-          },
-          hints: [],
-        }
-      }
-
       return {
         commands,
       }
@@ -255,12 +264,18 @@ export const layer = Layer.effect(
 
     const get = Effect.fn("Command.get")(function* (name: string) {
       const s = yield* InstanceState.get(state)
-      return s.commands[name]
+      const command = s.commands[name]
+      if (command) return command
+      const item = yield* skill.get(name)
+      return item ? skillCommand(item) : undefined
     })
 
     const list = Effect.fn("Command.list")(function* () {
       const s = yield* InstanceState.get(state)
-      return Object.values(s.commands)
+      const configured = Object.values(s.commands)
+      const names = new Set(configured.map((command) => command.name))
+      const skills = (yield* skill.all()).filter((item) => !names.has(item.name)).map(skillCommand)
+      return [...configured, ...skills]
     })
 
     return Service.of({ get, list })

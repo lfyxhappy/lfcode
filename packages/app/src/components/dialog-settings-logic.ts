@@ -2,15 +2,19 @@ export type SettingsTab =
   | "general"
   | "editor"
   | "personalization"
-  | "maintenance"
   | "appControl"
+  | "lanAccess"
   | "shortcuts"
   | "browser"
+  | "research"
+  | "automation"
   | "archives"
   | "models"
   | "mcp"
   | "plugins"
   | "skills"
+  | "agents"
+  | "hooks"
   | "usage"
   | "agentOS"
 
@@ -26,5 +30,5 @@ export function shouldMountSettingsPanel(input: {
   selected: SettingsTab
   visited: Set<SettingsTab>
 }) {
-  return input.tab === "general" || input.tab === "shortcuts" || input.visited.has(input.tab) || input.selected === input.tab
+  return input.visited.has(input.tab) || input.selected === input.tab
 }

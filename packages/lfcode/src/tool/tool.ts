@@ -17,7 +17,6 @@ export type Kind =
   | "automation"
   | "task"
   | "memory"
-  | "workflow"
   | "agent"
   | "system"
   | "custom"
@@ -69,21 +68,21 @@ export function defaultMetadata(id: string): DefinitionMetadata {
   if (["apply_patch", "replace_range", "symbol_edit", "write", "edit"].includes(id)) {
     return { kind: "file", namespace: "file", readOnly: false, recovery: "reread", latencyClass: "io" }
   }
-  if (["shell", "bash", "python", "pip", "cpp", "runtime_manage", "background_job"].includes(id)) {
+  if (["shell", "bash", "python", "pip", "cpp", "runtime_manage", "shell_process"].includes(id)) {
     return {
       kind: "execution",
       namespace: "runtime",
       readOnly: false,
       recovery: "retry",
-      latencyClass: id === "background_job" ? "long" : "io",
+      latencyClass: id === "shell_process" ? "long" : "io",
     }
   }
-  if (["credential_manage", "provider_manage", "mcp_manage", "skill_manage", "plugin_manage", "capability_manage"].includes(id)) {
+  if (["credential_manage", "provider_manage", "mcp_manage", "skill_manage", "hook_manage", "plugin_manage", "capability_manage"].includes(id)) {
     return { kind: "system", namespace: "agent-os", readOnly: false, recovery: "user", latencyClass: "io" }
   }
-  if (["task", "goal", "create_goal", "get_goal", "update_goal", "workflow"].includes(id)) {
+  if (["task", "goal", "create_goal", "get_goal", "update_goal"].includes(id)) {
     return {
-      kind: id === "workflow" ? "workflow" : "task",
+      kind: "task",
       namespace: "planning",
       readOnly: id === "get_goal",
       recovery: "retry",
@@ -168,12 +167,79 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
   attachments?: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[]
 }
 
+export type ToolExecutionContext = {
+  toolID: string
+  callID?: string
+  sessionID: SessionID
+  messageID: MessageID
+  parentCallID?: string
+  startedAt: number
+}
+
+export type ToolExecutionOutcome<M extends Metadata = Metadata> =
+  | { type: "success"; result: ExecuteResult<M>; durationMs: number }
+  | { type: "denied"; reason: string; durationMs: number }
+  | { type: "failure"; category: ValidationErrorCategory; error: string; durationMs: number }
+
+export type ToolPreExecuteHook = (input: ToolExecutionContext & { args: unknown }) => void | { args?: unknown; deny?: string }
+export type ToolExecutionGuard = (input: ToolExecutionContext & { args: unknown }) => string | undefined
+export type ToolExecuteWrapper = (
+  input: ToolExecutionContext & { args: unknown; signal: AbortSignal },
+  next: () => Effect.Effect<ExecuteResult>,
+) => Effect.Effect<ExecuteResult>
+export type ToolPostExecuteHook = (input: ToolExecutionContext & { args: unknown; result: ExecuteResult }) => void | ExecuteResult
+export type ToolResultObserver = (input: ToolExecutionContext & { outcome: ToolExecutionOutcome }) => void
+
+const preExecuteHooks = new Set<ToolPreExecuteHook>()
+const executionGuards = new Set<ToolExecutionGuard>()
+const executeWrappers = new Set<ToolExecuteWrapper>()
+const postExecuteHooks = new Set<ToolPostExecuteHook>()
+const resultObservers = new Set<ToolResultObserver>()
+
+export function registerPreExecuteHook(hook: ToolPreExecuteHook) {
+  preExecuteHooks.add(hook)
+  return () => preExecuteHooks.delete(hook)
+}
+
+export function registerExecutionGuard(guard: ToolExecutionGuard) {
+  executionGuards.add(guard)
+  return () => executionGuards.delete(guard)
+}
+
+export function registerExecuteWrapper(wrapper: ToolExecuteWrapper) {
+  executeWrappers.add(wrapper)
+  return () => executeWrappers.delete(wrapper)
+}
+
+export function registerPostExecuteHook(hook: ToolPostExecuteHook) {
+  postExecuteHooks.add(hook)
+  return () => postExecuteHooks.delete(hook)
+}
+
+export function registerResultObserver(observer: ToolResultObserver) {
+  resultObservers.add(observer)
+  return () => resultObservers.delete(observer)
+}
+
+function observe(execution: ToolExecutionContext, outcome: ToolExecutionOutcome) {
+  for (const observer of resultObservers) {
+    try {
+      observer({ ...execution, outcome })
+    } catch {
+      // Result observers are read-only telemetry and may not change settlement.
+    }
+  }
+}
+
 export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
   id: string
   description: string
   parameters: Parameters
   metadata?: DefinitionMetadata
+  /** Skill that must be loaded in the active session before this extension tool is exposed. */
+  activationSkill?: string
   execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
+  finalizeContent?(result: ExecuteResult<M>, execution: ToolExecutionContext): ExecuteResult<M>
   formatValidationError?(error: z.ZodError): string
   shell?: {
     description: string
@@ -228,38 +294,105 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
           "message.id": ctx.messageID,
           ...(ctx.callID ? { "tool.call_id": ctx.callID } : {}),
         }
-        return Effect.gen(function* () {
-          const parsedArgs = yield* Effect.try({
-            try: () => toolInfo.parameters.parse(args),
-            catch: (error) => {
-              if (error instanceof z.ZodError && toolInfo.formatValidationError) {
-                return new Error(toolInfo.formatValidationError(error), { cause: error })
-              }
-              if (error instanceof z.ZodError) {
-                return new Error(formatValidationError({ tool: id, error }), { cause: error })
-              }
-              return new Error(
-                `The ${id} tool was called with invalid arguments: ${error}.\nPlease rewrite the input so it satisfies the expected schema.`,
-                { cause: error },
-              )
-            },
-          })
-          const result = yield* execute(parsedArgs, ctx)
-          if (result.metadata.truncated !== undefined) {
-            return result
+        const execution: ToolExecutionContext = {
+          toolID: id,
+          ...(ctx.callID ? { callID: ctx.callID } : {}),
+          sessionID: ctx.sessionID,
+          messageID: ctx.messageID,
+          ...(typeof ctx.extra?.parentCallID === "string" ? { parentCallID: ctx.extra.parentCallID } : {}),
+          startedAt: Date.now(),
+        }
+        let denial: string | undefined
+        const pipeline = Effect.gen(function* () {
+          const parsedArgs =
+            ctx.extra?.internalSubtask === true
+              ? (args as z.infer<typeof toolInfo.parameters>)
+              : yield* Effect.try({
+                  try: () => toolInfo.parameters.parse(args),
+                  catch: (error) => {
+                    if (error instanceof z.ZodError && toolInfo.formatValidationError) {
+                      return new Error(toolInfo.formatValidationError(error), { cause: error })
+                    }
+                    if (error instanceof z.ZodError) {
+                      return new Error(formatValidationError({ tool: id, error }), { cause: error })
+                    }
+                    return new Error(
+                      `The ${id} tool was called with invalid arguments: ${error}.\nPlease rewrite the input so it satisfies the expected schema.`,
+                      { cause: error },
+                    )
+                  },
+                })
+          let nextArgs: unknown = parsedArgs
+          for (const hook of preExecuteHooks) {
+            const change = hook({ ...execution, args: nextArgs })
+            if (change?.deny) {
+              denial = change.deny
+              return { title: "Tool execution denied", output: change.deny, metadata: {} as Result }
+            }
+            if (change?.args !== undefined) nextArgs = change.args
+          }
+          for (const guard of executionGuards) {
+            const reason = guard({ ...execution, args: nextArgs })
+            if (!reason) continue
+            denial = reason
+            return { title: "Tool execution denied", output: reason, metadata: {} as Result }
+          }
+          const invoke = [...executeWrappers]
+            .toReversed()
+            .reduce<() => Effect.Effect<ExecuteResult>>(
+              (next, wrapper) => () => wrapper({ ...execution, args: nextArgs, signal: ctx.abort }, next),
+              () => execute(nextArgs as z.infer<typeof toolInfo.parameters>, ctx) as Effect.Effect<ExecuteResult>,
+            )
+          const result = yield* invoke()
+          const post = [...postExecuteHooks].reduce(
+            (current, hook) => hook({ ...execution, args: nextArgs, result: current }) ?? current,
+            result as ExecuteResult,
+          )
+          const finalized = (toolInfo.finalizeContent
+            ? toolInfo.finalizeContent(post as ExecuteResult<Result>, execution)
+            : post) as ExecuteResult<Result>
+          if (typeof finalized.title !== "string" || typeof finalized.output !== "string" || !finalized.metadata) {
+            throw new Error("Tool finalizer must return canonical title, output, and metadata")
+          }
+          if (finalized.metadata.truncated !== undefined) {
+            return finalized
           }
           const agent = yield* agents.get(ctx.agent)
-          const truncated = yield* truncate.output(result.output, {}, agent)
+          const truncated = yield* truncate.output(finalized.output, {}, agent)
           return {
-            ...result,
+            ...finalized,
             output: truncated.content,
             metadata: {
-              ...result.metadata,
+              ...finalized.metadata,
               truncated: truncated.truncated,
               ...(truncated.truncated && { outputRef: truncated.outputRef }),
             },
           }
-        }).pipe(Effect.orDie, Effect.withSpan("Tool.execute", { attributes: attrs }))
+        })
+        return pipeline.pipe(
+          Effect.tap((result) =>
+            Effect.sync(() =>
+              observe(
+                execution,
+                denial
+                  ? { type: "denied", reason: denial, durationMs: Date.now() - execution.startedAt }
+                  : { type: "success", result, durationMs: Date.now() - execution.startedAt },
+              ),
+            ),
+          ),
+          Effect.tapError((error) =>
+            Effect.sync(() =>
+              observe(execution, {
+                type: "failure",
+                category: classifyValidationError(error),
+                error: error instanceof Error ? error.message : String(error),
+                durationMs: Date.now() - execution.startedAt,
+              }),
+            ),
+          ),
+          Effect.orDie,
+          Effect.withSpan("Tool.execute", { attributes: attrs }),
+        )
       }
       return toolInfo
     })

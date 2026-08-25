@@ -6,7 +6,6 @@ import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
 import { Tooltip, TooltipKeybind } from "@lfcode-ai/ui/tooltip"
 import { createSignal, For, Show, type Component, type JSX } from "solid-js"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
-import { SessionContextUsage } from "@/components/session-context-usage"
 import { PromptMoreMenu } from "./more-menu"
 
 type ModelBinding = Parameters<typeof ModelSelectorPopover>[0]["model"]
@@ -43,6 +42,12 @@ export const PromptControlStrip: Component<{
   moreDisabled: boolean
   moreTabIndex?: number
   moreLabel: string
+  scheduleAutomationLabel: string
+  scheduleAutomationDisabled: boolean
+  onScheduleAutomation: VoidFunction
+  subagentDispatchLabel: string
+  subagentDispatchDisabled: boolean
+  onSubagentDispatch: VoidFunction
   onSubmit: VoidFunction
   hasGoal: boolean
   goalPaused: boolean
@@ -115,6 +120,12 @@ export const PromptControlStrip: Component<{
             disabled={props.moreDisabled}
             tabIndex={props.moreTabIndex}
             moreLabel={props.moreLabel}
+            scheduleAutomationLabel={props.scheduleAutomationLabel}
+            scheduleAutomationDisabled={props.scheduleAutomationDisabled}
+            onScheduleAutomation={props.onScheduleAutomation}
+            subagentDispatchLabel={props.subagentDispatchLabel}
+            subagentDispatchDisabled={props.subagentDispatchDisabled}
+            onSubagentDispatch={props.onSubagentDispatch}
             hasGoal={props.hasGoal}
             goalPaused={props.goalPaused}
             features={props.features}
@@ -127,7 +138,6 @@ export const PromptControlStrip: Component<{
       </div>
     </div>
     <div class="flex items-center gap-1.5 shrink-0">
-      <SessionContextUsage placement="top" />
       <Show when={!props.providersLoading && !props.shellMode}>
         <div data-component="prompt-model-summary-control" style={{ animation: "fade-in 0.3s" }}>
           <Show

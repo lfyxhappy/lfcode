@@ -1,6 +1,9 @@
 import { Glob } from "@lfcode-ai/shared/util/glob"
+import { readLfcodePluginManifest } from "@lfcode-ai/plugin"
 import { Schema } from "effect"
+import { readFile } from "node:fs/promises"
 import { pathToFileURL } from "url"
+import { PluginPath } from "@/plugin/path"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"
 import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
@@ -30,6 +33,27 @@ export type Origin = {
 export async function load(dir: string) {
   const plugins: Spec[] = []
 
+  if (PluginPath.isProfileRoot(dir)) await PluginPath.migrateLegacyPlugins()
+
+  for (const item of await Glob.scan("{plugin,plugins}/*/package.json", {
+    cwd: dir,
+    absolute: true,
+    dot: true,
+    symlink: true,
+  })) {
+    const json = JSON.parse(await readFile(item, "utf8")) as { lfcode?: unknown }
+    const manifest = readLfcodePluginManifest(json.lfcode, item)
+    const root = path.dirname(item)
+    const id = path.basename(root)
+    if (!manifest?.id) throw new TypeError(`Local plugin ${root} must declare lfcode.id`)
+    if (manifest.id !== id) throw new TypeError(`Local plugin ${root} must use folder name ${manifest.id}`)
+    if (!manifest.entrypoints.location) {
+      if (manifest.entrypoints.tui || manifest.activation === "model" || manifest.category === "runtime") continue
+      throw new TypeError(`Local plugin ${root} must declare an lfcode entrypoint`)
+    }
+    plugins.push(pathToFileURL(root).href)
+  }
+
   for (const item of await Glob.scan("{plugin,plugins}/*.{ts,js}", {
     cwd: dir,
     absolute: true,
@@ -38,7 +62,7 @@ export async function load(dir: string) {
   })) {
     plugins.push(pathToFileURL(item).href)
   }
-  return plugins
+  return Array.from(new Set(plugins))
 }
 
 export function pluginSpecifier(plugin: Spec): string {

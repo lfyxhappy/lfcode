@@ -27,6 +27,7 @@ import { sessionTitle } from "@/utils/session-title"
 import { sessionPermissionRequest } from "../session/composer/session-request-tree"
 import { childSessionOnPath, hasProjectPermissions, isSidebarSessionSelected } from "./helpers"
 import { buildSessionMenuActions, sessionDeeplink } from "./menu-actions"
+import type { RenameTriggerComponent } from "./inline-editor"
 
 const LFCODE_PROJECT_ID = "4b0ea68d7af9a6031a7ffda7ad66e0cb83315750"
 
@@ -91,25 +92,14 @@ export type SessionItemProps = {
   sidebarExpanded: Accessor<boolean>
   sidebarHovering: Accessor<boolean>
   clearHoverProjectSoon: () => void
+  onSelect?: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
   renameSession: (session: Session, next: string) => Promise<void>
   archiveSession: (session: Session) => Promise<void>
   showDeleteSessionDialog: (session: Session) => void
-  editorOpen: (id: string) => boolean
-  openEditor: (id: string, value: string) => void
-  InlineEditor: InlineEditorComponent
+  openEditor: (id: string, value: string, onSave: (next: string) => void | Promise<void>) => void
+  RenameTrigger: RenameTriggerComponent
 }
-
-export type InlineEditorComponent = (props: {
-  id: string
-  value: Accessor<string>
-  onSave: (next: string) => void
-  class?: string
-  displayClass?: string
-  editing?: boolean
-  stopPropagation?: boolean
-  openOnDblClick?: boolean
-}) => JSX.Element
 
 const SessionRow = (props: {
   session: Session
@@ -122,10 +112,13 @@ const SessionRow = (props: {
   hasError: Accessor<boolean>
   unseenCount: Accessor<number>
   clearHoverProjectSoon: () => void
+  onSelect?: () => void
   sidebarOpened: Accessor<boolean>
   titleValue: Accessor<string>
-  editing: Accessor<boolean>
-  InlineEditor: InlineEditorComponent
+  temporary: boolean
+  temporaryLabel: string
+  temporaryTooltip: string
+  RenameTrigger: RenameTriggerComponent
   renameSession: (session: Session, next: string) => Promise<void>
   warmPress: () => void
   warmFocus: () => void
@@ -139,6 +132,7 @@ const SessionRow = (props: {
       onFocus={props.warmFocus}
       onPointerEnter={props.warmHover}
       onClick={() => {
+        props.onSelect?.()
         if (props.sidebarOpened()) return
         props.clearHoverProjectSoon()
       }}
@@ -164,15 +158,22 @@ const SessionRow = (props: {
           </Switch>
         </div>
       </Show>
-      <props.InlineEditor
+      <props.RenameTrigger
         id={`session:${props.session.id}`}
         value={props.titleValue}
-        onSave={(next) => void props.renameSession(props.session, next)}
+        onSave={(next) => props.renameSession(props.session, next)}
         class="text-14-regular text-text-strong min-w-0 flex-1 truncate"
         displayClass="text-14-regular text-text-strong min-w-0 flex-1 truncate"
-        editing={props.editing()}
         stopPropagation
       />
+      <Show when={props.temporary}>
+        <span
+          class="shrink-0 rounded bg-surface-warning-strong/15 px-1 text-11-medium text-text-weak"
+          title={props.temporaryTooltip}
+        >
+          {props.temporaryLabel}
+        </span>
+      </Show>
     </A>
   )
 }
@@ -216,11 +217,11 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   })
   const selected = createMemo(() => isSidebarSessionSelected(props.session.id, params.id))
   const editorID = createMemo(() => `session:${props.session.id}`)
-  const editing = createMemo(() => props.editorOpen(editorID()))
   const pinned = createMemo(() => layout.sessions.isPinned(props.session.directory, props.session.id))
   const canOpenInExplorer = createMemo(() => platform.platform === "desktop" && !!platform.openPath && server.isLocal() === true)
   const canCopyDeeplink = createMemo(() => server.isLocal() === true)
   const titleValue = createMemo(() => sessionTitle(props.session.title) ?? "")
+  const temporary = createMemo(() => "temporary" in props.session && props.session.temporary === true)
   const [menu, setMenu] = createStore({
     open: false,
     context: false,
@@ -303,10 +304,13 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       hasError={hasError}
       unseenCount={unseenCount}
       clearHoverProjectSoon={props.clearHoverProjectSoon}
+      onSelect={props.onSelect}
       sidebarOpened={layout.sidebar.opened}
       titleValue={titleValue}
-      editing={editing}
-      InlineEditor={props.InlineEditor}
+      temporary={temporary()}
+      temporaryLabel={language.t("session.temporary")}
+      temporaryTooltip={language.t("session.temporary.tooltip")}
+      RenameTrigger={props.RenameTrigger}
       renameSession={props.renameSession}
       warmPress={() => warm(1, "high")}
       warmFocus={() => props.prefetchSession(props.session, "high")}
@@ -321,7 +325,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
           <div
             data-session-id={props.session.id}
             data-component="sidebar-session-item"
-            class="group/session relative w-full min-w-0 rounded-md cursor-default pr-3 transition-colors duration-[var(--motion-micro-ms)] ease-[var(--motion-ease-out)] has-[.active]:bg-surface-base-active"
+            class="group/session relative w-full min-w-0 rounded-lg cursor-default pr-3 transition-colors duration-[var(--motion-micro-ms)] ease-[var(--motion-ease-out)] has-[.active]:bg-surface-base-active"
             classList={{
               "bg-surface-base-active shadow-xs-border-base": selected(),
               "bg-surface-raised-base-hover": !selected() && (menu.open || menu.context),
@@ -333,7 +337,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             <div class="flex min-w-0 items-center gap-1">
               <div class="min-w-0 flex-1">
                 <Show
-                  when={!tooltip() || editing()}
+                  when={!tooltip()}
                   fallback={
                     <Tooltip
                       placement={props.mobile ? "bottom" : "right"}
@@ -375,7 +379,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
                         if (!menu.pendingRename) return
                         event.preventDefault()
                         setMenu("pendingRename", false)
-                        props.openEditor(editorID(), titleValue())
+                        props.openEditor(editorID(), titleValue(), (next) => props.renameSession(props.session, next))
                       }}
                     >
                       <For each={menuActions()}>
@@ -402,7 +406,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
               if (!menu.pendingRename) return
               event.preventDefault()
               setMenu("pendingRename", false)
-              props.openEditor(editorID(), titleValue())
+              props.openEditor(editorID(), titleValue(), (next) => props.renameSession(props.session, next))
             }}
           >
             <For each={menuActions()}>
@@ -436,6 +440,7 @@ export const NewSessionItem = (props: {
   dense?: boolean
   sidebarExpanded: Accessor<boolean>
   clearHoverProjectSoon: () => void
+  onSelect?: () => void
 }): JSX.Element => {
   const layout = useLayout()
   const language = useLanguage()
@@ -447,6 +452,7 @@ export const NewSessionItem = (props: {
       end
       class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
       onClick={() => {
+        props.onSelect?.()
         if (layout.sidebar.opened()) return
         props.clearHoverProjectSoon()
       }}

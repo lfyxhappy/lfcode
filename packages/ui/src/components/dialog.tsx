@@ -7,6 +7,7 @@ export interface DialogProps extends ParentProps {
   title?: JSXElement
   description?: JSXElement
   action?: JSXElement
+  dataAction?: string
   size?: "normal" | "large" | "x-large"
   class?: ComponentProps<"div">["class"]
   classList?: ComponentProps<"div">["classList"]
@@ -19,6 +20,7 @@ export function Dialog(props: DialogProps) {
   return (
     <div
       data-component="dialog"
+      data-action={props.dataAction}
       data-fit={props.fit ? true : undefined}
       data-size={props.size || "normal"}
       data-transition={props.transition ? true : undefined}

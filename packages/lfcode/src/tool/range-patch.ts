@@ -6,6 +6,21 @@ export type RangeEdit = {
   newText: string
 }
 
+export class RangeValidationError extends Error {
+  constructor(
+    message: string,
+    readonly detail: {
+      field: "startChar" | "endChar"
+      line: number
+      lineLength: number
+      maxEndChar: number
+    },
+  ) {
+    super(message)
+    this.name = "RangeValidationError"
+  }
+}
+
 export function buildRangePatchText(filePath: string, content: string, params: RangeEdit) {
   const normalizedContent = normalizeLineEndings(content)
   const normalizedLines = getVisibleLines(normalizedContent)
@@ -83,8 +98,15 @@ function getVisibleLines(content: string) {
   return lines
 }
 
-function validateCharacter(label: string, value: number, max: number, line: number) {
-  if (value > max) throw new Error(`${label} ${value} exceeds line ${line} length ${max - 1}`)
+function validateCharacter(label: "startChar" | "endChar", value: number, max: number, line: number) {
+  if (value > max) {
+    throw new RangeValidationError(`${label} ${value} exceeds line ${line} length ${max - 1}`, {
+      field: label,
+      line,
+      lineLength: max - 1,
+      maxEndChar: max,
+    })
+  }
 }
 
 function toPatchLine(line: string, lineEnding: "\n" | "\r\n") {

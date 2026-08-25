@@ -6,7 +6,6 @@ const skill = (input: Partial<LocalSkillItem> & { name: string; location: string
   description: input.description ?? "",
   location: input.location,
   content: input.content ?? "",
-  hidden: input.hidden,
   directory: input.directory,
 })
 

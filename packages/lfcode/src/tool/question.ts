@@ -44,6 +44,9 @@ export const QuestionTool = Tool.define<typeof parameters, Metadata, Question.Se
             }
           }
 
+          const onQuestionRequest = ctx.extra?.onQuestionRequest
+          if (typeof onQuestionRequest === "function") onQuestionRequest()
+
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
             questions: params.questions,

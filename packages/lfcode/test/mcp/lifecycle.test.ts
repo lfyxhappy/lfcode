@@ -189,7 +189,7 @@ beforeEach(() => {
 })
 
 // Import after mocks
-const { MCP } = await import("../../src/mcp/index")
+const { MCP, resolveCodegraphInitCommand } = await import("../../src/mcp/index")
 const { Instance } = await import("../../src/project/instance")
 const { Global } = await import("../../src/global")
 const { tmpdir } = await import("../fixture/fixture")
@@ -293,6 +293,84 @@ test("Claude Code local MCP server is pending until explicitly connected", async
     },
   })
 })
+
+test(
+  "CodeGraph stays lazy until a structured tool request and exposes its explorer directly",
+  withInstance(
+    {
+      codegraph: {
+        type: "local",
+        command: ["echo", "codegraph"],
+        enabled: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "codegraph"
+        const serverState = getOrCreateClientState("codegraph")
+        serverState.tools = [{ name: "explore", description: "Explore the code graph", inputSchema: { type: "object", properties: {} } }]
+
+        expect((yield* mcp.status()).codegraph).toEqual({ status: "pending" })
+        const countBeforeCodegraph = clientCreateCount
+        expect(Object.keys(yield* mcp.tools())).not.toContain("codegraph_explore")
+        expect(clientCreateCount).toBe(countBeforeCodegraph)
+
+        const tools = yield* mcp.tools({ codegraph: "auto" })
+        expect(Object.keys(tools)).toContain("codegraph_explore")
+        expect(clientCreateCount).toBe(countBeforeCodegraph + 1)
+      }),
+  ),
+)
+
+test("CodeGraph Node launcher initializes through node.exe and its JavaScript entry", () => {
+  expect(
+    resolveCodegraphInitCommand([
+      "C:\\Lfcode\\resources\\codegraph\\node.exe",
+      "C:\\Lfcode\\resources\\codegraph\\lib\\dist\\bin\\codegraph.js",
+      "serve",
+      "--mcp",
+    ]),
+  ).toEqual({
+    executable: "C:\\Lfcode\\resources\\codegraph\\node.exe",
+    args: ["C:\\Lfcode\\resources\\codegraph\\lib\\dist\\bin\\codegraph.js", "init"],
+  })
+  expect(resolveCodegraphInitCommand(["C:\\Lfcode\\resources\\codegraph\\codegraph.exe", "serve", "--mcp"])).toEqual({
+    executable: "C:\\Lfcode\\resources\\codegraph\\codegraph.exe",
+    args: ["init"],
+  })
+  expect(resolveCodegraphInitCommand(["C:\\tools\\custom-codegraph.cmd", "serve", "--mcp"])).toBeUndefined()
+  expect(resolveCodegraphInitCommand(["C:\\tools\\codegraph.exe", "serve", "--mcp"])).toBeUndefined()
+  expect(resolveCodegraphInitCommand(["node.exe", "custom-tool.js", "serve", "--mcp"])).toBeUndefined()
+})
+
+test(
+  "CodeGraph initialization failure can be retried without leaking into normal MCP tools",
+  withInstance(
+    {
+      codegraph: {
+        type: "local",
+        command: ["echo", "codegraph"],
+        enabled: true,
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "codegraph"
+        getOrCreateClientState("codegraph").tools = [
+          { name: "codegraph_explore", description: "Explore the code graph", inputSchema: { type: "object", properties: {} } },
+        ]
+        yield* mcp.status()
+        const countBeforeCodegraph = clientCreateCount
+        connectShouldFail = true
+        expect(Object.keys(yield* mcp.tools({ codegraph: "auto" }))).not.toContain("codegraph_explore")
+        expect(Object.keys(yield* mcp.tools())).not.toContain("codegraph_explore")
+
+        connectShouldFail = false
+        expect(Object.keys(yield* mcp.tools({ codegraph: "auto" }))).toContain("codegraph_explore")
+        expect(clientCreateCount).toBe(countBeforeCodegraph + 2)
+      }),
+  ),
+)
 
 // ========================================================================
 // Test: tool change notifications refresh the cache

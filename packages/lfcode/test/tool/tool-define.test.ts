@@ -56,4 +56,72 @@ describe("Tool.define", () => {
 
     expect(first).not.toBe(second)
   })
+
+  test("runs pre, guard, post, finalizer, and result observer in order", async () => {
+    const events: string[] = []
+    const disposePre = Tool.registerPreExecuteHook(() => {
+      events.push("pre")
+    })
+    const disposeGuard = Tool.registerExecutionGuard(() => {
+      events.push("guard")
+      return undefined
+    })
+    const disposePost = Tool.registerPostExecuteHook(({ result }) => {
+      events.push("post")
+      return { ...result, output: "post" }
+    })
+    const disposeObserver = Tool.registerResultObserver(() => events.push("result"))
+    try {
+      const info = await runtime.runPromise(
+        Tool.define(
+          "pipeline-tool",
+          Effect.succeed({
+            ...makeTool("pipeline"),
+            execute: () => {
+              events.push("execute")
+              return Effect.succeed({ title: "test", output: "body", metadata: { truncated: false } })
+            },
+            finalizeContent: (result) => {
+              events.push("finalize")
+              return { ...result, output: `${result.output}-final` }
+            },
+          }),
+        ),
+      )
+      const def = await Effect.runPromise(info.init())
+      const result = await Effect.runPromise(
+        def.execute({ input: "ok" }, { sessionID: "ses" as any, messageID: "msg" as any, agent: "build", abort: new AbortController().signal, messages: [], metadata: () => Effect.void, ask: () => Effect.void }),
+      )
+      expect(result.output).toBe("post-final")
+      expect(events).toEqual(["pre", "guard", "execute", "post", "finalize", "result"])
+    } finally {
+      disposePre()
+      disposeGuard()
+      disposePost()
+      disposeObserver()
+    }
+  })
+
+  test("reports a failed settlement to result observers exactly once", async () => {
+    const outcomes: Tool.ToolExecutionOutcome[] = []
+    const disposeObserver = Tool.registerResultObserver(({ outcome }) => outcomes.push(outcome))
+    try {
+      const info = await runtime.runPromise(
+        Tool.define(
+          "failed-pipeline-tool",
+          Effect.succeed({ ...makeTool("failed"), execute: () => Effect.fail(new Error("boom")) as never }),
+        ),
+      )
+      const def = await Effect.runPromise(info.init())
+      await expect(
+        Effect.runPromise(
+          def.execute({ input: "ok" }, { sessionID: "ses" as any, messageID: "msg" as any, agent: "build", abort: new AbortController().signal, messages: [], metadata: () => Effect.void, ask: () => Effect.void }),
+        ),
+      ).rejects.toThrow("boom")
+      expect(outcomes).toHaveLength(1)
+      expect(outcomes[0]?.type).toBe("failure")
+    } finally {
+      disposeObserver()
+    }
+  })
 })

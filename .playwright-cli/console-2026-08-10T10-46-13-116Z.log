@@ -1,0 +1,4 @@
+[-5241738ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/:0
+[   45402ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://192.168.10.23:43173/lan/v1/browser-pair:0
+[   45421ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/favicon.ico:0
+[  259306ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ https://192.168.10.23:43173/:0

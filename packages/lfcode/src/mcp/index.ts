@@ -22,15 +22,21 @@ import { McpOAuthProvider } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
 import { mcpControlRef } from "./control-ref"
+import {
+  MINIMAX_TOKEN_PLAN_MCP_ID,
+  formatMiniMaxTokenPlanError,
+  hasMiniMaxTokenPlanKey,
+} from "./minimax-token-plan"
 import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
-import { Effect, Exit, Layer, Option, Context, Stream } from "effect"
+import { Deferred, Effect, Exit, Layer, Option, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
+import { join } from "node:path"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
@@ -150,8 +156,137 @@ function isMcpConfigured(entry: McpEntry): entry is ConfigMCP.Info {
   return typeof entry === "object" && entry !== null && "type" in entry
 }
 
+export function resolveCodegraphInitCommand(
+  command: readonly string[],
+): { readonly executable: string; readonly args: readonly string[] } | undefined {
+  const executable = command[0]
+  if (!executable) return undefined
+  const executablePath = normalizedPath(executable)
+  const executableName = executablePath.split("/").at(-1) ?? ""
+  const bundledDirectory = executablePath.includes("/codegraph/") || !executablePath.includes("/")
+  if (
+    bundledDirectory &&
+    (executableName === "codegraph" || executableName === "codegraph.exe" || executableName === "codegraph.cmd")
+  ) {
+    return { executable, args: ["init"] }
+  }
+
+  const entry = command[1]
+  if (
+    (executableName === "node" || executableName === "node.exe") &&
+    entry &&
+    normalizedPath(entry).endsWith("/lib/dist/bin/codegraph.js")
+  ) {
+    return { executable, args: [entry, "init"] }
+  }
+  return undefined
+}
+
 function sameCommand(command: readonly string[], expected: readonly string[]) {
   return command.length === expected.length && command.every((item, index) => item === expected[index])
+}
+
+function normalizedPath(value: string) {
+  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "")
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized
+}
+
+function matchesManagedPath(value: string | undefined, placeholder: string, resolved: string | undefined) {
+  if (value === placeholder) return true
+  if (!resolved) return false
+  return normalizedPath(value ?? "") === normalizedPath(resolved)
+}
+
+function withCodegraphCommand(mcp: ConfigMCP.Local, command: string[]) {
+  return {
+    type: "local" as const,
+    command,
+    ...(mcp.environment && { environment: mcp.environment }),
+    ...(mcp.enabled !== undefined && { enabled: mcp.enabled }),
+    ...(mcp.timeout !== undefined && { timeout: mcp.timeout }),
+  } satisfies ConfigMCP.Info
+}
+
+function codegraphErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  return "CodeGraph runtime preparation failed"
+}
+
+function copyCodegraphDirectory(
+  fsys: AppFileSystem.Interface,
+  source: string,
+  target: string,
+): Effect.Effect<void, AppFileSystem.Error> {
+  return Effect.gen(function* () {
+    yield* fsys.ensureDir(target)
+    const entries = yield* fsys.readDirectoryEntries(source)
+    for (const entry of entries) {
+      if (entry.type === "symlink" || entry.type === "other") continue
+      const from = join(source, entry.name)
+      const to = join(target, entry.name)
+      if (entry.type === "directory") {
+        yield* copyCodegraphDirectory(fsys, from, to)
+        continue
+      }
+      yield* fsys.writeWithDirs(to, yield* fsys.readFile(from))
+    }
+  })
+}
+
+export function materializeCodegraphRuntime(
+  fsys: AppFileSystem.Interface,
+  mcp: ConfigMCP.Info,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  return Effect.gen(function* () {
+    if (mcp.type !== "local") return mcp
+
+    const sourceRoot = env.LFCODE_CODEGRAPH_INSTALL_DIR
+    const targetRoot = env.LFCODE_CODEGRAPH_DATA_DIR
+    if (!sourceRoot || !targetRoot) return mcp
+
+    const sourceNode = env.LFCODE_CODEGRAPH_NODE_EXE
+    const sourceEntry = env.LFCODE_CODEGRAPH_ENTRY
+    const sourceExecutable = env.LFCODE_CODEGRAPH_EXE
+    const nodeCommand =
+      !!sourceNode &&
+      !!sourceEntry &&
+      matchesManagedPath(mcp.command[0], "{env:LFCODE_CODEGRAPH_NODE_EXE}", sourceNode) &&
+      matchesManagedPath(mcp.command[1], "{env:LFCODE_CODEGRAPH_ENTRY}", sourceEntry)
+    const executableCommand =
+      !!sourceExecutable && matchesManagedPath(mcp.command[0], "{env:LFCODE_CODEGRAPH_EXE}", sourceExecutable)
+    if (!nodeCommand && !executableCommand) return mcp
+
+    const targetNode = join(targetRoot, "node.exe")
+    const targetEntry = join(targetRoot, "lib", "dist", "bin", "codegraph.js")
+    const targetExecutable = join(targetRoot, "codegraph.exe")
+    const targetReady = nodeCommand
+      ? (yield* fsys.isFile(targetNode)) && (yield* fsys.isFile(targetEntry))
+      : yield* fsys.isFile(targetExecutable)
+
+    if (!targetReady && normalizedPath(sourceRoot) !== normalizedPath(targetRoot)) {
+      const sourceReady = nodeCommand
+        ? !!sourceNode && !!sourceEntry && (yield* fsys.isFile(sourceNode)) && (yield* fsys.isFile(sourceEntry))
+        : !!sourceExecutable && (yield* fsys.isFile(sourceExecutable))
+      if (!sourceReady) return yield* Effect.fail(new Error("Bundled CodeGraph runtime is missing or incomplete"))
+
+      yield* fsys.remove(targetRoot, { recursive: true }).pipe(Effect.catch(() => Effect.void))
+      yield* copyCodegraphDirectory(fsys, sourceRoot, targetRoot)
+    }
+
+    const ready = nodeCommand
+      ? (yield* fsys.isFile(targetNode)) && (yield* fsys.isFile(targetEntry))
+      : yield* fsys.isFile(targetExecutable)
+    if (!ready) {
+      return yield* Effect.fail(new Error("CodeGraph runtime could not be materialized in the user data directory"))
+    }
+
+    if (nodeCommand) {
+      return withCodegraphCommand(mcp, [targetNode, targetEntry, ...mcp.command.slice(2)])
+    }
+    return withCodegraphCommand(mcp, [targetExecutable, ...mcp.command.slice(1)])
+  })
 }
 
 function hasExactKeys(value: object, expected: readonly string[]) {
@@ -303,10 +438,19 @@ interface State {
   defs: Record<string, MCPToolDef[]>
 }
 
+export type CodegraphMode = "auto" | "off"
+
+export type CodegraphReadiness =
+  | { readonly status: "ready" }
+  | { readonly status: "not_indexed"; readonly reason?: string }
+  | { readonly status: "unavailable"; readonly reason?: string }
+  | { readonly status: "failed"; readonly error: string }
+
 export interface Interface {
   readonly status: () => Effect.Effect<Record<string, Status>>
   readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-  readonly tools: () => Effect.Effect<Record<string, Tool>>
+  readonly tools: (options?: { codegraph?: CodegraphMode }) => Effect.Effect<Record<string, Tool>>
+  readonly ensureCodegraph?: () => Effect.Effect<CodegraphReadiness>
   readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
   readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCP.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -338,6 +482,7 @@ export const layer = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const auth = yield* McpAuth.Service
     const bus = yield* Bus.Service
+    const fsys = yield* AppFileSystem.Service
 
     type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
 
@@ -396,17 +541,33 @@ export const layer = Layer.effect(
           : {}),
       }
 
+      const remoteUrl = yield* Effect.try({
+        try: () => new URL(mcp.url),
+        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+      }).pipe(
+        Effect.catch((error) => {
+          log.warn("remote MCP URL is invalid", { key, url: ConfigMCP.redactString(mcp.url), error: error.message })
+          return Effect.succeed(undefined)
+        }),
+      )
+      if (!remoteUrl) {
+        return {
+          client: undefined as MCPClient | undefined,
+          status: { status: "failed", error: "Invalid remote MCP URL" } as Status,
+        }
+      }
+
       const transports: Array<{ name: string; transport: TransportWithAuth }> = [
         {
           name: "StreamableHTTP",
-          transport: new StreamableHTTPClientTransport(new URL(mcp.url), {
+          transport: new StreamableHTTPClientTransport(remoteUrl, {
             authProvider,
             requestInit: Object.keys(requestHeaders).length > 0 ? { headers: requestHeaders } : undefined,
           }),
         },
         {
           name: "SSE",
-          transport: new SSEClientTransport(new URL(mcp.url), {
+          transport: new SSEClientTransport(remoteUrl, {
             authProvider,
             requestInit: Object.keys(requestHeaders).length > 0 ? { headers: requestHeaders } : undefined,
           }),
@@ -497,7 +658,7 @@ export const layer = Layer.effect(
           },
         })
         transport.stderr?.on("data", (chunk: Buffer) => {
-          log.info(`mcp stderr: ${chunk.toString()}`, { key })
+          log.info(`mcp stderr: ${ConfigMCP.redactString(chunk.toString())}`, { key })
         })
 
         const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
@@ -507,11 +668,24 @@ export const layer = Layer.effect(
             status: { status: "connected" },
           })),
           Effect.catch((error): Effect.Effect<{ client: MCPClient | undefined; status: Status }> => {
-            const msg = error instanceof Error ? error.message : String(error)
+            const msg =
+              key === MINIMAX_TOKEN_PLAN_MCP_ID
+                ? formatMiniMaxTokenPlanError(error)
+                : ConfigMCP.redactString(error instanceof Error ? error.message : String(error))
             log.error("local mcp startup failed", { key, command: ConfigMCP.redactCommand([...command]), cwd, error: msg })
             return Effect.succeed({ client: undefined, status: { status: "failed", error: msg } })
           }),
         )
+      }
+
+      if (key === MINIMAX_TOKEN_PLAN_MCP_ID && !hasMiniMaxTokenPlanKey()) {
+        return {
+          client: undefined,
+          status: {
+            status: "failed" as const,
+            error: formatMiniMaxTokenPlanError(new Error("MINIMAX_API_KEY is missing")),
+          },
+        } satisfies { client: MCPClient | undefined; status: Status }
       }
 
       if (key === "playwright" && isManagedPlaywrightConfig(mcp)) {
@@ -628,6 +802,14 @@ export const layer = Layer.effect(
                 return
               }
 
+              // CodeGraph is intentionally opt-in at runtime. Its local
+              // process and index are prepared by ensureCodegraph() only when
+              // a structured code task actually needs it.
+              if (key === "codegraph") {
+                s.status[key] = { status: "pending" }
+                return
+              }
+
               if (mcp.type === "local" && cfg.mcp_origins?.[key]?.type === "claude") {
                 s.status[key] = { status: "pending" }
                 return
@@ -730,6 +912,102 @@ export const layer = Layer.effect(
       return yield* storeClient(s, name, result.mcpClient, result.defs!, mcp.timeout)
     })
 
+    let codegraphInFlight: Deferred.Deferred<CodegraphReadiness> | undefined
+    let codegraphReadiness: CodegraphReadiness | undefined
+    let codegraphFailureNotified = false
+
+    const runCodegraphInit = Effect.fnUntraced(function* (mcp: ConfigMCP.Info, cwd: string) {
+      if (mcp.type !== "local") return true
+      const command = resolveCodegraphInitCommand(mcp.command)
+      if (!command) return true
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(command.executable, command.args, {
+          cwd,
+          extendEnv: true,
+          env: mcp.environment,
+          stdin: "ignore",
+          forceKillAfter: "30 seconds",
+        }),
+      )
+      const [stdout, stderr] = yield* Effect.all(
+        [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))],
+        { concurrency: 2 },
+      )
+      const code = yield* handle.exitCode
+      if (Number(code) !== 0) {
+        log.warn("codegraph init failed", { cwd, code: Number(code), stdout: stdout.slice(-500), stderr: stderr.slice(-500) })
+        return false
+      }
+      return true
+    }, Effect.scoped)
+
+    const ensureCodegraph = Effect.fn("MCP.ensureCodegraph")(function* () {
+      if (codegraphReadiness?.status === "ready") return codegraphReadiness
+      if (codegraphInFlight) return yield* Deferred.await(codegraphInFlight)
+
+      const pending = yield* Deferred.make<CodegraphReadiness>()
+      codegraphInFlight = pending
+      const s = yield* InstanceState.get(state)
+      const readiness = yield* Effect.gen(function* () {
+        const cfg = yield* cfgSvc.get()
+        const configured = cfg.mcp?.codegraph
+        if (!isMcpConfigured(configured)) {
+          return { status: "unavailable", reason: "CodeGraph is not configured" } satisfies CodegraphReadiness
+        }
+        if (configured.enabled === false) {
+          return { status: "unavailable", reason: "CodeGraph is disabled" } satisfies CodegraphReadiness
+        }
+
+        const cwd = (yield* InstanceState.context).directory
+        const indexed = yield* fsys.existsSafe(join(cwd, ".codegraph"))
+        const runtimeConfig = yield* materializeCodegraphRuntime(fsys, configured)
+        if (!indexed && runtimeConfig.type === "local") {
+          const initialized = yield* runCodegraphInit(runtimeConfig, cwd).pipe(
+            Effect.catch((error) => {
+              log.warn("codegraph init threw", { error: error instanceof Error ? error.message : String(error) })
+              return Effect.succeed(false)
+            }),
+          )
+          if (!initialized) {
+            const failure = { status: "failed", error: "CodeGraph index initialization failed" } satisfies CodegraphReadiness
+            s.status.codegraph = failure
+            return failure
+          }
+        }
+
+        const status = yield* createAndStore("codegraph", runtimeConfig)
+        if (status.status === "connected") return { status: "ready" } satisfies CodegraphReadiness
+        if (status.status === "failed") return { status: "failed", error: status.error } satisfies CodegraphReadiness
+        return { status: "unavailable", reason: `CodeGraph status: ${status.status}` } satisfies CodegraphReadiness
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.succeed({ status: "failed", error: codegraphErrorMessage(error) } satisfies CodegraphReadiness),
+        ),
+      )
+
+      if (readiness.status === "failed" && s.status.codegraph?.status !== "failed") {
+        s.status.codegraph = { status: "failed", error: readiness.error }
+      }
+
+      yield* Deferred.succeed(pending, readiness)
+      codegraphInFlight = undefined
+      codegraphReadiness = readiness.status === "ready" ? readiness : undefined
+      if (readiness.status === "ready") {
+        codegraphFailureNotified = false
+      } else if (readiness.status === "failed" && !codegraphFailureNotified) {
+        codegraphFailureNotified = true
+        yield* bus
+          .publish(TuiEvent.ToastShow, {
+            title: "CodeGraph unavailable",
+            message: `${readiness.error}. Continuing with Read/Grep fallback.`,
+            variant: "warning",
+            duration: 8000,
+          })
+          .pipe(Effect.ignore)
+      }
+      return readiness
+    })
+
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCP.Info) {
       yield* createAndStore(name, mcp)
       const s = yield* InstanceState.get(state)
@@ -743,6 +1021,10 @@ export const layer = Layer.effect(
         return
       }
       yield* cfgSvc.updateMcpEnabled(name, true)
+      if (name === "codegraph") {
+        yield* ensureCodegraph()
+        return
+      }
       yield* createAndStore(name, { ...mcp, enabled: true })
     })
 
@@ -759,9 +1041,15 @@ export const layer = Layer.effect(
       yield* closeClient(s, name)
       delete s.clients[name]
       s.status[name] = { status: "disabled" }
+      if (name === "codegraph") {
+        codegraphInFlight = undefined
+        codegraphReadiness = undefined
+        codegraphFailureNotified = false
+      }
     })
 
-    const tools = Effect.fn("MCP.tools")(function* () {
+    const tools = Effect.fn("MCP.tools")(function* (options?: { codegraph?: CodegraphMode }) {
+      if (options?.codegraph === "auto") yield* ensureCodegraph()
       const result: Record<string, Tool> = {}
       const s = yield* InstanceState.get(state)
 
@@ -770,7 +1058,9 @@ export const layer = Layer.effect(
       const defaultTimeout = cfg.experimental?.mcp_timeout
 
       const connectedClients = Object.entries(s.clients).filter(
-        ([clientName]) => s.status[clientName]?.status === "connected",
+        ([clientName]) =>
+          s.status[clientName]?.status === "connected" &&
+          (clientName !== "codegraph" || options?.codegraph === "auto"),
       )
 
       yield* Effect.forEach(
@@ -788,7 +1078,13 @@ export const layer = Layer.effect(
 
             const timeout = entry?.timeout ?? defaultTimeout
             for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, {
+              const preferredName =
+                clientName === "codegraph" && (mcpTool.name === "codegraph_explore" || mcpTool.name === "explore")
+                  ? "codegraph_explore"
+                  : sanitize(clientName) + "_" + sanitize(mcpTool.name)
+              const key = result[preferredName] ? sanitize(clientName) + "_" + sanitize(mcpTool.name) : preferredName
+              if (key !== preferredName) log.warn("MCP tool name collision; retaining namespaced CodeGraph tool", { key: preferredName })
+              result[key] = convertMcpTool(mcpTool, client, {
                 timeout,
                 descriptionPrefix: clientName === "playwright" ? PLAYWRIGHT_BROWSER_TOOL_GUIDANCE : undefined,
               })
@@ -1047,6 +1343,7 @@ export const layer = Layer.effect(
       supportsOAuth,
       hasStoredTokens,
       getAuthStatus,
+      ensureCodegraph,
     })
     mcpControlRef.current = service
     yield* Effect.addFinalizer(() =>

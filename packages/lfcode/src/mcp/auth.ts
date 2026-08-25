@@ -29,7 +29,14 @@ export const Entry = z.object({
 })
 export type Entry = z.infer<typeof Entry>
 
-const filepath = path.join(Global.Path.data, "mcp-auth.json")
+const directory = path.join(Global.Path.config, "mcps")
+
+function filepath(mcpName: string) {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(mcpName)) {
+    throw new Error(`Invalid MCP name: ${mcpName}`)
+  }
+  return path.join(directory, mcpName, "data", "auth.json")
+}
 
 export interface Interface {
   readonly all: () => Effect.Effect<Record<string, Entry>>
@@ -55,15 +62,35 @@ export const layer = Layer.effect(
     const fs = yield* AppFileSystem.Service
 
     const all = Effect.fn("McpAuth.all")(function* () {
-      return yield* fs.readJson(filepath).pipe(
-        Effect.map((data) => data as Record<string, Entry>),
-        Effect.catch(() => Effect.succeed({} as Record<string, Entry>)),
+      const entries = yield* fs.readDirectoryEntries(directory).pipe(Effect.orElseSucceed(() => []))
+      const records = yield* Effect.forEach(
+        entries.filter((entry) => entry.type === "directory" && /^[a-z0-9][a-z0-9._-]*$/i.test(entry.name)),
+        (entry) =>
+          fs.readJson(filepath(entry.name)).pipe(
+            Effect.flatMap((data) =>
+              Effect.try({
+                try: () => [entry.name, Entry.parse(data)] as const,
+                catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+              }),
+            ),
+            Effect.option,
+          ),
+        { concurrency: "unbounded" },
       )
+      return Object.fromEntries(records.flatMap((entry) => (entry._tag === "Some" ? [entry.value] : [])))
     })
 
     const get = Effect.fn("McpAuth.get")(function* (mcpName: string) {
-      const data = yield* all()
-      return data[mcpName]
+      return yield* fs.readJson(filepath(mcpName)).pipe(
+        Effect.flatMap((data) =>
+          Effect.try({
+            try: () => Entry.parse(data),
+            catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+          }),
+        ),
+        Effect.option,
+        Effect.map((entry) => (entry._tag === "Some" ? entry.value : undefined)),
+      )
     })
 
     const getForUrl = Effect.fn("McpAuth.getForUrl")(function* (mcpName: string, serverUrl: string) {
@@ -75,15 +102,14 @@ export const layer = Layer.effect(
     })
 
     const set = Effect.fn("McpAuth.set")(function* (mcpName: string, entry: Entry, serverUrl?: string) {
-      const data = yield* all()
       if (serverUrl) entry.serverUrl = serverUrl
-      yield* fs.writeJson(filepath, { ...data, [mcpName]: entry }, 0o600).pipe(Effect.orDie)
+      const target = filepath(mcpName)
+      yield* fs.ensureDir(path.dirname(target)).pipe(Effect.orDie)
+      yield* fs.writeJson(target, entry, 0o600).pipe(Effect.orDie)
     })
 
     const remove = Effect.fn("McpAuth.remove")(function* (mcpName: string) {
-      const data = yield* all()
-      delete data[mcpName]
-      yield* fs.writeJson(filepath, data, 0o600).pipe(Effect.orDie)
+      yield* fs.remove(filepath(mcpName), { force: true }).pipe(Effect.orDie)
     })
 
     const updateField = <K extends keyof Entry>(field: K, spanName: string) =>

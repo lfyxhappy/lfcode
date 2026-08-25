@@ -16,13 +16,30 @@ import { Metrics } from "@/metrics"
 import { Memory } from "@/memory"
 import { WriterService, BackfillService } from "@/history"
 import { Session } from "@/session"
+import { dispatchHooks } from "@/hook/runtime"
 
 export const InstanceBootstrap = Effect.gen(function* () {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
   // everything depends on config so eager load it for nice traces
   yield* Config.Service.use((svc) => svc.get())
+  yield* Effect.promise(() =>
+    dispatchHooks({
+      event: "Setup",
+      projectID: String(Instance.project.id),
+      cwd: Instance.worktree,
+      payload: { directory: Instance.directory },
+    }),
+  ).pipe(Effect.ignore)
   // Plugin can mutate config so it has to be initialized before anything else.
   yield* Plugin.Service.use((svc) => svc.init())
+  yield* Effect.promise(() =>
+    dispatchHooks({
+      event: "InstructionsLoaded",
+      projectID: String(Instance.project.id),
+      cwd: Instance.worktree,
+      payload: { directory: Instance.directory },
+    }),
+  ).pipe(Effect.ignore)
   yield* Effect.sync(() =>
     Session.clearOrphanAssistants({
       directory: Instance.directory,

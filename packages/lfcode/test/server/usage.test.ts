@@ -6,6 +6,7 @@ import { Session as SessionNs } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { SessionUsage } from "../../src/session/usage"
+import { Server } from "../../src/server/server"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
 
@@ -239,6 +240,28 @@ describe("usage route", () => {
     )
   }, 20000)
 
+  test("preserves the requested heatmap granularity through the usage HTTP route", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({ title: "usage-route-granularity" })
+          await fillStep(session.id, "openai", "gpt-5", 1, 10, 20)
+
+          const response = await Server.Default().app.request("/usage?source=lfcode&search=usage-route-granularity&heatmap_granularity=day")
+          expect(response.status).toBe(200)
+          const payload = await response.json()
+          const data = "data" in payload ? payload.data : payload
+
+          expect(data.filters.heatmap_granularity).toBe("day")
+          expect(data.heatmap).toHaveLength(1)
+          expect(new Date(data.heatmap[0].time).getHours()).toBe(new Date(data.logs[0].time).getHours())
+        },
+      }),
+    )
+  }, 20000)
+
   test("keeps summary aggregates across all matches while paginating logs", async () => {
       await using tmp = await tmpdir({ git: true })
       await withoutWatcher(() =>
@@ -334,6 +357,8 @@ describe("usage route", () => {
     expect(body.summary.successRate).toBe(50)
     expect(body.summary.avgDuration).toBe(1625)
     expect(body.summary.avgTtft).toBeCloseTo(700 / 3, 5)
+    expect(body.heatmap).toHaveLength(1)
+    expect(body.heatmap[0]?.totalTokens).toBe(162)
     expect(body.projectStats).toHaveLength(2)
     expect(body.sessionStats).toHaveLength(3)
 
@@ -397,6 +422,8 @@ describe("usage route", () => {
     })
     expect(statusFiltered.summary.requestCount).toBe(1)
     expect(statusFiltered.logs.map((item) => item.status)).toEqual(["error"])
+    expect(statusFiltered.heatmap).toHaveLength(1)
+    expect(statusFiltered.heatmap[0]?.totalTokens).toBe(48)
 
     const mainFiltered = SessionUsage.get({
       range: "all",
@@ -429,5 +456,25 @@ describe("usage route", () => {
     })
     expect(betaSessionFiltered.summary.totalTokens).toBe(63)
     expect(betaSessionFiltered.summary.totalCost).toBe(3)
+  }, 20000)
+
+  test("excludes hidden context reviewer usage from every aggregate", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({ title: "hidden-reviewer-usage" })
+          await fillStep(session.id, "openai", "gpt-5", 1, 10, 5)
+          await fillStep(session.id, "openai", "gpt-5", 99, 900, 400, 0, { agentID: "context-reviewer-1" })
+
+          const body = SessionUsage.get({ range: "all", source: "lfcode", search: "hidden-reviewer-usage" })
+          expect(body.summary.requestCount).toBe(1)
+          expect(body.summary.totalTokens).toBe(18)
+          expect(body.logs).toHaveLength(1)
+          expect(body.logs[0]?.agentID).not.toContain("context-reviewer")
+        },
+      }),
+    )
   }, 20000)
 })

@@ -260,7 +260,11 @@ function createSessionEntries(props: {
   return { sessions }
 }
 
-export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFile?: (path: string) => void }) {
+export function DialogSelectFileContent(props: {
+  mode?: DialogSelectFileMode
+  onOpenFile?: (path: string) => void
+  onClose?: VoidFunction
+}) {
   const command = useCommand()
   const language = useLanguage()
   const layout = useLayout()
@@ -360,7 +364,8 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
     if (!item) return
     state.committed = true
     state.cleanup = undefined
-    dialog.close()
+    if (props.onClose) props.onClose()
+    else dialog.close()
 
     if (item.type === "command") {
       item.option?.onSelect?.("palette")
@@ -383,8 +388,7 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
   })
 
   return (
-    <Dialog class="pt-3 pb-0 !max-h-[480px]" transition>
-      <List
+    <List
         search={{
           placeholder: filesOnly()
             ? language.t("session.header.searchFiles")
@@ -400,7 +404,7 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
         groupBy={grouped() ? (item) => item.category : () => ""}
         onMove={handleMove}
         onSelect={handleSelect}
-      >
+    >
         {(item) => (
           <Switch
             fallback={
@@ -460,7 +464,14 @@ export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFil
             </Match>
           </Switch>
         )}
-      </List>
+    </List>
+  )
+}
+
+export function DialogSelectFile(props: { mode?: DialogSelectFileMode; onOpenFile?: (path: string) => void }) {
+  return (
+    <Dialog class="pt-3 pb-0 !max-h-[480px]" transition>
+      <DialogSelectFileContent mode={props.mode} onOpenFile={props.onOpenFile} />
     </Dialog>
   )
 }

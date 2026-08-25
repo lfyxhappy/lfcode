@@ -1,8 +1,9 @@
 import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { Icon } from "@lfcode-ai/ui/icon"
+import { Markdown } from "@lfcode-ai/ui/markdown"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { createMemo, createSignal, Show } from "solid-js"
+import { createMemo, createResource, createSignal, Show } from "solid-js"
 import { useFile } from "@/context/file"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
@@ -11,6 +12,7 @@ import { useTerminal } from "@/context/terminal"
 import { isCppRunnablePath } from "@/pages/session/cpp-file"
 import { createMessageBlockDraftState, type MessageBlockDraftState } from "@/pages/session/message-block-draft-state"
 import { createCppMessageScratchPath } from "@/pages/session/cpp-message-block-path"
+import { messageCodeFileStatus, readMessageCodeFile } from "@/pages/session/message-code-block-path"
 import { MessageEditableCodeBlock } from "@/pages/session/message-editable-code-block"
 import { isMissingCppCompilerError, promptInstallManagedCppCompiler, runCppFileInTerminal } from "@/pages/session/cpp-terminal-run"
 import { isCppChecksumConflict } from "@/pages/session/cpp-write-state"
@@ -25,31 +27,44 @@ type CppMessageBlockProps = {
   partID: string
   blockIndex: number
   code: string
+  raw: string
+  projectPath?: string
 }
 
 const cache = new Map<string, MessageBlockDraftState>()
 
 export function CppMessageBlock(props: CppMessageBlockProps) {
+  const sdk = useSDK()
   const [editing, setEditing] = createSignal(false)
+  const [projectFile] = createResource(
+    () => props.projectPath,
+    (path) => (path ? readMessageCodeFile(sdk.client.file.read, path) : undefined),
+  )
 
   return (
     <Show
-      when={editing()}
-      fallback={
-        <StaticMessageCodeBlockPreview
-          blockKey={props.blockKey}
-          languageID="cpp"
-          code={props.code}
-          onEdit={() => setEditing(true)}
-        />
-      }
+      when={props.projectPath && messageCodeFileStatus(projectFile()) === "exists"}
+      fallback={<Markdown text={props.raw} cacheKey={`${props.blockKey}:markdown`} streaming={false} />}
     >
-      <EditableCppMessageBlock {...props} />
+      <Show
+        when={editing()}
+        fallback={
+          <StaticMessageCodeBlockPreview
+            blockKey={props.blockKey}
+            languageID="cpp"
+            code={props.code}
+            projectPath={props.projectPath}
+            onEdit={() => setEditing(true)}
+          />
+        }
+      >
+        <EditableCppMessageBlock {...props} projectPath={props.projectPath!} />
+      </Show>
     </Show>
   )
 }
 
-function EditableCppMessageBlock(props: CppMessageBlockProps) {
+function EditableCppMessageBlock(props: CppMessageBlockProps & { projectPath: string }) {
   const language = useLanguage()
   const globalSDK = useGlobalSDK()
   const sdk = useSDK()
@@ -64,7 +79,7 @@ function EditableCppMessageBlock(props: CppMessageBlockProps) {
     openTab: layout.tabs().open,
     setActiveTab: layout.tabs().setActive,
   })
-  const initialPath = createCppMessageScratchPath(props)
+  const initialPath = props.projectPath || createCppMessageScratchPath(props)
   const draft = createMessageBlockDraftState({
     blockKey: props.blockKey,
     initialDraft: props.code,

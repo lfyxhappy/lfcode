@@ -1,126 +1,49 @@
-import { createStore } from "solid-js/store"
-import { onCleanup, Show, type Accessor } from "solid-js"
-import { InlineInput } from "@lfcode-ai/ui/inline-input"
+import type { Accessor, JSX } from "solid-js"
+import type { useDialog } from "@lfcode-ai/ui/context/dialog"
+import { DialogRename, type RenameKind } from "@/components/dialog-rename"
+import { isRenameDoubleClick } from "./rename-double-click"
 
-export function createInlineEditorController() {
-  // This controller intentionally supports one active inline editor at a time.
-  const [editor, setEditor] = createStore({
-    active: "" as string,
-    value: "",
-  })
+export type RenameTriggerComponent = (props: {
+  id: string
+  value: Accessor<string>
+  onSave: (next: string) => void | Promise<void>
+  class?: string
+  displayClass?: string
+  stopPropagation?: boolean
+  openOnDblClick?: boolean
+}) => JSX.Element
 
-  const editorOpen = (id: string) => editor.active === id
-  const editorValue = () => editor.value
-  const openEditor = (id: string, value: string) => {
+export function createRenameDialogController(dialog: ReturnType<typeof useDialog>) {
+  const kind = (id: string): RenameKind => {
+    if (id.startsWith("project:")) return "project"
+    if (id.startsWith("workspace:")) return "workspace"
+    return "session"
+  }
+
+  const openEditor = (id: string, value: string, onSave: (next: string) => void | Promise<void>) => {
     if (!id) return
-    setEditor({ active: id, value })
-  }
-  const closeEditor = () => setEditor({ active: "", value: "" })
-
-  const saveEditor = (callback: (next: string) => void) => {
-    const next = editor.value.trim()
-    if (!next) {
-      closeEditor()
-      return
-    }
-    closeEditor()
-    callback(next)
+    dialog.show(() => <DialogRename kind={kind(id)} value={value} onSave={onSave} />)
   }
 
-  const editorKeyDown = (event: KeyboardEvent, callback: (next: string) => void) => {
-    if (event.key === "Enter") {
+  const RenameTrigger: RenameTriggerComponent = (props) => {
+    let previousClickAt: number | undefined
+    const handleClick = (event: MouseEvent) => {
+      if (props.openOnDblClick === false) return
+      const currentClickAt = performance.now()
+      const rename = isRenameDoubleClick(previousClickAt, currentClickAt)
+      previousClickAt = currentClickAt
+      if (!rename) return
+      previousClickAt = undefined
       event.preventDefault()
-      saveEditor(callback)
-      return
-    }
-    if (event.key !== "Escape") return
-    event.preventDefault()
-    closeEditor()
-  }
-
-  const InlineEditor = (props: {
-    id: string
-    value: Accessor<string>
-    onSave: (next: string) => void
-    class?: string
-    displayClass?: string
-    editing?: boolean
-    stopPropagation?: boolean
-    openOnDblClick?: boolean
-  }) => {
-    let frame: number | undefined
-
-    onCleanup(() => {
-      if (frame === undefined) return
-      cancelAnimationFrame(frame)
-    })
-
-    const isEditing = () => props.editing ?? editorOpen(props.id)
-    const stopEvents = () => props.stopPropagation ?? false
-    const allowDblClick = () => props.openOnDblClick ?? true
-    const stopPropagation = (event: Event) => {
-      if (!stopEvents()) return
       event.stopPropagation()
-    }
-    const handleDblClick = (event: MouseEvent) => {
-      if (!allowDblClick()) return
-      stopPropagation(event)
-      openEditor(props.id, props.value())
+      openEditor(props.id, props.value(), props.onSave)
     }
 
-    return (
-      <Show
-        when={isEditing()}
-        fallback={
-          <span
-            class={props.displayClass ?? props.class}
-            onDblClick={handleDblClick}
-            onPointerDown={stopPropagation}
-            onMouseDown={stopPropagation}
-            onClick={stopPropagation}
-            onTouchStart={stopPropagation}
-          >
-            {props.value()}
-          </span>
-        }
-      >
-        <InlineInput
-          ref={(el) => {
-            if (frame !== undefined) cancelAnimationFrame(frame)
-            frame = requestAnimationFrame(() => {
-              frame = undefined
-              if (!el.isConnected) return
-              el.focus()
-            })
-          }}
-          value={editorValue()}
-          class={props.class}
-          onInput={(event) => setEditor("value", event.currentTarget.value)}
-          onKeyDown={(event) => {
-            event.stopPropagation()
-            editorKeyDown(event, props.onSave)
-          }}
-          onBlur={closeEditor}
-          onPointerDown={stopPropagation}
-          onClick={stopPropagation}
-          onDblClick={stopPropagation}
-          onMouseDown={stopPropagation}
-          onMouseUp={stopPropagation}
-          onTouchStart={stopPropagation}
-        />
-      </Show>
-    )
+    return <span class={props.displayClass ?? props.class} onClick={handleClick}>{props.value()}</span>
   }
 
   return {
-    editor,
-    editorOpen,
-    editorValue,
     openEditor,
-    closeEditor,
-    saveEditor,
-    editorKeyDown,
-    setEditor,
-    InlineEditor,
+    RenameTrigger,
   }
 }

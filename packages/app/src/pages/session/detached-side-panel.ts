@@ -1,4 +1,4 @@
-export type DetachedSidePanelKind = "file" | "browser" | "review" | "context"
+export type DetachedSidePanelKind = "file" | "browser" | "review"
 
 export type DetachedSidePanelContext = {
   detachedWindowID: string
@@ -17,7 +17,7 @@ function parseHashRoute(value: string) {
   const tab = url.searchParams.get("tab")
   const kind = url.searchParams.get("kind")
   if (!detachedWindowID || !sessionKey || !tab) return
-  if (kind !== "file" && kind !== "browser" && kind !== "review" && kind !== "context") return
+  if (kind !== "file" && kind !== "browser" && kind !== "review") return
   return {
     detachedWindowID,
     sessionKey,

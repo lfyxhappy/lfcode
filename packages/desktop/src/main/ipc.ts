@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { readFile, readdir } from "node:fs/promises"
+import { lstat, readFile, readdir } from "node:fs/promises"
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path"
 import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, shell } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
@@ -20,6 +20,7 @@ import type {
   AutomationEventPayload,
   BrowserGuestTarget,
   BrowserSiteDataResult,
+  BrowserStateSync,
   BrowserWindowOpenRequest,
   DetachedSidePanelEvent,
   DetachedSidePanelRecord,
@@ -28,10 +29,15 @@ import type {
   SqliteMigrationProgress,
   TitlebarTheme,
   WindowConfig,
+  WindowVisibility,
   WslConfig,
+  MobileAccessStatus,
+  LanAccessDevice,
+  LanBrowserPairing,
 } from "../preload/types"
 import { openExternal } from "./external"
 import { clipboardFilePaths } from "./clipboard-files"
+import { clipboardImagePayload } from "./clipboard-image"
 import { getStore } from "./store"
 import { setTitlebar } from "./windows"
 import { browserAutofillOriginMatches } from "./browser-management-core"
@@ -67,6 +73,14 @@ type Deps = {
   setWslConfig: (config: WslConfig) => Promise<void> | void
   getDisplayBackend: () => Promise<string | null>
   setDisplayBackend: (backend: string | null) => Promise<void> | void
+  getMobileAccessStatus: () => Promise<MobileAccessStatus> | MobileAccessStatus
+  enableMobileAccess: () => Promise<MobileAccessStatus> | MobileAccessStatus
+  disableMobileAccess: () => Promise<MobileAccessStatus> | MobileAccessStatus
+  applyMobileAccessNetworkChange: () => Promise<MobileAccessStatus> | MobileAccessStatus
+  revokeMobileDevice: (deviceID: string) => Promise<void> | void
+  listMobileDevices: () => Promise<LanAccessDevice[]> | LanAccessDevice[]
+  createLanBrowserPairing: () => Promise<LanBrowserPairing> | LanBrowserPairing
+  resetMobileAccessCertificate: () => Promise<void> | void
   parseMarkdown: (markdown: string) => Promise<string> | string
   checkAppExists: (appName: string) => Promise<boolean> | boolean
   wslPath: (path: string, mode: "windows" | "linux" | null) => Promise<string>
@@ -76,15 +90,17 @@ type Deps = {
   checkUpdate: () => Promise<{ updateAvailable: boolean; version?: string }>
   installUpdate: () => Promise<void> | void
   setBackgroundColor: (color: string) => void
+  getWindowVisibility: (windowID: number) => WindowVisibility
   automationEvent: (payload: AutomationEventPayload) => Promise<void> | void
   createDetachedSidePanelWindow: (input: {
     detachedWindowID: string
     route: string
     sessionKey: string
     tab: string
-    kind: "file" | "browser" | "review" | "context"
+    kind: "file" | "browser" | "review"
     title?: string
     sourceWindowID: number
+    background?: boolean
   }) => Promise<void> | void
   redockDetachedSidePanelWindow: (
     detachedWindowID: string,
@@ -122,6 +138,7 @@ type Deps = {
   resolveBrowserAutofill: (input: BrowserAutofillRequest) => Promise<{ username: string; password: string } | null> | { username: string; password: string } | null
   captureBrowserPassword: (input: { guestID: number; payload: BrowserPasswordCapturePayload }) => Promise<void> | void
   setActiveBrowserTab: (target: BrowserGuestTarget & { active: boolean }) => Promise<void> | void
+  reportBrowserState: (senderWindowID: number, input: BrowserStateSync) => Promise<void> | void
 }
 
 const droppedImageMime = (path: string) => {
@@ -152,6 +169,14 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) =>
     deps.setDisplayBackend(backend),
   )
+  ipcMain.handle("get-mobile-access-status", () => deps.getMobileAccessStatus())
+  ipcMain.handle("enable-mobile-access", () => deps.enableMobileAccess())
+  ipcMain.handle("disable-mobile-access", () => deps.disableMobileAccess())
+  ipcMain.handle("apply-mobile-access-network-change", () => deps.applyMobileAccessNetworkChange())
+  ipcMain.handle("revoke-mobile-device", (_event: IpcMainInvokeEvent, deviceID: string) => deps.revokeMobileDevice(deviceID))
+  ipcMain.handle("list-mobile-devices", () => deps.listMobileDevices())
+  ipcMain.handle("create-lan-browser-pairing", () => deps.createLanBrowserPairing())
+  ipcMain.handle("reset-mobile-access-certificate", () => deps.resetMobileAccessCertificate())
   ipcMain.handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
   ipcMain.handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) => deps.checkAppExists(appName))
   ipcMain.handle("wsl-path", (_event: IpcMainInvokeEvent, path: string, mode: "windows" | "linux" | null) =>
@@ -166,7 +191,7 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.on("automation-event", (_event: IpcMainEvent, payload: AutomationEventPayload) => deps.automationEvent(payload))
   ipcMain.handle(
     "create-detached-side-panel-window",
-    (event: IpcMainInvokeEvent, input: Omit<DetachedSidePanelRecord, "sourceWindowID"> & { route: string }) => {
+    (event: IpcMainInvokeEvent, input: Omit<DetachedSidePanelRecord, "sourceWindowID"> & { route: string; background?: boolean }) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       return deps.createDetachedSidePanelWindow({
         ...input,
@@ -369,6 +394,9 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("set-active-browser-tab", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget & { active: boolean }) => {
     return deps.setActiveBrowserTab(target)
   })
+  ipcMain.handle("report-browser-state", (event: IpcMainInvokeEvent, input: BrowserStateSync) => {
+    return deps.reportBrowserState(BrowserWindow.fromWebContents(event.sender)?.id ?? -1, input)
+  })
 
   ipcMain.handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
     if (!app) return shell.openPath(path)
@@ -378,13 +406,17 @@ export function registerIpcHandlers(deps: Deps) {
       execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
     })
   })
+  ipcMain.handle("stat-path", async (_event: IpcMainInvokeEvent, path: string) => {
+    if (!isAbsolute(path)) return { exists: false, kind: "unknown" as const }
+    const info = await lstat(path).catch(() => undefined)
+    if (!info) return { exists: false, kind: "unknown" as const }
+    if (info.isDirectory()) return { exists: true, kind: "directory" as const }
+    if (info.isFile()) return { exists: true, kind: "file" as const }
+    return { exists: true, kind: "unknown" as const }
+  })
 
   ipcMain.handle("read-clipboard-image", () => {
-    const image = clipboard.readImage()
-    if (image.isEmpty()) return null
-    const buffer = image.toPNG().buffer
-    const size = image.getSize()
-    return { buffer, width: size.width, height: size.height }
+    return clipboardImagePayload(clipboard.readImage())
   })
 
   ipcMain.on("show-notification", (_event: IpcMainEvent, title: string, body?: string) => {
@@ -395,6 +427,10 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("get-window-id", (event: IpcMainInvokeEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return win?.id ?? null
+  })
+  ipcMain.handle("get-window-visibility", (event: IpcMainInvokeEvent) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return deps.getWindowVisibility(win?.id ?? -1)
   })
   ipcMain.handle("get-renderer-memory-info", (event: IpcMainInvokeEvent) => {
     const metric = app.getAppMetrics().find((item) => item.pid === event.sender.getOSProcessId())
@@ -441,6 +477,7 @@ export function sendSqliteMigrationProgress(win: BrowserWindow, progress: Sqlite
 export function sendMenuCommand(win: BrowserWindow, id: string) {
   win.webContents.send("menu-command", id)
 }
+
 
 export function sendDeepLinks(win: BrowserWindow, urls: string[]) {
   win.webContents.send("deep-link", urls)

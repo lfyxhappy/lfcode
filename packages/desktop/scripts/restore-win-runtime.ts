@@ -79,17 +79,6 @@ function upgradeBundledCommands(text: string) {
       ),
     )
   }
-  if ("codegraph" in mcp) {
-    updated = applyEdits(
-      updated,
-      modify(updated, ["mcp"], Object.fromEntries(Object.entries(mcp).filter(([key]) => key !== "codegraph")), {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
-        },
-      }),
-    )
-  }
   const playwright = mcp.playwright
   if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright) || isStaleBundledPlaywrightRemoteConfig(playwright)) {
     updated = applyEdits(

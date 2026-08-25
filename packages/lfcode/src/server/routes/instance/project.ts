@@ -59,6 +59,81 @@ export const ProjectRoutes = lazy(() =>
         return c.json(Instance.project)
       },
     )
+    .post(
+      "/managed",
+      describeRoute({
+        summary: "Create managed project",
+        description: "Create or retrieve a non-Git project owned by a plugin extension.",
+        operationId: "project.createManaged",
+        responses: {
+          200: {
+            description: "Managed project information",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info.zod),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", Project.CreateManagedInput),
+      async (c) =>
+        jsonRequest("ProjectRoutes.createManaged", c, function* () {
+          const svc = yield* Project.Service
+          return yield* svc.createManagedProject(c.req.valid("json"))
+        }),
+    )
+    .get(
+      "/managed/:pluginID/:type",
+      describeRoute({
+        summary: "Get managed project",
+        description: "Get the non-Git project owned by a plugin extension.",
+        operationId: "project.getManaged",
+        responses: {
+          200: {
+            description: "Managed project information, when it exists",
+            content: {
+              "application/json": {
+                schema: resolver(Project.Info.zod.nullable()),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", Project.ProjectExtension.zod),
+      async (c) =>
+        jsonRequest("ProjectRoutes.getManaged", c, function* () {
+          const svc = yield* Project.Service
+          return yield* svc.getManagedProject(c.req.valid("param"))
+        }),
+    )
+    .delete(
+      "/managed/:pluginID/:type",
+      describeRoute({
+        summary: "Remove managed project",
+        description: "Remove a plugin-owned project record and its cascaded Lfcode session data.",
+        operationId: "project.removeManaged",
+        responses: {
+          200: {
+            description: "Whether a project record was removed",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("param", Project.ProjectExtension.zod),
+      async (c) =>
+        jsonRequest("ProjectRoutes.removeManaged", c, function* () {
+          const svc = yield* Project.Service
+          return yield* svc.removeManagedProject(c.req.valid("param"))
+        }),
+    )
     .delete(
       "/:projectID/snapshot",
       describeRoute({

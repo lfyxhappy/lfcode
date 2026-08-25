@@ -19,17 +19,33 @@ export function createSessionStatusReconciler(input: {
   getClient: (directory: string) => LfcodeClient
   getStore: (directory: string) => [Store<State>, SetStoreFunction<State>]
   delayMs?: number
+  activityWindowMs?: number
+  now?: () => number
   timers?: {
     set: (fn: () => void, ms: number) => TimerID
     clear: (timer: TimerID) => void
   }
 }) {
   const delayMs = input.delayMs ?? 2000
+  const activityWindowMs = input.activityWindowMs ?? 4000
+  const now = input.now ?? (() => Date.now())
   const timers = input.timers ?? {
     set: (fn, ms) => setTimeout(fn, ms),
     clear: (timer) => clearTimeout(timer),
   }
-  const pending = new Map<string, { timer: TimerID; token: symbol }>()
+  const pending = new Map<string, { timer: TimerID; token: symbol; dueAt: number }>()
+  const activity = new Map<string, number>()
+
+  const recentActivity = (key: string) => {
+    const seenAt = activity.get(key)
+    return seenAt !== undefined && now() - seenAt < activityWindowMs
+  }
+
+  const remainingActivity = (key: string) => {
+    const seenAt = activity.get(key)
+    if (seenAt === undefined) return delayMs
+    return Math.max(1, activityWindowMs - (now() - seenAt))
+  }
 
   const stop = (directory: string, sessionID?: string) => {
     directory = normalizeWorkspacePath(directory)
@@ -37,9 +53,11 @@ export function createSessionStatusReconciler(input: {
     if (sessionID) {
       const key = keyFor(directory, sessionID)
       const current = pending.get(key)
-      if (!current) return
-      timers.clear(current.timer)
+      if (current) timers.clear(current.timer)
       pending.delete(key)
+      // A status event is authoritative (in particular user-initiated Stop).
+      // Only a polled snapshot is guarded by recent stream activity below.
+      activity.delete(key)
       return
     }
     for (const [key, current] of pending) {
@@ -47,19 +65,24 @@ export function createSessionStatusReconciler(input: {
       timers.clear(current.timer)
       pending.delete(key)
     }
+    for (const key of activity.keys()) {
+      if (key.startsWith(directory + "\n")) activity.delete(key)
+    }
   }
 
-  const schedule = (directory: string, sessionID: string) => {
+  const schedule = (directory: string, sessionID: string, wait = delayMs) => {
     directory = normalizeWorkspacePath(directory)
     if (!directory || !sessionID) return
     const key = keyFor(directory, sessionID)
+    const dueAt = now() + wait
     const current = pending.get(key)
+    if (current && current.dueAt <= dueAt) return
     if (current) timers.clear(current.timer)
     const token = Symbol(key)
     const timer = timers.set(() => {
       void reconcile(directory, sessionID, token)
-    }, delayMs)
-    pending.set(key, { timer, token })
+    }, wait)
+    pending.set(key, { timer, token, dueAt })
   }
 
   const reconcile = async (directory: string, sessionID: string, token: symbol) => {
@@ -77,6 +100,12 @@ export function createSessionStatusReconciler(input: {
       if (!isSessionStreaming(latestStore.session_status[sessionID])) return
       const next = snapshot[sessionID] as SessionStatus | undefined
       if (!isSessionStreaming(next)) {
+        if (recentActivity(key)) {
+          setStore("session_status", sessionID, { type: "busy" })
+          schedule(directory, sessionID, remainingActivity(key))
+          return
+        }
+        activity.delete(key)
         setStore("session_status", sessionID, next ?? { type: "idle" })
         return
       }
@@ -122,6 +151,7 @@ export function createSessionStatusReconciler(input: {
       timers.clear(current.timer)
       pending.delete(key)
     }
+    activity.clear()
   }
 
   return {
@@ -129,6 +159,17 @@ export function createSessionStatusReconciler(input: {
       schedule(directory, sessionID)
     },
     stop,
+    noteActivity(directory: string, sessionID: string) {
+      directory = normalizeWorkspacePath(directory)
+      if (!directory || !sessionID) return
+      const key = keyFor(directory, sessionID)
+      activity.set(key, now())
+      const [store, setStore] = input.getStore(directory)
+      if (!isSessionStreaming(store.session_status[sessionID])) {
+        setStore("session_status", sessionID, { type: "busy" })
+      }
+      schedule(directory, sessionID)
+    },
     refresh,
     dispose,
   }

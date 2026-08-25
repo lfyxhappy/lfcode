@@ -29,7 +29,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
@@ -41,6 +40,7 @@ import { ToolRegistry } from "../../src/tool"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
+import { Actor } from "../../src/actor/spawn"
 import { Memory } from "../../src/memory"
 import { History } from "../../src/history"
 import { Team } from "../../src/team"
@@ -249,29 +249,34 @@ function makeHttp() {
     ),
   )
   const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
+  const prompt = SessionPrompt.layer.pipe(
+    Layer.provide(Goal.defaultLayer),
+    Layer.provide(Skill.defaultLayer),
+    Layer.provide(TaskGateState.defaultLayer),
+    Layer.provide(TaskRegistry.defaultLayer),
+    Layer.provide(SessionRevert.defaultLayer),
+    Layer.provide(summary),
+    Layer.provide(checkpoint),
+    Layer.provide(team),
+    Layer.provide(taskRegistry),
+    Layer.provideMerge(run),
+    Layer.provideMerge(prune),
+    Layer.provideMerge(compaction),
+    Layer.provideMerge(proc),
+    Layer.provideMerge(registry),
+    Layer.provideMerge(trunc),
+    Layer.provide(Instruction.defaultLayer),
+    Layer.provide(SystemPrompt.defaultLayer),
+    Layer.provide(Inbox.defaultLayer),
+    Layer.provideMerge(deps),
+  )
   return Layer.mergeAll(
     TestLLMServer.layer,
-    SessionPrompt.layer.pipe(
-      Layer.provide(Goal.defaultLayer),
-      Layer.provide(ComposeGateState.defaultLayer),
-      Layer.provide(Skill.defaultLayer),
-      Layer.provide(TaskGateState.defaultLayer),
+    Actor.layer.pipe(
+      Layer.provideMerge(prompt),
+      Layer.provideMerge(taskRegistry),
       Layer.provide(TaskRegistry.defaultLayer),
-      Layer.provide(SessionRevert.defaultLayer),
-      Layer.provide(summary),
-      Layer.provide(checkpoint),
-      Layer.provide(team),
-      Layer.provide(taskRegistry),
-      Layer.provideMerge(run),
-      Layer.provideMerge(prune),
-      Layer.provideMerge(compaction),
-      Layer.provideMerge(proc),
-      Layer.provideMerge(registry),
-      Layer.provideMerge(trunc),
-      Layer.provide(Instruction.defaultLayer),
-      Layer.provide(SystemPrompt.defaultLayer),
       Layer.provide(Inbox.defaultLayer),
-      Layer.provideMerge(deps),
     ),
   ).pipe(
     Layer.provide(summary),
@@ -381,7 +386,7 @@ const seed = Effect.fn("test.seed")(function* (sessionID: SessionID, opts?: { fi
   return { user: msg, assistant }
 })
 
-const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
+const addSubtask = (sessionID: SessionID, messageID: MessageID, model?: typeof ref) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
     yield* session.updatePart({
@@ -392,7 +397,11 @@ const addSubtask = (sessionID: SessionID, messageID: MessageID, model = ref) =>
       prompt: "look into the cache key path",
       description: "inspect bug",
       agent: "general",
-      model,
+      execution: "wait",
+      context: "state",
+      contextRefs: [],
+      declaredFiles: [],
+      ...(model ? { model } : {}),
     })
   })
 
@@ -474,6 +483,72 @@ it.live("static loop returns assistant text through local provider", () =>
       expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
       expect(yield* llm.hits).toHaveLength(1)
       expect(yield* llm.pending).toBe(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("explicit agent attachment becomes a direct subtask", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Explicit agent" })
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          { type: "text", text: "Inspect the cache path" },
+          { type: "agent", name: "general" },
+        ],
+      })
+
+      const task = result.parts.find((part): part is MessageV2.SubtaskPart => part.type === "subtask")
+      expect(task?.agent).toBe("general")
+      expect(task?.prompt).toBe("Inspect the cache path")
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("persists explicit subtask execution, context, model, and file references", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "Persisted subtask fields" })
+      const model = { providerID: ProviderID.make("test"), modelID: ModelID.make("test-model") }
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          {
+            type: "subtask",
+            agent: "general",
+            description: "Persist dispatch options",
+            prompt: "Keep these options intact",
+            execution: "background",
+            context: "full",
+            model,
+            contextRefs: ["src/feature.ts", "docs/plan.md"],
+            declaredFiles: ["src/feature.ts"],
+          },
+        ],
+      })
+
+      const task = result.parts.find((part): part is MessageV2.SubtaskPart => part.type === "subtask")
+      expect(task).toMatchObject({
+        agent: "general",
+        execution: "background",
+        context: "full",
+        model,
+        contextRefs: ["src/feature.ts", "docs/plan.md"],
+        declaredFiles: ["src/feature.ts"],
+      })
     }),
     { git: true, config: providerCfg },
   ),
@@ -724,9 +799,12 @@ it.live(
           permission: [{ permission: "*", pattern: "*", action: "allow" }],
         })
         yield* llm.tool("actor", {
-          description: "inspect bug",
-          prompt: "look into the cache key path",
-          subagent_type: "general",
+          operation: {
+            action: "run",
+            description: "inspect bug",
+            prompt: "look into the cache key path",
+            subagent_type: "general",
+          },
         })
         yield* llm.hang
         yield* user(chat.id, "hello")

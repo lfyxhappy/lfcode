@@ -27,7 +27,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -188,7 +187,6 @@ function makeLayer() {
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
-    Layer.provide(ComposeGateState.defaultLayer),
     Layer.provide(Skill.defaultLayer),
     Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
@@ -885,13 +883,9 @@ describe("Actor.spawn structured output (P3)", () => {
 })
 
 describe("Actor.spawn onActorID pre-registration (MR104 #2)", () => {
-  // The workflow runtime needs the child's actorID in its reclaim set BEFORE the
-  // background work fiber detaches, otherwise a cancel that races an in-flight
-  // spawn leaves an orphan. spawn exposes onActorID: fired synchronously inside
-  // the spawn Effect, right after register(), before forkWork detaches. Proof:
-  // by the time spawn RESOLVES to the caller, the callback has already run AND
-  // carries the SAME actorID the registry was populated with — so any consumer
-  // (the workflow) is guaranteed to know the id the instant the actor exists.
+  // Callers that coordinate cancellation need the child actorID before its
+  // background fiber detaches. onActorID fires synchronously after register()
+  // and before forkWork detaches, so it carries the same registered actorID.
   it.live("onActorID fires with the registered actorID before spawn resolves", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -1020,7 +1014,7 @@ describe("Actor.spawn return-format injection (F21)", () => {
 
         yield* Deferred.await(result.outcome)
 
-        const msgs = yield* session.messages({ sessionID: result.sessionID })
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
         const subAgentUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
         expect(subAgentUser).toBeDefined()
         const text = subAgentUser?.parts.find((p) => p.type === "text")?.text ?? ""
@@ -1057,7 +1051,7 @@ describe("Actor.spawn return-format injection (F21)", () => {
 
         yield* Deferred.await(result.outcome)
 
-        const msgs = yield* session.messages({ sessionID: result.sessionID })
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
         const subAgentUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
         const text = subAgentUser?.parts.find((p) => p.type === "text")?.text ?? ""
         expect(text).not.toContain("Return format (required)")
@@ -1092,7 +1086,7 @@ describe("Actor.spawn return-format injection (F21)", () => {
 
         yield* Deferred.await(result.outcome)
 
-        const msgs = yield* session.messages({ sessionID: result.sessionID })
+        const msgs = yield* session.messages({ sessionID: result.sessionID, agentID: "*" })
         const subAgentUser = msgs.find((m) => m.info.role === "user" && m.info.agentID === result.actorID)
         const text = subAgentUser?.parts.find((p) => p.type === "text")?.text ?? ""
         expect(text).not.toContain("Return format (required)")

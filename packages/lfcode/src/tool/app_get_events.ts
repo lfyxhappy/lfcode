@@ -20,7 +20,7 @@ export const AppGetEventsTool = Tool.define(
       parameters,
       execute: (args: z.infer<typeof parameters>) =>
         Effect.gen(function* () {
-          const current = yield* config.get()
+          const current = yield* config.getGlobal()
           ensureAppControlAccess(current, "read_only")
           const client = yield* Effect.promise(() => createAppControlClient())
           const params = new URLSearchParams()

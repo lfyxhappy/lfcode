@@ -12,12 +12,12 @@ appends them at request time per-agent).
 #   - $vars are preserved as literal text (no expansion)
 
 # block until done, return the subagent's final message inline:
-    actor run <subagent_type> "<description>" "<prompt>" [--model <ref>] [--actor <id>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
+    actor run <subagent_type> "<description>" "<prompt>" [--identity <name>] [--purpose <purpose>] [--model <ref>] [--actor <id>] [--timeout <ms>] [--command <cmd>] [--context none|state] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor run <subagent_type> "<description>" "<prompt>" --task <TID>
 
 # return actor_id immediately, run independently:
-    actor spawn <subagent_type> "<description>" "<prompt>" [--model <ref>] [--actor <id>] [--command <cmd>] [--context none|state|full] [--output-schema '<json>']
+    actor spawn <subagent_type> "<description>" "<prompt>" [--identity <name>] [--purpose <purpose>] [--model <ref>] [--actor <id>] [--command <cmd>] [--context none|state] [--output-schema '<json>']
     # bind it to one of your `task` tool tasks (TID from the `task` tool, e.g. T4):
     actor spawn <subagent_type> "<description>" "<prompt>" --task <TID>
 
@@ -40,6 +40,9 @@ Examples:
 # pick a model/tier for this subagent (group name like ultra/standard/lite, or a literal provider/model):
     actor run explore "Quick scan" "find catch blocks" --model lite
 
+# identify the visible subagent card (old calls without these flags keep their description):
+    actor spawn explore "Review auth" "inspect the authentication flow" --identity Researcher --purpose "Review authentication"
+
 # tie this subagent to a task — pass a TID the `task` tool returned this session
 # (e.g. T1). On completion the postStop hook validates tasks/<TID>/progress.md.
 # An unknown or malformed TID is ignored and the subagent runs ad-hoc:
@@ -61,8 +64,9 @@ Examples:
 # fire-and-forget when you don't need the result inline:
     actor spawn general "Background log collection" "..."
 
-# run/spawn flags: --actor resume a prior subagent (by actor_id); --timeout ms before
-#   giving up (run only); --command the command that triggered this; --context none|state|full
+# run/spawn flags: --actor sends a follow-up to a prior subagent (by actor_id) instead of
+#   creating a new one; for follow-ups prefer `actor send <actor_id> "..."`. --timeout ms before
+#   giving up (run only); --command the command that triggered this; --context none|state
 #   (default none); --output-schema a JSON Schema STRING (single-quote it) — forces the
 #   subagent to return a matching object instead of free text.
 

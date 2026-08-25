@@ -27,7 +27,6 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { Goal } from "../../src/session/goal"
-import { ComposeGateState } from "../../src/session/compose-gate-state"
 import { TaskGateState } from "../../src/task/gate-state"
 import { SessionStatus } from "../../src/session/status"
 import { Skill } from "../../src/skill"
@@ -52,9 +51,10 @@ import { Ripgrep } from "../../src/file/ripgrep"
 import { Format } from "../../src/format"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
-import { TestLLMServer } from "../lib/llm-server"
+import { TestLLMServer, reply } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { InboxTable } from "../../src/inbox/inbox.sql"
+import { ContextReviewTable } from "../../src/context-review/context-review.sql"
 
 afterEach(async () => {
   await Instance.disposeAll()
@@ -185,7 +185,6 @@ function makeLayer() {
   const prune = SessionPrune.layer.pipe(Layer.provide(checkpoint), Layer.provideMerge(deps))
   const prompt = SessionPrompt.layer.pipe(
     Layer.provide(Goal.defaultLayer),
-    Layer.provide(ComposeGateState.defaultLayer),
     Layer.provide(Skill.defaultLayer),
     Layer.provide(TaskGateState.defaultLayer),
     Layer.provide(SessionRevert.defaultLayer),
@@ -320,10 +319,10 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         )
 
         expect(rows.length).toBe(1)
-        expect(rows[0].type).toBe("actor_notification")
+        expect(rows[0].type).toBe("completion_notification")
         const content = rows[0].content as { text?: string }
-        expect(content.text).toContain("<actor-notification>")
-        expect(content.text).toContain("background build task")
+        expect(content.text).toContain('"source":"actor"')
+        expect(content.text).toContain('"summary":"done"')
         expect(content.text).toContain("completed")
       }),
       { git: true, config: providerCfg },
@@ -369,6 +368,189 @@ describe("Actor.spawn inbox notifications (Plan 3 / Task 2)", () => {
         )
 
         expect(rows.length).toBe(0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("context-reviewer agentType does not write inbox notification", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const actor = yield* Actor.Service
+        const session = yield* Session.Service
+
+        const parent = yield* session.create({
+          title: "notification-test-context-reviewer",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.text('{"skills":[],"memory":[]}')
+        const result = yield* actor.spawn({
+          mode: "subagent",
+          sessionID: parent.id,
+          agentType: "context-reviewer",
+          task: "review the completed turn",
+          context: "none",
+          tools: ["memory"],
+          background: true,
+          model: ref,
+        })
+
+        yield* Deferred.await(result.outcome)
+        const rows = yield* Effect.sync(() =>
+          Database.use((db) =>
+            db.select().from(InboxTable).where(eq(InboxTable.receiver_session_id, parent.id)).all(),
+          ),
+        )
+        expect(rows.length).toBe(0)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("a completed hidden review hands off only to the immediately following main turn", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "context-review-handoff",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.text("The first answer omitted the code review workflow.")
+        yield* llm.push(
+          reply().tool("StructuredOutput", {
+            skills: [
+              { name: "code-reviewer" },
+              { name: "removed-skill" },
+            ],
+            memory: [{ query: "code review preference" }],
+          }),
+        )
+        const first = yield* prompt.prompt({
+          sessionID: parent.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Can you review this change?" }],
+        })
+        expect(first.info.role).toBe("assistant")
+
+        const completed = yield* Effect.gen(function* () {
+          let lastReview: { status: string; error: string | null } | undefined
+          for (let attempt = 0; attempt < 80; attempt += 1) {
+            const review = Database.use((db) =>
+              db.select().from(ContextReviewTable).where(eq(ContextReviewTable.session_id, parent.id)).get(),
+            )
+            if (review?.status === "completed") return review
+            lastReview = review ? { status: review.status, error: review.error } : undefined
+            yield* Effect.sleep("25 millis")
+          }
+          const inputs = yield* llm.inputs
+          return yield* Effect.die(
+            new Error(
+              `context reviewer did not complete: ${JSON.stringify(lastReview)}; inputs=${JSON.stringify(
+                inputs.map((input) => ({
+                  last: Array.isArray(input.messages) ? input.messages.at(-1) : undefined,
+                  toolNames: Array.isArray(input.tools)
+                    ? input.tools.map((tool) => {
+                        if (!tool || typeof tool !== "object" || !("function" in tool)) return
+                        const fn = tool.function
+                        return fn && typeof fn === "object" && "name" in fn ? fn.name : undefined
+                      })
+                    : undefined,
+                })),
+              )}`,
+            ),
+          )
+        })
+        expect(completed.findings).toEqual({
+          skills: [
+            { name: "code-reviewer" },
+            { name: "removed-skill" },
+          ],
+          memory: [{ query: "code review preference" }],
+        })
+
+        yield* llm.text("The automation completed without changing the review.")
+        const automation = yield* prompt.prompt({
+          sessionID: parent.id,
+          agent: "build",
+          model: ref,
+          source: "automation",
+          parts: [{ type: "text", text: "Run scheduled maintenance." }],
+        })
+        expect(automation.info.role).toBe("assistant")
+        const afterAutomation = Database.use((db) =>
+          db.select().from(ContextReviewTable).where(eq(ContextReviewTable.id, completed.id)).get(),
+        )
+        expect(afterAutomation?.status).toBe("completed")
+
+        yield* llm.text("The related review follow-up answer.")
+        const second = yield* prompt.prompt({
+          sessionID: parent.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Please continue reviewing it." }],
+        })
+        expect(second.info.role).toBe("assistant")
+
+        const inputs = yield* llm.inputs
+        const toolNames = (input: (typeof inputs)[number] | undefined) =>
+          (Array.isArray(input?.tools) ? input.tools : []).flatMap((tool: unknown) => {
+            if (!tool || typeof tool !== "object" || !("function" in tool)) return []
+            const fn = tool.function
+            return fn && typeof fn === "object" && "name" in fn && typeof fn.name === "string" ? [fn.name] : []
+          }) ?? []
+        const firstTurn = inputs.find((input) => JSON.stringify(input).includes("Can you review this change?"))
+        // The first turn has no completed review yet. Memory must remain
+        // unavailable until an explicit user request or a valid hand-off.
+        expect(toolNames(firstTurn)).not.toContain("memory")
+        const secondTurn = inputs.find((input) => JSON.stringify(input).includes("Please continue reviewing it."))
+        expect(JSON.stringify(secondTurn)).toContain("<context_review")
+        expect(JSON.stringify(secondTurn)).toContain("code-reviewer")
+        expect(JSON.stringify(secondTurn)).not.toContain("removed-skill")
+        expect(JSON.stringify(secondTurn)).toContain("code review preference")
+        // Code Mode no longer adds a duplicate run_code facade; the complete
+        // native catalog is injected directly for every presentation mode.
+        expect(toolNames(secondTurn)).not.toContain("run_code")
+
+        const consumed = Database.use((db) =>
+          db.select().from(ContextReviewTable).where(eq(ContextReviewTable.id, completed.id)).get(),
+        )
+        expect(consumed?.status).toBe("consumed")
+      }),
+      { git: true, config: providerCfg },
+    ),
+  )
+
+  it.live("does not review an automation turn", () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const session = yield* Session.Service
+        const parent = yield* session.create({
+          title: "context-review-automation-excluded",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+
+        yield* llm.text("The scheduled automation completed.")
+        const response = yield* prompt.prompt({
+          sessionID: parent.id,
+          agent: "build",
+          model: ref,
+          source: "automation",
+          parts: [{ type: "text", text: "Run the scheduled maintenance check." }],
+        })
+        expect(response.info.role).toBe("assistant")
+
+        // Scheduling creates its database record before the reviewer calls a
+        // model, so a short yield is sufficient to detect an accidental run.
+        yield* Effect.sleep("50 millis")
+        const reviews = Database.use((db) =>
+          db.select().from(ContextReviewTable).where(eq(ContextReviewTable.session_id, parent.id)).all(),
+        )
+        expect(reviews).toHaveLength(0)
       }),
       { git: true, config: providerCfg },
     ),

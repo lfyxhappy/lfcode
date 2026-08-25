@@ -1,0 +1,43 @@
+{
+  "name": "@lfcode-ai/imagemaker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./location": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "lfcode": {
+    "apiVersion": 2,
+    "id": "lfcode-imagemaker",
+    "name": "ImageMaker",
+    "description": "在对话中按需生成和编辑图片。",
+    "category": "mixed",
+    "activation": "startup",
+    "trust": "official",
+    "capabilities": ["tool.image-generation", "storage.secure"],
+    "bundledSkills": [
+      {
+        "id": "imagemaker",
+        "path": "skills/imagemaker/SKILL.md"
+      }
+    ],
+    "entrypoints": {
+      "location": "./src/index.ts"
+    },
+    "storage": {
+      "data": true
+    }
+  },
+  "dependencies": {
+    "@lfcode-ai/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@lfcode-ai/sdk": "workspace:*",
+    "@tsconfig/bun": "catalog:",
+    "@typescript/native-preview": "catalog:"
+  }
+}

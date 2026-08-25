@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "budget": {
+    "resource_count": 80,
+    "transfer_bytes": 5000000,
+    "dom_nodes": 1500,
+    "long_tasks": 5,
+    "cumulative_layout_shift": 0.1
+  }
+}

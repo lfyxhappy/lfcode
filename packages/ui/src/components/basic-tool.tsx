@@ -33,6 +33,7 @@ export interface BasicToolProps {
   forceOpen?: boolean
   defer?: boolean
   locked?: boolean
+  disableToggle?: boolean
   animated?: boolean
   onSubtitleClick?: () => void
   onTriggerClick?: JSX.EventHandlerUnion<HTMLElement, MouseEvent>
@@ -121,6 +122,7 @@ export function BasicTool(props: BasicToolProps) {
   })
 
   const handleOpenChange = (value: boolean) => {
+    if (props.disableToggle) return
     if (pending()) return
     if (props.locked && !value) return
     setState("open", value)

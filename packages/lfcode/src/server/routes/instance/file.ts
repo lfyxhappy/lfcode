@@ -3,6 +3,7 @@ import { describeRoute, validator, resolver } from "hono-openapi"
 import z from "zod"
 import { File } from "@/file"
 import { Ripgrep } from "@/file/ripgrep"
+import { Flag } from "@/flag/flag"
 import { LSP } from "@/lsp"
 import { Instance } from "@/project/instance"
 import { lazy } from "@/util/lazy"
@@ -138,6 +139,97 @@ export const FileRoutes = lazy(() =>
         }),
     )
     .get(
+      "/file/reference-tree",
+      describeRoute({
+        summary: "List reference directory",
+        description:
+          "List the direct children of a directory previously granted by the desktop reference-tree view.",
+        operationId: "file.referenceTree",
+        responses: {
+          200: {
+            description: "Files and directories",
+            content: {
+              "application/json": {
+                schema: resolver(File.Node.array()),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string(),
+          token: z.string().optional(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("FileRoutes.listReferenceTree", c, function* () {
+          const svc = yield* File.Service
+          return yield* svc.listReferenceDirectory(c.req.valid("query"))
+        }),
+    )
+    .post(
+      "/file/reference-grant",
+      describeRoute({
+        summary: "Grant desktop reference directory",
+        description: "Create a short-lived project-bound grant for a desktop user-selected reference directory.",
+        operationId: "file.referenceGrant",
+        responses: {
+          200: {
+            description: "Reference directory grant",
+            content: {
+              "application/json": {
+                schema: resolver(File.ReferenceGrant),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          path: z.string(),
+        }),
+      ),
+      async (c) => {
+        if (Flag.LFCODE_CLIENT !== "desktop" || Flag.LFCODE_WORKSPACE_ID) return c.json({ error: "desktop only" }, 403)
+        return jsonRequest("FileRoutes.grantReferenceDirectory", c, function* () {
+          const svc = yield* File.Service
+          return yield* svc.grantReferenceDirectory(c.req.valid("json").path)
+        })
+      },
+    )
+    .get(
+      "/file/stat",
+      describeRoute({
+        summary: "Get file reference state",
+        description: "Check whether a local file reference exists and whether it is a file or directory without reading its content.",
+        operationId: "file.stat",
+        responses: {
+          200: {
+            description: "File reference state",
+            content: {
+              "application/json": {
+                schema: resolver(File.Reference),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("FileRoutes.stat", c, function* () {
+          const svc = yield* File.Service
+          return yield* svc.stat(c.req.valid("query").path)
+        }),
+    )
+    .get(
       "/file/content",
       describeRoute({
         summary: "Read file",
@@ -159,13 +251,17 @@ export const FileRoutes = lazy(() =>
         z.object({
           path: z.string(),
           with_diff: z.enum(["true", "false"]).optional(),
+          reference_token: z.string().optional(),
         }),
       ),
       async (c) =>
         jsonRequest("FileRoutes.read", c, function* () {
           const svc = yield* File.Service
           const query = c.req.valid("query")
-          return yield* svc.read(query.path, { withDiff: query.with_diff === "true" })
+          return yield* svc.read(query.path, {
+            withDiff: query.with_diff === "true",
+            referenceToken: query.reference_token,
+          })
         }),
     )
     .post(

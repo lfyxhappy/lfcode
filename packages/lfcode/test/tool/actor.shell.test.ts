@@ -91,6 +91,22 @@ describe("actor.shell.parse: --model flag", () => {
     ])
   })
 
+  test("identity and purpose flags produce visible actor metadata", async () => {
+    const out = await parse('actor spawn explore "d" "p" --identity Researcher --purpose "Check auth flow"')
+    expect(out).toEqual([
+      {
+        operation: {
+          action: "spawn",
+          subagent_type: "explore",
+          description: "d",
+          prompt: "p",
+          identity: "Researcher",
+          purpose: "Check auth flow",
+        },
+      },
+    ])
+  })
+
   test("--task=<TID> equals form", async () => {
     const out = await parse('actor run explore "d" "p" --task=T3')
     expect(out).toEqual([{ operation: { action: "run", subagent_type: "explore", description: "d", prompt: "p", task_id: "T3" } }])

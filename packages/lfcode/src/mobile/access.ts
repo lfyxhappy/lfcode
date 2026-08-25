@@ -4,6 +4,8 @@ export const MOBILE_PROTOCOL_VERSION = 1
 const PAIRING_TTL_MS = 2 * 60 * 1000
 const PAIRING_FAILURE_WINDOW_MS = 60 * 1000
 const MAX_PAIRING_FAILURES = 5
+const MAX_ACTIVE_DEVICES = 32
+const MAX_REVOKED_DEVICES = 16
 
 export type MobileDevice = {
   id: string
@@ -36,6 +38,15 @@ export type MobilePairing = {
   expiresAt: number
 }
 
+export type MobilePairingPayload = {
+  protocolVersion: typeof MOBILE_PROTOCOL_VERSION
+  hostID: string
+  endpoints: string[]
+  spkiSha256: string
+  pairingKey: string
+  expiresAt: number
+}
+
 export type MobilePairResult =
   | { ok: true; device: Omit<MobileDevice, "tokenHash">; token: string }
   | { ok: false; code: "invalid_pairing" | "pairing_expired" | "rate_limited" }
@@ -48,12 +59,32 @@ export function createMobileAccessState(hostID = `host_${randomUUID()}`): Mobile
   }
 }
 
-export function createPairing(state: MobileAccessState, now = Date.now()): MobilePairing {
+export function createPairing(state: MobileAccessState, now = Date.now(), ttlMs = PAIRING_TTL_MS): MobilePairing {
   const key = randomToken()
-  const expiresAt = now + PAIRING_TTL_MS
+  const expiresAt = now + ttlMs
   state.pairing = { keyHash: hash(key), expiresAt }
   state.failedPairingAttempts = {}
   return { key, expiresAt }
+}
+
+export function createPairingPayload(input: {
+  state: MobileAccessState
+  endpoints: string[]
+  spkiSha256: string
+  now?: number
+}): MobilePairingPayload {
+  const pairing = createPairing(input.state, input.now)
+  const endpoints = input.endpoints.filter((endpoint) => isSecureEndpoint(endpoint))
+  if (endpoints.length === 0) throw new Error("Mobile pairing requires at least one HTTPS endpoint")
+  if (Buffer.from(input.spkiSha256, "base64").length !== 32) throw new Error("Mobile pairing requires a SHA-256 SPKI pin")
+  return {
+    protocolVersion: MOBILE_PROTOCOL_VERSION,
+    hostID: input.state.hostID,
+    endpoints,
+    spkiSha256: input.spkiSha256,
+    pairingKey: pairing.key,
+    expiresAt: pairing.expiresAt,
+  }
 }
 
 export function pairDevice(input: {
@@ -76,15 +107,22 @@ export function pairDevice(input: {
 
   input.state.pairing = undefined
   delete input.state.failedPairingAttempts[input.source]
+  return createDevice(input.state, input.deviceID, input.deviceName, now)
+}
+
+function createDevice(state: MobileAccessState, deviceID: string, deviceName: string, now: number): MobilePairResult {
   const token = randomToken()
   const device: MobileDevice = {
-    id: input.deviceID,
-    name: input.deviceName,
+    id: deviceID,
+    name: deviceName,
     tokenHash: hash(token),
     createdAt: now,
     lastSeenAt: now,
   }
-  input.state.devices = [...input.state.devices.filter((item) => item.id !== input.deviceID), device]
+  const previous = state.devices.filter((item) => item.id !== deviceID)
+  const revoked = previous.filter((item) => item.revokedAt).sort((left, right) => left.lastSeenAt - right.lastSeenAt)
+  const active = previous.filter((item) => !item.revokedAt).sort((left, right) => left.lastSeenAt - right.lastSeenAt)
+  state.devices = [...revoked.slice(-MAX_REVOKED_DEVICES), ...active.slice(-(MAX_ACTIVE_DEVICES - 1)), device]
   return { ok: true, device: publicDevice(device), token }
 }
 
@@ -141,4 +179,13 @@ function matchesHash(expected: string, actual: string) {
 
 function randomToken() {
   return randomBytes(32).toString("base64url")
+}
+
+function isSecureEndpoint(value: string) {
+  try {
+    const endpoint = new URL(value)
+    return endpoint.protocol === "https:" && Boolean(endpoint.hostname) && !endpoint.username && !endpoint.password
+  } catch {
+    return false
+  }
 }

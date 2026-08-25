@@ -124,15 +124,26 @@ describe("classifyAssistantStep", () => {
     }
   })
 
-  test("finish=tool-calls => continue", () => {
+  test("provider-executed tool-calls + text => final without an empty re-loop", () => {
     expect(
       classifyAssistantStep({
         phase: "after-process",
         lastUser,
         assistant: assistantInfo("m-2", { finish: "tool-calls" }),
-        parts: [],
+        parts: [toolPart("m-2", { providerExecuted: true }), textPart("m-2", "answer")],
       }),
-    ).toEqual({ type: "continue" })
+    ).toEqual({ type: "final" })
+  })
+
+  test("provider-executed tool-calls without text => invalid", () => {
+    expect(
+      classifyAssistantStep({
+        phase: "after-process",
+        lastUser,
+        assistant: assistantInfo("m-2", { finish: "tool-calls" }),
+        parts: [toolPart("m-2", { providerExecuted: true })],
+      }),
+    ).toEqual({ type: "invalid", reason: "empty output" })
   })
 
   test("no finish => continue", () => {
@@ -331,5 +342,26 @@ describe("classifyAssistantStep", () => {
       parts: [errPart],
     })
     expect(result).toEqual({ type: "failed", reason: "APIError" })
+  })
+
+  test("PowerShell syntax guard error + text => continue for command recovery", () => {
+    const guardError =
+      "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax. Bash heredocs are not supported here."
+    const errorPart = {
+      ...basePart("m-2"),
+      type: "tool" as const,
+      callID: "call-1",
+      tool: "shell",
+      state: { status: "error" as const, input: {}, error: guardError, time: { start: 1, end: 2 } },
+    } as unknown as MessageV2.Part
+
+    expect(
+      classifyAssistantStep({
+        phase: "after-process",
+        lastUser,
+        assistant: assistantInfo("m-2", { finish: "tool-calls" }),
+        parts: [textPart("m-2", "I will inspect the archive count."), errorPart],
+      }),
+    ).toEqual({ type: "continue" })
   })
 })

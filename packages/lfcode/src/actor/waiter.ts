@@ -32,7 +32,11 @@ const DEFAULT_TIMEOUT_MS = 600_000
 // Persistent actors stay idle without a lastOutcome before their first turn
 // runs. We only resolve wait once they've completed at least one turn AND
 // that turn's outcome is not "success" — i.e. the actor needs attention.
-function isWaitResolving(entry: Pick<Actor, "status" | "lastOutcome" | "lifecycle">): boolean {
+function isWaitResolving(
+  entry: Pick<Actor, "status" | "lastOutcome" | "lifecycle" | "turnCount">,
+  afterTurnCount?: number,
+): boolean {
+  if (afterTurnCount !== undefined) return entry.status === "idle" && entry.turnCount > afterTurnCount
   return (
     entry.status === "idle" &&
     (entry.lifecycle === "ephemeral" || (entry.lastOutcome !== undefined && entry.lastOutcome !== "success"))
@@ -44,6 +48,7 @@ export interface Interface {
     sessionID: SessionID
     actor_id: string
     timeout_ms?: number
+    after_turn_count?: number
   }) => Effect.Effect<WaitResult>
 }
 
@@ -103,11 +108,12 @@ export const layer: Layer.Layer<Service, never, Bus.Service | ActorRegistry.Serv
       sessionID: SessionID
       actor_id: string
       timeout_ms?: number
+      after_turn_count?: number
     }) {
       // Fast path: registry already in a wait-resolving state.
       const entry = yield* reg.get(input.sessionID, input.actor_id)
       if (!entry) return { status: "unknown" as const, actor_id: input.actor_id }
-      if (isWaitResolving(entry)) return yield* snapshot(input.sessionID, input.actor_id, entry)
+      if (isWaitResolving(entry, input.after_turn_count)) return yield* snapshot(input.sessionID, input.actor_id, entry)
 
       const resolved = yield* Deferred.make<WaitResult>()
       const timeoutMs = input.timeout_ms ?? DEFAULT_TIMEOUT_MS
@@ -122,7 +128,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | ActorRegistry.Serv
             Effect.gen(function* () {
               const fresh = yield* reg.get(input.sessionID, input.actor_id)
               if (!fresh) return
-              if (!isWaitResolving(fresh)) return
+              if (!isWaitResolving(fresh, input.after_turn_count)) return
               const snap = yield* snapshot(input.sessionID, input.actor_id, fresh)
               Deferred.doneUnsafe(resolved, Effect.succeed(snap))
             }).pipe(
@@ -137,7 +143,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | ActorRegistry.Serv
             // Re-check after subscribing — the row could have flipped between
             // the initial get() above and the bus.subscribeCallback bind.
             const recheck = yield* reg.get(input.sessionID, input.actor_id)
-            if (recheck && isWaitResolving(recheck)) {
+            if (recheck && isWaitResolving(recheck, input.after_turn_count)) {
               return yield* snapshot(input.sessionID, input.actor_id, recheck)
             }
             const raced = yield* Deferred.await(resolved).pipe(

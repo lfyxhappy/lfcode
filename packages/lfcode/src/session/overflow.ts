@@ -1,6 +1,7 @@
 import type { Config } from "@/config"
 import type { Provider } from "@/provider"
 import * as ProviderTransform from "@/provider/transform"
+import { Token } from "@/util"
 import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
@@ -10,6 +11,28 @@ const AUTO_COMPACT_RATIO = 0.8
 // don't strangle the usable input window. 20K covers >99.99% of compaction
 // summary outputs based on production telemetry of summary token counts.
 const OUTPUT_CAP = 20_000
+
+/** Canonical token count across providers with inconsistent total semantics. */
+export function countTokens(tokens: MessageV2.Assistant["tokens"]) {
+  const components =
+    (tokens.input ?? 0) +
+    (tokens.output ?? 0) +
+    (tokens.reasoning ?? 0) +
+    (tokens.cache?.read ?? 0) +
+    (tokens.cache?.write ?? 0)
+  return Math.max(tokens.total ?? 0, components)
+}
+
+/** Estimate the complete serializable request envelope before provider send. */
+export function estimateRequestTokens(input: { system: unknown; messages: unknown; tools?: unknown }) {
+  return Token.estimate(
+    JSON.stringify({
+      system: input.system,
+      messages: input.messages,
+      tools: input.tools,
+    }),
+  )
+}
 
 export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
   const context = input.model.limit.context
@@ -28,8 +51,7 @@ export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistan
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
 
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+  const count = countTokens(input.tokens)
   return count >= usable(input)
 }
 
@@ -44,8 +66,7 @@ export function shouldAutoCompact(input: {
   const limit = usable(input)
   if (limit === 0) return false
 
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+  const count = countTokens(input.tokens)
   return count >= Math.floor(limit * AUTO_COMPACT_RATIO)
 }
 
@@ -57,8 +78,7 @@ export function pressureLevel(input: {
   if (input.cfg.compaction?.auto === false) return 0
   if (input.model.limit.context === 0) return 0
 
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+  const count = countTokens(input.tokens)
   const limit = usable(input)
   if (limit === 0) return 0
 

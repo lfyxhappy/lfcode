@@ -2,12 +2,22 @@ import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js"
 
 export type MotionMode = "full" | "standard" | "off"
 export type MotionChannel = "micro" | "content" | "surface"
+export type MotionPreset = "micro" | "content" | "surface-scale" | "surface-slide"
 export type MotionPresencePhase = "entering" | "entered" | "exiting"
 export const MOTION_CHANGE_EVENT = "lfcode:motion-change"
+
+const [sharedMotionEnabled, setSharedMotionEnabled] = createSignal(motionEnabled())
+const [sharedPageVisible, setSharedPageVisible] = createSignal(
+  typeof document === "undefined" || document.visibilityState === "visible",
+)
+let motionStateObserved = false
+let pageVisibilityObserved = false
 
 export type MotionPresenceProps = {
   present: boolean
   channel?: MotionChannel
+  /** A shared spatial treatment. `channel` remains available for existing callers. */
+  preset?: MotionPreset
   children: JSX.Element
   class?: string
   style?: JSX.CSSProperties
@@ -30,6 +40,7 @@ function publish(phase?: MotionPresencePhase) {
 export function motionMode(): MotionMode {
   if (typeof document === "undefined") return "off"
   if (document.documentElement.dataset.motionReduced === "true") return "off"
+  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return "off"
   const value = document.documentElement.dataset.motionMode
   if (value === "standard" || value === "off") return value
   return "full"
@@ -40,19 +51,36 @@ export function motionEnabled() {
 }
 
 export function useMotionEnabled() {
-  const [enabled, setEnabled] = createSignal(motionEnabled())
+  observeMotionState()
+  return sharedMotionEnabled
+}
 
-  createEffect(() => {
-    if (typeof window === "undefined") return
-    const sync = () => setEnabled(motionEnabled())
-    window.addEventListener(MOTION_CHANGE_EVENT, sync)
-    onCleanup(() => window.removeEventListener(MOTION_CHANGE_EVENT, sync))
-  })
+export function usePageVisible() {
+  observePageVisibility()
+  return sharedPageVisible
+}
 
-  return enabled
+function observeMotionState() {
+  if (motionStateObserved || typeof window === "undefined") return
+  const sync = () => setSharedMotionEnabled(motionEnabled())
+  const query = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+  sync()
+  window.addEventListener(MOTION_CHANGE_EVENT, sync)
+  query?.addEventListener("change", sync)
+  motionStateObserved = true
+}
+
+function observePageVisibility() {
+  if (pageVisibilityObserved || typeof document === "undefined") return
+  const sync = () => setSharedPageVisible(document.visibilityState === "visible")
+  sync()
+  document.addEventListener("visibilitychange", sync)
+  pageVisibilityObserved = true
 }
 
 export function MotionPresence(props: MotionPresenceProps) {
+  const preset = () => props.preset ?? (props.channel === "micro" ? "micro" : props.channel === "surface" ? "surface-slide" : "content")
+  const channel = () => (preset() === "micro" ? "micro" : preset() === "content" ? "content" : "surface")
   const [mounted, setMounted] = createSignal(props.present)
   const [phase, setPhase] = createSignal<MotionPresencePhase>(props.present ? "entered" : "exiting")
   let root: HTMLDivElement | undefined
@@ -173,7 +201,8 @@ export function MotionPresence(props: MotionPresenceProps) {
           props.ref?.(element)
         }}
         data-component="motion-presence"
-        data-channel={props.channel ?? "content"}
+        data-channel={channel()}
+        data-preset={preset()}
         data-phase={phase()}
         class={props.class}
         aria-hidden={phase() === "exiting" ? "true" : undefined}

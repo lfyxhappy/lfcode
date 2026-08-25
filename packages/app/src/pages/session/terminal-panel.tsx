@@ -14,20 +14,26 @@ import { Terminal } from "@/components/terminal"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { usePlatform } from "@/context/platform"
+import { useServer } from "@/context/server"
 import { useTerminal } from "@/context/terminal"
 import { terminalTabLabel } from "@/pages/session/terminal-label"
 import { createSizing } from "@/pages/session/helpers"
 import { getTerminalHandoff, setTerminalHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { canUseTerminal } from "@/pages/session/runtime-capabilities"
 
 export function TerminalPanel() {
   const layout = useLayout()
+  const platform = usePlatform()
+  const server = useServer()
   const terminal = useTerminal()
   const language = useLanguage()
   const command = useCommand()
   const { params, view } = useSessionLayout()
 
-  const opened = createMemo(() => view().terminal.opened())
+  const terminalAvailable = createMemo(() => canUseTerminal(platform.platform, server.isLocal()))
+  const opened = createMemo(() => terminalAvailable() && view().terminal.opened())
   const size = createSizing()
   const height = createMemo(() => layout.terminal.height())
   const close = () => view().terminal.close()
@@ -51,6 +57,11 @@ export function TerminalPanel() {
     sync()
     makeEventListener(window, "resize", sync)
     if (port) makeEventListener(port, "resize", sync)
+  })
+
+  createEffect(() => {
+    if (terminalAvailable()) return
+    if (view().terminal.opened()) view().terminal.close()
   })
 
   createEffect(() => {

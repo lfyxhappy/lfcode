@@ -8,6 +8,8 @@ import { HistoryFtsTable } from "./fts.sql"
 import { extract, DEFAULT_KINDS, type Kind } from "./extract"
 import { makeResolver, type Resolver } from "./resolve"
 import { Log } from "../util"
+import { isUserHiddenSystemActorID } from "../actor/visibility"
+import { MessageTable } from "../session/session.sql"
 
 const log = Log.create({ service: "history.writer" })
 
@@ -78,6 +80,19 @@ function handle(job: Job, resolver: Resolver, enabled: ReadonlySet<Kind>) {
   }
   return Effect.gen(function* () {
     const part = job.part
+    const agentID = Database.use((db) =>
+      db
+        .select({ agent_id: MessageTable.agent_id })
+        .from(MessageTable)
+        .where(eq(MessageTable.id, part.messageID))
+        .get()?.agent_id,
+    )
+    if (isUserHiddenSystemActorID(agentID)) {
+      // An older row can still exist if the actor was reclassified after it
+      // was indexed. Delete it on the incremental path as well as backfill.
+      Database.use((db) => db.delete(HistoryFtsTable).where(eq(HistoryFtsTable.part_id, part.id)).run())
+      return
+    }
     const role = yield* resolver.role(part.messageID)
     const extracted = extract(part, role, enabled)
     if (!extracted) return

@@ -17,6 +17,10 @@ const log = Log.create({ service: "config" })
 
 const PositiveInt = Schema.Number.check(Schema.isInt()).check(Schema.isGreaterThan(0))
 
+const DefaultExecution = Schema.Literals(["wait", "background"])
+const DefaultContext = Schema.Literals(["minimal", "full", "task"])
+const ModelInheritance = Schema.Literals(["primary", "configured"])
+
 const Color = Schema.Union([
   Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/)),
   Schema.Literals(["primary", "secondary", "accent", "success", "warning", "error", "info"]),
@@ -49,6 +53,30 @@ const AgentSchema = Schema.StructWithRest(
     hidden: Schema.optional(Schema.Boolean).annotate({
       description: "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
     }),
+    preset: Schema.optional(Schema.String).annotate({
+      description: "Optional native preset this agent was copied or overridden from.",
+    }),
+    display_name: Schema.optional(Schema.String).annotate({
+      description: "Display name shown in subagent management and dispatch surfaces.",
+    }),
+    avatar: Schema.optional(Schema.String).annotate({
+      description: "Stable avatar token shown for this agent.",
+    }),
+    icon: Schema.optional(Schema.String).annotate({
+      description: "Stable icon token shown for this agent.",
+    }),
+    default_execution: Schema.optional(DefaultExecution).annotate({
+      description: "Default dispatch behavior: wait for completion or run in the background.",
+    }),
+    default_context: Schema.optional(DefaultContext).annotate({
+      description: "Default context policy: minimal checkpoint state, full conversation, or task only.",
+    }),
+    model_inheritance: Schema.optional(ModelInheritance).annotate({
+      description: "Whether this agent inherits the primary model or uses an explicit configured model.",
+    }),
+    delegation_allowlist: Schema.optional(Schema.Array(Schema.String)).annotate({
+      description: "Subagent role IDs this role may delegate to. Omit or leave empty to prohibit recursive delegation.",
+    }),
     options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
     color: Schema.optional(Color).annotate({
       description: "Hex color code (e.g., #FF5733) or theme color (e.g., primary)",
@@ -75,6 +103,14 @@ const KNOWN_KEYS = new Set([
   "top_p",
   "mode",
   "hidden",
+  "preset",
+  "display_name",
+  "avatar",
+  "icon",
+  "default_execution",
+  "default_context",
+  "model_inheritance",
+  "delegation_allowlist",
   "color",
   "steps",
   "maxSteps",

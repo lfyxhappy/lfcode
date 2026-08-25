@@ -1,6 +1,6 @@
 import type {
   Agent,
-  Command,
+  CommandListResponse,
   Config,
   LspStatus,
   McpStatus,
@@ -75,14 +75,27 @@ export type SessionGoal = {
   lastMessageID?: string
 }
 
+export type HookRunActivity = {
+  hookID: string
+  hookName: string
+  event: string
+  status: "completed" | "blocked" | "failed" | "timeout" | "skipped" | "started"
+  durationMs: number
+  summary: string
+  timeCreated: number
+}
+
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
-  command: Command[]
+  command: CommandListResponse
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
   provider_ready: boolean
+  command_ready: boolean
+  permission_ready: boolean
+  permission_error: boolean
   provider: ProviderListResponse
   config: Config
   path: Path
@@ -93,6 +106,9 @@ export type State = {
   }
   session_goal: {
     [sessionID: string]: SessionGoal | undefined
+  }
+  hook_run?: {
+    [sessionID: string]: HookRunActivity[] | undefined
   }
   session_diff: {
     [sessionID: string]: SnapshotFileDiff[]
@@ -129,6 +145,7 @@ export type State = {
       mode: string
       status: string
       description: string
+      visible?: boolean
       time: { created: number }
       agent?: string
       parentActorID?: string

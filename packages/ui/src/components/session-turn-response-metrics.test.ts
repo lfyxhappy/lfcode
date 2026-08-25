@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage } from "@lfcode-ai/sdk/v2/client"
-import { getTurnResponseMetricsLine } from "./session-turn-response-metrics"
+import { formatResponseTokenCount, getTurnResponseMetricsLine } from "./session-turn-response-metrics"
 
 const labels = {
   ended: "Ended",
@@ -43,6 +43,13 @@ function assistant(input: Partial<AssistantMessage> = {}): AssistantMessage {
 }
 
 describe("session turn response metrics", () => {
+  test("formats response token counts with adaptive K, M, and B units", () => {
+    expect(formatResponseTokenCount(505, "en")).toBe("505")
+    expect(formatResponseTokenCount(1_500, "en")).toBe("1.5K")
+    expect(formatResponseTokenCount(1_500_000, "en")).toBe("1.5M")
+    expect(formatResponseTokenCount(1_500_000_000, "en")).toBe("1.5B")
+  })
+
   test("formats a completed turn summary", () => {
     const finishedAt = Date.UTC(2026, 0, 1, 10, 0, 5)
     const line = getTurnResponseMetricsLine({

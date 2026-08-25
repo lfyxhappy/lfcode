@@ -26,14 +26,10 @@ const DEFAULT_CACHE_TTL = 300_000
 const CHECKPOINT_RESERVED = 13_000
 const MAX_WRITER_FAILURES = 3
 
-/**
- * Checkpoint writers are opt-in. The default hot path uses direct compaction,
- * so threshold-triggered checkpoint writes stay disabled unless explicitly
- * configured.
- */
+/** Default checkpoint thresholds for the layered recovery strategy. */
 export function defaultThresholdsFor(window: number): readonly string[] {
   void window
-  return []
+  return ["55%", "70%"]
 }
 
 function isCacheCold(model?: Provider.Model, lastAssistantTime?: number): boolean {
@@ -256,21 +252,12 @@ export const layer: Layer.Layer<
       const actor = input.agentID ? yield* actorReg.get(input.sessionID, input.agentID) : undefined
       if (actor?.mode === "subagent") return
 
-      // Lock: skip if a writer is already running for this session.
-      // crossed Set is NOT incremented here — when the in-flight writer
-      // finishes, the next fireCheckpoints invocation can re-fire previously-
-      // skipped thresholds.
-      if (yield* checkpoint.isWriterRunning(input.sessionID)) {
-        log.info("checkpoint writer running, skipping new threshold trigger", {
-          sessionID: input.sessionID,
-        })
-        return
-      }
-
       const cfg = yield* config.get()
+      if (cfg.compaction?.auto === false) return
       const windowSize = usable({ cfg, model: input.model })
       if (windowSize === 0) return
-      const raw = cfg.checkpoint?.thresholds ?? defaultThresholdsFor(windowSize)
+      const raw =
+        cfg.checkpoint?.thresholds ?? (cfg.compaction?.strategy === "legacy" ? [] : defaultThresholdsFor(windowSize))
 
       // resolveThresholds throws on invalid config; we let that propagate so
       // the user sees the error fast at the first overflow check.
@@ -297,6 +284,13 @@ export const layer: Layer.Layer<
             promptOps: input.promptOps,
           })
           .pipe(Effect.catch(() => Effect.succeed<"started" | "queued" | "skipped">("skipped")))
+
+        // A later threshold while a writer is active must reach the writer's
+        // single pending slot. The newest request covers the widest range and
+        // replaces any older pending one there.
+        if (outcome === "queued") {
+          log.info("checkpoint refresh queued", { threshold: t, currentTokens })
+        }
 
         if (outcome === "started") {
           // Fork a watcher that settles after the detached writer fiber

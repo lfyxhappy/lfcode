@@ -29,7 +29,7 @@
 
 .monaco-editor .lfcode-code-diff-line-selected {
   background: color-mix(in srgb, var(--surface-base-active) 78%, transparent);
-  box-shadow: inset 2px 0 0 var(--border-strong-base);
+  box-shadow: inset 1px 0 0 var(--border-strong-base);
 }
 
 .monaco-editor .lfcode-code-diff-line-commented.lfcode-code-diff-line-selected {
@@ -37,9 +37,9 @@
 }
 
 .monaco-editor .margin .lfcode-code-diff-gutter-commented {
-  border-left: 2px solid var(--icon-diff-modified-base);
+  border-left: 1px solid var(--icon-diff-modified-base);
 }
 
 .monaco-editor .margin .lfcode-code-diff-gutter-selected {
-  border-left: 2px solid var(--text-strong);
+  border-left: 1px solid var(--text-strong);
 }

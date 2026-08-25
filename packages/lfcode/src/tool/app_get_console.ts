@@ -14,7 +14,7 @@ export const AppGetConsoleTool = Tool.define(
     description: "Read recent side-browser console output for the current desktop session.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/console", {

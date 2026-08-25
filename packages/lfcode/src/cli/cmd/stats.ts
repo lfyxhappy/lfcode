@@ -1,6 +1,7 @@
 import type { Argv } from "yargs"
 import { cmd } from "./cmd"
 import { Session } from "../../session"
+import { MessageV2 } from "../../session/message-v2"
 import { bootstrap } from "../bootstrap"
 import { Database } from "../../storage"
 import { SessionTable } from "../../session/session.sql"
@@ -174,9 +175,9 @@ export async function aggregateSessionStats(days?: number, projectFilter?: strin
     const batch = filteredSessions.slice(i, i + BATCH_SIZE)
 
     const batchPromises = batch.map(async (session) => {
-      const messages = await AppRuntime.runPromise(
+      const messages = (await AppRuntime.runPromise(
         Session.Service.use((svc) => svc.messages({ sessionID: session.id, agentID: "*" })),
-      )
+      )).filter((message) => MessageV2.isUserVisible(message.info))
 
       let sessionCost = 0
       let sessionOverheadCost = 0

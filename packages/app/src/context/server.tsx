@@ -1,9 +1,9 @@
 import { createSimpleContext } from "@lfcode-ai/ui/context"
 import { type Accessor, batch, createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
-import { Persist, persisted } from "@/utils/persist"
+import { isRetiredImageMakerProjectPath, normalizeWorkspacePath, Persist, persisted } from "@/utils/persist"
 import { useCheckServerHealth } from "@/utils/server-health"
-import { normalizeWorkspacePath } from "@/utils/persist"
+import { startVisiblePolling } from "@/utils/visible-poll"
 
 type StoredProject = { worktree: string; expanded: boolean }
 type StoredServer = string | ServerConnection.HttpBase | ServerConnection.Http
@@ -35,13 +35,13 @@ function normalizeStoredProject(project: StoredProject) {
 
 function mergeStoredProjects(current: StoredProject[], legacy: StoredProject[]) {
   const merged = new Map<string, StoredProject>()
-  for (const project of [...legacy, ...current]) {
+  for (const project of [...legacy, ...current].filter((project) => !isRetiredImageMakerProjectPath(project.worktree))) {
     merged.set(normalizeWorkspacePath(project.worktree), normalizeStoredProject(project))
   }
   return [...merged.values()]
 }
 
-function normalizeServerStore(value: unknown) {
+export function normalizeServerStore(value: unknown) {
   if (!value || typeof value !== "object") return value
   if (Array.isArray(value)) return value
 
@@ -57,14 +57,16 @@ function normalizeServerStore(value: unknown) {
       Object.entries(store.projects ?? {}).map(([key, projects]) => [key, mergeStoredProjects([], projects ?? [])]),
     ),
     lastProject: Object.fromEntries(
-      Object.entries(store.lastProject ?? {}).map(([key, directory]) => [key, normalizeWorkspacePath(directory)]),
+      Object.entries(store.lastProject ?? {})
+        .filter(([, directory]) => !isRetiredImageMakerProjectPath(directory))
+        .map(([key, directory]) => [key, normalizeWorkspacePath(directory)]),
     ),
   }
 }
 
 function isLocalHost(url: string) {
   const host = url.replace(/^https?:\/\//, "").split(":")[0]
-  if (host === "localhost" || host === "127.0.0.1") return "local"
+  return host === "localhost" || host === "127.0.0.1"
 }
 
 export namespace ServerConnection {
@@ -200,11 +202,10 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           })
       }
 
-      run()
-      const interval = setInterval(run, HEALTH_POLL_INTERVAL_MS)
+      const stopPolling = startVisiblePolling(run, HEALTH_POLL_INTERVAL_MS)
       return () => {
         alive = false
-        clearInterval(interval)
+        stopPolling()
       }
     }
 
@@ -296,6 +297,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
           if (!key) return
           const current = store.projects[key] ?? []
           const normalized = normalizeWorkspacePath(directory)
+          if (isRetiredImageMakerProjectPath(normalized)) return
           if (current.find((x) => normalizeWorkspacePath(x.worktree) === normalized)) return
           setStore("projects", key, [{ worktree: normalized, expanded: true }, ...current.map(normalizeStoredProject)])
         },

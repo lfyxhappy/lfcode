@@ -27,6 +27,7 @@ type Inline =
       start: number
       end: number
       value: string
+      comment?: string
       messageID?: string
       selection?: {
         startLine: number
@@ -149,6 +150,7 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
           start: item.start ?? 0,
           end: item.end ?? item.text.length,
           value: item.text,
+          comment: typeof item.comment === "string" ? item.comment : undefined,
           messageID: item.messageID,
           selection: item.selection,
         })
@@ -210,6 +212,7 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
       content: "",
       start: position,
       end: position,
+      comment: item.comment,
       messageID: item.messageID,
       selection: item.selection,
     }

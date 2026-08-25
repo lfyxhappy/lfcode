@@ -7,11 +7,28 @@ import { GenericTool } from "./basic-tool"
 import { Markdown } from "./markdown"
 import { Tooltip } from "./tooltip"
 import { IconButton } from "./icon-button"
+import { SelectedTextReference } from "./selected-text-reference"
 import { registerPartComponent, ToolRegistry } from "./message-part-registry"
 import { splitRenderableCodeBlocks } from "./message-code-blocks"
 import { MessageDivider, PacedMarkdown } from "./message-part"
 import { useData } from "../context"
 import { useI18n } from "../context/i18n"
+
+type SelectedTextReferenceMetadata = {
+  text: string
+  comment?: string
+}
+
+function selectedTextReferences(part: TextPart) {
+  const metadata = part.metadata
+  if (!metadata || typeof metadata !== "object" || !("lfcodeSelectedText" in metadata)) return []
+  const value = metadata.lfcodeSelectedText
+  const values = Array.isArray(value) ? value : [value]
+  return values.filter(
+    (item): item is SelectedTextReferenceMetadata =>
+      !!item && typeof item === "object" && "text" in item && typeof item.text === "string" && item.text.length > 0,
+  )
+}
 
 export function registerMessagePartRenderers() {
   registerPartComponent("tool", function ToolPartDisplay(props) {
@@ -60,6 +77,8 @@ export function registerMessagePartRenderers() {
                 metadata={partMetadata()}
                 // @ts-expect-error
                 output={part().state.output}
+                // @ts-expect-error completed tool state is the only state that carries attachments.
+                attachments={part().state.attachments}
                 status={part().state.status}
                 hideDetails={props.hideDetails}
                 defaultOpen={props.defaultOpen}
@@ -130,6 +149,7 @@ export function registerMessagePartRenderers() {
       () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
     )
     const text = () => (part().text ?? "").trim()
+    const references = createMemo(() => (props.message.role === "user" ? selectedTextReferences(part()) : []))
     const isLastTextPart = createMemo(() => {
       const last = (data.store.part?.[props.message.id] ?? [])
         .filter((item): item is TextPart => item?.type === "text" && !!item.text?.trim())
@@ -186,8 +206,14 @@ export function registerMessagePartRenderers() {
     })
 
     return (
-      <Show when={text()}>
+      <Show when={text() || references().length > 0}>
         <div data-component="text-part">
+          <Show when={references().length > 0}>
+            <div class="mb-2 flex max-w-full flex-col gap-2">
+              <For each={references()}>{(reference) => <SelectedTextReference {...reference} />}</For>
+            </div>
+          </Show>
+          <Show when={text()}>
           <div data-slot="text-part-body">
             <Show
               when={streaming()}
@@ -233,6 +259,8 @@ export function registerMessagePartRenderers() {
                                   language: segment.language,
                                   code: segment.code,
                                   raw: segment.raw,
+                                  title: segment.title,
+                                  projectPath: segment.projectPath,
                                   blockIndex: segment.blockIndex,
                                   message: {
                                     id: props.message.id,
@@ -270,6 +298,7 @@ export function registerMessagePartRenderers() {
               />
             </Show>
           </div>
+          </Show>
           <Show when={showCopy()}>
             <div data-slot="text-part-copy-wrapper" data-interrupted={interrupted() ? "" : undefined}>
               <Tooltip

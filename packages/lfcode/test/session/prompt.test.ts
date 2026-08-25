@@ -803,6 +803,35 @@ describe("session.agent-resolution", () => {
         ),
     })
   }, 30000)
+
+  test("retired workflow command is rejected as unknown", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: () =>
+        run(
+          Effect.gen(function* () {
+            const prompt = yield* SessionPrompt.Service
+            const sessions = yield* Session.Service
+            const session = yield* sessions.create({})
+            const err = yield* Effect.promise(() =>
+              Effect.runPromise(
+                prompt.command({
+                  sessionID: session.id,
+                  command: "workflow",
+                  arguments: "",
+                }),
+              ).then(
+                () => undefined,
+                (error) => error,
+              ),
+            )
+            expect(NamedError.Unknown.isInstance(err)).toBe(true)
+            if (NamedError.Unknown.isInstance(err)) expect(err.data.message).toContain('Command not found: "workflow"')
+          }),
+        ),
+    })
+  }, 30000)
 })
 
 // F37: subagent context isolation. Lfcode's spawnSubagent shares

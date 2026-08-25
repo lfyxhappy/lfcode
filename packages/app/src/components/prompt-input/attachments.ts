@@ -7,7 +7,7 @@ import { useLanguage } from "@/context/language"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
-import { normalizePaste, pasteMode } from "./paste"
+import { normalizePaste } from "./paste"
 
 function dataUrl(file: File, mime: string) {
   return new Promise<string>((resolve) => {
@@ -195,6 +195,12 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     return true
   }
 
+  const addPastedText = (text: string) => {
+    if (input.addPart({ type: "text", content: text, start: 0, end: 0 })) return true
+    input.focusEditor()
+    return input.addPart({ type: "text", content: text, start: 0, end: 0 })
+  }
+
   const handlePaste = async (event: ClipboardEvent) => {
     const clipboardData = event.clipboardData
     if (!clipboardData) return
@@ -202,24 +208,28 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     event.preventDefault()
     event.stopPropagation()
 
+    const scope = input.scope()
+    if (addFilePaths(transferredFilePaths(clipboardData), scope)) return
+
     const files = Array.from(clipboardData.items).flatMap((item) => {
       if (item.kind !== "file") return []
       const file = item.getAsFile()
       return file ? [file] : []
     })
 
-    const scope = input.scope()
     if (files.length > 0) {
       await addAttachments(files, true, scope)
       return
     }
 
-    if (addFilePaths(transferredFilePaths(clipboardData), scope)) return
+    const text = normalizePaste(clipboardData.getData("text/plain") ?? "")
+    if (text) {
+      addPastedText(text)
+      return
+    }
 
-    const plainText = clipboardData.getData("text/plain") ?? ""
-
-    // Desktop: Browser clipboard has no images and no text, try platform's native clipboard for images
-    if (input.readClipboardImage && !plainText) {
+    // Electron exposes some DIB screenshots only through the native clipboard bridge.
+    if (input.readClipboardImage) {
       const file = await input.readClipboardImage()
       if (file) {
         await add(file, true, scope)
@@ -227,25 +237,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       }
     }
 
-    if (!plainText) return
-
-    const text = normalizePaste(plainText)
-
-    const put = () => {
-      if (input.addPart({ type: "text", content: text, start: 0, end: 0 })) return true
-      input.focusEditor()
-      return input.addPart({ type: "text", content: text, start: 0, end: 0 })
-    }
-
-    if (pasteMode(text) === "manual") {
-      put()
-      return
-    }
-
-    const inserted = typeof document.execCommand === "function" && document.execCommand("insertText", false, text)
-    if (inserted) return
-
-    put()
+    return
   }
 
   const handleGlobalDragOver = (event: DragEvent) => {

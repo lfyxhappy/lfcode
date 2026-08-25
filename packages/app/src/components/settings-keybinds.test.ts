@@ -28,13 +28,13 @@ describe("settings keybind display policy", () => {
   test("sorts each group by priority, assigned state, then localized title", () => {
     const list = new Map([
       ["settings.open", meta("settings.open", "设置")],
-      ["theme.cycle", meta("theme.cycle", "主题")],
+      ["theme.scheme.cycle", meta("theme.scheme.cycle", "配色方案")],
       ["sidebar.toggle", meta("sidebar.toggle", "侧边栏")],
     ])
 
-    expect(groupedFor(list, (id) => (id === "theme.cycle" ? "Ctrl+T" : "")).get("General")).toEqual([
+    expect(groupedFor(list, (id) => (id === "theme.scheme.cycle" ? "Ctrl+Shift+S" : "")).get("General")).toEqual([
       "settings.open",
-      "theme.cycle",
+      "theme.scheme.cycle",
       "sidebar.toggle",
     ])
   })

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -47,10 +47,44 @@ try {
     ],
   })
 
-  await $`bun prettier --write src/gen`
-  await $`bun prettier --write src/v2`
+  // On Windows the generator can return before all rewritten handles are
+  // released. Retry formatting briefly instead of making SDK generation flaky.
+  await formatWithRetry("src/gen")
+  await formatDirectoryWithRetry("src/v2")
   await $`rm -rf dist`
   await $`bun tsc`
 } finally {
   await rm(tempDir, { recursive: true, force: true })
+}
+
+async function formatWithRetry(target: string) {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await $`bun prettier --write ${target}`
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < 7) await Bun.sleep(500 * (attempt + 1))
+    }
+  }
+  throw lastError
+}
+
+async function formatDirectoryWithRetry(directory: string) {
+  await Bun.sleep(1000)
+  const files = await collectTypeScriptFiles(directory)
+  for (const file of files) await formatWithRetry(file)
+}
+
+async function collectTypeScriptFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const target = path.join(directory, entry.name)
+      if (entry.isDirectory()) return collectTypeScriptFiles(target)
+      return entry.isFile() && target.endsWith(".ts") ? [target] : []
+    }),
+  )
+  return nested.flat()
 }

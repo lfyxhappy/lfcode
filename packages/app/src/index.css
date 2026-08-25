@@ -1,5 +1,120 @@
 @import "@lfcode-ai/ui/styles/tailwind";
 
+.file-reference-card {
+  display: inline-flex;
+  max-width: min(100%, 360px);
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.1rem 0.15rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--border-weak-base) 82%, var(--text-interactive-base) 18%);
+  border-radius: 0.5rem;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-base) 88%, var(--text-interactive-base) 12%), var(--surface-base)),
+    var(--surface-base);
+  color: var(--text-strong);
+  text-decoration: none;
+  vertical-align: middle;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+}
+
+.file-reference-card::before {
+  width: 0.8rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 0.15rem;
+  opacity: 0.7;
+  content: "";
+}
+
+.file-reference-card:hover {
+  filter: brightness(1.04);
+  text-decoration: none;
+}
+
+.file-reference-card[data-reference-kind="directory"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #c99022 20%, var(--surface-base)), color-mix(in srgb, #805b16 7%, var(--surface-base))),
+    repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, #dba42f 9%, transparent) 7px 8px);
+}
+
+.file-reference-card[data-reference-kind="directory"]::before {
+  width: 1rem;
+  height: 0.72rem;
+  border-radius: 0.12rem 0.18rem 0.18rem 0.18rem;
+  background: linear-gradient(#d9a53a 0.17rem, #c9891f 0.17rem);
+}
+
+.file-reference-card[data-reference-kind="directory"] {
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.file-reference-card[data-reference-kind="directory"]::after {
+  margin-left: 0.1rem;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  content: "↗";
+  font-size: 0.75rem;
+}
+
+.file-reference-card[data-reference-kind="directory"]:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 13%, transparent), 0 3px 8px color-mix(in srgb, #000 15%, transparent);
+}
+
+.file-reference-card[data-reference-kind="directory"]:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.file-reference-card[data-reference-kind="directory"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, #dba42f 75%, white);
+  outline-offset: 2px;
+}
+
+.file-reference-card[data-file-category="archive"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #a86de2 20%, var(--surface-base)), color-mix(in srgb, #7542ad 7%, var(--surface-base))),
+    repeating-linear-gradient(90deg, transparent 0 5px, color-mix(in srgb, #b67ce8 12%, transparent) 5px 6px);
+}
+
+.file-reference-card[data-file-category="document"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #4e8bd9 19%, var(--surface-base)), color-mix(in srgb, #356ba7 6%, var(--surface-base))),
+    linear-gradient(45deg, transparent 48%, color-mix(in srgb, #7cacdf 12%, transparent) 49% 51%, transparent 52%);
+}
+
+.file-reference-card[data-file-category="image"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #2fa88c 22%, var(--surface-base)), color-mix(in srgb, #227b68 7%, var(--surface-base))),
+    radial-gradient(circle at 78% 25%, color-mix(in srgb, #a7e3b8 31%, transparent) 0 8%, transparent 9%);
+}
+
+.file-reference-card[data-file-category="media"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #d25878 20%, var(--surface-base)), color-mix(in srgb, #9d3555 7%, var(--surface-base))),
+    repeating-linear-gradient(90deg, transparent 0 4px, color-mix(in srgb, #ef839e 12%, transparent) 4px 5px);
+}
+
+.file-reference-card[data-file-category="code"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #408fbe 20%, var(--surface-base)), color-mix(in srgb, #285b91 7%, var(--surface-base))),
+    repeating-linear-gradient(0deg, transparent 0 5px, color-mix(in srgb, #83c4e5 10%, transparent) 5px 6px);
+}
+
+.file-reference-card[data-file-category="data"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #4ca367 20%, var(--surface-base)), color-mix(in srgb, #2d7645 7%, var(--surface-base))),
+    repeating-linear-gradient(90deg, transparent 0 7px, color-mix(in srgb, #8bcf93 10%, transparent) 7px 8px);
+}
+
+.file-reference-card[data-file-category="other"] {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, #7b8799 16%, var(--surface-base)), color-mix(in srgb, #536174 6%, var(--surface-base))),
+    var(--surface-base);
+}
+
 @font-face {
   font-family: "JetBrainsMono Nerd Font Mono";
   src: url("/assets/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
@@ -14,6 +129,13 @@
 
   [data-component="session-main-panel"] {
     transition: width var(--motion-surface-ms) var(--motion-ease-out);
+  }
+
+  [data-component="session-side-panel"][data-resizing="true"],
+  [data-component="session-main-panel"][data-resizing="true"],
+  [data-component="session-file-tree"][data-resizing="true"] {
+    transition-duration: 0ms;
+    will-change: width;
   }
 
   [data-component="terminal-panel"] {
@@ -56,13 +178,6 @@
     animation: prompt-attachment-enter var(--motion-content-ms) var(--motion-ease-out) both;
   }
 
-  [data-component="prompt-attachment"][data-removing="true"],
-  [data-component="prompt-context-item"][data-removing="true"] {
-    opacity: 0;
-    transform: translate3d(0, -2px, 0) scale(0.98);
-    pointer-events: none;
-  }
-
   [data-component="session-file-tree"] {
     transition: width var(--motion-content-ms) var(--motion-ease-out);
   }
@@ -81,6 +196,20 @@
       opacity: 1;
       transform: translate3d(0, 0, 0) scale(1);
     }
+  }
+
+  @keyframes provider-quota-update {
+    0% { background-color: color-mix(in srgb, var(--color-status-success) 12%, transparent); }
+    100% { background-color: transparent; }
+  }
+
+  .provider-quota-updated {
+    animation: provider-quota-update var(--motion-content-ms) var(--motion-ease-out) both;
+  }
+
+  :root[data-motion-mode="off"] .provider-quota-updated,
+  :root[data-motion-reduced="true"] .provider-quota-updated {
+    animation: none;
   }
 
   :root[data-motion-mode="off"] [data-component="session-side-panel"],
@@ -214,29 +343,23 @@
   @keyframes detached-tab-float-in {
     from {
       opacity: 0;
-      transform: translateY(10px) scale(0.96) rotate(-2deg);
-      filter: blur(4px);
+      transform: translateY(8px) scale(0.98);
     }
 
     to {
       opacity: 1;
-      transform: translateY(0) scale(1.02) rotate(-1deg);
-      filter: blur(0);
+      transform: translateY(0) scale(1);
     }
   }
 
   @keyframes detached-dock-target-pulse {
     0%,
     100% {
-      box-shadow:
-        0 0 0 0 color-mix(in srgb, var(--border-info-base) 0%, transparent),
-        0 10px 28px -22px color-mix(in srgb, var(--border-info-base) 0%, transparent);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--border-info-base) 0%, transparent);
     }
 
     50% {
-      box-shadow:
-        0 0 0 1px color-mix(in srgb, var(--border-info-base) 72%, transparent),
-        0 18px 42px -24px color-mix(in srgb, var(--border-info-base) 42%, transparent);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-info-base) 72%, transparent);
     }
   }
 
@@ -244,13 +367,11 @@
     from {
       opacity: 0;
       transform: translateY(10px) scale(0.985);
-      filter: blur(6px);
     }
 
     to {
       opacity: 1;
       transform: translateY(0) scale(1);
-      filter: blur(0);
     }
   }
 
@@ -258,13 +379,11 @@
     from {
       opacity: 1;
       transform: translateY(0) scale(1);
-      filter: blur(0);
     }
 
     to {
       opacity: 0;
       transform: translateY(16px) scale(0.94);
-      filter: blur(8px);
     }
   }
 
@@ -272,19 +391,11 @@
     min-width: 220px;
     max-width: min(420px, 60vw);
     padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 88%, transparent);
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 96%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 92%, transparent)
-      );
-    box-shadow:
-      0 20px 48px -24px color-mix(in srgb, var(--background-inverse) 40%, transparent),
-      0 10px 22px -18px color-mix(in srgb, var(--background-inverse) 30%, transparent);
-    backdrop-filter: blur(12px);
-    transform: translateY(0) scale(1.02) rotate(-1deg);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-weak-base);
+    background-color: var(--surface-raised-stronger-non-alpha);
+    box-shadow: var(--shadow-xs-border);
+    transform: translateY(0) scale(1);
     animation: detached-tab-float-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
     will-change: transform, opacity, filter;
   }
@@ -301,21 +412,13 @@
     min-width: 140px;
     max-width: min(420px, 60vw);
     padding: 0 12px;
-    border-radius: 10px 10px 0 0;
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 82%, transparent);
-    border-bottom-color: color-mix(in srgb, var(--background-base) 100%, transparent);
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 98%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 94%, transparent)
-      );
-    box-shadow:
-      0 18px 40px -24px color-mix(in srgb, var(--background-inverse) 42%, transparent),
-      0 6px 16px -12px color-mix(in srgb, var(--background-inverse) 28%, transparent);
-    backdrop-filter: blur(10px);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    border: 1px solid var(--border-weak-base);
+    border-bottom-color: var(--background-base);
+    background-color: var(--surface-raised-stronger-non-alpha);
+    box-shadow: var(--shadow-xs-border);
     pointer-events: none;
-    transform: translate3d(0, 0, 0) scale(1.01);
+    transform: translate3d(0, 0, 0);
     animation: detached-tab-float-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
     will-change: left, top, transform, opacity;
   }
@@ -370,93 +473,12 @@
     }
   }
 
-  .settings-liquid-slider {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 100%;
-    height: 4px;
-    border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--surface-interactive-base) 68%, transparent),
-      color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 78%, transparent)
-    );
-    outline: none;
-  }
-
-  .settings-liquid-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 72%, transparent);
-    background:
-      radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.18) 48%, transparent 60%),
-      color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 90%, var(--surface-interactive-base) 10%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.42),
-      0 6px 12px -8px color-mix(in srgb, var(--background-base) 75%, transparent);
-    cursor: pointer;
-  }
-
-  .settings-liquid-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 72%, transparent);
-    background:
-      radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.18) 48%, transparent 60%),
-      color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 90%, var(--surface-interactive-base) 10%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.42),
-      0 6px 12px -8px color-mix(in srgb, var(--background-base) 75%, transparent);
-    cursor: pointer;
-  }
-
-  .settings-liquid-slider::-moz-range-track {
-    height: 4px;
-    border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--surface-interactive-base) 68%, transparent),
-      color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 78%, transparent)
-    );
-  }
-
   [data-component="settings-shell"] {
-    background:
-      radial-gradient(circle at top left, color-mix(in srgb, var(--surface-interactive-base) 10%, transparent), transparent 26%),
-      linear-gradient(180deg, color-mix(in srgb, var(--background-stronger) 100%, transparent), var(--background-base));
+    background: var(--background-base);
   }
 
-  [data-component="settings-nav-hero"],
-  [data-component="settings-nav-footer"] {
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 88%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 68%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 62%, transparent);
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
-      0 16px 32px -28px color-mix(in srgb, var(--background-inverse) 46%, transparent);
-  }
-
-  [data-component="settings-nav-badge"] {
-    color: var(--text-strong);
-    background:
-      radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.24), transparent 52%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 96%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 90%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 70%, transparent);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.12),
-      0 12px 24px -20px color-mix(in srgb, var(--background-inverse) 58%, transparent);
+  [data-component="settings-page"] {
+    color: var(--text-base);
   }
 
   .settings-tab-content {
@@ -468,42 +490,18 @@
     min-height: 100%;
   }
 
-  [data-component="settings-section-card"],
-  [data-component="settings-aside-card"],
-  [data-component="settings-liquid-card"],
-  [data-component="settings-liquid-preview"],
-  .settings-general-hero,
-  [data-component="settings-hero-stat"] {
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 66%, transparent);
-    background:
-      radial-gradient(circle at top left, color-mix(in srgb, white 5%, transparent), transparent 34%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 98%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 94%, transparent)
-      );
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
-      0 28px 48px -38px color-mix(in srgb, var(--background-inverse) 58%, transparent);
-    backdrop-filter: blur(14px) saturate(118%);
-  }
-
   [data-component="settings-section-card"] {
-    position: relative;
-    overflow: hidden;
+    border-top: 1px solid var(--border-weak-base);
   }
 
-  [data-component="settings-section-card"]::before,
-  [data-component="settings-liquid-card"]::before,
-  [data-component="settings-liquid-preview"]::before,
-  .settings-general-hero::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 44%;
-    height: 1px;
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.32), transparent);
-    pointer-events: none;
+  [data-component="settings-page"][data-settings-density="compact"] [data-component="settings-section-card"] {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  [data-component="settings-page"][data-settings-density="compact"] .settings-row {
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   .settings-row + .settings-row {
@@ -521,81 +519,10 @@
     }
   }
 
-  [data-component="settings-hero-stat"],
-  [data-component="settings-pill"],
-  [data-component="settings-liquid-slider-row"],
-  [data-component="settings-liquid-preview-panel"] {
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 90%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 72%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 52%, transparent);
-    box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
-  }
-
-  [data-component="settings-liquid-preview-canvas"] {
-    background:
-      radial-gradient(circle at 20% 18%, color-mix(in srgb, var(--surface-interactive-base) 26%, transparent), transparent 44%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--background-stronger) 92%, transparent),
-        color-mix(in srgb, var(--background-base) 82%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 52%, transparent);
-  }
-
-  [data-component="settings-liquid-preview-panel"] {
-    backdrop-filter: blur(calc(var(--lf-liquid-glass-blur, 18px) * 0.75))
-      saturate(var(--lf-liquid-glass-saturation, 132%));
-  }
-
-  [data-component="settings-liquid-preview-orb"] {
-    background:
-      radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.16) 40%, transparent 58%),
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--surface-interactive-base) 65%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 88%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 68%, transparent);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.28),
-      0 18px 30px -22px color-mix(in srgb, var(--background-inverse) 60%, transparent);
-  }
-
-  [data-component="settings-liquid-preview-line"] {
-    background:
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 88%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 68%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 38%, transparent);
-  }
-
-  [data-component="settings-liquid-preview-focus"] {
-    background:
-      radial-gradient(circle at top left, rgba(255, 255, 255, 0.16), transparent 38%),
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--surface-interactive-base) 24%, transparent),
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 82%, transparent)
-      );
-    border: 1px solid color-mix(in srgb, var(--border-weak-base) 54%, transparent);
-  }
-
   [data-component="select-trigger"][data-variant="settings"],
   .settings-row [data-component="text-field"],
   .settings-row [data-component="button"][data-variant="secondary"] {
-    border-color: color-mix(in srgb, var(--border-weak-base) 56%, transparent);
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--surface-raised-stronger-non-alpha) 92%, transparent),
-        color-mix(in srgb, var(--surface-raised-base) 72%, transparent)
-      );
-    box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+    border-color: var(--border-weak-base);
+    background: var(--surface-base);
   }
 }

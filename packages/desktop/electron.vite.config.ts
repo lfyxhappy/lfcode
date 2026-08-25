@@ -7,8 +7,10 @@ const channel = (() => {
   if (raw === "stable") return raw
   return "stable"
 })()
+const preRelease = process.env.LFCODE_PRE_RELEASE === "true"
 
-const LFCODE_SERVER_DIST = "../lfcode/dist/node"
+const LFCODE_SERVER_DIST = "../lfcode/dist/node/src"
+const LFCODE_SERVER_ASSET_DIR = "../lfcode/dist/node"
 let serverAssets: { name: string; data: Uint8Array }[] = []
 
 const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
@@ -24,6 +26,7 @@ export default defineConfig({
   main: {
     define: {
       "import.meta.env.LFCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.LFCODE_PRE_RELEASE": JSON.stringify(preRelease ? "true" : "false"),
     },
     build: {
       rollupOptions: {
@@ -66,13 +69,22 @@ export default defineConfig({
         name: "lfcode:copy-server-assets",
         async buildStart() {
           serverAssets = await Promise.all(
-            (await fs.readdir(LFCODE_SERVER_DIST))
+            (await fs.readdir(LFCODE_SERVER_ASSET_DIR))
               .filter((name) => name.endsWith(".wasm"))
-              .map(async (name) => ({ name, data: await fs.readFile(`${LFCODE_SERVER_DIST}/${name}`) })),
+              .map(async (name) => ({ name, data: await fs.readFile(`${LFCODE_SERVER_ASSET_DIR}/${name}`) })),
           )
         },
         async writeBundle() {
-          await Promise.all(serverAssets.map((asset) => fs.writeFile(`./out/main/chunks/${asset.name}`, asset.data)))
+          // Bundled file imports in the server chunk resolve `../asset` from
+          // `out/main/chunks/*.js`, so the runtime lookup is `out/main/*.wasm`.
+          // Keep a chunks copy as well for tooling that inspects the emitted
+          // chunk directory directly.
+          await Promise.all(
+            serverAssets.flatMap((asset) => [
+              fs.writeFile(`./out/main/${asset.name}`, asset.data),
+              fs.writeFile(`./out/main/chunks/${asset.name}`, asset.data),
+            ]),
+          )
         },
       },
     ],
@@ -94,6 +106,7 @@ export default defineConfig({
     root: "src/renderer",
     define: {
       "import.meta.env.VITE_LFCODE_CHANNEL": JSON.stringify(channel),
+      "import.meta.env.VITE_LFCODE_PRE_RELEASE": JSON.stringify(preRelease ? "true" : "false"),
     },
     build: {
       rollupOptions: {

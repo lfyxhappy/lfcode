@@ -11,6 +11,7 @@ import { SessionCheckpoint } from "../../src/session/checkpoint"
 import { MessageID, SessionID } from "../../src/session/schema"
 import { ActorTool } from "../../src/tool/actor"
 import { ActorRegistry } from "../../src/actor/registry"
+import { ActorDispatch } from "../../src/actor/dispatch"
 import { TaskRegistry } from "../../src/task/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
 import { Team } from "../../src/team"
@@ -34,6 +35,7 @@ const it = testEffect(
     Truncate.defaultLayer,
     ToolRegistry.defaultLayer,
     ActorRegistry.defaultLayer,
+    ActorDispatch.defaultLayer,
     ActorWaiter.layer.pipe(Layer.provide(Bus.layer), Layer.provide(ActorRegistry.defaultLayer), Layer.provide(Session.defaultLayer)),
     Team.defaultLayer,
     SessionCheckpoint.defaultLayer,
@@ -46,6 +48,8 @@ interface WaitResponse {
   actor_id: string
   result?: string
   error?: string
+  context?: "none" | "state" | "full"
+  dispatch?: { id: string; status: string; contextRefs: string[]; declaredFiles: string[]; actualFiles: string[] }
 }
 
 function parseOutput(output: string): WaitResponse {
@@ -131,6 +135,63 @@ describe("actor tool — wait action", () => {
         const snap = parseOutput(result.output)
         expect(snap.status).toBe("unknown")
         expect(snap.actor_id).toBe(actorID)
+      }),
+    ),
+  )
+
+  it.live(
+    "wait projects durable dispatch context after the actor settles",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const registry = yield* ActorRegistry.Service
+        const dispatch = yield* ActorDispatch.Service
+        const chat = yield* sessions.create({ title: "chat" })
+        const actorID = yield* registry.allocateActorID(chat.id, "general")
+        yield* registry.register({
+          sessionID: chat.id,
+          actorID,
+          mode: "subagent",
+          agent: "general",
+          description: "done with dispatch",
+          contextMode: "state",
+          background: true,
+          lifecycle: "ephemeral",
+        })
+        const queued = yield* dispatch.enqueue({
+          sessionID: chat.id,
+          actorID,
+          agent: "general",
+          description: "done with dispatch",
+          context: "state",
+          contextRefs: ["issue/015-task-schema-grok-invalid-arguments-loop.md"],
+          declaredFiles: ["packages/lfcode/src/tool/actor.ts"],
+          writeAccess: true,
+          payload: {
+            agent: "general",
+            task: "done with dispatch",
+            description: "done with dispatch",
+            context: "state",
+            tools: "INHERIT",
+          },
+        })
+        yield* dispatch.claimNext(chat.id)
+        yield* dispatch.complete({ id: queued.id, status: "completed", result: "done" })
+        yield* registry.updateStatus(chat.id, actorID, { status: "idle", lastOutcome: "success" })
+
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+        const result = yield* def.execute(
+          { operation: { action: "wait", actor_id: actorID } },
+          ctxFor(chat.id),
+        )
+
+        const snap = parseOutput(result.output)
+        expect(snap.context).toBe("state")
+        expect(snap.dispatch?.id).toBe(queued.id)
+        expect(snap.dispatch?.status).toBe("completed")
+        expect(snap.dispatch?.contextRefs).toEqual(["issue/015-task-schema-grok-invalid-arguments-loop.md"])
+        expect(snap.dispatch?.declaredFiles).toEqual(["packages/lfcode/src/tool/actor.ts"])
       }),
     ),
   )

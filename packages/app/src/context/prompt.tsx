@@ -30,6 +30,7 @@ export interface AgentPart extends PartBase {
 export interface SelectedTextAttachmentPart extends PartBase {
   type: "selected-text"
   text: string
+  comment?: string
   messageID?: string
   selection?: FileSelection
 }
@@ -97,6 +98,7 @@ function isPartEqual(partA: ContentPart, partB: ContentPart) {
       return (
         partB.type === "selected-text" &&
         partA.text === partB.text &&
+        partA.comment === partB.comment &&
         partA.messageID === partB.messageID &&
         isSelectionEqual(partA.selection, partB.selection)
       )

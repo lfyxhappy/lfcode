@@ -7,7 +7,7 @@ import semver from "semver"
 import { Effect, Schema, Context, Layer, Option, FileSystem } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { AppFileSystem } from "@/filesystem"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { EffectFlock } from "@/util/effect-flock"
 
 import { makeRuntime } from "../effect/runtime"
@@ -127,7 +127,7 @@ export const layer = Layer.effect(
     const afs = yield* AppFileSystem.Service
     const fs = yield* FileSystem.FileSystem
     const flock = yield* EffectFlock.Service
-    const cacheRoot = path.resolve(Global.Path.cache, "packages")
+    const cacheRoot = PluginPath.data("runtime-node")
     const directory = (pkg: string) => resolveCacheDirectory(cacheRoot, pkg)
     const runReify = (input: { dir: string; add?: string[] }) =>
       Effect.gen(function* () {

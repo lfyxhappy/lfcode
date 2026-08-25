@@ -7,7 +7,14 @@ import { Provider } from "@/provider"
 import { ModelsDev } from "@/provider"
 import { ProviderAuth } from "@/provider"
 import { ProviderTransform } from "@/provider"
+import { A6Api } from "@/provider/a6api"
+import { MiniMaxUsage } from "@/provider/minimax-usage"
+import { OpenCodeGo } from "@/provider/opencode-go"
+import { OpenCode } from "@/provider/opencode"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { Auth } from "@/auth"
+import { Flag } from "@/flag/flag"
+import { url as serverURL } from "@/server/server"
 import { mapValues } from "remeda"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
@@ -15,12 +22,168 @@ import { Cause, Effect } from "effect"
 import { jsonRequest } from "./trace"
 import { generateText, tool } from "ai"
 import { completeCapabilityOperation, decideCapabilityOperation, requireCapabilityDecision } from "@/capability/gate"
+import { suggestModelWithOnlineFallback } from "@/provider/model-suggestions"
+import { matchModelsInCatalog } from "@/provider/model-suggestions"
+import { discoverProviderModels } from "@/provider/model-discovery"
+import { NotFoundError } from "@/storage"
 
 const DetectResult = z.object({
   detected: ConfigProvider.Model.zod,
   saved: z.boolean(),
   warnings: z.array(z.string()),
 })
+
+const ModelSuggestionCandidate = z.object({
+  providerID: z.string(),
+  providerName: z.string(),
+  modelID: z.string(),
+  displayName: z.string(),
+  patch: z.record(z.string(), z.unknown()),
+})
+
+const ModelSuggestionResult = z.object({
+  providerID: z.string(),
+  modelID: z.string(),
+  displayName: z.string(),
+  source: z.enum(["catalog", "alias", "online", "inferred", "none"]),
+  patch: z.record(z.string(), z.unknown()),
+  warning: z.string().optional(),
+  matchedProviderID: z.string().optional(),
+  candidates: z.array(ModelSuggestionCandidate).optional(),
+})
+
+const ProviderModelDiscoveryInput = z.object({ providerID: z.string().min(1) })
+const ProviderModelDiscoveryResult = z.object({
+  source: z.enum(["remote", "specialized"]),
+  models: z.array(z.object({ id: z.string(), name: z.string().optional(), protocol: z.string().optional() })),
+  warning: z.string().optional(),
+  error: z
+    .enum(["unsupported", "missing_credentials", "unauthorized", "invalid_response", "network", "unsafe_url"])
+    .optional(),
+})
+const ProviderModelMatchInput = z.object({ providerID: z.string().min(1), query: z.string().min(2) })
+const ProviderModelMatchResult = z.object({
+  models: z.array(
+    z.object({ providerID: z.string(), providerName: z.string(), modelID: z.string(), displayName: z.string() }),
+  ),
+})
+
+const A6ApiDiscoverInput = z.object({
+  apiKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Temporary A6API key. It is used only for this request and is never stored."),
+})
+
+const A6ApiDiscoverResult = A6Api.DiscoverResult
+const OpenCodeGoDiscoverInput = z.object({
+  apiKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Temporary OpenCode Go key. It is used only for this request and is never stored."),
+})
+const OpenCodeGoDiscoverResult = OpenCodeGo.DiscoverResult
+const OpenCodeGoUsageResult = OpenCodeGo.UsageQueryResult
+const OpenCodeDiscoverInput = z.object({
+  apiKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Temporary OpenCode Zen key. It is used only for this request and is never stored."),
+})
+const OpenCodeDiscoverResult = OpenCode.DiscoverResult
+const OpenCodeUsageResult = OpenCode.UsageQueryResult
+const MiniMaxUsageResult = MiniMaxUsage.UsageQueryResult
+
+function discoverA6ApiModels(input: z.infer<typeof A6ApiDiscoverInput>, signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored = input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get("a6api").pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      A6Api.discover({
+        apiKey: input.apiKey,
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
+
+function canUseStoredA6ApiKey() {
+  if (Flag.LFCODE_SERVER_PASSWORD) return true
+  const hostname = serverURL?.hostname
+  return !hostname || hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1"
+}
+
+function discoverOpenCodeGoModels(input: z.infer<typeof OpenCodeGoDiscoverInput>, signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored =
+      input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get(OpenCodeGo.PROVIDER_ID).pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      OpenCodeGo.discover({
+        apiKey: input.apiKey,
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
+
+function queryOpenCodeGoUsage(signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored = yield* auth.get(OpenCodeGo.PROVIDER_ID).pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      OpenCodeGo.usage({
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
+
+function discoverOpenCodeModels(input: z.infer<typeof OpenCodeDiscoverInput>, signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored =
+      input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get(OpenCode.PROVIDER_ID).pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      OpenCode.discover({
+        apiKey: input.apiKey,
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
+
+function queryOpenCodeUsage(signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored = yield* auth.get(OpenCode.PROVIDER_ID).pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      OpenCode.usage({ storedApiKey: stored?.type === "api" ? stored.key : undefined, signal }),
+    )
+  })
+}
+
+function queryMiniMaxUsage(signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const primary = yield* auth.get(MiniMaxUsage.MINIMAX_PROVIDER_ID).pipe(Effect.orDie)
+    const legacy = primary ? undefined : yield* auth.get("minimax-cn-coding-plan").pipe(Effect.orDie)
+    const stored = primary ?? legacy
+    return yield* Effect.promise(() =>
+      MiniMaxUsage.usage({
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
 
 type DetectedCapabilityOverrides = Partial<{
   text: boolean
@@ -370,8 +533,7 @@ function runReasoningProbe(language: ProbeLanguageModel, signal: AbortSignal, ad
         }),
       )
       const warnings = probeWarnings(result.warnings)
-      const reasoningTokens =
-        result.usage?.outputTokenDetails?.reasoningTokens ?? result.usage?.reasoningTokens ?? 0
+      const reasoningTokens = result.usage?.outputTokenDetails?.reasoningTokens ?? result.usage?.reasoningTokens ?? 0
       if (reasoningTokens > 0) {
         return {
           detected: true,
@@ -432,7 +594,8 @@ function runNativeWebProbe(model: Provider.Model, language: ProbeLanguageModel, 
       const result = yield* Effect.promise(() =>
         generateText({
           model: language,
-          prompt: "Use the web search tool exactly once to search for today's weather in Beijing, then reply with exactly ok.",
+          prompt:
+            "Use the web search tool exactly once to search for today's weather in Beijing, then reply with exactly ok.",
           maxOutputTokens: 16,
           temperature: 0,
           abortSignal: signal,
@@ -546,7 +709,8 @@ function detectModelCapabilities(model: Provider.Model, language: ProbeLanguageM
     const nativeWeb = yield* safeProbe("native_web", runNativeWebProbe(model, language, signal))
     const temperature = yield* safeProbe("temperature", runTemperatureProbe(language, signal))
     const variants = yield* safeVariantProbe("variants", runVariantProbe(model, language, signal))
-    const detectedReasoning = reasoning.detected === true || hasDetectedVariants(variants.detected) ? true : reasoning.detected
+    const detectedReasoning =
+      reasoning.detected === true || hasDetectedVariants(variants.detected) ? true : reasoning.detected
     return {
       detected: {
         text: text.detected,
@@ -611,7 +775,11 @@ export const ProviderRoutes = lazy(() =>
               filtered[key] = value
             }
           }
-          const connected = yield* svc.list()
+          const connected = Object.fromEntries(
+            Object.entries(yield* svc.list()).filter(
+              ([providerID]) => (enabled ? enabled.has(providerID) : true) && !disabled.has(providerID),
+            ),
+          )
           const providers = Object.assign(
             mapValues(filtered, (x) => Provider.fromModelsDevProvider(x)),
             connected,
@@ -621,6 +789,257 @@ export const ProviderRoutes = lazy(() =>
             default: Provider.defaultModelIDs(providers),
             connected: Object.keys(connected),
           }
+        }),
+    )
+    .post(
+      "/models/discover",
+      describeRoute({
+        summary: "Discover models for a configured provider",
+        description: "Fetch a provider model list without exposing stored credentials.",
+        operationId: "provider.models.discover",
+        responses: {
+          200: {
+            description: "Provider model discovery result",
+            content: { "application/json": { schema: resolver(ProviderModelDiscoveryResult) } },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("json", ProviderModelDiscoveryInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.models.discover", c, function* () {
+          const input = c.req.valid("json")
+          const svc = yield* Provider.Service
+          const provider = yield* svc.getProvider(ProviderID.make(input.providerID))
+          if (!provider) throw new NotFoundError({ message: `Provider not found: ${input.providerID}` })
+          const safeProvider = canUseStoredA6ApiKey() ? provider : { ...provider, key: undefined }
+          return yield* Effect.promise(() => discoverProviderModels(safeProvider, { signal: c.req.raw.signal }))
+        }),
+    )
+    .post(
+      "/models/match",
+      describeRoute({
+        summary: "Match model names from the local catalog",
+        description: "Search the bundled Models.dev catalog without returning the complete catalog.",
+        operationId: "provider.models.match",
+        responses: {
+          200: {
+            description: "Matching model candidates",
+            content: { "application/json": { schema: resolver(ProviderModelMatchResult) } },
+          },
+        },
+      }),
+      validator("json", ProviderModelMatchInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.models.match", c, function* () {
+          const input = c.req.valid("json")
+          const catalog = yield* Effect.promise(() => ModelsDev.get())
+          return { models: matchModelsInCatalog({ providerID: input.providerID, query: input.query, catalog }) }
+        }),
+    )
+    .post(
+      "/models/suggest",
+      describeRoute({
+        summary: "Suggest model capabilities",
+        description:
+          "Suggest model capabilities from the local models.dev catalog and query the online catalog when the local data does not contain the model.",
+        operationId: "provider.models.suggest",
+        responses: {
+          200: {
+            description: "Model capability suggestion",
+            content: { "application/json": { schema: resolver(ModelSuggestionResult) } },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          providerID: z.string().min(1),
+          modelID: z.string().min(1),
+          displayName: z.string().optional(),
+          providerName: z.string().optional(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("ProviderRoutes.models.suggest", c, function* () {
+          const input = c.req.valid("json")
+          const catalog = yield* Effect.promise(() => ModelsDev.get())
+          return yield* Effect.promise(() =>
+            suggestModelWithOnlineFallback({ ...input, catalog }, async () => {
+              return ModelsDev.refresh(true)
+            }),
+          )
+        }),
+    )
+    .get(
+      "/a6api/models/discover",
+      describeRoute({
+        summary: "Discover A6API models",
+        description:
+          "Read the A6API model catalog using the saved A6API credential. The response includes only supported model IDs and never includes credentials.",
+        operationId: "provider.a6api.models.list",
+        responses: {
+          200: {
+            description: "Filtered A6API model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(A6ApiDiscoverResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.a6api.models.list", c, function* () {
+          return yield* discoverA6ApiModels({}, c.req.raw.signal)
+        }),
+    )
+    .post(
+      "/a6api/models/discover",
+      describeRoute({
+        summary: "Discover A6API models with an optional temporary key",
+        description:
+          "Read the A6API model catalog using a temporary key from this request, or the saved A6API credential when omitted. The key is neither stored nor returned.",
+        operationId: "provider.a6api.models.discover",
+        responses: {
+          200: {
+            description: "Filtered A6API model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(A6ApiDiscoverResult) } },
+          },
+        },
+      }),
+      validator("json", A6ApiDiscoverInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.a6api.models.discover", c, function* () {
+          return yield* discoverA6ApiModels(c.req.valid("json"), c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/opencode/models/discover",
+      describeRoute({
+        summary: "Discover OpenCode Zen models",
+        description: "Read the live OpenCode Zen model catalog using the saved credential when available.",
+        operationId: "provider.opencode.models.list",
+        responses: {
+          200: {
+            description: "OpenCode Zen model catalog",
+            content: { "application/json": { schema: resolver(OpenCodeDiscoverResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencode.models.list", c, function* () {
+          return yield* discoverOpenCodeModels({}, c.req.raw.signal)
+        }),
+    )
+    .post(
+      "/opencode/models/discover",
+      describeRoute({
+        summary: "Discover OpenCode Zen models with an optional temporary key",
+        operationId: "provider.opencode.models.discover",
+        responses: {
+          200: {
+            description: "OpenCode Zen model catalog",
+            content: { "application/json": { schema: resolver(OpenCodeDiscoverResult) } },
+          },
+        },
+      }),
+      validator("json", OpenCodeDiscoverInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencode.models.discover", c, function* () {
+          return yield* discoverOpenCodeModels(c.req.valid("json"), c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/opencode/usage",
+      describeRoute({
+        summary: "Get OpenCode Zen quota usage",
+        description: "Read the documented OpenCode Zen usage endpoint when available; no credentials are returned.",
+        operationId: "provider.opencode.usage",
+        responses: {
+          200: {
+            description: "OpenCode Zen quota usage",
+            content: { "application/json": { schema: resolver(OpenCodeUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencode.usage", c, function* () {
+          return yield* queryOpenCodeUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/opencode-go/models/discover",
+      describeRoute({
+        summary: "Discover OpenCode Go models",
+        description:
+          "Read the OpenCode Go model catalog using the saved OpenCode Go credential. The response includes only supported model IDs and never includes credentials.",
+        operationId: "provider.opencodeGo.models.list",
+        responses: {
+          200: {
+            description: "OpenCode Go model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(OpenCodeGoDiscoverResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencodeGo.models.list", c, function* () {
+          return yield* discoverOpenCodeGoModels({}, c.req.raw.signal)
+        }),
+    )
+    .post(
+      "/opencode-go/models/discover",
+      describeRoute({
+        summary: "Discover OpenCode Go models with an optional temporary key",
+        description:
+          "Read the OpenCode Go model catalog using a temporary key from this request, or the saved OpenCode Go credential when omitted. The key is neither stored nor returned.",
+        operationId: "provider.opencodeGo.models.discover",
+        responses: {
+          200: {
+            description: "OpenCode Go model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(OpenCodeGoDiscoverResult) } },
+          },
+        },
+      }),
+      validator("json", OpenCodeGoDiscoverInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencodeGo.models.discover", c, function* () {
+          return yield* discoverOpenCodeGoModels(c.req.valid("json"), c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/opencode-go/usage",
+      describeRoute({
+        summary: "Get OpenCode Go quota usage",
+        description:
+          "Read OpenCode Go quota usage using the saved credential. The response never includes credentials and uses safe error categories when a quota cannot be read.",
+        operationId: "provider.opencodeGo.usage",
+        responses: {
+          200: {
+            description: "OpenCode Go quota usage or a safe error category",
+            content: { "application/json": { schema: resolver(OpenCodeGoUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.opencodeGo.usage", c, function* () {
+          return yield* queryOpenCodeGoUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/minimax/usage",
+      describeRoute({
+        summary: "Get MiniMax Token Plan quota usage",
+        description:
+          "Read MiniMax Token Plan quota usage using the saved provider credential. The response never includes credentials and returns every model window reported by the provider, including five-hour and optional weekly windows, absolute count/token values when available, and relative reset durations when the provider omits absolute timestamps. MiniMax usage_count fields are exposed as remaining counts and used values are derived from total minus remaining.",
+        operationId: "provider.minimax.usage",
+        responses: {
+          200: {
+            description: "MiniMax quota usage or a safe error category",
+            content: { "application/json": { schema: resolver(MiniMaxUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.minimax.usage", c, function* () {
+          return yield* queryMiniMaxUsage(c.req.raw.signal)
         }),
     )
     .get(

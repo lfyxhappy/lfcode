@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "protocol_version": "ui-ai.v3",
+  "enabled": true,
+  "required_context": [
+    "product",
+    "design",
+    "style_profile",
+    "registry",
+    "recipes",
+    "codebase_map",
+    "state_matrix",
+    "responsive_matrix"
+  ],
+  "optional_context": [
+    "interactions",
+    "changelog",
+    "visual_critique"
+  ],
+  "operation_types": [
+    "set_property",
+    "set_token",
+    "set_attribute",
+    "set_text",
+    "set_recipe",
+    "insert",
+    "remove",
+    "move",
+    "responsive"
+  ],
+  "cases": [
+    {
+      "id": "component-intent",
+      "kind": "component",
+      "required_states": [
+        "pending",
+        "streaming",
+        "ready",
+        "rejected",
+        "failed"
+      ],
+      "required_gates": [
+        "source-hash",
+        "target-scope",
+        "accept-reject",
+        "visual-preview"
+      ]
+    },
+    {
+      "id": "theme-intent",
+      "kind": "theme",
+      "required_states": [
+        "pending",
+        "streaming",
+        "ready",
+        "rejected",
+        "failed"
+      ],
+      "required_gates": [
+        "source-hash",
+        "target-scope",
+        "accept-reject",
+        "visual-preview"
+      ]
+    },
+    {
+      "id": "page-intent",
+      "kind": "page",
+      "required_states": [
+        "pending",
+        "streaming",
+        "ready",
+        "rejected",
+        "failed"
+      ],
+      "required_gates": [
+        "source-hash",
+        "target-scope",
+        "accept-reject",
+        "visual-preview"
+      ]
+    }
+  ],
+  "thresholds": {
+    "max_missing_context": 0,
+    "require_confirmation": true
+  }
+}

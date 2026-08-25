@@ -13,6 +13,16 @@ const PairRequest = z.object({
   deviceName: z.string().min(1).max(200),
 })
 
+const DEVICE_COOKIE = "lfcode_lan_device"
+
+export function authorizeLanDevice(state: MobileAccessState, headers: { authorization?: string; cookie?: string }) {
+  return authorizeDevice(state, deviceToken(headers.authorization, headers.cookie))
+}
+
+export function lanDeviceCookie(token: string) {
+  return `${DEVICE_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000`
+}
+
 export function MobileRoutes(input: {
   access: MobileAccessState
   hostName: string
@@ -35,7 +45,7 @@ export function MobileRoutes(input: {
         pairingKey: parsed.data.pairingKey,
         deviceID: parsed.data.deviceID,
         deviceName: parsed.data.deviceName,
-        source: sourceAddress(c.req.header("x-forwarded-for")),
+        source: sourceAddress(c.req.header("x-lfcode-mobile-source")),
       })
       if (!paired.ok) {
         const status = paired.code === "rate_limited" ? 429 : 401
@@ -49,7 +59,7 @@ export function MobileRoutes(input: {
       })
     })
     .get("/host", (c) => {
-      const device = authorizeDevice(input.access, bearerToken(c.req.header("authorization")))
+      const device = authorizeLanDevice(input.access, { authorization: c.req.header("authorization"), cookie: c.req.header("cookie") })
       if (!device) return mobileError(c, 401, "unauthorized", "A valid paired device token is required", true)
       return c.json({
         protocolVersion: MOBILE_PROTOCOL_VERSION,
@@ -68,8 +78,18 @@ function bearerToken(header: string | undefined) {
   return header.slice("Bearer ".length)
 }
 
+function deviceToken(authorization: string | undefined, cookie: string | undefined) {
+  const bearer = bearerToken(authorization)
+  if (bearer) return bearer
+  return cookie
+    ?.split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${DEVICE_COOKIE}=`))
+    ?.slice(DEVICE_COOKIE.length + 1) ?? ""
+}
+
 function sourceAddress(value: string | undefined) {
-  return value?.split(",")[0]?.trim() || "unknown"
+  return value?.trim() || "unknown"
 }
 
 function mobileError(c: Context, status: 400 | 401 | 429, code: string, message: string, retryable: boolean) {

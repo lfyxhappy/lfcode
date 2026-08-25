@@ -3,6 +3,7 @@ import { eq, Database } from "../storage"
 import { MessageTable, SessionTable } from "../session/session.sql"
 import type { MessageID } from "../session/schema"
 import type { SessionID } from "../session/schema"
+import { isUserHiddenSystemActorID } from "../actor/visibility"
 
 class LRU<K, V> {
   private map = new Map<K, V>()
@@ -26,11 +27,13 @@ class LRU<K, V> {
 
 export type Resolver = {
   role: (messageID: string) => Effect.Effect<"user" | "assistant">
+  hidden: (messageID: string) => Effect.Effect<boolean>
   projectID: (sessionID: string) => Effect.Effect<string>
 }
 
 export function makeResolver(): Resolver {
   const roleCache = new LRU<string, "user" | "assistant">(1024)
+  const hiddenCache = new LRU<string, boolean>(1024)
   const projectCache = new LRU<string, string>(512)
 
   return {
@@ -44,6 +47,18 @@ export function makeResolver(): Resolver {
         const role = (row?.data as { role?: string } | undefined)?.role === "user" ? "user" : "assistant"
         roleCache.set(messageID, role)
         return role
+      }),
+
+    hidden: (messageID) =>
+      Effect.sync(() => {
+        const cached = hiddenCache.get(messageID)
+        if (cached !== undefined) return cached
+        const row = Database.use((db) =>
+          db.select({ agent_id: MessageTable.agent_id }).from(MessageTable).where(eq(MessageTable.id, messageID as MessageID)).get(),
+        )
+        const hidden = isUserHiddenSystemActorID(row?.agent_id)
+        hiddenCache.set(messageID, hidden)
+        return hidden
       }),
 
     projectID: (sessionID) =>

@@ -500,6 +500,54 @@ describe("applyDirectoryEvent", () => {
     expect(store.part[other.id]?.map((item) => item.id)).toEqual(["prt_other"])
   })
 
+  test("adds visible actors and applies live status updates", () => {
+    const sessionID = "ses_actors"
+    const [store, setStore] = createStore(baseState())
+    const input = {
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    }
+
+    applyDirectoryEvent({
+      ...input,
+      event: {
+        type: "actor.registered",
+        properties: {
+          sessionID,
+          actorID: "child-1",
+          mode: "subagent",
+          description: "研究员：检查认证",
+          agent: "explore",
+          visible: true,
+        },
+      },
+    })
+    applyDirectoryEvent({
+      ...input,
+      event: { type: "actor.status", properties: { sessionID, actorID: "child-1", status: "running" } },
+    })
+    applyDirectoryEvent({
+      ...input,
+      event: {
+        type: "actor.registered",
+        properties: {
+          sessionID,
+          actorID: "checkpoint-writer-1",
+          mode: "subagent",
+          description: "internal",
+          visible: false,
+        },
+      },
+    })
+
+    expect(store.actor[sessionID]).toEqual([
+      expect.objectContaining({ actorID: "child-1", description: "研究员：检查认证", status: "running" }),
+    ])
+  })
+
   test("upserts and prunes message parts", () => {
     const sessionID = "ses_1"
     const messageID = "msg_1"
@@ -768,5 +816,38 @@ describe("applyDirectoryEvent", () => {
 
     expect(pushes).toEqual(["/tmp"])
     expect(lspLoads).toBe(1)
+  })
+
+  test("keeps a compact, deduplicated Hook activity feed per session", () => {
+    const [store, setStore] = createStore(baseState())
+    const apply = (timeCreated: number, summary: string) =>
+      applyDirectoryEvent({
+        event: {
+          type: "hook.run.completed",
+          properties: {
+            sessionID: "ses_1",
+            hookID: "hook_1",
+            hookName: "Guard",
+            event: "PreToolUse",
+            status: "completed",
+            durationMs: 12,
+            summary,
+            timeCreated,
+          },
+        },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    apply(1, "first")
+    apply(1, "updated")
+    for (let index = 2; index <= 8; index++) apply(index, String(index))
+
+    expect(store.hook_run?.ses_1).toHaveLength(6)
+    expect(store.hook_run?.ses_1?.[0]?.summary).toBe("8")
+    expect(store.hook_run?.ses_1?.at(-1)?.summary).toBe("3")
   })
 })

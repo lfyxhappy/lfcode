@@ -6,7 +6,7 @@ import * as Tool from "./tool"
 import { ApplyPatchTool } from "./apply_patch"
 import DESCRIPTION from "./replace_range.txt"
 import { assertWriteAllowed } from "./external-directory"
-import { buildRangePatchText } from "./range-patch"
+import { buildRangePatchText, RangeValidationError } from "./range-patch"
 import { SessionCwd } from "./session-cwd"
 import * as PatchRecovery from "./patch-recovery"
 
@@ -43,6 +43,7 @@ export const ReplaceRangeTool = Tool.define(
 
           const currentBytes = yield* fs.readFile(filePath)
           if (params.expected_version && params.expected_version !== PatchRecovery.contentVersion(currentBytes)) {
+            const recovery = PatchRecovery.markVersionFailure(ctx.sessionID, ctx.messageID, filePath)
             return yield* Effect.fail(
               new Error(
                 `[tool_error] ${JSON.stringify({
@@ -52,14 +53,37 @@ export const ReplaceRangeTool = Tool.define(
                   field: "expected_version",
                   fields: ["expected_version"],
                   retryable: true,
-                  recovery: "Read the target file again and retry with the new version.",
+                  recovery,
                   message: "The file changed after the previous read.",
-                })}\nThe file changed after the previous read. Read it again before editing.`,
+                })}\n${recovery}`,
               ),
             )
           }
           const content = yield* fs.readFileString(filePath)
-          const patchText = buildRangePatchText(filePath, content, params)
+          let patchText: string
+          try {
+            patchText = buildRangePatchText(filePath, content, params)
+          } catch (error) {
+            if (!(error instanceof RangeValidationError)) throw error
+            const recovery = PatchRecovery.markCoordinateFailure(ctx.sessionID, ctx.messageID, filePath)
+            return yield* Effect.fail(
+              new Error(
+                `[tool_error] ${JSON.stringify({
+                  type: "tool_error",
+                  tool: "replace_range",
+                  category: "parameters",
+                  field: error.detail.field,
+                  fields: [error.detail.field],
+                  line: error.detail.line,
+                  lineLength: error.detail.lineLength,
+                  maxEndChar: error.detail.maxEndChar,
+                  retryable: true,
+                  recovery,
+                  message: error.message,
+                })}\n${error.message}. Valid endChar for line ${error.detail.line} is 1 through ${error.detail.maxEndChar} (the end is exclusive). ${recovery}`,
+              ),
+            )
+          }
           return yield* applyPatch.execute({ patchText }, ctx)
         }).pipe(Effect.orDie),
     }

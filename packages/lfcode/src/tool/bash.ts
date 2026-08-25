@@ -1,6 +1,5 @@
 import z from "zod"
 import os from "os"
-import { createWriteStream, readFileSync } from "node:fs"
 import * as Tool from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -10,26 +9,20 @@ import { lazy } from "@/util/lazy"
 import { Language, type Node } from "web-tree-sitter"
 
 import { AppFileSystem } from "@/filesystem"
+import { BackgroundJobPersistence } from "@/background-job/persistence"
 import { fileURLToPath } from "url"
-import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
 
 import { SessionCwd } from "./session-cwd"
 import { BashArity } from "@/permission/arity"
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
-import { Effect, Stream } from "effect"
+import { Effect } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as BashInteractive from "./bash-interactive"
-import { BackgroundJobPersistence } from "@/background-job/persistence"
 import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
-import { Identifier } from "@/id/id"
-import * as PatchRecovery from "./patch-recovery"
 
-const MAX_METADATA_LENGTH = 30_000
-const DEFAULT_TIMEOUT = Flag.LFCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
-const RETRY_WINDOW_MS = 10 * 60 * 1000
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -63,7 +56,10 @@ const Parameters = z.object({
     .describe(
       "The command to execute. On Windows, this `shell` tool is actually a PowerShell 7 (`pwsh`) terminal. Generate `pwsh` syntax only; do not use cmd.exe, Bash, or Windows PowerShell 5-only syntax.",
     ),
-  timeout: z.number().describe("Optional timeout in milliseconds").optional(),
+  timeout: z
+    .number()
+    .describe("Optional reminder threshold in milliseconds. It never terminates the command.")
+    .optional(),
   workdir: z
     .string()
     .describe(
@@ -79,7 +75,7 @@ const Parameters = z.object({
   background: z
     .boolean()
     .describe(
-      "Set to true to start this command as a durable background shell job. Background jobs continue after this tool call returns and can later be inspected or awaited with the background_job tool.",
+      "Deprecated no-op. Every non-interactive shell command is already a tracked shell process; inspect one with shell_process only when needed.",
     )
     .optional(),
   description: z
@@ -95,7 +91,15 @@ export type PreparedShellExecution = {
   shellName: string
   cwd: string
   env: NodeJS.ProcessEnv
-  timeout: number
+}
+
+type ShellMetadata = {
+  output: string
+  exit: number | null
+  description: string
+  truncated: boolean
+  jobID?: string
+  status?: string
 }
 
 type Part = {
@@ -109,14 +113,8 @@ type Scan = {
   always: Set<string>
 }
 
-type Chunk = {
-  text: string
-  size: number
-}
-
 export const log = Log.create({ service: "bash-tool" })
-
-const failedCommands = new Map<string, { failures: number; updatedAt: number }>()
+const INLINE_SHELL_WAIT_MS = 1_250
 
 const resolveWasm = (asset: string) => {
   if (asset.startsWith("file://")) return fileURLToPath(asset)
@@ -247,60 +245,6 @@ function pathArgs(list: Part[], ps: boolean) {
     out.push(item.text)
   }
   return out
-}
-
-function preview(text: string) {
-  if (text.length <= MAX_METADATA_LENGTH) return text
-  return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
-}
-
-const ERROR_PATTERN = /error|exception|failed|fatal|traceback|panic|exit code/i
-const HEAD_BYTES = Math.floor(Truncate.MAX_BYTES * 0.7)
-const HEAD_LINES = Math.floor(Truncate.MAX_LINES * 0.7)
-
-function head(text: string, maxLines: number, maxBytes: number): string {
-  const lines = text.split("\n")
-  const out: string[] = []
-  let bytes = 0
-  for (let i = 0; i < lines.length && out.length < maxLines; i++) {
-    const size = Buffer.byteLength(lines[i], "utf-8") + (i > 0 ? 1 : 0)
-    if (bytes + size > maxBytes) break
-    out.push(lines[i])
-    bytes += size
-  }
-  return out.join("\n")
-}
-
-function tail(text: string, maxLines: number, maxBytes: number) {
-  const lines = text.split("\n")
-  if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) {
-    return {
-      text,
-      cut: false,
-    }
-  }
-
-  const out: string[] = []
-  let bytes = 0
-  for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
-    const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
-    if (bytes + size > maxBytes) {
-      if (out.length === 0) {
-        const buf = Buffer.from(lines[i], "utf-8")
-        let start = buf.length - maxBytes
-        if (start < 0) start = 0
-        while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
-        out.unshift(buf.subarray(start).toString("utf-8"))
-      }
-      break
-    }
-    out.unshift(lines[i])
-    bytes += size
-  }
-  return {
-    text: out.join("\n"),
-    cut: true,
-  }
 }
 
 function pwshGuardMessage(command: string) {
@@ -457,54 +401,6 @@ const shellEnv = Effect.fn("BashTool.shellEnv")(function* (ctx: Tool.Context, cw
   }
 })
 
-function shouldRunInBackground(command: string) {
-  return /\b(?:vite|next|nuxt|astro|webpack|parcel|storybook)\s+(?:dev|serve|watch)\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|watch)\b|\bjupyter\s+(?:lab|notebook)\b|\b(?:node|python|python3|pwsh)\b[^\n]*(?:--watch|\bserve\b)/i.test(
-    command,
-  )
-}
-
-function classifyShellFailure(input: { code: number | null; expired: boolean; aborted: boolean; output: string }) {
-  if (input.aborted) return "aborted"
-  if (input.expired) return "timeout"
-  if (input.code === 0) return
-  if (/parsererror|unexpected token|syntax error|not recognized as the name of a cmdlet/i.test(input.output))
-    return "syntax"
-  if (/cannot find path|no such file|does not exist|path not found|file not found/i.test(input.output)) return "path"
-  if (/access is denied|permission denied|unauthorized|not permitted/i.test(input.output)) return "permission"
-  return "process"
-}
-
-function commandSignature(sessionID: string, cwd: string, command: string) {
-  return `${sessionID}\0${cwd}\0${command.toLowerCase().replace(/[\s'"`()\[\]{}]+/g, "")}`
-}
-
-function assertRetryBudget(sessionID: string, cwd: string, command: string) {
-  const entry = failedCommands.get(commandSignature(sessionID, cwd, command))
-  if (!entry || Date.now() - entry.updatedAt > RETRY_WINDOW_MS) return
-  if (entry.failures < 2) return
-  throw new Error(
-    "This equivalent shell command has already failed twice in this session. Stop retrying it, summarize the classified failure, then inspect the relevant path, permission, process state, or syntax before choosing a different verified approach.",
-  )
-}
-
-function rememberCommandResult(
-  sessionID: string,
-  cwd: string,
-  command: string,
-  failed: boolean,
-) {
-  const signature = commandSignature(sessionID, cwd, command)
-  if (!failed) {
-    failedCommands.delete(signature)
-    return
-  }
-  const previous = failedCommands.get(signature)
-  failedCommands.set(signature, {
-    failures: (previous?.failures ?? 0) + 1,
-    updatedAt: Date.now(),
-  })
-}
-
 export const prepareShellExecution = Effect.fn("BashTool.prepareShellExecution")(function* (
   params: Pick<ShellToolInput, "command" | "timeout" | "workdir" | "interactive" | "background">,
   ctx: Tool.Context,
@@ -518,11 +414,6 @@ export const prepareShellExecution = Effect.fn("BashTool.prepareShellExecution")
   }
   if (params.interactive && params.background) {
     throw new Error("`interactive: true` cannot be combined with `background: true`.")
-  }
-  if (params.background && params.timeout !== undefined) {
-    throw new Error(
-      '`timeout` only applies to blocking shell execution. Start the job in background mode, then use `background_job` with `operation="wait"` and `timeout_ms` if you need bounded waiting.',
-    )
   }
   const ps = PS.has(shellName)
   if (process.platform === "win32" && ps) {
@@ -539,33 +430,8 @@ export const prepareShellExecution = Effect.fn("BashTool.prepareShellExecution")
     shellName,
     cwd,
     env,
-    timeout: params.timeout ?? DEFAULT_TIMEOUT,
   } satisfies PreparedShellExecution
 })
-
-function cmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
-  if (process.platform === "win32" && PS.has(name)) {
-    const utf8 = [
-      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-      "$OutputEncoding = [Console]::OutputEncoding",
-      `& { ${command} }`,
-    ].join("; ")
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", utf8], {
-      cwd,
-      env,
-      stdin: "ignore",
-      detached: false,
-    })
-  }
-
-  return ChildProcess.make(command, [], {
-    shell,
-    cwd,
-    env,
-    stdin: "ignore",
-    detached: process.platform !== "win32",
-  })
-}
 
 const parser = lazy(async () => {
   const { Parser } = await import("web-tree-sitter")
@@ -594,278 +460,13 @@ const parser = lazy(async () => {
   return { bash, ps }
 })
 
-function defineShellTool(id: "shell" | "bash", legacy: boolean) {
+function defineShellTool(id: "shell" | "bash") {
   return Tool.define(
     id,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner
       const fs = yield* AppFileSystem.Service
       const plugin = yield* Plugin.Service
-      const trunc = yield* Truncate.Service
-
-      const run = Effect.fn("BashTool.run")(function* (
-        input: {
-          shell: string
-          name: string
-          command: string
-          cwd: string
-          env: NodeJS.ProcessEnv
-          timeout: number
-          description: string
-        },
-        ctx: Tool.Context,
-      ) {
-        const patchBypass = PatchRecovery.blockedShellWrite(ctx.sessionID, ctx.messageID, input.cwd, input.command)
-        if (patchBypass) throw new Error(patchBypass)
-        assertRetryBudget(ctx.sessionID, input.cwd, input.command)
-        const bytes = Truncate.MAX_BYTES
-        const lines = Truncate.MAX_LINES
-        const keep = bytes * 2
-        let full = ""
-        let last = ""
-        const list: Chunk[] = []
-        let used = 0
-        let file = ""
-        let sink: ReturnType<typeof createWriteStream> | undefined
-        let cut = false
-        let expired = false
-        let aborted = false
-        let foregroundJobID: string | undefined
-        let foregroundJobLogSequence = 0
-        let pendingForegroundJobLog = ""
-
-        const flushForegroundJobLog = () => {
-          const jobID = foregroundJobID
-          if (!jobID || !pendingForegroundJobLog) return
-          const job = BackgroundJobPersistence.load(jobID)
-          if (!job || job.status !== "running") return
-          BackgroundJobPersistence.appendLog({
-            jobID,
-            sessionID: job.sessionID,
-            seq: ++foregroundJobLogSequence,
-            stream: "stdout",
-            text: pendingForegroundJobLog,
-          })
-          pendingForegroundJobLog = ""
-        }
-
-        const flushForegroundJobLogIfNeeded = () => {
-          if (pendingForegroundJobLog.length < 4096) return Effect.void
-          return Effect.sync(flushForegroundJobLog).pipe(Effect.ignore)
-        }
-
-        yield* ctx.metadata({
-          metadata: {
-            output: "",
-            description: input.description,
-          },
-        })
-
-        const code: number | null = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const handle = yield* spawner.spawn(cmd(input.shell, input.name, input.command, input.cwd, input.env))
-            foregroundJobID = Identifier.ascending("job")
-            BackgroundJobPersistence.recordStart({
-              id: foregroundJobID,
-              sessionID: ctx.sessionID,
-              kind: "shell",
-              source: "shell",
-              title: input.description,
-              cwd: input.cwd,
-              payload: {
-                command: input.command,
-                shell: input.shell,
-                shellName: input.name,
-              },
-              env: Object.fromEntries(
-                Object.entries(input.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-              ),
-              ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
-              ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
-              metadata: { mode: "foreground" },
-            })
-            BackgroundJobPersistence.attachProcess({
-              id: foregroundJobID,
-              pid: Number(handle.pid),
-            })
-
-            yield* Effect.forkScoped(
-              Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
-                const safeChunk = Truncate.redact(chunk)
-                const size = Buffer.byteLength(safeChunk, "utf-8")
-                pendingForegroundJobLog += safeChunk
-                list.push({ text: safeChunk, size })
-                used += size
-                while (used > keep && list.length > 1) {
-                  const item = list.shift()
-                  if (!item) break
-                  used -= item.size
-                  cut = true
-                }
-
-                last = preview(last + safeChunk)
-
-                if (file) {
-                  sink?.write(safeChunk)
-                } else {
-                  full += safeChunk
-                  if (Buffer.byteLength(full, "utf-8") > bytes) {
-                    return trunc.write(full).pipe(
-                      Effect.andThen((next) =>
-                        Effect.sync(() => {
-                          file = next
-                          cut = true
-                          sink = createWriteStream(next, { flags: "a" })
-                          full = ""
-                        }),
-                      ),
-                      Effect.andThen(
-                        ctx.metadata({
-                          metadata: {
-                            output: last,
-                            description: input.description,
-                          },
-                        }),
-                      ),
-                      Effect.andThen(flushForegroundJobLogIfNeeded()),
-                    )
-                  }
-                }
-
-                return flushForegroundJobLogIfNeeded().pipe(
-                  Effect.andThen(
-                    ctx.metadata({
-                      metadata: {
-                        output: last,
-                        description: input.description,
-                      },
-                    }),
-                  ),
-                )
-              }),
-            )
-
-            const abort = Effect.callback<void>((resume) => {
-              if (ctx.abort.aborted) return resume(Effect.void)
-              const handler = () => resume(Effect.void)
-              ctx.abort.addEventListener("abort", handler, { once: true })
-              return Effect.sync(() => ctx.abort.removeEventListener("abort", handler))
-            })
-
-            const timeout = Effect.sleep(`${input.timeout + 100} millis`)
-
-            const exit = yield* Effect.raceAll([
-              handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
-              abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
-              timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
-            ])
-
-            if (exit.kind === "abort") {
-              aborted = true
-              yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
-            }
-            if (exit.kind === "timeout") {
-              expired = true
-              yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
-            }
-
-            return exit.kind === "exit" ? exit.code : null
-          }),
-        ).pipe(Effect.orDie)
-
-        const meta: string[] = []
-        if (expired) {
-          meta.push(
-            `terminal tool terminated command after exceeding timeout ${input.timeout} ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.`,
-          )
-        }
-        if (aborted) meta.push("User aborted the command")
-        const raw = list.map((item) => item.text).join("")
-        const end = tail(raw, lines, bytes)
-        if (end.cut) cut = true
-        if (!file && end.cut) {
-          file = yield* trunc.write(raw)
-        }
-
-        let output = end.text
-        if (!output) output = "(no output)"
-
-        const outputRef = file ? Truncate.outputReference(file) : undefined
-        if (cut && file && outputRef) {
-          // Check if tail contains error patterns — if so, prepend head for context
-          const tailScan = end.text.length > 2048 ? end.text.slice(-2048) : end.text
-          const hasErrors = ERROR_PATTERN.test(tailScan)
-          if (hasErrors) {
-            let fileContent: string | undefined
-            try {
-              fileContent = readFileSync(file, "utf-8")
-            } catch {
-              fileContent = undefined
-            }
-            if (fileContent) {
-              const headText = head(fileContent, HEAD_LINES, HEAD_BYTES)
-              output = `...output truncated (head+tail shown due to errors)...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n${headText}\n\n...middle omitted...\n\n${end.text}`
-            } else {
-              output = `...output truncated...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n` + output
-            }
-          } else {
-            output = `...output truncated...\n\nFull output is available as ${outputRef}. Use tool_output with a bounded read or search.\n\n` + output
-          }
-        }
-
-        if (meta.length > 0) {
-          output += "\n\n<bash_metadata>\n" + meta.join("\n") + "\n</bash_metadata>"
-        }
-        const errorKind = classifyShellFailure({ code, expired, aborted, output: raw })
-        rememberCommandResult(ctx.sessionID, input.cwd, input.command, Boolean(errorKind && errorKind !== "aborted"))
-        if (errorKind) output += `\n\n<bash_error_kind>${errorKind}</bash_error_kind>`
-        if (foregroundJobID) {
-          yield* Effect.sync(() => {
-            const job = BackgroundJobPersistence.load(foregroundJobID!)
-            if (!job || job.status !== "running") return
-            flushForegroundJobLog()
-            const status = aborted ? "cancelled" : expired || errorKind || code !== 0 ? "failed" : "completed"
-            BackgroundJobPersistence.recordTerminal({
-              id: job.id,
-              status,
-              ...(code === null ? {} : { exitCode: code }),
-              ...(status === "failed"
-                ? {
-                    error: expired
-                      ? `Shell command exceeded timeout ${input.timeout} ms.`
-                      : errorKind
-                        ? `Shell command failed: ${errorKind}.`
-                        : "Shell command exited with a non-zero status.",
-                  }
-                : {}),
-              pid: null,
-            })
-          }).pipe(Effect.ignore)
-        }
-        if (sink) {
-          const stream = sink
-          yield* Effect.promise(
-            () =>
-              new Promise<void>((resolve) => {
-                stream.end(() => resolve())
-                stream.on("error", () => resolve())
-              }),
-          )
-        }
-
-        return {
-          title: input.description,
-          metadata: {
-            output: last || preview(output),
-            exit: code,
-            description: input.description,
-            truncated: cut,
-            ...(errorKind ? { errorKind } : {}),
-            ...(outputRef ? { outputRef } : {}),
-          },
-          output,
-        }
-      })
 
       return () =>
         Effect.sync(() => {
@@ -873,17 +474,13 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
           const name = Shell.name(shell)
           const shellContract =
             process.platform === "win32"
-              ? legacy
-                ? "On Windows, this legacy `bash` alias always runs PowerShell 7 (`pwsh`). Treat every invocation as a `pwsh` terminal. Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior."
-                : "On Windows, this `shell` tool always runs PowerShell 7 (`pwsh`). Treat every invocation as a `pwsh` terminal. Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior."
+              ? "On Windows, this `shell` tool always runs PowerShell 7 (`pwsh`). Treat every invocation as a `pwsh` terminal. Do NOT rely on cmd.exe syntax, Git Bash syntax, or Windows PowerShell 5-only behavior."
               : "On macOS and Linux, this tool runs the current POSIX shell. Generate shell syntax that matches the reported shell."
           const shellQuickstart =
             process.platform === "win32"
               ? [
                   "PowerShell 7 quick reference:",
-                  legacy
-                    ? "- Treat this tool as `pwsh` even though the compatibility alias is `bash`."
-                    : "- Treat this tool as `pwsh`.",
+                  "- Treat this tool as `pwsh`.",
                   "- Dependent commands: prefer `cmd1; if ($?) { cmd2 }`.",
                   '- Environment variables: use `$env:NAME = "value"`, and read them with `$env:NAME`.',
                   "- Multi-line scripts: use PowerShell here-strings such as `$script = @' ... '@` or `$script = @\" ... \"@`.",
@@ -904,7 +501,7 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
           const chain =
             process.platform === "win32" && PS.has(name)
               ? "If the commands depend on each other and must run sequentially in `pwsh`, prefer `cmd1; if ($?) { cmd2 }` or separate tool calls. Use `;` only when later commands should run even if earlier commands fail."
-              : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
+              : "If the commands depend on each other and must run sequentially, use a single shell call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts, run these operations sequentially instead."
           log.info("terminal tool using shell", { shell })
 
           return {
@@ -913,29 +510,44 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
               .replaceAll("${shell}", name)
               .replaceAll("${shell_contract}", shellContract)
               .replaceAll("${shell_quickstart}", shellQuickstart)
-              .replaceAll(
-                "${tool_identity}",
-                legacy
-                  ? "This legacy compatibility alias still routes to the public `shell` tool. Prefer `shell` in new calls."
-                  : "The public tool name is `shell`. Use it for all terminal operations.",
-              )
+              .replaceAll("${tool_identity}", "The public tool name is `shell`. Use it for all terminal operations.")
               .replaceAll("${chaining}", chain)
               .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
               .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
             parameters: Parameters,
-            execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
+            execute: (
+              params: z.infer<typeof Parameters>,
+              ctx: Tool.Context,
+            ): Effect.Effect<Tool.ExecuteResult<ShellMetadata>> =>
               Effect.gen(function* () {
                 const execution = {
                   ...params,
-                  background:
-                    params.background ??
-                    (!params.interactive && params.timeout === undefined && shouldRunInBackground(params.command)),
+                  // Every non-interactive model command is durable. The legacy
+                  // background flag remains accepted for schema compatibility,
+                  // but it no longer controls process ownership.
+                  background: !params.interactive,
                 }
-                const prepared = yield* prepareShellExecution(execution, ctx).pipe(
+                const preparedResult = yield* prepareShellExecution(execution, ctx).pipe(
                   Effect.provideService(ChildProcessSpawner, spawner),
                   Effect.provideService(AppFileSystem.Service, fs),
                   Effect.provideService(Plugin.Service, plugin),
+                  Effect.map((value) => ({ ok: true as const, value })),
+                  // A missing parser asset must be reported as a tool failure,
+                  // never allowed to escape as an unhandled rejection that
+                  // terminates the Electron main process. Packaging validates
+                  // these assets, but this guard also protects dev/old installs.
+                  Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
                 )
+                if (!preparedResult.ok) {
+                  const reason = String(preparedResult.error)
+                  log.error("shell preparation failed", { error: reason, sessionID: ctx.sessionID, callID: ctx.callID })
+                  return {
+                    title: params.description,
+                    metadata: { output: reason, description: params.description, exit: null, truncated: false },
+                    output: `Shell is unavailable because command parsing failed: ${reason}`,
+                  }
+                }
+                const prepared = preparedResult.value
 
                 // Interactive mode: hand terminal to user for direct interaction
                 if (params.interactive) {
@@ -967,55 +579,72 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
                   }
                 }
 
-                if (execution.background) {
-                  const runtime = shellBackgroundRuntimeRef.current
-                  if (!runtime) {
-                    throw new Error("Shell background runtime is not available in this process.")
-                  }
-                  const job = yield* runtime.start({
-                    sessionID: ctx.sessionID,
+                const runtime = shellBackgroundRuntimeRef.current
+                if (!runtime) {
+                  const reason = "Shell background runtime is not available in this process."
+                  log.error("shell execution unavailable", { error: reason, sessionID: ctx.sessionID, callID: ctx.callID })
+                  return {
                     title: params.description,
-                    command: params.command,
-                    cwd: prepared.cwd,
-                    env: prepared.env as Record<string, string>,
-                    shell: prepared.shell,
-                    shellName: prepared.shellName,
-                    source: "shell",
-                    ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
-                    ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
-                  })
+                    metadata: { output: reason, description: params.description, exit: null, truncated: false },
+                    output: reason,
+                  }
+                }
+                const job = yield* runtime.start({
+                  sessionID: ctx.sessionID,
+                  title: params.description,
+                  command: params.command,
+                  cwd: prepared.cwd,
+                  env: Object.fromEntries(
+                    Object.entries(prepared.env).filter(
+                      (entry): entry is [string, string] => typeof entry[1] === "string",
+                    ),
+                  ),
+                  shell: prepared.shell,
+                  shellName: prepared.shellName,
+                  source: "shell",
+                  ...(params.timeout !== undefined ? { remindAfterMs: params.timeout } : {}),
+                  ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
+                  ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
+                })
+                const settled = yield* runtime.wait({ jobID: job.id, timeoutMs: INLINE_SHELL_WAIT_MS })
+                const latest = settled.job ?? job
+                if (!settled.timedOut) {
+                  const output = BackgroundJobPersistence.listLogs({ jobID: job.id })
+                    .filter((entry) => entry.stream === "stdout" || entry.stream === "stderr")
+                    .map((entry) => entry.text)
+                    .join("")
+                    .trim()
                   return {
                     title: params.description,
                     metadata: {
-                      output: `Started background shell job ${job.id}`,
+                      output,
                       description: params.description,
-                      exit: null,
+                      exit: latest.exitCode ?? null,
                       truncated: false,
-                      jobID: job.id,
-                      status: job.status,
+                      jobID: latest.id,
+                      status: latest.status,
                     },
-                    output: [
-                      `Started durable background shell job.`,
-                      `<job_id>${job.id}</job_id>`,
-                      `<status>${job.status}</status>`,
-                      `<cwd>${job.cwd}</cwd>`,
-                      `<title>${job.title}</title>`,
-                    ].join("\n"),
+                    output: output || `Shell command finished with status ${latest.status}.`,
                   }
                 }
-
-                return yield* run(
-                  {
-                    shell: prepared.shell,
-                    name: prepared.shellName,
-                    command: params.command,
-                    cwd: prepared.cwd,
-                    env: prepared.env,
-                    timeout: prepared.timeout,
+                return {
+                  title: params.description,
+                  metadata: {
+                    output: `Started shell process ${job.id}`,
                     description: params.description,
+                    exit: null,
+                    truncated: false,
+                    jobID: job.id,
+                    status: job.status,
                   },
-                  ctx,
-                )
+                  output: [
+                    `Started tracked shell process.`,
+                    `<job_id>${job.id}</job_id>`,
+                    `<status>${job.status}</status>`,
+                    `<cwd>${job.cwd}</cwd>`,
+                    `<title>${job.title}</title>`,
+                  ].join("\n"),
+                }
               }),
           }
         })
@@ -1023,5 +652,5 @@ function defineShellTool(id: "shell" | "bash", legacy: boolean) {
   )
 }
 
-export const ShellTool = defineShellTool("shell", false)
-export const BashTool = defineShellTool("bash", true)
+export const ShellTool = defineShellTool("shell")
+export const BashTool = defineShellTool("bash")

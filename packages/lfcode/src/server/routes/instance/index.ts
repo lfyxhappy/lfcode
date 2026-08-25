@@ -13,7 +13,6 @@ import { Global } from "@/global"
 import { Command } from "@/command"
 import { QuestionRoutes } from "./question"
 import { PermissionRoutes } from "./permission"
-import { WorkflowRoutes } from "./workflows"
 import { BashInteractiveRoutes } from "./bash-interactive"
 import { Flag } from "@/flag/flag"
 import { ExperimentalHttpApiServer } from "./httpapi/server"
@@ -36,6 +35,11 @@ import { PluginRoutes } from "./plugin"
 import { CapabilityRoutes } from "./capability"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
+import { ResearchRoutes } from "./research"
+import { HookRoutes } from "./hooks"
+import { AgentManageRoutes } from "./agents"
+import { ActorDispatchRoutes } from "./actor-dispatch"
+import { ClaudeCodeRoutes } from "./claude-code"
 
 export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
   const app = new Hono()
@@ -64,11 +68,11 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
   return app
     .route("/project", ProjectRoutes())
     .route("/pty", PtyRoutes(upgrade))
+    .route("/claude-code", ClaudeCodeRoutes())
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())
     .route("/permission", PermissionRoutes())
-    .route("/workflows", WorkflowRoutes())
     .route("/question", QuestionRoutes())
     .route("/bash-interactive", BashInteractiveRoutes())
     .route("/provider", ProviderRoutes())
@@ -78,9 +82,13 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/", FileRoutes())
     .route("/", EventRoutes())
     .route("/skills", SkillsRoutes())
+    .route("/agent/manage", AgentManageRoutes())
+    .route("/actor-dispatch", ActorDispatchRoutes())
     .route("/background-job", BackgroundJobRoutes())
     .route("/plugin", PluginRoutes())
     .route("/capability", CapabilityRoutes())
+    .route("/research", ResearchRoutes())
+    .route("/hooks", HookRoutes())
     .route("/mcp", McpRoutes())
     .route("/usage", UsageRoutes())
     .route("/tui", TuiRoutes())
@@ -182,7 +190,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
             description: "List of commands",
             content: {
               "application/json": {
-                schema: resolver(Command.Info.array()),
+                schema: resolver(Command.PublicInfo.array()),
               },
             },
           },
@@ -191,7 +199,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
       async (c) =>
         jsonRequest("InstanceRoutes.command.list", c, function* () {
           const svc = yield* Command.Service
-          return yield* svc.list()
+          return Command.publicList(yield* svc.list())
         }),
     )
     .get(

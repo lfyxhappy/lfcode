@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
-import { existsSync, rmSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { execFile, spawn } from "node:child_process"
 import { createServer } from "node:net"
 import { homedir } from "node:os"
@@ -15,10 +15,12 @@ import type { Server } from "virtual:lfcode-server"
 import type {
   DetachedSidePanelEvent,
   DetachedSidePanelRecord,
+  BrowserStateSync,
   InitStep,
   ServerReadyData,
   SqliteMigrationProgress,
   WslConfig,
+  WindowVisibility,
 } from "../preload/types"
 import { checkAppExists, resolveAppPath, wslPath } from "./apps"
 import { getBootstrapState } from "./bootstrap"
@@ -30,12 +32,11 @@ import {
   sendMenuCommand,
   sendSqliteMigrationProgress,
 } from "./ipc"
-import { initLogging } from "./logging"
+import { initLogging, startLogCleanup } from "./logging"
 import { parseMarkdown } from "./markdown"
 import { createMenu } from "./menu"
 import { migrate } from "./migrate"
 import { getDefaultServerUrl, getWslConfig, setDefaultServerUrl, setWslConfig, spawnLocalServer } from "./server"
-import { BaiduPanUpdateError, BaiduPanUpdater } from "./updater-baidu"
 import {
   createLoadingWindow,
   createDetachedSidePanelWindow,
@@ -73,10 +74,10 @@ import {
   trackBrowserGuest,
   untrackBrowserGuest,
 } from "./browser-runtime"
-import { registerBrowserAutomationBridge } from "./browser-automation"
 import { createAutomationEventBuffer } from "./automation-events"
-import { startAutomationServer } from "./automation-server"
+import type { startAutomationServer } from "./automation-server"
 import { removeAutomationDiscovery, writeAutomationDiscovery } from "../automation-discovery"
+import type { LanAccessManager } from "./mobile-access"
 
 contextMenu({ showSaveImageAs: true, showLookUpSelection: false, showSearchWithGoogle: false })
 
@@ -86,8 +87,10 @@ const bootstrapState = getBootstrapState()
 let initStep: InitStep = { phase: "server_waiting" }
 let mainWindow: BrowserWindow | null = null
 let server: Server.Listener | null = null
+let localServerAuth: ServerReadyData | undefined
 let recoveryPromptOpen = false
 let shuttingDown = false
+let quitCleanupInProgress = false
 let updateReady = false
 let updateState: UpdateReadyState | undefined
 let updateCheck: Promise<UpdateCheckResult> | undefined
@@ -120,13 +123,29 @@ const DISK_CACHE_LIMIT_BYTES = 128 * 1024 * 1024
 const MEDIA_CACHE_LIMIT_BYTES = 32 * 1024 * 1024
 const LOADING_WINDOW_COMPLETE_TIMEOUT_MS = 4000
 const CLOSED_PIPE_WARN_THROTTLE_MS = 60 * 1000
+const LAN_NETWORK_CHECK_MS = 15 * 1000
+const TEMPORARY_SESSION_CLEANUP_TIMEOUT_MS = 1500
 let lastClosedPipeWarningAt = 0
 let suppressedClosedPipeWarnings = 0
 const execFileAsync = promisify(execFile)
 const automationArgs = parseAutomationArgs(process.argv)
 const automationEvents = createAutomationEventBuffer(400)
 let automationServer: Awaited<ReturnType<typeof startAutomationServer>> | undefined
+let automationServerStarting: Promise<void> | undefined
 let automationDiscoveryRemoved = false
+let lanAccess: LanAccessManager | undefined
+let lanAccessLoading: Promise<LanAccessManager> | undefined
+let lanAccessStatus: {
+  enabled: boolean
+  hostID?: string
+  port?: number
+  spkiSha256?: string
+  endpoints?: string[]
+  certificateStale?: boolean
+  pendingEndpoints?: string[]
+  certificateUpdated?: { at: number; reason: "network_changed" | "manual_reset" }
+} = { enabled: false }
+let lanAccessNetworkMonitor: ReturnType<typeof setInterval> | undefined
 
 logger.log("app starting", {
   bootstrap: bootstrapState,
@@ -142,7 +161,6 @@ if (!automationArgs.enabled) {
 }
 
 migrate()
-registerBrowserAutomationBridge()
 setupApp()
 
 async function installCli() {
@@ -171,8 +189,6 @@ function setupApp() {
   app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_LIMIT_BYTES))
   app.commandLine.appendSwitch("media-cache-size", String(MEDIA_CACHE_LIMIT_BYTES))
   setRelaunchHandler(relaunchApp)
-  purgeTransientSessionCaches()
-
   if (process.env.LFCODE_DISABLE_SINGLE_INSTANCE_LOCK !== "1" && !app.requestSingleInstanceLock()) {
     app.quit()
     return
@@ -193,12 +209,20 @@ function setupApp() {
     emitDeepLinks([url])
   })
 
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    if (quitCleanupInProgress) return
+    event.preventDefault()
+    quitCleanupInProgress = true
     shuttingDown = true
     logger.log("app before quit", captureProcessSnapshot({ note: "before-quit" }))
     clearAppSessionCacheGuard()
     closeAutomationServer()
-    killSidecar()
+    stopLanAccessNetworkMonitor()
+    void lanAccess?.stop()
+    void cleanupTemporarySessions().finally(() => {
+      killSidecar()
+      app.quit()
+    })
   })
 
   app.on("will-quit", () => {
@@ -206,6 +230,8 @@ function setupApp() {
     logger.log("app will quit", captureProcessSnapshot({ note: "will-quit" }))
     clearAppSessionCacheGuard()
     closeAutomationServer()
+    stopLanAccessNetworkMonitor()
+    void lanAccess?.stop()
     killSidecar()
   })
 
@@ -248,30 +274,8 @@ function setupApp() {
       app.setAsDefaultProtocolClient("lfcode")
       registerRendererProtocol()
       setDockIcon()
-      ensurePortableWindowsShortcuts()
       setupAutoUpdater()
-      startAppSessionCacheGuard()
       await initialize()
-      automationServer = await startAutomationServer({
-        enabled: automationArgs.enabled,
-        host: "127.0.0.1",
-        port: automationArgs.port,
-        token: automationArgs.token,
-        logger,
-        events: automationEvents,
-      })
-      if (automationServer) {
-        automationDiscoveryRemoved = false
-        await writeAutomationDiscovery({
-          host: automationServer.host,
-          pid: process.pid,
-          port: automationServer.port,
-          startedAt: Date.now(),
-          token: automationServer.token,
-          userData: app.getPath("userData"),
-          version: app.getVersion(),
-        })
-      }
     })
     .catch((error) => {
       handleFatalAppError("whenReady", error)
@@ -417,6 +421,114 @@ function setInitStep(step: InitStep) {
   initEmitter.emit("step", step)
 }
 
+function startDesktopAutomationServer() {
+  if (!automationArgs.enabled || shuttingDown) return Promise.resolve()
+  if (automationServer) return Promise.resolve()
+  if (automationServerStarting) return automationServerStarting
+
+  automationServerStarting = Promise.all([import("./automation-server"), import("./browser-automation")])
+    .then(async ([{ startAutomationServer }, { registerBrowserAutomationBridge }]) => {
+      if (shuttingDown) return
+      registerBrowserAutomationBridge()
+      const started = await startAutomationServer({
+        enabled: automationArgs.enabled,
+        host: "127.0.0.1",
+        port: automationArgs.port,
+        token: automationArgs.token,
+        version: app.getVersion(),
+        logger,
+        events: automationEvents,
+      })
+      if (!started) return
+      if (shuttingDown) {
+        started.close()
+        return
+      }
+      automationServer = started
+      automationDiscoveryRemoved = false
+      await writeAutomationDiscovery({
+        host: automationServer.host,
+        pid: process.pid,
+        port: automationServer.port,
+        startedAt: automationServer.startedAt,
+        token: automationServer.token,
+        userData: app.getPath("userData"),
+        version: automationServer.version,
+        protocolVersion: automationServer.protocolVersion,
+        instanceID: automationServer.instanceID,
+      })
+    })
+    .catch((error) => {
+      logger.error("desktop automation server startup failed", error)
+    })
+    .finally(() => {
+      automationServerStarting = undefined
+    })
+  return automationServerStarting
+}
+
+async function startLanAccessOnStartup(attempt = 0): Promise<void> {
+  try {
+    const manager = await loadLanAccessManager()
+    if (!manager.enabled()) return
+    await refreshLanAccessStatus()
+    startLanAccessNetworkMonitor()
+  } catch (error) {
+    logger.error("LAN access startup failed", error)
+    if (!isLanPortRetryable(error) || attempt >= 3) return
+    await delay(500 * (attempt + 1))
+    await startLanAccessOnStartup(attempt + 1)
+  }
+}
+
+async function refreshLanAccessStatus() {
+  const manager = await loadLanAccessManager()
+  if (!manager.enabled()) {
+    lanAccessStatus = { enabled: false }
+    return lanAccessStatus
+  }
+  const started = await manager.start({})
+  lanAccessStatus = { enabled: true, ...started }
+  if (started.certificateStale) logger.warn("LAN access certificate needs a network update", { pendingEndpoints: started.pendingEndpoints })
+  return lanAccessStatus
+}
+
+function startLanAccessNetworkMonitor() {
+  if (lanAccessNetworkMonitor) return
+  lanAccessNetworkMonitor = setInterval(() => {
+    if (!lanAccess?.enabled()) return
+    void refreshLanAccessStatus().catch((error) => logger.error("LAN access network check failed", error))
+  }, LAN_NETWORK_CHECK_MS)
+  lanAccessNetworkMonitor.unref?.()
+}
+
+function stopLanAccessNetworkMonitor() {
+  if (!lanAccessNetworkMonitor) return
+  clearInterval(lanAccessNetworkMonitor)
+  lanAccessNetworkMonitor = undefined
+}
+
+function isLanPortRetryable(error: unknown) {
+  return error instanceof Error && error.message.includes("EADDRINUSE")
+}
+
+function loadLanAccessManager() {
+  if (lanAccess) return Promise.resolve(lanAccess)
+  if (lanAccessLoading) return lanAccessLoading
+
+  lanAccessLoading = import("./mobile-access")
+    .then(({ createLanAccessManager }) => createLanAccessManager())
+    .then((manager) => {
+      lanAccess = manager
+      return manager
+    })
+    .catch((error: unknown) => {
+      lanAccessLoading = undefined
+      throw error
+    })
+  return lanAccessLoading
+}
+
 async function initialize() {
   const needsMigration = !sqliteFileExists()
   const sqliteDone = needsMigration ? defer<void>() : undefined
@@ -456,13 +568,14 @@ async function initialize() {
     logger.log("spawning sidecar", { url })
     const { listener, health } = await spawnLocalServer(hostname, port, password)
     server = listener
-    serverReady.resolve({
+    localServerAuth = {
       url,
       username: "lfcode",
       password,
-    })
+    }
+    serverReady.resolve(localServerAuth)
 
-    await Promise.race([
+    void Promise.race([
       health.wait,
       delay(30_000).then(() => {
         throw new Error("Sidecar health check timed out")
@@ -471,7 +584,7 @@ async function initialize() {
       logger.error("sidecar health check failed", error)
     })
 
-    logger.log("loading task finished")
+    logger.log("sidecar listener is ready")
   })()
 
   if (needsMigration) {
@@ -502,6 +615,13 @@ async function initialize() {
     type: "window.main-created",
     windowID: mainWindow.id,
     data: { url: safe(() => mainWindow?.webContents.getURL()) },
+  })
+  mainWindow.once("ready-to-show", () => {
+    startAppSessionCacheGuard()
+    startLogCleanup()
+    ensurePortableWindowsShortcuts()
+    void startDesktopAutomationServer()
+    void startLanAccessOnStartup()
   })
   wireMenu()
   overlay?.close()
@@ -543,6 +663,43 @@ registerIpcHandlers({
   setWslConfig: (config: WslConfig) => setWslConfig(config),
   getDisplayBackend: async () => null,
   setDisplayBackend: async () => undefined,
+  getMobileAccessStatus: () => refreshLanAccessStatus(),
+  enableMobileAccess: async () => {
+    const manager = await loadLanAccessManager()
+    await manager.setEnabled(true)
+    const status = await refreshLanAccessStatus()
+    startLanAccessNetworkMonitor()
+    return status
+  },
+  disableMobileAccess: async () => {
+    const manager = await loadLanAccessManager()
+    await manager.setEnabled(false)
+    await manager.stop()
+    stopLanAccessNetworkMonitor()
+    lanAccessStatus = { enabled: false }
+    return lanAccessStatus
+  },
+  applyMobileAccessNetworkChange: async () => {
+    const manager = await loadLanAccessManager()
+    const started = await manager.applyNetworkChange()
+    lanAccessStatus = { enabled: manager.enabled(), ...started }
+    startLanAccessNetworkMonitor()
+    return lanAccessStatus
+  },
+  revokeMobileDevice: async (deviceID) => {
+    if (!lanAccess) return
+    await lanAccess.revoke(deviceID)
+  },
+  listMobileDevices: async () => (lanAccess ? await lanAccess.listDevices() : []),
+  createLanBrowserPairing: async () => {
+    const manager = await loadLanAccessManager()
+    return manager.createBrowserPairing()
+  },
+  resetMobileAccessCertificate: async () => {
+    const manager = await loadLanAccessManager()
+    await manager.resetCertificate()
+    lanAccessStatus = { enabled: manager.enabled(), certificateUpdated: { at: Date.now(), reason: "manual_reset" } }
+  },
   parseMarkdown: async (markdown) => parseMarkdown(markdown),
   checkAppExists: async (appName) => checkAppExists(appName),
   wslPath: async (path, mode) => wslPath(path, mode),
@@ -555,6 +712,10 @@ registerIpcHandlers({
   checkUpdate: async () => checkUpdate(),
   installUpdate: async () => installUpdate(),
   setBackgroundColor: (color) => setBackgroundColor(color),
+  getWindowVisibility: (windowID): WindowVisibility => {
+    const win = BrowserWindow.fromId(windowID)
+    return !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()
+  },
   automationEvent: async (payload) => {
     automationEvents.push({
       scope: "renderer",
@@ -570,6 +731,7 @@ registerIpcHandlers({
       route: input.route,
       title: input.title,
       kind: input.kind,
+      background: input.background,
     })
     detachedSidePanels.set(input.detachedWindowID, {
       detachedWindowID: input.detachedWindowID,
@@ -742,12 +904,56 @@ registerIpcHandlers({
       sessionID: target.sessionID,
     })
   },
+  reportBrowserState: async (senderWindowID, input) => {
+    const recipients = new Set<BrowserWindow>()
+    for (const item of detachedSidePanels.values()) {
+      if (item.sessionKey !== input.sessionKey) continue
+      const source = BrowserWindow.fromId(item.sourceWindowID)
+      if (!source || source.isDestroyed() || source.id === senderWindowID) continue
+      recipients.add(source)
+    }
+    for (const win of recipients) win.webContents.send("browser-state", input)
+  },
 })
+
+let temporarySessionCleanup: Promise<void> | undefined
+
+function cleanupTemporarySessions() {
+  if (temporarySessionCleanup) return temporarySessionCleanup
+  const auth = localServerAuth
+  if (!auth || !server) return Promise.resolve()
+
+  temporarySessionCleanup = (async () => {
+    const endpoint = new URL("/global/session/temporary/cleanup", auth.url)
+    const headers = new Headers({
+      authorization: `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`,
+    })
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(TEMPORARY_SESSION_CLEANUP_TIMEOUT_MS),
+    })
+    if (!response.ok) throw new Error(`temporary session cleanup returned ${response.status}`)
+    const result = (await response.json()) as { removed?: unknown }
+    logger.log("temporary sessions cleaned", {
+      removed: typeof result.removed === "number" ? result.removed : undefined,
+    })
+  })()
+    .catch((error) => {
+      logger.warn("temporary session cleanup failed", { error: formatError(error) })
+    })
+    .finally(() => {
+      temporarySessionCleanup = undefined
+    })
+
+  return temporarySessionCleanup
+}
 
 function killSidecar() {
   if (!server) return
   server.stop()
   server = null
+  localServerAuth = undefined
 }
 
 function clearAppSessionCacheGuard() {
@@ -796,9 +1002,11 @@ function relaunchApp() {
   shuttingDown = true
   logger.log("app relaunch requested", captureProcessSnapshot({ note: "relaunch" }))
   closeAutomationServer()
-  killSidecar()
-  app.relaunch()
-  app.exit(0)
+  void cleanupTemporarySessions().finally(() => {
+    killSidecar()
+    app.relaunch()
+    app.exit(0)
+  })
 }
 
 function exitApp(code: number) {
@@ -809,8 +1017,10 @@ function exitApp(code: number) {
     snapshot: captureProcessSnapshot({ note: "exit" }),
   })
   closeAutomationServer()
-  killSidecar()
-  app.exit(code)
+  void cleanupTemporarySessions().finally(() => {
+    killSidecar()
+    app.exit(code)
+  })
 }
 
 function closeAutomationServer() {
@@ -1090,40 +1300,6 @@ function trimSessionCache(input: {
     })
 }
 
-function purgeTransientSessionCaches() {
-  const userData = app.getPath("userData")
-  const targets = [
-    join(userData, "Cache"),
-    join(userData, "Code Cache"),
-    join(userData, "GPUCache"),
-    join(userData, "DawnGraphiteCache"),
-    join(userData, "DawnWebGPUCache"),
-    join(userData, "Partitions", "lfcode-browser", "Cache"),
-    join(userData, "Partitions", "lfcode-browser", "Code Cache"),
-    join(userData, "Partitions", "lfcode-browser", "GPUCache"),
-    join(userData, "Partitions", "lfcode-browser", "DawnGraphiteCache"),
-    join(userData, "Partitions", "lfcode-browser", "DawnWebGPUCache"),
-  ]
-  let removed = 0
-  for (const target of targets) {
-    if (!existsSync(target)) continue
-    try {
-      rmSync(target, { force: true, recursive: true, maxRetries: 2 })
-      removed += 1
-    } catch (error) {
-      logger.warn("failed to purge transient session cache", {
-        target,
-        error: formatError(error),
-      })
-    }
-  }
-  if (removed === 0) return
-  logger.log("purged transient electron caches before ready", {
-    removed,
-    userData,
-  })
-}
-
 function setupAutoUpdater() {
   if (!UPDATER_ENABLED) return
   autoUpdater.logger = logger
@@ -1189,11 +1365,13 @@ async function checkUpdate(): Promise<UpdateCheckResult> {
 async function installUpdate() {
   if (!updateReady) return
   if (updateState?.source === "github") {
+    await cleanupTemporarySessions()
     killSidecar()
     autoUpdater.quitAndInstall()
     return
   }
   if (updateState?.source === "baidu") {
+    await cleanupTemporarySessions()
     killSidecar()
     const child = spawn("cmd.exe", ["/c", "start", "", updateState.installerPath], {
       detached: true,
@@ -1298,8 +1476,14 @@ async function checkGithubUpdate() {
 }
 
 async function checkBaiduPanUpdate() {
+  const module = await import("./updater-baidu").catch((error) => {
+    logger.error("baidu fallback module failed to load", error)
+    return undefined
+  })
+  if (!module) return { updateAvailable: false, failed: true } satisfies UpdateCheckResult
+
   try {
-    const updater = new BaiduPanUpdater({
+    const updater = new module.BaiduPanUpdater({
       cacheDir: process.env.LFCODE_CACHE_DIR ?? join(app.getPath("temp"), "lfcode-cache"),
       currentVersion: app.getVersion(),
     })
@@ -1309,7 +1493,7 @@ async function checkBaiduPanUpdate() {
     updateState = { source: "baidu", version: result.version, installerPath: result.installerPath }
     return { updateAvailable: true, version: result.version, source: "baidu" as const } satisfies UpdateCheckResult
   } catch (error) {
-    if (error instanceof BaiduPanUpdateError) {
+    if (error instanceof module.BaiduPanUpdateError) {
       logger.warn?.("baidu fallback check failed", { message: error.message })
     } else {
       logger.error("baidu fallback check failed", error)

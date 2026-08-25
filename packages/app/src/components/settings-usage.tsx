@@ -1,28 +1,33 @@
 import { createInfiniteQuery, createQuery } from "@tanstack/solid-query"
 import { Button } from "@lfcode-ai/ui/button"
-import { Collapsible } from "@lfcode-ai/ui/collapsible"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { Select } from "@lfcode-ai/ui/select"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { TextField } from "@lfcode-ai/ui/text-field"
-import { type Component, For, Match, Show, Switch, createMemo, createSignal } from "solid-js"
+import { type Component, type JSX, For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { SettingsList } from "./settings-list"
 import {
   buildUsageFilters,
+  buildUsageHeatmap,
   buildUsageOptions,
+  formatUsageDuration,
   hasMoreUsageLogs,
   selectedUsageOption,
+  usageHeatmapIntensity,
   USAGE_ALL,
   type UsageAgentKind,
   type UsageData,
+  type UsageHeatmapCell,
+  type UsageHeatmapGranularity,
   type UsageLog,
   type UsageRange,
   type UsageStatus,
 } from "./settings-usage-helpers"
 
 const PAGE_SIZE = 50
+const USAGE_CACHE_TIME = 5 * 60 * 1000
 
 const ranges: Array<{ value: UsageRange; label: string }> = [
   { value: "today", label: "settings.usage.range.today" },
@@ -64,8 +69,7 @@ function currency(value: number, locale: string) {
 }
 
 function percent(value: number | null, locale: string) {
-  if (value == null) return "N/A"
-  return `${decimal(value, locale)}%`
+  return `${decimal(value ?? 0, locale)}%`
 }
 
 function dateTime(value: number, locale: string) {
@@ -77,26 +81,14 @@ function dateTime(value: number, locale: string) {
   }).format(value)
 }
 
-function nullableMetric(value: number | null, locale: string) {
-  if (value == null) return "N/A"
-  return `${decimal(value, locale)} ms`
-}
-
 function statusTone(status: UsageLog["status"]) {
-  if (status === "completed") return "bg-emerald-500/10 text-emerald-600"
-  if (status === "error") return "bg-rose-500/10 text-rose-600"
-  return "bg-amber-500/10 text-amber-600"
+  if (status === "completed") return "bg-status-success/10 text-status-success"
+  if (status === "error") return "bg-status-error/10 text-status-error"
+  return "bg-status-warning/10 text-status-warning"
 }
-
-const EmptyState: Component<{ title: string; description: string }> = (props) => (
-  <div class="rounded-[20px] border border-dashed border-border-weak-base px-4 py-10 text-center">
-    <div class="text-14-medium text-text-strong">{props.title}</div>
-    <div class="pt-1 text-14-regular text-text-weak">{props.description}</div>
-  </div>
-)
 
 const MiniMetric: Component<{ title: string; value: string; hint?: string }> = (props) => (
-  <div class="rounded-[20px] border border-border-weak-base bg-surface-base/70 px-4 py-4">
+  <div class="px-4 py-3">
     <div class="text-12-regular text-text-weak">{props.title}</div>
     <div class="pt-2 text-18-medium text-text-strong">{props.value}</div>
     <Show when={props.hint}>
@@ -105,7 +97,14 @@ const MiniMetric: Component<{ title: string; value: string; hint?: string }> = (
   </div>
 )
 
-const SectionHeader: Component<{ title: string; description?: string; trailing?: string }> = (props) => (
+const HeatmapMetric: Component<{ title: string; value: string }> = (props) => (
+  <div class="min-h-0 overflow-hidden bg-surface-raised-base px-5 py-5">
+    <div class="text-[clamp(1.75rem,3vw,2.35rem)] font-medium leading-none text-text-strong">{props.value}</div>
+    <div class="pt-2 text-14-regular text-text-weak">{props.title}</div>
+  </div>
+)
+
+const SectionHeader: Component<{ title: string; description?: string; trailing?: string; controls?: JSX.Element }> = (props) => (
   <div class="flex flex-wrap items-start justify-between gap-3 pb-4">
     <div>
       <div class="text-14-medium text-text-strong">{props.title}</div>
@@ -116,11 +115,12 @@ const SectionHeader: Component<{ title: string; description?: string; trailing?:
     <Show when={props.trailing}>
       {(trailing) => <div class="text-12-regular text-text-weak">{trailing()}</div>}
     </Show>
+    <Show when={props.controls}>{props.controls}</Show>
   </div>
 )
 
 const StatRow: Component<{ title: string; subtitle?: string; amount: string; meta: string; share?: number }> = (props) => (
-  <div class="rounded-[18px] border border-border-weak-base bg-surface-base/60 px-4 py-3">
+  <div class="px-4 py-3">
     <div class="flex items-center justify-between gap-4">
       <div class="min-w-0">
         <div class="truncate text-14-medium text-text-strong">{props.title}</div>
@@ -143,84 +143,149 @@ const StatRow: Component<{ title: string; subtitle?: string; amount: string; met
   </div>
 )
 
-const TrendChart: Component<{
-  points: UsageData["trend"]
+const UsageHeatmap: Component<{
+  points: UsageData["heatmap"]
+  summary: UsageData["heatmapSummary"]
+  granularity: UsageHeatmapGranularity
   locale: string
-  labels: Record<"input" | "output" | "cacheCreate" | "cacheHit" | "cost", string>
+  labels: {
+    aria: string
+    noData: string
+    low: string
+    high: string
+    tokens: string
+    total: string
+    peak: string
+    activeDays: string
+  }
 }> = (props) => {
-  const width = 960
-  const height = 280
-  const padding = { top: 18, right: 18, bottom: 34, left: 18 }
-  const baseline = height - padding.bottom
+  let heatmapArea: HTMLDivElement | undefined
+  const [heatmapHeight, setHeatmapHeight] = createSignal<number>()
+  const heatmap = createMemo(() => buildUsageHeatmap(props.points, props.granularity))
+  const month = createMemo(() => {
+    const value = heatmap()
+    return value.kind === "month" ? value : undefined
+  })
+  const week = createMemo(() => {
+    const value = heatmap()
+    return value.kind === "week" ? value : undefined
+  })
+  const day = createMemo(() => {
+    const value = heatmap()
+    return value.kind === "day" ? value : undefined
+  })
+  const max = createMemo(() => Math.max(0, ...props.points.map((point) => point.totalTokens)))
+  const dateLabel = (time: number) =>
+    new Intl.DateTimeFormat(props.locale, { month: "numeric", day: "numeric" }).format(time)
+  const monthLabel = (time: number) => new Intl.DateTimeFormat(props.locale, { month: "numeric" }).format(time)
+  const hourLabel = (hour: number) => `${String(hour).padStart(2, "0")}:00`
+  const hourRange = (hour: number) => `${String(hour).padStart(2, "0")}-${String(hour + 2).padStart(2, "0")}`
+  const weekLabel = (time: number) => {
+    const date = new Date(time)
+    const firstDay = new Date(date.getFullYear(), 0, 1)
+    return `第${Math.ceil(((date.getTime() - firstDay.getTime()) / 86_400_000 + firstDay.getDay() + 1) / 7)}周`
+  }
+  const cell = (point: UsageHeatmapCell | undefined, label: string, className = "size-5") => (
+    <button
+      type="button"
+      class={`${className} rounded-[3px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#60a5fa]`}
+      style={{ background: point ? `rgb(37 99 235 / ${usageHeatmapIntensity(point.totalTokens, max())})` : "var(--surface-raised-base)" }}
+      aria-label={point ? `${label}: ${point.totalTokens} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
+      title={point ? `${label}: ${point.totalTokens} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
+    />
+  )
 
-  const series = createMemo(() => {
-    const keys = [
-      { key: "input", color: "#2563eb", fill: "rgba(37,99,235,0.16)", label: props.labels.input },
-      { key: "output", color: "#16a34a", fill: "rgba(22,163,74,0.12)", label: props.labels.output },
-      { key: "cacheCreate", color: "#ea580c", fill: "rgba(234,88,12,0.1)", label: props.labels.cacheCreate },
-      { key: "cacheHit", color: "#7c3aed", fill: "rgba(124,58,237,0.1)", label: props.labels.cacheHit },
-      { key: "cost", color: "#e11d48", fill: "rgba(225,29,72,0.1)", label: props.labels.cost },
-    ] as const
-    const max = Math.max(1, ...props.points.flatMap((point) => keys.map((item) => Number(point[item.key]))))
-    return keys.map((item) => {
-      const coords = props.points.map((point, index) => {
-        const x = padding.left + ((width - padding.left - padding.right) * index) / Math.max(1, props.points.length - 1)
-        const y = baseline - ((height - padding.top - padding.bottom) * Number(point[item.key])) / max
-        return { x, y }
-      })
-      const path = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`).join(" ")
-      const area =
-        coords.length === 0
-          ? ""
-          : `${path} L${coords[coords.length - 1]!.x},${baseline} L${coords[0]!.x},${baseline} Z`
-      return {
-        ...item,
-        path,
-        area,
-      }
-    })
+  createEffect(() => {
+    if (!heatmapArea) return
+    const observer = new ResizeObserver(() => setHeatmapHeight(Math.ceil(heatmapArea?.getBoundingClientRect().height ?? 0)))
+    observer.observe(heatmapArea)
+    setHeatmapHeight(Math.ceil(heatmapArea.getBoundingClientRect().height))
+    onCleanup(() => observer.disconnect())
   })
 
   return (
-    <div class="rounded-[20px] border border-border-weak-base bg-[radial-gradient(circle_at_top,_rgba(37,99,235,0.08),_transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.02),transparent)] px-4 py-4">
-      <svg viewBox={`0 0 ${width} ${height}`} class="h-[280px] w-full">
-        <For each={[0, 1, 2, 3]}>
-          {(step) => {
-            const y = padding.top + ((height - padding.top - padding.bottom) * step) / 3
-            return <line x1={padding.left} y1={y} x2={width - padding.right} y2={y} stroke="rgba(148,163,184,0.18)" />
-          }}
-        </For>
-        <line x1={padding.left} y1={baseline} x2={width - padding.right} y2={baseline} stroke="rgba(148,163,184,0.28)" />
-        <Show when={series()[0]?.area}>
-          {(area) => <path d={area()} fill={series()[0]!.fill} />}
-        </Show>
-        <For each={series()}>
-          {(item, index) => (
-            <path
-              d={item.path}
-              fill="none"
-              stroke={item.color}
-              stroke-width={index() === 0 ? "3.25" : "2.25"}
-              stroke-linecap="round"
-              stroke-dasharray={index() >= 2 ? "6 6" : undefined}
-            />
-          )}
-        </For>
-      </svg>
-      <div class="flex flex-wrap gap-x-5 gap-y-2 pt-3 text-12-regular text-text-weak">
-        <For each={series()}>
-          {(item) => (
-            <span class="inline-flex items-center gap-2">
-              <span class="size-2 rounded-full" style={{ background: item.color }} />
-              {item.label}
-            </span>
-          )}
-        </For>
+    <div class="grid items-stretch gap-6 xl:grid-cols-[minmax(0,1fr)_250px]">
+      <div class="min-w-0 py-1">
+        <div ref={(element) => (heatmapArea = element)}>
+          <Switch>
+          <Match when={month()}>
+            <div class="grid grid-cols-[24px_minmax(0,1fr)] gap-x-2">
+              <div />
+              <div class="grid h-4 gap-1 text-[10px] text-text-weak" style={{ "grid-template-columns": `repeat(${month()!.columns.length}, minmax(0, 1fr))` }}>
+                <For each={month()!.columns}>
+                  {(column, index) => {
+                    const monthStart = column.cells.find((item) => new Date(item.day).getDate() === 1)
+                    return <span class="truncate">{monthStart ? monthLabel(monthStart.day) : index() === 0 ? monthLabel(column.cells[3]?.day ?? column.cells[0].day) : ""}</span>
+                  }}
+                </For>
+              </div>
+              <div class="grid grid-rows-7 gap-1 text-right text-[10px] leading-none text-text-weak">
+                <For each={month()!.columns[0]?.cells ?? []}>
+                  {(_, index) => <span class="flex items-center justify-end">{["一", "二", "三", "四", "五", "六", "七"][index()]}</span>}
+                </For>
+              </div>
+              <div class="grid w-full gap-1" role="grid" aria-label={props.labels.aria} style={{ "grid-template-columns": `repeat(${month()!.columns.length}, minmax(0, 1fr))` }}>
+                <For each={month()!.columns}>
+                  {(column) => (
+                    <div class="grid h-full grid-rows-7 gap-1">
+                      <For each={column.cells}>{(item) => cell(item.cell, dateLabel(item.day), "aspect-square w-full")}</For>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+          </Match>
+          <Match when={week()}>
+            <div class="grid grid-cols-[24px_minmax(0,1fr)] gap-x-2">
+              <div />
+              <div class="grid h-4 grid-cols-2 gap-1 text-[10px] text-text-weak">
+                <For each={[0, 7]}>{(index) => <span class="truncate">{weekLabel(week()!.columns[index]?.day ?? week()!.columns[0].day)}</span>}</For>
+              </div>
+              <div class="grid grid-rows-8 gap-1 text-right text-[10px] leading-none text-text-weak">
+                <For each={Array.from({ length: 8 })}>{(_, slot) => <span class="flex items-center justify-end">{slot() % 2 === 0 ? hourRange(slot() * 3) : ""}</span>}</For>
+              </div>
+              <div class="grid w-full gap-1" role="grid" aria-label={props.labels.aria} style={{ "grid-template-columns": `repeat(${week()!.columns.length}, minmax(0, 1fr))` }}>
+                <For each={week()!.columns}>
+                  {(column) => (
+                    <div class="grid h-full grid-rows-8 gap-1">
+                      <For each={column.cells}>{(point, slot) => cell(point, dateLabel(column.day) + " " + hourLabel(slot() * 3), "aspect-square w-full")}</For>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+          </Match>
+          <Match when={day()}>
+            <div>
+              <div class="grid h-4 gap-1 text-[10px] text-text-weak" style={{ "grid-template-columns": `repeat(${day()!.columns.length}, minmax(0, 1fr))` }}>
+                <For each={day()!.columns}>{(column) => <span class="truncate">{dateLabel(column.day)}</span>}</For>
+              </div>
+              <div class="grid w-full gap-1" role="grid" aria-label={props.labels.aria} style={{ "grid-template-columns": `repeat(${day()!.columns.length}, minmax(0, 1fr))` }}>
+                <For each={day()!.columns}>
+                  {(column) => (
+                    <div class="grid grid-cols-3 grid-rows-8 gap-1">
+                      <For each={column.cells}>{(point, hour) => cell(point, dateLabel(column.day) + " " + hourLabel(hour()), "aspect-square w-full")}</For>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </div>
+          </Match>
+          </Switch>
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-3 text-12-regular text-text-weak">
+          <span>{props.labels.low}</span>
+          <For each={[0.16, 0.32, 0.5, 0.72, 1]}>{(opacity) => <span class="size-3 rounded-sm" style={{ background: `rgb(37 99 235 / ${opacity})` }} />}</For>
+          <span>{props.labels.high}</span>
+        </div>
       </div>
-      <div class="pt-2 text-12-regular text-text-weak">
-        <Show when={props.points.length > 0}>
-          {dateTime(props.points[0]!.time, props.locale)} - {dateTime(props.points[props.points.length - 1]!.time, props.locale)}
-        </Show>
+      <div
+        class="grid min-h-0 grid-rows-3 gap-3"
+        style={{ height: heatmapHeight() ? `${heatmapHeight()}px` : undefined }}
+      >
+        <HeatmapMetric title={props.labels.total} value={compactNumber(props.summary.totalTokens, props.locale)} />
+        <HeatmapMetric title={props.labels.peak} value={compactNumber(props.summary.peakDailyTokens, props.locale)} />
+        <HeatmapMetric title={props.labels.activeDays} value={decimal(props.summary.activeDays, props.locale, 0)} />
       </div>
     </div>
   )
@@ -229,23 +294,37 @@ const TrendChart: Component<{
 export const SettingsUsage: Component = () => {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
-  const [range, setRange] = createSignal<UsageRange>("all")
+  const [range, setRange] = createSignal<UsageRange>("today")
   const [provider, setProvider] = createSignal(USAGE_ALL)
   const [model, setModel] = createSignal(USAGE_ALL)
-  const [project, setProject] = createSignal(USAGE_ALL)
   const [session, setSession] = createSignal(USAGE_ALL)
   const [status, setStatus] = createSignal<UsageStatus | typeof USAGE_ALL>(USAGE_ALL)
   const [agentKind, setAgentKind] = createSignal<UsageAgentKind | typeof USAGE_ALL>(USAGE_ALL)
+  const [heatmapGranularity, setHeatmapGranularity] = createSignal<UsageHeatmapGranularity>("month")
   const [search, setSearch] = createSignal("")
   const [tab, setTab] = createSignal<(typeof detailTabs)[number]["value"]>("logs")
-  const [advancedOpen, setAdvancedOpen] = createSignal(false)
 
   const filters = createMemo(() =>
     buildUsageFilters({
       range: range(),
+      heatmapGranularity: "month",
       provider: provider(),
       model: model(),
-      project: project(),
+      project: USAGE_ALL,
+      session: session(),
+      status: status(),
+      agentKind: agentKind(),
+      search: search(),
+    }),
+  )
+
+  const heatmapFilters = createMemo(() =>
+    buildUsageFilters({
+      range: range(),
+      heatmapGranularity: heatmapGranularity(),
+      provider: provider(),
+      model: model(),
+      project: USAGE_ALL,
       session: session(),
       status: status(),
       agentKind: agentKind(),
@@ -259,9 +338,9 @@ export const SettingsUsage: Component = () => {
       "summary",
       globalSDK.url,
       range(),
+      "month",
       provider(),
       model(),
-      project(),
       session(),
       status(),
       agentKind(),
@@ -270,9 +349,15 @@ export const SettingsUsage: Component = () => {
     queryFn: () =>
       globalSDK.client.usage.get({
         ...filters(),
-        limit: 1,
+        limit: PAGE_SIZE,
       }),
+    staleTime: USAGE_CACHE_TIME,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   }))
+
+  const data = createMemo(() => usageQuery.data?.data)
 
   const logsQuery = createInfiniteQuery(() => ({
     queryKey: [
@@ -282,7 +367,6 @@ export const SettingsUsage: Component = () => {
       range(),
       provider(),
       model(),
-      project(),
       session(),
       status(),
       agentKind(),
@@ -292,25 +376,57 @@ export const SettingsUsage: Component = () => {
       globalSDK.client.usage.get({
         ...filters(),
         limit: PAGE_SIZE,
-        cursor: typeof pageParam === "number" ? pageParam : undefined,
+        cursor: typeof pageParam === "number" ? pageParam : data()?.nextCursor ?? undefined,
       }),
-    initialPageParam: undefined as number | undefined,
+    initialPageParam: null as number | null,
     getNextPageParam: (lastPage) => lastPage.data?.nextCursor ?? undefined,
+    enabled: false,
+    staleTime: USAGE_CACHE_TIME,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   }))
 
-  const data = createMemo(() => usageQuery.data?.data)
+  const heatmapQuery = createQuery(() => ({
+    queryKey: [
+      "settings-usage",
+      "heatmap",
+      globalSDK.url,
+      range(),
+      heatmapGranularity(),
+      provider(),
+      model(),
+      session(),
+      status(),
+      agentKind(),
+      search(),
+    ],
+    queryFn: () => globalSDK.client.usage.get({ ...heatmapFilters(), limit: 1 }),
+    enabled: () => heatmapGranularity() !== "month",
+    placeholderData: (previous) => previous,
+    staleTime: USAGE_CACHE_TIME,
+    gcTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  }))
+
+  const heatmapData = createMemo(() =>
+    heatmapGranularity() === "month" ? data() : heatmapQuery.data?.data ?? data(),
+  )
   const locale = createMemo(() => language.intl())
-  const logs = createMemo(() => logsQuery.data?.pages.flatMap((page) => page.data?.logs ?? []) ?? [])
-  const hasUsage = createMemo(() => (data()?.summary.requestCount ?? 0) > 0)
+  const logs = createMemo(() => [
+    ...(data()?.logs ?? []),
+    ...(logsQuery.data?.pages.flatMap((page) => page.data?.logs ?? []) ?? []),
+  ])
   const errorText = createMemo(() => {
-    const error = usageQuery.error ?? logsQuery.error
+    const error = usageQuery.error ?? heatmapQuery.error ?? logsQuery.error
     if (!error) return
     if (error instanceof Error) return error.message
     return String(error)
   })
   const activeFilterCount = createMemo(
     () =>
-      [provider(), model(), project(), session(), status(), agentKind()]
+      [provider(), model(), session(), status(), agentKind()]
         .filter((value) => value && value !== USAGE_ALL).length + (search().trim() ? 1 : 0),
   )
   const rangeOptions = createMemo(() => ranges.map((item) => ({ value: item.value, label: language.t(item.label as never) })))
@@ -324,12 +440,6 @@ export const SettingsUsage: Component = () => {
     buildUsageOptions(language.t("settings.usage.filter.allModels"), data()?.modelStats ?? [], (item) => ({
       value: item.model,
       label: item.model,
-    })),
-  )
-  const projectOptions = createMemo(() =>
-    buildUsageOptions(language.t("settings.usage.filter.allProjects"), data()?.projectStats ?? [], (item) => ({
-      value: item.projectID,
-      label: item.projectName,
     })),
   )
   const sessionOptions = createMemo(() =>
@@ -353,27 +463,34 @@ export const SettingsUsage: Component = () => {
   const selectedRange = createMemo(() => selectedUsageOption(rangeOptions(), range()))
   const selectedProvider = createMemo(() => selectedUsageOption(providerOptions(), provider()))
   const selectedModel = createMemo(() => selectedUsageOption(modelOptions(), model()))
-  const selectedProject = createMemo(() => selectedUsageOption(projectOptions(), project()))
   const selectedSession = createMemo(() => selectedUsageOption(sessionOptions(), session()))
   const selectedStatus = createMemo(() => selectedUsageOption(statusOptions(), status()))
   const selectedAgentKind = createMemo(() => selectedUsageOption(agentKindOptions(), agentKind()))
   const hasMoreLogs = createMemo(() => {
     const pages = logsQuery.data?.pages
     const lastPage = pages?.[pages.length - 1]
-    return hasMoreUsageLogs(lastPage?.data?.nextCursor)
+    return hasMoreUsageLogs(lastPage?.data?.nextCursor ?? data()?.nextCursor)
   })
-  const chartLabels = createMemo(() => ({
-    input: language.t("settings.usage.chart.input"),
-    output: language.t("settings.usage.chart.output"),
-    cacheCreate: language.t("settings.usage.chart.cacheCreate"),
-    cacheHit: language.t("settings.usage.chart.cacheHit"),
-    cost: language.t("settings.usage.chart.cost"),
+  const heatmapLabels = createMemo(() => ({
+    aria: language.t("settings.usage.heatmap.aria"),
+    noData: language.t("settings.usage.heatmap.noData"),
+    low: language.t("settings.usage.heatmap.low"),
+    high: language.t("settings.usage.heatmap.high"),
+    tokens: language.t("settings.usage.metric.totalTokens"),
+    total: language.t("settings.usage.heatmap.total"),
+    peak: language.t("settings.usage.heatmap.peak"),
+    activeDays: language.t("settings.usage.heatmap.activeDays"),
+    granularity: {
+      month: language.t("settings.usage.heatmap.month"),
+      week: language.t("settings.usage.heatmap.week"),
+      day: language.t("settings.usage.heatmap.day"),
+    },
   }))
 
   return (
     <div class="no-scrollbar flex h-full flex-col overflow-y-auto px-4 pb-10 sm:px-10 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
-        <div class="flex max-w-[1180px] items-end justify-between gap-4 pb-6 pt-6">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
+        <div class="flex w-full items-end justify-between gap-4 pb-6 pt-6">
           <div>
             <h2 class="text-16-medium text-text-strong">{language.t("settings.usage.title")}</h2>
             <p class="pt-1 text-14-regular text-text-weak">{language.t("settings.usage.description")}</p>
@@ -393,116 +510,108 @@ export const SettingsUsage: Component = () => {
         </div>
       </div>
 
-      <div class="max-w-[1180px] space-y-6">
+      <div class="w-full space-y-8 pt-6">
         <Show when={errorText()}>
           {(message) => (
-            <div class="rounded-[20px] border border-border-weak-base bg-surface-base px-4 py-4 text-14-regular text-status-warning">
+            <div class="rounded-[6px] border border-border-weak-base bg-surface-base px-4 py-4 text-14-regular text-status-warning">
               {message()}
             </div>
           )}
         </Show>
 
         <Show
-          when={!usageQuery.isLoading && !logsQuery.isLoading}
+          when={!usageQuery.isLoading}
           fallback={
             <SettingsList>
               <div class="py-10 text-center text-14-regular text-text-weak">{language.t("common.loading")}</div>
             </SettingsList>
           }
         >
-          <Show
-            when={hasUsage()}
-            fallback={<EmptyState title={language.t("settings.usage.empty.title")} description={language.t("settings.usage.empty.description")} />}
-          >
-            <div class="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
-              <SettingsList class="overflow-hidden border border-border-weak-base bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.12),_transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01))]">
-                <div class="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div class="text-12-medium uppercase tracking-[0.16em] text-text-weak">
-                      {language.t("settings.usage.metric.totalTokens")}
-                    </div>
-                    <div class="pt-3 text-[clamp(2rem,5vw,3.2rem)] font-medium leading-none text-text-strong">
-                      {compactNumber(data()!.summary.totalTokens, locale())}
-                    </div>
-                    <div class="pt-3 text-14-regular text-text-weak">
-                      {language.t("settings.usage.metric.totalCost")} · {currency(data()!.summary.totalCost, locale())}
-                    </div>
-                  </div>
-                  <div class="rounded-[18px] border border-white/10 bg-black/10 px-4 py-3 text-right backdrop-blur-sm">
-                    <div class="text-12-regular text-text-weak">{language.t("settings.usage.metric.requests")}</div>
-                    <div class="pt-1 text-20-medium text-text-strong">{decimal(data()!.summary.requestCount, locale(), 0)}</div>
-                    <div class="pt-1 text-12-regular text-text-weak">
-                      {language.t("settings.usage.metric.successRate")} · {percent(data()!.summary.successRate, locale())}
-                    </div>
-                  </div>
-                </div>
-                <div class="grid gap-3 pt-6 md:grid-cols-3">
+          <SettingsList class="border-y border-border-weak-base px-0 py-0">
+              <div class="grid divide-y divide-border-weak-base">
+                <div class="grid divide-y divide-border-weak-base sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
                   <MiniMetric
-                    title={language.t("settings.usage.metric.input")}
-                    value={compactNumber(data()!.summary.inputTokens, locale())}
+                    title={language.t("settings.usage.metric.totalTokens")}
+                    value={compactNumber(data()!.summary.totalTokens, locale())}
+                    hint={`${language.t("settings.usage.metric.input")} · ${compactNumber(data()!.summary.inputTokens, locale())}`}
+                  />
+                  <MiniMetric
+                    title={language.t("settings.usage.metric.totalCost")}
+                    value={currency(data()!.summary.totalCost, locale())}
                     hint={`${language.t("settings.usage.metric.output")} · ${compactNumber(data()!.summary.outputTokens, locale())}`}
                   />
                   <MiniMetric
-                    title={language.t("settings.usage.metric.cacheCreate")}
-                    value={compactNumber(data()!.summary.cacheCreateTokens, locale())}
-                    hint={`${language.t("settings.usage.metric.cacheHit")} · ${compactNumber(data()!.summary.cacheHitTokens, locale())}`}
+                    title={language.t("settings.usage.metric.requests")}
+                    value={decimal(data()!.summary.requestCount, locale(), 0)}
+                    hint={`${language.t("settings.usage.metric.successRate")} · ${percent(data()!.summary.successRate, locale())}`}
                   />
                   <MiniMetric
                     title={language.t("settings.usage.metric.cacheHitRatio")}
                     value={percent(data()!.summary.cacheHitRatio, locale())}
-                    hint={`${language.t("settings.usage.metric.totalCost")} · ${currency(data()!.summary.overheadCost, locale())}`}
+                    hint={`${language.t("settings.usage.metric.cacheHit")} · ${compactNumber(data()!.summary.cacheHitTokens, locale())}`}
                   />
                 </div>
-              </SettingsList>
-
-              <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-                <MiniMetric title={language.t("settings.usage.metric.totalCost")} value={currency(data()!.summary.totalCost, locale())} />
-                <MiniMetric title={language.t("settings.usage.metric.requests")} value={decimal(data()!.summary.requestCount, locale(), 0)} />
-                <MiniMetric title={language.t("settings.usage.metric.avgDuration")} value={nullableMetric(data()!.summary.avgDuration, locale())} />
-                <MiniMetric title={language.t("settings.usage.metric.avgTtft")} value={nullableMetric(data()!.summary.avgTtft, locale())} />
+                <div class="grid divide-y divide-border-weak-base sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                  <MiniMetric
+                    title={language.t("settings.usage.metric.cacheCreate")}
+                    value={compactNumber(data()!.summary.cacheCreateTokens, locale())}
+                    hint={`${language.t("settings.usage.metric.totalCost")} · ${currency(data()!.summary.overheadCost, locale())}`}
+                  />
+                  <MiniMetric title={language.t("settings.usage.metric.avgDuration")} value={formatUsageDuration(data()!.summary.avgDuration, locale())} />
+                  <MiniMetric title={language.t("settings.usage.metric.avgTtft")} value={formatUsageDuration(data()!.summary.avgTtft, locale())} />
+                </div>
               </div>
-            </div>
+          </SettingsList>
 
-            <SettingsList class="border border-border-weak-base bg-surface-base/70">
+            <SettingsList>
               <SectionHeader
-                title={language.t("settings.usage.section.trend")}
-                trailing={`${language.t("settings.usage.metric.cacheHitRatio")} · ${percent(data()!.summary.cacheHitRatio, locale())}`}
+                title={language.t("settings.usage.section.heatmap")}
+                description={language.t("settings.usage.heatmap.description")}
+                controls={
+                  <div
+                    class="flex items-center gap-1"
+                    role="group"
+                    aria-label={heatmapLabels().aria}
+                    data-ui-control-group="usage-heatmap-granularity"
+                    data-ui-control-intent="mode-switch"
+                    data-ui-control-presentation="toggle-button"
+                    data-ui-option-count="3"
+                  >
+                    <For each={["month", "week", "day"] as UsageHeatmapGranularity[]}>
+                      {(value) => (
+                        <button
+                          type="button"
+                          aria-pressed={heatmapGranularity() === value}
+                          class={heatmapGranularity() === value ? "rounded-[4px] bg-surface-raised-base px-2 py-1 text-12-medium text-text-strong" : "rounded-[4px] px-2 py-1 text-12-medium text-text-weak hover:bg-surface-raised-base hover:text-text-strong"}
+                          onClick={() => setHeatmapGranularity(value)}
+                        >
+                          {heatmapLabels().granularity[value]}
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                }
               />
-              <TrendChart points={data()!.trend} locale={locale()} labels={chartLabels()} />
+              <UsageHeatmap
+                points={heatmapData()?.heatmap ?? []}
+                summary={data()!.heatmapSummary}
+                granularity={heatmapGranularity()}
+                locale={locale()}
+                labels={heatmapLabels()}
+              />
             </SettingsList>
 
-            <SettingsList class="border border-border-weak-base bg-surface-base/70">
-              <SectionHeader
-                title={language.t("settings.usage.section.projects")}
-                description={language.t("settings.usage.projects.description")}
-                trailing={language.t("settings.usage.projects.trailing", { count: data()!.projectStats.length.toString() })}
-              />
-              <div class="grid gap-3">
-                <For each={data()!.projectStats.slice(0, 8)}>
-                  {(item) => (
-                    <StatRow
-                      title={item.projectName}
-                      subtitle={item.directory}
-                      amount={currency(item.totalCost, locale())}
-                      meta={`${compactNumber(item.totalTokens, locale())} · ${language.t("settings.usage.label.requests")}: ${decimal(item.requestCount, locale(), 0)}`}
-                      share={item.share}
-                    />
-                  )}
-                </For>
-              </div>
-            </SettingsList>
-
-            <SettingsList class="border border-border-weak-base bg-surface-base/70">
+            <SettingsList>
               <div class="flex flex-col gap-4">
-                <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div class="flex flex-col gap-3 rounded-[6px] border border-border-weak-base bg-surface-base p-2 xl:flex-row xl:items-center xl:justify-between">
                   <Tabs value={tab()} onChange={(value) => setTab((value as (typeof detailTabs)[number]["value"]) ?? "logs")} variant="pill">
-                    <Tabs.List class="gap-2">
+                    <Tabs.List class="flex-row items-center gap-1">
                       <For each={detailTabs}>
                         {(item) => <Tabs.Trigger value={item.value}>{language.t(item.label as never)}</Tabs.Trigger>}
                       </For>
                     </Tabs.List>
                   </Tabs>
-                  <div class="grid gap-3 sm:grid-cols-2 xl:min-w-[420px] xl:grid-cols-2">
+                  <div class="grid min-w-0 gap-2 sm:grid-cols-2 xl:w-[440px] xl:flex-shrink-0">
                     <Select
                       options={providerOptions()}
                       current={selectedProvider()}
@@ -526,33 +635,20 @@ export const SettingsUsage: Component = () => {
                   </div>
                 </div>
 
-                <Collapsible open={advancedOpen()} onOpenChange={setAdvancedOpen} class="rounded-[18px] border border-border-weak-base bg-surface-base/70">
-                  <Collapsible.Trigger class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left">
+                <div class="rounded-[6px] border border-border-weak-base bg-surface-base">
+                  <div class="flex items-center justify-between gap-4 px-3 py-2">
                     <div>
-                      <div class="text-14-medium text-text-strong">{language.t("settings.usage.filter.advanced")}</div>
-                      <div class="pt-1 text-12-regular text-text-weak">
-                        {language.t("settings.usage.filter.advancedHint", { count: activeFilterCount().toString() })}
-                      </div>
+                      <div class="text-13-medium text-text-strong">{language.t("settings.usage.filter.advanced")}</div>
                     </div>
-                    <div class="flex items-center gap-2 text-12-regular text-text-weak">
+                    <div class="flex items-center gap-2 text-12-regular text-text-weak" aria-live="polite">
+                      <span>{language.t("settings.usage.filter.advancedHint", { count: activeFilterCount().toString() })}</span>
                       <Show when={activeFilterCount() > 0}>
-                        <span class="rounded-full bg-surface-raised-base px-2 py-1 text-text-strong">{activeFilterCount()}</span>
+                        <span class="rounded-full bg-surface-raised-base px-1.5 py-0.5 text-text-strong">{activeFilterCount()}</span>
                       </Show>
-                      <Icon name="chevron-down" size="small" />
                     </div>
-                  </Collapsible.Trigger>
-                  <Collapsible.Content class="border-t border-border-weak-base px-4 py-4">
-                    <div class="grid gap-3 lg:grid-cols-2 2xl:grid-cols-5">
-                      <Select
-                        options={projectOptions()}
-                        current={selectedProject()}
-                        value={(item) => item.value}
-                        label={(item) => item.label}
-                        onSelect={(item) => setProject(item?.value ?? USAGE_ALL)}
-                        triggerVariant="settings"
-                        variant="secondary"
-                        size="small"
-                      />
+                  </div>
+                  <div class="border-t border-border-weak-base px-3 py-3">
+                    <div class="grid min-w-0 gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                       <Select
                         options={sessionOptions()}
                         current={selectedSession()}
@@ -583,7 +679,7 @@ export const SettingsUsage: Component = () => {
                         variant="secondary"
                         size="small"
                       />
-                      <div class="flex h-9 items-center gap-2 rounded-lg border border-border-weak-base bg-surface-base px-3">
+                      <div class="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-border-weak-base bg-surface-base px-3">
                         <Icon name="magnifying-glass" class="flex-shrink-0 text-icon-weak-base" />
                         <TextField
                           variant="ghost"
@@ -595,27 +691,30 @@ export const SettingsUsage: Component = () => {
                         />
                       </div>
                     </div>
-                  </Collapsible.Content>
-                </Collapsible>
+                  </div>
+                </div>
 
                 <div class="pt-1">
                   <Switch>
                     <Match when={tab() === "logs"}>
-                      <div class="overflow-hidden rounded-[18px] border border-border-weak-base">
-                        <div class="overflow-x-auto">
-                          <table class="min-w-full text-left text-12-regular text-text-weak">
-                            <thead class="bg-surface-base/80 text-text-strong">
+                      <div class="overflow-hidden rounded-[6px] border border-border-weak-base">
+                        <div class="h-[360px] overflow-y-auto sm:h-[420px]">
+                          <table class="w-full table-fixed text-left text-12-regular text-text-weak">
+                            <colgroup>
+                              <col class="w-[14%]" />
+                              <col class="w-[23%]" />
+                              <col class="w-[17%]" />
+                              <col class="w-[18%]" />
+                              <col class="w-[10%]" />
+                              <col class="w-[10%]" />
+                              <col class="w-[8%]" />
+                            </colgroup>
+                            <thead class="sticky top-0 z-[1] bg-surface-base text-text-strong shadow-[0_1px_0_var(--border-weak-base)]">
                               <tr>
                                 <th class="px-3 py-2.5">{language.t("settings.usage.table.time")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.project")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.session")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.provider")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.agentKind")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.input")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.output")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.reasoning")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.cacheRead")}</th>
-                                <th class="px-3 py-2.5">{language.t("settings.usage.table.cacheWrite")}</th>
+                                <th class="px-3 py-2.5">{language.t("settings.usage.table.provider")} / {language.t("settings.usage.table.model")}</th>
+                                <th class="px-3 py-2.5">{language.t("settings.usage.table.input")} / {language.t("settings.usage.table.output")}</th>
+                                <th class="px-3 py-2.5">{language.t("settings.usage.table.reasoning")} / {language.t("settings.usage.table.cacheRead")} / {language.t("settings.usage.table.cacheWrite")}</th>
                                 <th class="px-3 py-2.5">{language.t("settings.usage.table.cost")}</th>
                                 <th class="px-3 py-2.5">{language.t("settings.usage.table.latency")}</th>
                                 <th class="px-3 py-2.5">{language.t("settings.usage.table.status")}</th>
@@ -626,30 +725,22 @@ export const SettingsUsage: Component = () => {
                                 {(item) => (
                                   <tr class="border-t border-border-weak-base align-top">
                                     <td class="whitespace-nowrap px-3 py-3">{dateTime(item.time, locale())}</td>
-                                    <td class="px-3 py-3">
-                                      <div class="max-w-[220px] truncate text-text-strong">{item.projectName || item.projectID}</div>
-                                      <div class="max-w-[220px] truncate pt-1">{item.directory}</div>
+                                    <td class="min-w-0 px-3 py-3">
+                                      <div class="truncate text-text-strong" title={`${item.provider} / ${item.model}`}>{item.provider}</div>
+                                      <div class="truncate pt-1" title={item.model}>{item.model}</div>
                                     </td>
-                                    <td class="px-3 py-3">
-                                      <div class="max-w-[220px] truncate text-text-strong">{item.sessionTitle || item.sessionID}</div>
-                                      <div class="pt-1">{item.model}</div>
+                                    <td class="whitespace-nowrap px-3 py-3">
+                                      <div class="text-text-strong">{compactNumber(item.input, locale())} / {compactNumber(item.output, locale())}</div>
+                                      <div class="pt-1">{language.t("settings.usage.table.input")} / {language.t("settings.usage.table.output")}</div>
                                     </td>
-                                    <td class="whitespace-nowrap px-3 py-3">{item.provider}</td>
-                                    <td class="px-3 py-3">
-                                      <div class="whitespace-nowrap text-text-strong">{language.t(`settings.usage.agent.${item.agentKind}` as never)}</div>
-                                      <Show when={item.agentID && item.agentID !== "main"}>
-                                        <div class="pt-1">{item.agentID}</div>
-                                      </Show>
+                                    <td class="whitespace-nowrap px-3 py-3">
+                                      <div class="text-text-strong">{compactNumber(item.reasoning, locale())}</div>
+                                      <div class="pt-1">{compactNumber(item.cacheRead, locale())} / {compactNumber(item.cacheWrite, locale())}</div>
                                     </td>
-                                    <td class="whitespace-nowrap px-3 py-3">{compactNumber(item.input, locale())}</td>
-                                    <td class="whitespace-nowrap px-3 py-3">{compactNumber(item.output, locale())}</td>
-                                    <td class="whitespace-nowrap px-3 py-3">{compactNumber(item.reasoning, locale())}</td>
-                                    <td class="whitespace-nowrap px-3 py-3">{compactNumber(item.cacheRead, locale())}</td>
-                                    <td class="whitespace-nowrap px-3 py-3">{compactNumber(item.cacheWrite, locale())}</td>
                                     <td class="whitespace-nowrap px-3 py-3">{currency(item.cost, locale())}</td>
                                     <td class="px-3 py-3">
-                                      <div>{nullableMetric(item.duration, locale())}</div>
-                                      <div class="pt-1">{nullableMetric(item.ttft, locale())}</div>
+                                      <div>{formatUsageDuration(item.duration, locale())}</div>
+                                      <div class="pt-1">{formatUsageDuration(item.ttft, locale())}</div>
                                     </td>
                                     <td class="px-3 py-3">
                                       <span class={`inline-flex rounded-full px-2 py-1 text-12-medium ${statusTone(item.status)}`}>
@@ -711,7 +802,6 @@ export const SettingsUsage: Component = () => {
                 </div>
               </div>
             </SettingsList>
-          </Show>
         </Show>
       </div>
     </div>

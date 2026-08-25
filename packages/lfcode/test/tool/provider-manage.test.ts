@@ -40,7 +40,7 @@ describe("tool.provider_manage", () => {
           const tool = (yield* registry.tools({
             providerID: "lfcode" as never,
             modelID: "gpt-5" as never,
-            agent: { name: "build", mode: "primary", permission: [], options: {} },
+            agent: { name: "build", mode: "primary", permission: [], options: {}, toolAllowlist: [ProviderManageTool.id] },
           })).find((item) => item.id === ProviderManageTool.id)
           if (!tool) throw new Error("provider_manage tool not found")
           const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []

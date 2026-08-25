@@ -30,28 +30,30 @@ import type { OpenAIResponsesIncludeOptions, OpenAIResponsesIncludeValue } from 
 import { prepareResponsesTools } from "./openai-responses-prepare-tools"
 import type { OpenAIResponsesModelId } from "./openai-responses-settings"
 import { localShellInputSchema } from "./tool/local-shell"
+import { nativeWebSearchToolOutput } from "@/tool/websearch/native-result"
+
+const webSearchCallAction = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("search"),
+    query: z.string().nullish(),
+    sources: z.array(z.record(z.string(), z.unknown())).optional(),
+  }),
+  z.object({
+    type: z.literal("open_page"),
+    url: z.string(),
+  }),
+  z.object({
+    type: z.literal("find"),
+    url: z.string(),
+    pattern: z.string(),
+  }),
+])
 
 const webSearchCallItem = z.object({
   type: z.literal("web_search_call"),
   id: z.string(),
   status: z.string(),
-  action: z
-    .discriminatedUnion("type", [
-      z.object({
-        type: z.literal("search"),
-        query: z.string().nullish(),
-      }),
-      z.object({
-        type: z.literal("open_page"),
-        url: z.string(),
-      }),
-      z.object({
-        type: z.literal("find"),
-        url: z.string(),
-        pattern: z.string(),
-      }),
-    ])
-    .nullish(),
+  action: webSearchCallAction.nullish(),
 })
 
 const fileSearchCallItem = z.object({
@@ -505,6 +507,11 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
       })
     }
 
+    // OpenAI Responses may place the useful URL citations on the assistant
+    // message annotations rather than on `web_search_call.action.sources`.
+    // Collect them before converting provider output so the native tool result
+    // can make an accurate fallback decision.
+    const nativeWebSearchSources = collectOpenAIWebSearchCitations(response.output)
     const content: Array<LanguageModelV3Content> = []
     const logprobs: Array<z.infer<typeof LOGPROBS_SCHEMA>> = []
 
@@ -643,7 +650,11 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
             type: "tool-result",
             toolCallId: part.id,
             toolName: webSearchToolName ?? "web_search",
-            result: { status: part.status },
+            result: nativeWebSearchToolOutput({
+              action: part.action,
+              sources: nativeWebSearchSources,
+              status: part.status,
+            }),
           })
 
           break
@@ -850,6 +861,13 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
     // Track a stable text part id for the current assistant message.
     // Copilot may change item_id across text deltas; normalize to one id.
     let currentTextId: string | null = null
+    const nativeWebSearchSources: Array<{ url: string; title?: string }> = []
+    const pendingNativeWebSearchResults: Array<{
+      toolCallId: string
+      toolName: string
+      action?: unknown
+      status: string
+    }> = []
 
     let serviceTier: string | undefined
 
@@ -1010,16 +1028,19 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
                 controller.enqueue({
                   type: "tool-call",
                   toolCallId: value.item.id,
-                  toolName: "web_search",
+                  toolName: webSearchToolName ?? "web_search",
                   input: JSON.stringify({ action: value.item.action }),
                   providerExecuted: true,
                 })
-
-                controller.enqueue({
-                  type: "tool-result",
+                // URL citations arrive as later assistant annotation events on
+                // some Responses-compatible endpoints. Defer this result until
+                // flush so those citations can be attached before fallback is
+                // evaluated.
+                pendingNativeWebSearchResults.push({
                   toolCallId: value.item.id,
-                  toolName: "web_search",
-                  result: { status: value.item.status },
+                  toolName: webSearchToolName ?? "web_search",
+                  action: value.item.action,
+                  status: value.item.status,
                 })
               } else if (value.item.type === "computer_call") {
                 ongoingToolCalls[value.output_index] = undefined
@@ -1276,6 +1297,7 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
               }
             } else if (isResponseAnnotationAddedChunk(value)) {
               if (value.annotation.type === "url_citation") {
+                nativeWebSearchSources.push({ url: value.annotation.url, title: value.annotation.title })
                 controller.enqueue({
                   type: "source",
                   sourceType: "url",
@@ -1303,6 +1325,19 @@ export class OpenAIResponsesLanguageModel implements LanguageModelV3 {
             if (currentTextId) {
               controller.enqueue({ type: "text-end", id: currentTextId })
               currentTextId = null
+            }
+
+            for (const pending of pendingNativeWebSearchResults) {
+              controller.enqueue({
+                type: "tool-result",
+                toolCallId: pending.toolCallId,
+                toolName: pending.toolName,
+                result: nativeWebSearchToolOutput({
+                  action: pending.action,
+                  sources: nativeWebSearchSources,
+                  status: pending.status,
+                }),
+              })
             }
 
             const providerMetadata: SharedV3ProviderMetadata = {
@@ -1419,12 +1454,7 @@ const responseOutputItemAddedSchema = z.object({
       type: z.literal("web_search_call"),
       id: z.string(),
       status: z.string(),
-      action: z
-        .object({
-          type: z.literal("search"),
-          query: z.string().optional(),
-        })
-        .nullish(),
+      action: webSearchCallAction.nullish(),
     }),
     z.object({
       type: z.literal("computer_call"),
@@ -1774,3 +1804,28 @@ const openaiResponsesProviderOptionsSchema = z.object({
 })
 
 export type OpenAIResponsesProviderOptions = z.infer<typeof openaiResponsesProviderOptionsSchema>
+
+function collectOpenAIWebSearchCitations(value: unknown) {
+  if (!Array.isArray(value)) return [] as Array<{ url: string; title?: string }>
+  return value.flatMap((part) => {
+    if (!part || typeof part !== "object" || Array.isArray(part)) return []
+    const record = part as Record<string, unknown>
+    if (record.type !== "message" || !Array.isArray(record.content)) return []
+    return record.content.flatMap((contentPart) => {
+      if (!contentPart || typeof contentPart !== "object" || Array.isArray(contentPart)) return []
+      const contentRecord = contentPart as Record<string, unknown>
+      if (!Array.isArray(contentRecord.annotations)) return []
+      return contentRecord.annotations.flatMap((annotation) => {
+        if (!annotation || typeof annotation !== "object" || Array.isArray(annotation)) return []
+        const annotationRecord = annotation as Record<string, unknown>
+        if (annotationRecord.type !== "url_citation" || typeof annotationRecord.url !== "string") return []
+        return [
+          {
+            url: annotationRecord.url,
+            ...(typeof annotationRecord.title === "string" ? { title: annotationRecord.title } : {}),
+          },
+        ]
+      })
+    })
+  })
+}

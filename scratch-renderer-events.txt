@@ -1,0 +1,24 @@
+[
+  {
+    "id": 4,
+    "at": 1786013542629,
+    "timestamp": 1786013542629,
+    "isoTime": "2026-08-06T10:52:22.629Z",
+    "scope": "renderer",
+    "type": "route.changed",
+    "data": {
+      "route": "/Qzov566X5rOVL-Wwj-W6lOeUqC_pl7LogYo/session"
+    }
+  },
+  {
+    "id": 5,
+    "at": 1786013545902,
+    "timestamp": 1786013545902,
+    "isoTime": "2026-08-06T10:52:25.902Z",
+    "scope": "renderer",
+    "type": "route.changed",
+    "data": {
+      "route": "/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session"
+    }
+  }
+]

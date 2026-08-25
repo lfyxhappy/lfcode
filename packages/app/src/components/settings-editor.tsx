@@ -1,4 +1,4 @@
-import { type Component, createMemo, createResource, For, Show } from "solid-js"
+import { type Component, createMemo, createResource, createSignal, For, Show } from "solid-js"
 import { Select } from "@lfcode-ai/ui/select"
 import { Switch } from "@lfcode-ai/ui/switch"
 import { SettingsList } from "./settings-list"
@@ -22,6 +22,14 @@ export const SettingsEditor: Component<{ directory?: string }> = (props) => {
         .lsp.status()
         .then((result) => result.data ?? []),
   )
+  const [showAllLsp, setShowAllLsp] = createSignal(false)
+  const lspSummary = createMemo(() => {
+    const items = lspStatuses.latest ?? []
+    return {
+      items,
+      errors: items.filter((item) => item.status === "error").length,
+    }
+  })
 
   const resetLspDownloadReminders = () => {
     try {
@@ -189,31 +197,60 @@ export const SettingsEditor: Component<{ directory?: string }> = (props) => {
             title={language.t("settings.editor.intellisense.server.title")}
             description={language.t("settings.editor.intellisense.server.description")}
           >
-            <div class="flex max-w-72 flex-wrap justify-end gap-1.5 text-12-regular">
+            <div class="flex max-w-[min(420px,52vw)] min-w-0 flex-col items-end gap-2 text-12-regular">
               <Show
                 when={!lspStatuses.loading}
                 fallback={<span class="text-text-weak">{language.t("common.loading")}</span>}
               >
                 <Show
-                  when={(lspStatuses.latest ?? []).length > 0}
+                  when={lspSummary().items.length > 0}
                   fallback={
                     <span class="text-text-weak">{language.t("settings.editor.intellisense.server.empty")}</span>
                   }
                 >
-                  <For each={lspStatuses.latest ?? []}>
-                    {(item) => (
-                      <span
-                        classList={{
-                          "rounded-full px-2 py-0.5": true,
-                          "bg-surface-raised text-text-weak": item.status === "available",
-                          "bg-status-success/15 text-status-success": item.status === "connected",
-                          "bg-status-error/15 text-status-error": item.status === "error",
-                        }}
-                      >
-                        {item.name || item.id}
+                  <div class="flex flex-wrap justify-end gap-1.5">
+                    <For each={showAllLsp() ? lspSummary().items : lspSummary().items.slice(0, 6)}>
+                      {(item) => (
+                        <span
+                          classList={{
+                            "rounded-full px-2 py-0.5": true,
+                            "bg-surface-raised text-text-weak": item.status === "available",
+                            "bg-status-success/15 text-status-success": item.status === "connected",
+                            "bg-status-error/15 text-status-error": item.status === "error",
+                          }}
+                        >
+                          {item.name || item.id}
+                        </span>
+                      )}
+                    </For>
+                    <Show when={!showAllLsp() && lspSummary().items.length > 6}>
+                      <span class="rounded-full bg-surface-raised px-2 py-0.5 text-text-subtle">
+                        +{lspSummary().items.length - 6}
                       </span>
-                    )}
-                  </For>
+                    </Show>
+                  </div>
+                  <div class="flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-text-subtle">
+                    <span>
+                      {language.t("lsp.label.connected", {
+                        count: lspSummary().items.length,
+                      })}
+                    </span>
+                    <Show when={lspSummary().errors > 0}>
+                      <span class="text-status-error">
+                        {lspSummary().errors} {language.t("codeEditor.problems.error")}
+                      </span>
+                    </Show>
+                    <Show when={lspSummary().items.length > 6}>
+                      <button
+                        type="button"
+                        class="rounded px-1.5 py-0.5 text-text-weak underline decoration-border-weak-base underline-offset-2 hover:text-text-strong"
+                        aria-expanded={showAllLsp()}
+                        onClick={() => setShowAllLsp((value) => !value)}
+                      >
+                        {showAllLsp() ? language.t("session.todo.collapse") : language.t("session.todo.expand")}
+                      </button>
+                    </Show>
+                  </div>
                 </Show>
               </Show>
             </div>

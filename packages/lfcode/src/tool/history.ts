@@ -24,7 +24,7 @@ const KIND = z.enum([
 const AROUND_MAX_BYTES = 20 * 1024
 
 const parameters = z.object({
-  operation: z.enum(["search", "around", "session"]).describe("search: FTS BM25; around: pull message context; session: read raw session history"),
+  operation: z.enum(["search", "around", "session", "event_search", "event_read", "trace"]).describe("search: FTS BM25; around: pull message context; session: read raw session history; event_search/event_read: query durable session events; trace: read durable session lineage and background work"),
   // search params
   query: z.string().optional().describe("FTS query (BM25 over text/tool bodies). Required for operation=search."),
   scope: z.enum(["project", "global"]).optional().describe("Default project."),
@@ -35,7 +35,10 @@ const parameters = z.object({
   tool_name: z.string().optional().describe("Filter to a specific tool (e.g. Bash, Read)"),
   time_after: z.number().optional().describe("Unix ms"),
   time_before: z.number().optional(),
-  limit: z.number().optional().describe("Max 50, default 10"),
+  limit: z.number().int().min(1).optional().describe("Max 50 for search/session; max 100 for event_search."),
+  // durable event params
+  event_type: z.string().optional().describe("For event_search: exact durable event type."),
+  event_seq: z.number().int().min(0).optional().describe("For event_read: durable event sequence number."),
   // around params
   message_id: z.string().optional().describe("Anchor message id. Required for operation=around."),
   before: z.number().optional().describe("Default 5"),
@@ -160,6 +163,107 @@ export const HistoryTool = Tool.define(
                 session_found: snapshot.session_found,
                 checkpoint_found: snapshot.checkpoint_found,
               },
+            }
+          }
+
+          if (args.operation === "trace") {
+            if (!args.session_id) {
+              return {
+                title: "History trace: missing session_id",
+                output: "operation=trace requires a `session_id` argument.",
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            const gate = contextReadGate(args, ctx, args.session_id)
+            const trace = yield* history.trace({ session_id: args.session_id })
+            completeCapabilityOperation(gate.auditID, `completed (${trace.children.length} children)`, {
+              project: trace.project_id,
+              session: trace.session_id,
+            })
+            if (!trace.session_found) {
+              return {
+                title: "History trace: session not found",
+                output: `No session with id ${args.session_id}.`,
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            return {
+              title: `History trace: ${trace.session_id}`,
+              output: JSON.stringify(trace, null, 2),
+              metadata: {
+                count: trace.children.length + trace.actors.length + trace.dispatches.length + trace.jobs.length,
+                session_found: true,
+              },
+            }
+          }
+
+          if (args.operation === "event_search") {
+            if (!args.session_id) {
+              return {
+                title: "History event search: missing session_id",
+                output: "operation=event_search requires a `session_id` argument.",
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            const gate = contextReadGate(args, ctx, args.session_id)
+            const snapshot = yield* history.eventSearch({
+              session_id: args.session_id,
+              query: args.query,
+              type: args.event_type,
+              limit: args.limit,
+            })
+            completeCapabilityOperation(gate.auditID, `completed (${snapshot.events.length} events)`, {
+              project: snapshot.project_id,
+              session: snapshot.session_id,
+              eventSequences: snapshot.events.map((event) => event.sequence),
+            })
+            if (!snapshot.session_found) {
+              return {
+                title: "History event search: session not found",
+                output: `No session with id ${args.session_id}.`,
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            return {
+              title: `History event search: ${snapshot.events.length} event${snapshot.events.length === 1 ? "" : "s"}`,
+              output: JSON.stringify(snapshot, null, 2),
+              metadata: { count: snapshot.events.length, session_found: true },
+            }
+          }
+
+          if (args.operation === "event_read") {
+            if (!args.session_id || args.event_seq === undefined) {
+              return {
+                title: "History event read: missing event target",
+                output: "operation=event_read requires `session_id` and `event_seq` arguments.",
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            const gate = contextReadGate(args, ctx, args.session_id)
+            const snapshot = yield* history.eventRead({ session_id: args.session_id, sequence: args.event_seq })
+            completeCapabilityOperation(gate.auditID, `completed (${snapshot.event_found ? 1 : 0} events)`, {
+              project: snapshot.project_id,
+              session: snapshot.session_id,
+              eventSequence: args.event_seq,
+            })
+            if (!snapshot.session_found) {
+              return {
+                title: "History event read: session not found",
+                output: `No session with id ${args.session_id}.`,
+                metadata: { count: 0, session_found: false },
+              }
+            }
+            if (!snapshot.event_found) {
+              return {
+                title: "History event read: event not found",
+                output: `No durable event with sequence ${args.event_seq} in session ${args.session_id}.`,
+                metadata: { count: 0, session_found: true },
+              }
+            }
+            return {
+              title: `History event read: ${args.session_id}#${args.event_seq}`,
+              output: JSON.stringify(snapshot.event, null, 2),
+              metadata: { count: 1, session_found: true },
             }
           }
 

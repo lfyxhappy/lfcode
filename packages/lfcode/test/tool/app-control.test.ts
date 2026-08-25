@@ -10,6 +10,11 @@ import { Session } from "../../src/session"
 import { MessageID, SessionID } from "../../src/session/schema"
 import type { Tool } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
+import {
+  allowBrowserNavigation,
+  browserSessionKey,
+  resetBrowserNavigationAuthorizations,
+} from "../../src/server/routes/browser-session-authorization"
 import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -35,11 +40,58 @@ const baseCtx: Tool.Context = {
 }
 
 afterEach(async () => {
+  resetBrowserNavigationAuthorizations()
   await Instance.disposeAll()
 })
 
 describe("app control tools", () => {
-  it.live("read-only app control exposes diagnostics tools but hides write actions", () =>
+  it.live("browser defaults to Lfcode's background embedded-browser channel", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const current = yield* session.create()
+        const ctx = { ...baseCtx, sessionID: current.id }
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.method === "POST" && request.url.pathname === "/browser/open") return { ok: true, data: { opened: true } }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const result = yield* withAutomationEnv(port, "browser-tool-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "session_control", browser: { enabled: true, permission: "interactive" } })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            return yield* browser.execute({ operation: "open", url: "https://example.com" }, ctx)
+          }),
+        )
+
+        expect(JSON.parse(result.output)).toMatchObject({ opened: true })
+        expect(result.metadata).toMatchObject({ operation: "open", presentation: "headless" })
+        expect(received).toHaveLength(1)
+        expect(received[0]?.body).toMatchObject({
+          url: "https://example.com",
+          presentation: "headless",
+          sessionKey: browserSessionKey({ directory: current.directory, sessionID: current.id }),
+        })
+      }),
+    ),
+  )
+
+  it.live("read-only app control exposes aggregate tools instead of granular app controls", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
@@ -55,43 +107,286 @@ describe("app control tools", () => {
           agent: general,
         })
         const ids = new Set(tools.map((tool) => tool.id))
-        expect(ids.has("app_get_state")).toBe(true)
-        expect(ids.has("app_list_windows")).toBe(true)
-        expect(ids.has("app_get_events")).toBe(true)
-        expect(ids.has("app_capture_window")).toBe(true)
-        expect(ids.has("app_capture_diagnostics_bundle")).toBe(true)
-        expect(ids.has("app_wait_for_state")).toBe(true)
-        expect(ids.has("app_get_console")).toBe(false)
-        expect(ids.has("app_get_network")).toBe(false)
-        expect(ids.has("app_open_browser")).toBe(false)
-        expect(ids.has("app_browser_snapshot")).toBe(false)
-        expect(ids.has("app_read_browser_page")).toBe(false)
-        expect(ids.has("app_browser_download_resource")).toBe(false)
-        expect(ids.has("app_focus_browser_tab")).toBe(false)
-        expect(ids.has("app_browser_click")).toBe(false)
-        expect(ids.has("app_browser_scroll")).toBe(false)
-        expect(ids.has("app_browser_type")).toBe(false)
-        expect(ids.has("app_browser_wait")).toBe(false)
-        expect(ids.has("app_close_browser_tab")).toBe(false)
-        expect(ids.has("app_open_route")).toBe(false)
-        expect(ids.has("app_open_session")).toBe(false)
-        expect(ids.has("app_open_side_chat")).toBe(false)
-        expect(ids.has("app_focus_side_chat")).toBe(false)
-        expect(ids.has("app_close_side_chat")).toBe(false)
-        expect(ids.has("app_set_input")).toBe(false)
-        expect(ids.has("app_append_input")).toBe(false)
-        expect(ids.has("app_send")).toBe(false)
+        expect(ids.has("app_control")).toBe(true)
+        expect(ids.has("browser")).toBe(true)
+        for (const id of [
+          "app_get_state",
+          "app_list_windows",
+          "app_get_events",
+          "app_get_automation_status",
+          "app_wait_for_event",
+          "app_capture_window",
+          "app_capture_diagnostics_bundle",
+          "app_wait_for_state",
+          "app_open_browser",
+          "app_browser_snapshot",
+          "app_read_browser_page",
+          "app_open_route",
+          "app_open_session",
+          "app_open_side_chat",
+          "app_focus_side_chat",
+          "app_close_side_chat",
+          "app_set_input",
+          "app_append_input",
+          "app_send",
+        ]) {
+          expect(ids.has(id)).toBe(false)
+        }
       }),
     ),
   )
 
-  it.live("browser-control app control exposes browser tools without full app control", () =>
+  it.live("keeps explicitly allowlisted legacy app and browser tools for fixed agents", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
         const agent = yield* Agent.Service
         const config = yield* Config.Service
-        yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+        yield* config.saveGlobalAppControl({
+          enabled: true,
+          permission: "full_app_control",
+          browser: { enabled: true, permission: "interactive" },
+        })
+        const general = yield* agent.get("general")
+        if (!general) throw new Error("general agent not found")
+
+        const tools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: {
+            ...general,
+            name: "legacy-app-control-fixture",
+            toolAllowlist: ["app_dom", "app_browser_snapshot"],
+          },
+        })
+        const ids = new Set(tools.map((tool) => tool.id))
+        expect(ids.has("app_dom")).toBe(true)
+        expect(ids.has("app_browser_snapshot")).toBe(true)
+        expect(ids.has("app_control")).toBe(false)
+        expect(ids.has("browser")).toBe(false)
+      }),
+    ),
+  )
+
+  it.live("app control registry and execution both ignore project-level permission overrides", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { port, received } = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startStubServer((request) => {
+                if (request.method === "GET" && request.url.pathname === "/diagnostics/ui-state") {
+                  return { ok: true, data: { route: "/" } }
+                }
+                throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+              }),
+            ),
+            (server) => Effect.promise(() => server.close()),
+          )
+          yield* withAutomationEnv(port, "global-app-control-token", () =>
+            Effect.gen(function* () {
+              const registry = yield* ToolRegistry.Service
+              const agent = yield* Agent.Service
+              const config = yield* Config.Service
+              yield* config.saveGlobalAppControl({ enabled: true, permission: "read_only" })
+              const general = yield* agent.get("general")
+              if (!general) throw new Error("general agent not found")
+
+              const initiallyVisible = yield* registry.tools({
+                providerID: ProviderID.make("test"),
+                modelID: ModelID.make("test-model"),
+                agent: general,
+              })
+              const appControl = initiallyVisible.find((tool) => tool.id === "app_control")
+              if (!appControl) throw new Error("app_control should be visible with global read-only access")
+
+              const forwarded = yield* appControl.execute({ operation: "get_state", input: {} }, baseCtx)
+              expect(JSON.parse(forwarded.output)).toMatchObject({ route: "/" })
+
+              yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only" })
+              const hidden = yield* registry.tools({
+                providerID: ProviderID.make("test"),
+                modelID: ModelID.make("test-model"),
+                agent: general,
+              })
+              expect(hidden.some((tool) => tool.id === "app_control")).toBe(false)
+
+              const exit = yield* Effect.exit(appControl.execute({ operation: "get_state", input: {} }, baseCtx))
+              expect(exit._tag).toBe("Failure")
+              expect(String(exit)).toContain("App Control is disabled in global settings")
+            }),
+          )
+          expect(received).toHaveLength(1)
+        }),
+      {
+        config: {
+          app_control: {
+            enabled: true,
+            permission: "full_app_control",
+          },
+        },
+      },
+    ),
+  )
+
+  it.live("browser control stays independent when app control is disabled", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const config = yield* Config.Service
+        yield* config.saveGlobalAppControl({
+          enabled: false,
+          permission: "session_control",
+          browser: { enabled: true, permission: "interactive" },
+        })
+        const general = yield* agent.get("general")
+        if (!general) throw new Error("general agent not found")
+
+        const tools = yield* registry.tools({
+          providerID: ProviderID.make("minimax-cn-coding-plan"),
+          modelID: ModelID.make("MiniMax-M3"),
+          agent: general,
+        })
+        const ids = new Set(tools.map((tool) => tool.id))
+        expect(ids.has("browser")).toBe(true)
+        expect(ids.has("app_open_route")).toBe(false)
+
+        const openBrowser = tools.find((tool) => tool.id === "browser")
+        if (!openBrowser) throw new Error("browser tool not found")
+        const exit = yield* Effect.exit(openBrowser.execute({ operation: "open", url: "https://example.com" }, baseCtx))
+        expect(exit._tag).toBe("Failure")
+        expect(String(exit)).toContain("No running desktop automation service")
+        expect(String(exit)).toContain("automation_service_unavailable")
+      }),
+    ),
+  )
+
+  it.live("browser open authorizes each user session without a repeated confirmation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const current = yield* session.create()
+        const other = yield* session.create()
+        const ctx = { ...baseCtx, sessionID: current.id }
+        const otherCtx = { ...baseCtx, sessionID: other.id }
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.method === "GET" && request.url.pathname === "/browser/target") {
+                return { ok: true, data: null }
+              }
+              if (request.method === "POST" && request.url.pathname === "/browser/open") {
+                return { ok: true, data: { opened: true } }
+              }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const result = yield* withAutomationEnv(port, "browser-open-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "session_control", browser: { enabled: true, permission: "interactive" } })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const tool = tools.find((item) => item.id === "browser")
+            if (!tool) throw new Error("browser tool not found")
+            return {
+              initial: yield* tool.execute({ operation: "open", url: "https://example.com" }, ctx),
+              repeated: yield* tool.execute({ operation: "open", url: "https://example.com" }, ctx),
+              reused: yield* tool.execute({ operation: "open", url: "https://example.com/next" }, ctx),
+              other: yield* tool.execute({ operation: "open", url: "https://example.com" }, otherCtx),
+            }
+          }),
+        )
+
+        const sessionKey = browserSessionKey({ directory: current.directory, sessionID: current.id })
+        const otherSessionKey = browserSessionKey({ directory: other.directory, sessionID: other.id })
+        expect(JSON.parse(result.initial.output)).toMatchObject({ opened: true })
+        expect(result.repeated.metadata.sessionKey).toBe(sessionKey)
+        expect(result.reused.metadata.sessionKey).toBe(sessionKey)
+        expect(JSON.parse(result.other.output)).toMatchObject({ opened: true })
+        expect(allowBrowserNavigation({ sessionKey, hasTarget: false })).toBe(true)
+        expect(allowBrowserNavigation({ sessionKey: otherSessionKey, hasTarget: false })).toBe(true)
+        expect(received.map((item) => item.url.pathname)).toEqual([
+          "/browser/open",
+          "/browser/open",
+          "/browser/open",
+          "/browser/open",
+        ])
+        expect(received[0]?.headers.authorization).toBe("Bearer browser-open-token")
+        expect(received.map((item) => item.body)).toEqual([
+          expect.objectContaining({ sessionKey }),
+          expect.objectContaining({ sessionKey }),
+          expect.objectContaining({ sessionKey }),
+          expect.objectContaining({ sessionKey: otherSessionKey }),
+        ])
+      }),
+    ),
+  )
+
+  it.live("browser preserves explicit session keys while sending the default canonical key", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const current = yield* session.create()
+        const ctx = { ...baseCtx, sessionID: current.id }
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.method === "POST" && request.url.pathname === "/browser/open") return { ok: true, data: { opened: true } }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const result = yield* withAutomationEnv(port, "browser-explicit-session-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            return yield* browser.execute(
+              { operation: "open", url: "https://example.com", session_key: "explicit/session-key" },
+              ctx,
+            )
+          }),
+        )
+
+        expect(received[0]?.body).toMatchObject({ sessionKey: "explicit/session-key" })
+        expect(result.metadata.sessionKey).toBe("explicit/session-key")
+      }),
+    ),
+  )
+
+  it.live("legacy browser-control permission migrates to independent browser control", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const config = yield* Config.Service
+        const saved = yield* config.saveGlobalAppControl({
+          enabled: true,
+          permission: "browser_control",
+          browser: { enabled: true, permission: "interactive" },
+        })
         const general = yield* agent.get("general")
         if (!general) throw new Error("general agent not found")
 
@@ -101,31 +396,98 @@ describe("app control tools", () => {
           agent: general,
         })
         const ids = new Set(tools.map((tool) => tool.id))
-        expect(ids.has("app_open_browser")).toBe(true)
-        expect(ids.has("app_browser_snapshot")).toBe(true)
-        expect(ids.has("app_get_console")).toBe(true)
-        expect(ids.has("app_get_network")).toBe(true)
-        expect(ids.has("app_read_browser_page")).toBe(true)
-        expect(ids.has("app_browser_screenshot")).toBe(true)
-        expect(ids.has("app_browser_extract_resource")).toBe(true)
-        expect(ids.has("app_browser_download_resource")).toBe(true)
-        expect(ids.has("app_focus_browser_tab")).toBe(true)
-        expect(ids.has("app_browser_click")).toBe(true)
-        expect(ids.has("app_browser_scroll")).toBe(true)
-        expect(ids.has("app_browser_type")).toBe(true)
-        expect(ids.has("app_browser_wait")).toBe(true)
-        expect(ids.has("app_close_browser_tab")).toBe(true)
-        expect(ids.has("app_open_route")).toBe(true)
-        expect(ids.has("app_open_session")).toBe(true)
-        expect(ids.has("app_focus_side_chat")).toBe(true)
-        expect(ids.has("app_close_side_chat")).toBe(true)
-        expect(ids.has("app_append_input")).toBe(true)
-        expect(ids.has("app_send")).toBe(true)
+        expect(saved.permission).toBe("session_control")
+        expect(saved.browser).toEqual({ enabled: true, permission: "interactive" })
+        expect(saved.config.app_control).toEqual({ enabled: true, permission: "session_control" })
+        expect(saved.config.browser_control).toEqual({ enabled: true, permission: "interactive" })
+        expect(ids.has("browser")).toBe(true)
+        expect(ids.has("app_control")).toBe(true)
+        expect(ids.has("app_open_route")).toBe(false)
+        expect(ids.has("app_open_session")).toBe(false)
+        expect(ids.has("app_focus_side_chat")).toBe(false)
+        expect(ids.has("app_close_side_chat")).toBe(false)
+        expect(ids.has("app_append_input")).toBe(false)
+        expect(ids.has("app_send")).toBe(false)
       }),
     ),
   )
 
-  it.live("read-only window listing and route navigation tools normalize payloads", () =>
+  it.live("uses maximum independent defaults and preserves explicit browser overrides", () =>
+    Effect.sync(() => {
+      expect(Config.resolveGlobalAppControlConfig(undefined)).toEqual({
+        enabled: true,
+        permission: "full_app_control",
+      })
+      expect(Config.resolveGlobalBrowserControlConfig(undefined)).toEqual({
+        enabled: true,
+        permission: "interactive",
+      })
+
+      const legacy = {
+        app_control: {
+          enabled: false,
+          permission: "full_app_control",
+        },
+      } as Config.Info
+      expect(Config.resolveGlobalBrowserControlConfig(legacy)).toEqual({
+        enabled: false,
+        permission: "interactive",
+      })
+      expect(
+        Config.resolveGlobalBrowserControlConfig({
+          ...legacy,
+          browser_control: {
+            enabled: true,
+            permission: "read_only",
+          },
+        }),
+      ).toEqual({
+        enabled: true,
+        permission: "read_only",
+      })
+    }),
+  )
+
+  it.live("browser permission errors are actionable without depending on app control", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const config = yield* Config.Service
+        const general = yield* agent.get("general")
+        if (!general) throw new Error("general agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.make("test"),
+          modelID: ModelID.make("test-model"),
+          agent: general,
+        })
+        const browser = tools.find((item) => item.id === "browser")
+        if (!browser) throw new Error("browser tool not found")
+
+        yield* config.saveGlobalAppControl({
+          enabled: false,
+          permission: "read_only",
+          browser: { enabled: false, permission: "interactive" },
+        })
+        const disabled = yield* Effect.exit(browser.execute({ operation: "read" }, baseCtx))
+        expect(disabled._tag).toBe("Failure")
+        expect(String(disabled)).toContain("browser_control_disabled")
+        expect(String(disabled)).toContain("Settings > App Control > Built-in browser control")
+
+        yield* config.saveGlobalAppControl({
+          enabled: false,
+          permission: "read_only",
+          browser: { enabled: true, permission: "read_only" },
+        })
+        const denied = yield* Effect.exit(browser.execute({ operation: "click", ref: "button:save" }, baseCtx))
+        expect(denied._tag).toBe("Failure")
+        expect(String(denied)).toContain("browser_permission_denied")
+        expect(String(denied)).toContain("change the permission to Interactive")
+      }),
+    ),
+  )
+
+  it.live("aggregate window listing and route navigation normalize payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, received } = yield* Effect.acquireRelease(
@@ -155,11 +517,10 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const listWindows = tools.find((item) => item.id === "app_list_windows")
-            const openRoute = tools.find((item) => item.id === "app_open_route")
-            if (!listWindows || !openRoute) throw new Error("window/route tools not found")
-            yield* listWindows.execute({}, baseCtx)
-            return yield* openRoute.execute({ route: "/settings", window_id: 4 }, baseCtx)
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            yield* appControl.execute({ operation: "list_windows", input: {} }, baseCtx)
+            return yield* appControl.execute({ operation: "open_route", input: { route: "/settings", window_id: 4 } }, baseCtx)
           }),
         )
 
@@ -207,14 +568,21 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const focusTool = tools.find((item) => item.id === "app_focus_side_chat")
-            const closeTool = tools.find((item) => item.id === "app_close_side_chat")
-            const appendTool = tools.find((item) => item.id === "app_append_input")
-            if (!focusTool || !closeTool || !appendTool) throw new Error("side chat tools not found")
-            yield* focusTool.execute({ session_id: "ses_side_1", window_id: 2 }, baseCtx)
-            yield* closeTool.execute({ session_id: "ses_side_1", window_id: 2 }, baseCtx)
-            return yield* appendTool.execute(
-              { text: " world", target: "active_side", session_id: "ses_side_1", window_id: 2 },
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            yield* appControl.execute(
+              { operation: "focus_side_chat", input: { session_id: "ses_side_1", window_id: 2 } },
+              baseCtx,
+            )
+            yield* appControl.execute(
+              { operation: "close_side_chat", input: { session_id: "ses_side_1", window_id: 2 } },
+              baseCtx,
+            )
+            return yield* appControl.execute(
+              {
+                operation: "append_input",
+                input: { text: " world", target: "active_side", session_id: "ses_side_1", window_id: 2 },
+              },
               baseCtx,
             )
           }),
@@ -245,7 +613,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("app_get_events queries diagnostics events with filters", () =>
+  it.live("aggregate diagnostics events query forwards filters", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, close, received } = yield* Effect.acquireRelease(
@@ -281,13 +649,16 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_get_events")
-            if (!tool) throw new Error("app_get_events not found")
-            return yield* tool.execute(
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            return yield* appControl.execute(
               {
-                scope: "renderer",
-                type: "sidechat.opened",
-                limit: 5,
+                operation: "get_events",
+                input: {
+                  scope: "renderer",
+                  type: "sidechat.opened",
+                  limit: 5,
+                },
               },
               baseCtx,
             )
@@ -305,7 +676,105 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("app_wait_for_state normalizes wait match payload before posting", () =>
+  it.live("aggregate automation status and cursor events use authenticated protocol endpoints", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.method === "GET" && request.url.pathname === "/meta") {
+                return {
+                  ok: true,
+                  data: {
+                    protocolVersion: 2,
+                    instanceID: "desktop-instance-1",
+                    pid: 1234,
+                    startedAt: 1_700_000_000_000,
+                    version: "1.2.3",
+                    capability: "full_app_control",
+                    features: ["diagnostics.events.cursor"],
+                  },
+                }
+              }
+              if (request.method === "GET" && request.url.pathname === "/diagnostics/events/next") {
+                return {
+                  ok: true,
+                  data: {
+                    events: [
+                      {
+                        id: 42,
+                        at: 1_700_000_000_100,
+                        timestamp: 1_700_000_000_100,
+                        isoTime: "2023-11-14T22:13:20.100Z",
+                        scope: "renderer",
+                        type: "session.updated",
+                      },
+                    ],
+                    nextCursor: 42,
+                    oldestID: 40,
+                    latestID: 42,
+                    resetRequired: false,
+                  },
+                }
+              }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const result = yield* withAutomationEnv(port, "status-and-cursor-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: true, permission: "read_only" })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            return {
+              status: yield* appControl.execute({ operation: "get_automation_status", input: {} }, baseCtx),
+              wait: yield* appControl.execute(
+                {
+                  operation: "wait_for_event",
+                  input: {
+                    after: 41,
+                    scope: "renderer",
+                    type: "session.updated",
+                    limit: 3,
+                    wait_ms: 250,
+                  },
+                },
+                baseCtx,
+              ),
+            }
+          }),
+        )
+
+        expect(received.map((item) => item.url.pathname)).toEqual(["/meta", "/diagnostics/events/next"])
+        expect(received.map((item) => item.headers.authorization)).toEqual([
+          "Bearer status-and-cursor-token",
+          "Bearer status-and-cursor-token",
+        ])
+        expect(received[1]?.url.search).toBe("?after=41&scope=renderer&type=session.updated&limit=3&waitMs=250")
+        expect(result.status.title).toBe("Read desktop automation status")
+        expect(result.status.metadata).toMatchObject({
+          protocolVersion: 2,
+          instanceID: "desktop-instance-1",
+          capability: "full_app_control",
+        })
+        expect(JSON.parse(result.wait.output)).toMatchObject({ nextCursor: 42, resetRequired: false })
+        expect(result.wait.metadata).toMatchObject({ after: 41, waitMs: 250 })
+      }),
+    ),
+  )
+
+  it.live("aggregate wait_for_state normalizes wait match payload before posting", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, close, received } = yield* Effect.acquireRelease(
@@ -341,21 +810,24 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_wait_for_state")
-            if (!tool) throw new Error("app_wait_for_state not found")
-            return yield* tool.execute(
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            return yield* appControl.execute(
               {
-                window_id: 3,
-                timeout_ms: 1500,
-                interval_ms: 60,
-                match: {
-                  route: "/session/demo",
-                  session_id: "ses_side_1",
-                  active_tab: "side-chat",
-                  loading: false,
-                  side_chat_count: 1,
-                  browser_tab_count: 2,
-                  composer_target: "active_side",
+                operation: "wait_for_state",
+                input: {
+                  window_id: 3,
+                  timeout_ms: 1500,
+                  interval_ms: 60,
+                  match: {
+                    route: "/session/demo",
+                    session_id: "ses_side_1",
+                    active_tab: "side-chat",
+                    loading: false,
+                    side_chat_count: 1,
+                    browser_tab_count: 2,
+                    composer_target: "active_side",
+                  },
                 },
               },
               baseCtx,
@@ -385,7 +857,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("app_capture_window posts capture request and returns saved path", () =>
+  it.live("aggregate capture_window posts capture request and returns saved path", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, received } = yield* Effect.acquireRelease(
@@ -419,12 +891,15 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_capture_window")
-            if (!tool) throw new Error("app_capture_window not found")
-            return yield* tool.execute(
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            return yield* appControl.execute(
               {
-                window_id: 9,
-                label: "goal-run",
+                operation: "capture_window",
+                input: {
+                  window_id: 9,
+                  label: "goal-run",
+                },
               },
               baseCtx,
             )
@@ -443,7 +918,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("app_read_browser_page falls back to the current session key", () =>
+  it.live("browser read falls back to the current session key", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -472,7 +947,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -480,23 +955,73 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_read_browser_page")
-            if (!tool) throw new Error("app_read_browser_page not found")
-            return yield* tool.execute({}, ctx)
+            const tool = tools.find((item) => item.id === "browser")
+            if (!tool) throw new Error("browser tool not found")
+            return yield* tool.execute({ operation: "read" }, ctx)
           }),
         )
 
         expect(received.length).toBe(1)
         expect(received[0]?.headers.authorization).toBe("Bearer browser-read-token")
         expect(received[0]?.body).toEqual({
-          sessionKey: `${info.directory}/${info.id}`,
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
         })
-        expect(result.metadata.sessionKey).toBe(`${info.directory}/${info.id}`)
+        expect(result.metadata.sessionKey).toBe(browserSessionKey({ directory: info.directory, sessionID: info.id }))
       }),
     ),
   )
 
-  it.live("browser tools normalize click/type/wait payloads", () =>
+  it.live("browser target errors retain an actionable desktop recovery", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const { port } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.method !== "POST" || request.url.pathname !== "/browser/read-page") {
+                throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+              }
+              return {
+                ok: false,
+                error: "No active side browser tab exists for this session.",
+                code: "browser_target_missing",
+                retryable: false,
+                recovery: "Open or bind a side browser tab for this session, then retry.",
+              }
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const exit = yield* withAutomationEnv(port, "browser-target-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({
+              enabled: false,
+              permission: "read_only",
+              browser: { enabled: true, permission: "interactive" },
+            })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            return yield* Effect.exit(browser.execute({ operation: "read", session_key: "dir/ses_missing" }, baseCtx))
+          }),
+        )
+
+        expect(exit._tag).toBe("Failure")
+        expect(String(exit)).toContain("browser_target_missing")
+        expect(String(exit)).toContain("Open or bind a side browser tab")
+      }),
+    ),
+  )
+
+  it.live("unified browser tool normalizes click/type/wait payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, received } = yield* Effect.acquireRelease(
@@ -515,7 +1040,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -523,13 +1048,11 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const click = tools.find((item) => item.id === "app_browser_click")
-            const type = tools.find((item) => item.id === "app_browser_type")
-            const wait = tools.find((item) => item.id === "app_browser_wait")
-            if (!click || !type || !wait) throw new Error("browser tools not found")
-            yield* click.execute({ session_key: "dir/ses_1", ref: "button:login" }, baseCtx)
-            yield* type.execute({ session_key: "dir/ses_1", ref: "input:query", text: "lfcode", submit: true }, baseCtx)
-            yield* wait.execute({ session_key: "dir/ses_1", text: "Done", text_gone: "Loading", time_ms: 50, timeout_ms: 1000 }, baseCtx)
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "click", session_key: "dir/ses_1", ref: "button:login" }, baseCtx)
+            yield* browser.execute({ operation: "type", session_key: "dir/ses_1", ref: "input:query", text: "lfcode", submit: true }, baseCtx)
+            yield* browser.execute({ operation: "wait", session_key: "dir/ses_1", text: "Done", text_gone: "Loading", time_ms: 50, timeout_ms: 1000 }, baseCtx)
           }),
         )
 
@@ -555,7 +1078,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("browser diagnostics tools normalize console and network payloads", () =>
+  it.live("unified browser tool normalizes console and network payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -576,7 +1099,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -584,17 +1107,16 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const consoleTool = tools.find((item) => item.id === "app_get_console")
-            const networkTool = tools.find((item) => item.id === "app_get_network")
-            if (!consoleTool || !networkTool) throw new Error("diagnostic browser tools not found")
-            yield* consoleTool.execute({ limit: 15 }, ctx)
-            yield* networkTool.execute({ session_key: "dir/custom", limit: 9 }, ctx)
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "console", limit: 15 }, ctx)
+            yield* browser.execute({ operation: "network", session_key: "dir/custom", limit: 9 }, ctx)
           }),
         )
 
         expect(received.map((item) => item.url.pathname)).toEqual(["/browser/console", "/browser/network"])
         expect(received[0]?.body).toEqual({
-          sessionKey: `${info.directory}/${info.id}`,
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
           limit: 15,
         })
         expect(received[1]?.body).toEqual({
@@ -605,7 +1127,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("browser screenshot and resource extraction normalize payloads", () =>
+  it.live("unified browser tool normalizes screenshot and resource extraction payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -626,7 +1148,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -634,17 +1156,16 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const screenshotTool = tools.find((item) => item.id === "app_browser_screenshot")
-            const resourceTool = tools.find((item) => item.id === "app_browser_extract_resource")
-            if (!screenshotTool || !resourceTool) throw new Error("browser capture tools not found")
-            yield* screenshotTool.execute({}, ctx)
-            yield* resourceTool.execute({ session_key: "dir/custom", selector: "img.hero" }, ctx)
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "screenshot" }, ctx)
+            yield* browser.execute({ operation: "extract_resource", session_key: "dir/custom", selector: "img.hero" }, ctx)
           }),
         )
 
         expect(received.map((item) => item.url.pathname)).toEqual(["/browser/screenshot", "/browser/extract-resource"])
         expect(received[0]?.body).toEqual({
-          sessionKey: `${info.directory}/${info.id}`,
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
         })
         expect(received[1]?.body).toEqual({
           sessionKey: "dir/custom",
@@ -655,7 +1176,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("browser snapshot and scroll normalize payloads", () =>
+  it.live("unified browser tool normalizes snapshot and scroll payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -676,7 +1197,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -684,17 +1205,16 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const snapshotTool = tools.find((item) => item.id === "app_browser_snapshot")
-            const scrollTool = tools.find((item) => item.id === "app_browser_scroll")
-            if (!snapshotTool || !scrollTool) throw new Error("browser snapshot/scroll tools not found")
-            yield* snapshotTool.execute({}, ctx)
-            yield* scrollTool.execute({ session_key: "dir/custom", selector: ".timeline", direction: "down", amount: 320 }, ctx)
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "snapshot" }, ctx)
+            yield* browser.execute({ operation: "scroll", session_key: "dir/custom", selector: ".timeline", direction: "down", amount: 320 }, ctx)
           }),
         )
 
         expect(received.map((item) => item.url.pathname)).toEqual(["/browser/snapshot", "/browser/scroll"])
         expect(received[0]?.body).toEqual({
-          sessionKey: `${info.directory}/${info.id}`,
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
         })
         expect(received[1]?.body).toEqual({
           sessionKey: "dir/custom",
@@ -707,7 +1227,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("browser close and resource download normalize payloads", () =>
+  it.live("unified browser tool normalizes close and resource download payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -730,7 +1250,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -738,12 +1258,11 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const closeTool = tools.find((item) => item.id === "app_close_browser_tab")
-            const downloadTool = tools.find((item) => item.id === "app_browser_download_resource")
-            if (!closeTool || !downloadTool) throw new Error("browser close/download tools not found")
-            yield* closeTool.execute({}, ctx)
-            yield* downloadTool.execute(
-              { session_key: "dir/custom", selector: "img.hero", filename: "hero.png" },
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "close" }, ctx)
+            yield* browser.execute(
+              { operation: "download_resource", session_key: "dir/custom", selector: "img.hero", filename: "hero.png" },
               ctx,
             )
           }),
@@ -751,7 +1270,7 @@ describe("app control tools", () => {
 
         expect(received.map((item) => item.url.pathname)).toEqual(["/browser/close", "/browser/download-resource"])
         expect(received[0]?.body).toEqual({
-          sessionKey: `${info.directory}/${info.id}`,
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
         })
         expect(received[1]?.body).toEqual({
           sessionKey: "dir/custom",
@@ -765,7 +1284,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("browser tab focus normalizes payloads", () =>
+  it.live("unified browser tool normalizes tab focus payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, received } = yield* Effect.acquireRelease(
@@ -782,7 +1301,7 @@ describe("app control tools", () => {
             const registry = yield* ToolRegistry.Service
             const agent = yield* Agent.Service
             const config = yield* Config.Service
-            yield* config.saveGlobalAppControl({ enabled: true, permission: "browser_control" })
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
             const general = yield* agent.get("general")
             if (!general) throw new Error("general agent not found")
             const tools = yield* registry.tools({
@@ -790,9 +1309,9 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_focus_browser_tab")
-            if (!tool) throw new Error("app_focus_browser_tab not found")
-            return yield* tool.execute({ tab_id: "b_demo", window_id: 6 }, baseCtx)
+            const tool = tools.find((item) => item.id === "browser")
+            if (!tool) throw new Error("browser tool not found")
+            return yield* tool.execute({ operation: "focus_tab", session_key: "dir/custom", tab_id: "b_demo", window_id: 6 }, baseCtx)
           }),
         )
 
@@ -806,7 +1325,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("app_capture_diagnostics_bundle combines ui state, events, and screenshot", () =>
+  it.live("aggregate diagnostics bundle combines UI state, events, and screenshot", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const { port, received } = yield* Effect.acquireRelease(
@@ -839,13 +1358,16 @@ describe("app control tools", () => {
               modelID: ModelID.make("test-model"),
               agent: general,
             })
-            const tool = tools.find((item) => item.id === "app_capture_diagnostics_bundle")
-            if (!tool) throw new Error("app_capture_diagnostics_bundle not found")
-            return yield* tool.execute(
+            const appControl = tools.find((item) => item.id === "app_control")
+            if (!appControl) throw new Error("app_control not found")
+            return yield* appControl.execute(
               {
-                window_id: 5,
-                label: "bundle",
-                event_limit: 12,
+                operation: "capture_diagnostics_bundle",
+                input: {
+                  window_id: 5,
+                  label: "bundle",
+                  event_limit: 12,
+                },
               },
               baseCtx,
             )

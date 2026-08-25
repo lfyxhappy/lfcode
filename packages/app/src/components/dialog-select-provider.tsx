@@ -9,8 +9,14 @@ import { DialogConnectProvider } from "./dialog-connect-provider"
 import { useLanguage } from "@/context/language"
 import { DialogCustomProvider } from "./dialog-custom-provider"
 import { VOLCENGINE_CODING_PLAN_PROVIDER_ID } from "@lfcode-ai/shared/volcengine-coding-plan"
+import { A6API_PROVIDER_ID } from "./dialog-custom-provider-form"
+import { OPENCODE_GO_NAME, OPENCODE_GO_PRESET_ID, OPENCODE_GO_PROVIDER_ID } from "@lfcode-ai/shared/opencode-go"
+import { OPENCODE_NAME, OPENCODE_PRESET_ID, OPENCODE_PROVIDER_ID } from "@lfcode-ai/shared/opencode"
 
 const CUSTOM_ID = "_custom"
+const A6API_PROVIDER = { id: A6API_PROVIDER_ID, name: "A6API" }
+const OPENCODE_ZEN_PROVIDER = { id: OPENCODE_PROVIDER_ID, name: OPENCODE_NAME }
+const OPENCODE_GO_PROVIDER = { id: OPENCODE_GO_PROVIDER_ID, name: OPENCODE_GO_NAME }
 
 export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-models" }> = (props) => {
   const dialog = useDialog()
@@ -29,7 +35,7 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
   }
 
   return (
-    <Dialog title={language.t("command.provider.connect")} transition>
+    <Dialog dataAction="provider-select-dialog" title={language.t("command.provider.connect")} transition>
       <List
         search={{ placeholder: language.t("dialog.provider.search.placeholder"), autofocus: true }}
         emptyMessage={language.t("dialog.provider.empty")}
@@ -37,10 +43,21 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
         key={(x) => x?.id}
         items={() => {
           language.locale()
-          const allProviders = providers.all().filter((provider) => provider.id !== VOLCENGINE_CODING_PLAN_PROVIDER_ID)
+          const allProviders = providers
+            .all()
+            .filter(
+              (provider) =>
+                provider.id !== VOLCENGINE_CODING_PLAN_PROVIDER_ID &&
+                provider.id !== A6API_PROVIDER_ID &&
+                provider.id !== OPENCODE_ZEN_PROVIDER.id &&
+                provider.id !== OPENCODE_GO_PROVIDER_ID,
+            )
           return [
             { id: CUSTOM_ID, name: customLabel() },
             { id: VOLCENGINE_CODING_PLAN_PROVIDER_ID, name: volcengineCodingPlanLabel() },
+            A6API_PROVIDER,
+            OPENCODE_ZEN_PROVIDER,
+            OPENCODE_GO_PROVIDER,
             ...allProviders,
           ]
         }}
@@ -65,6 +82,18 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
           if (!x) return
           if (x.id === CUSTOM_ID) {
             dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} />)
+            return
+          }
+          if (x.id === A6API_PROVIDER_ID) {
+            dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} preset={A6API_PROVIDER_ID} />)
+            return
+          }
+          if (x.id === OPENCODE_GO_PROVIDER_ID) {
+            dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} preset={OPENCODE_GO_PRESET_ID} />)
+            return
+          }
+          if (x.id === OPENCODE_PROVIDER_ID) {
+            dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} preset={OPENCODE_PRESET_ID} />)
             return
           }
           dialog.show(() => <DialogConnectProvider provider={x.id} returnTo={props.returnTo} />)

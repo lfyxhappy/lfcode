@@ -167,6 +167,11 @@
   &:focus {
     outline: none;
   }
+
+  &:focus-visible:not(:disabled) {
+    outline: 2px solid var(--border-interactive-focus);
+    outline-offset: 2px;
+  }
 }
 
 [data-component="button"].titlebar-icon[data-variant="ghost"][aria-expanded="true"] {

@@ -9,12 +9,12 @@ import { Auth } from "../auth"
 import * as ProviderTransform from "../provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
-import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_DREAM from "./prompt/dream.txt"
 import PROMPT_DISTILL from "./prompt/distill.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_CONTEXT_REVIEWER from "./prompt/context-reviewer.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
@@ -25,6 +25,11 @@ import { Effect, Context, Layer } from "effect"
 import { InstanceState } from "@/effect"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { Log } from "@/util"
+import { AgentPreset } from "./preset"
+import { SYSTEM_SPAWNED_AGENT_TYPES } from "./config"
+
+const log = Log.create({ service: "agent" })
 
 export const Info = z
   .object({
@@ -36,6 +41,14 @@ export const Info = z
     topP: z.number().optional(),
     temperature: z.number().optional(),
     color: z.string().optional(),
+    preset: z.string().optional(),
+    displayName: z.string().optional(),
+    avatar: z.string().optional(),
+    icon: z.string().optional(),
+    defaultExecution: AgentPreset.Execution.optional(),
+    defaultContext: AgentPreset.Context.optional(),
+    modelInheritance: AgentPreset.ModelInheritance.optional(),
+    delegationAllowlist: z.array(z.string()).optional(),
     permission: Permission.Ruleset.zod,
     model: z
       .object({
@@ -59,6 +72,7 @@ export interface Interface {
   readonly get: (agent: string) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Info[]>
   readonly defaultAgent: () => Effect.Effect<string>
+  readonly invalidate: () => Effect.Effect<void>
   readonly generate: (input: {
     description: string
     model?: { providerID: ProviderID; modelID: ModelID }
@@ -69,7 +83,7 @@ export interface Interface {
   }>
 }
 
-type State = Omit<Interface, "generate">
+type State = Omit<Interface, "generate" | "invalidate">
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/Agent") {}
 
@@ -96,7 +110,6 @@ export const layer = Layer.effect(
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
           },
           question: "deny",
-          compose_enter: "deny",
           plan_enter: "deny",
           plan_exit: "deny",
           // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
@@ -120,7 +133,6 @@ export const layer = Layer.effect(
               defaults,
               Permission.fromConfig({
                 question: "allow",
-                compose_enter: "allow",
                 plan_enter: "allow",
               }),
               user,
@@ -130,7 +142,7 @@ export const layer = Layer.effect(
           },
           // Max mode is experimental and opt-in: only registered when
           // `experimental.maxMode` is configured. This keeps the default agent
-          // set as {build, plan, compose} when the feature is off.
+          // set as {build, plan} when the feature is off.
           ...(cfg.experimental?.maxMode
             ? {
                 max: {
@@ -143,7 +155,6 @@ export const layer = Layer.effect(
                     defaults,
                     Permission.fromConfig({
                       question: "allow",
-                      compose_enter: "allow",
                       plan_enter: "allow",
                     }),
                     user,
@@ -177,68 +188,31 @@ export const layer = Layer.effect(
             mode: "primary",
             native: true,
           },
-          compose: {
-            name: "compose",
-            color: "#a7a3d8",
-            description: "Large-project orchestration mode with built-in superpowers workflows for planning, delegation, review, and verification.",
-            options: {},
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                question: "allow",
-                skill: "allow",
-                compose_enter: "allow",
-              }),
-              user,
-            ),
-            mode: "primary",
-            native: true,
-          },
-          general: {
-            name: "general",
-            color: "#aac4e1",
-            description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                change_directory: "deny",
-              }),
-              user,
-            ),
-            options: {},
-            mode: "subagent",
-            native: true,
-          },
-          explore: {
-            name: "explore",
-            color: "#f5c9b0",
-            permission: Permission.merge(
-              defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                search: "allow",
-                tree: "allow",
-                file_info: "allow",
-                archive_inspect: "allow",
-                list: "allow",
-                shell: "allow",
-                webfetch: "allow",
-                websearch: "allow",
-                codesearch: "allow",
-                read: "allow",
-                external_directory: {
-                  "*": "ask",
-                  ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
-                },
-              }),
-              user,
-            ),
-            description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by name or path (eg. "src/components/App.tsx"), search code for keywords (eg. "API endpoints"), inspect directory structure, or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
-            prompt: PROMPT_EXPLORE,
-            options: {},
-            mode: "subagent",
-            native: true,
-          },
+          ...Object.fromEntries(
+            AgentPreset.presets.map((preset) => [
+              preset.id,
+              {
+                name: preset.id,
+                color: preset.color,
+                description: preset.description,
+                preset: preset.id,
+                displayName: preset.displayName,
+                avatar: preset.avatar,
+                icon: preset.icon,
+                defaultExecution: preset.defaultExecution,
+                defaultContext: preset.defaultContext,
+                modelInheritance: preset.modelInheritance,
+                ...(preset.delegationAllowlist ? { delegationAllowlist: [...preset.delegationAllowlist] } : {}),
+                prompt: preset.prompt,
+                permission: Permission.merge(defaults, Permission.fromConfig(preset.permission), user),
+                ...(preset.toolAllowlist ? { toolAllowlist: [...preset.toolAllowlist] } : {}),
+                ...(preset.hidden ? { hidden: true } : {}),
+                options: {},
+                mode: "subagent" as const,
+                native: true,
+              } satisfies Info,
+            ]),
+          ),
           title: {
             name: "title",
             mode: "subagent",
@@ -318,6 +292,25 @@ export const layer = Layer.effect(
             // docs/superpowers/specs/2026-06-05-checkpoint-writer-permission-deadlock-design.md
             permission: Permission.merge(defaults, user),
           },
+          "context-reviewer": {
+            name: "context-reviewer",
+            mode: "subagent" as const,
+            options: {},
+            native: true,
+            hidden: true,
+            prompt: PROMPT_CONTEXT_REVIEWER,
+            // This actor is an internal reliability check. Its only executable
+            // capability is read-only Memory lookup; it cannot turn a review
+            // pass into user-visible work or mutate any local/external state.
+            permission: Permission.fromConfig({
+              "*": "deny",
+              memory: "allow",
+              // The reviewer returns only schema-validated findings. This is
+              // a synthetic in-process result tool, not an external capability.
+              StructuredOutput: "allow",
+            }),
+            toolAllowlist: ["memory"],
+          },
           dream: {
             name: "dream",
             mode: "subagent" as const,
@@ -391,6 +384,14 @@ export const layer = Layer.effect(
         }
 
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {
+          if (key === "compose") {
+            log.warn("ignored removed compose agent config", { source: "agent.compose" })
+            continue
+          }
+          if (SYSTEM_SPAWNED_AGENT_TYPES.has(key)) {
+            log.warn("ignored system-spawned agent config", { source: `agent.${key}` })
+            continue
+          }
           if (value.disable) {
             delete agents[key]
             continue
@@ -400,7 +401,23 @@ export const layer = Layer.effect(
             item = agents[key] = {
               name: key,
               mode: "all",
-              permission: Permission.merge(defaults, user),
+              permission: Permission.merge(
+                defaults,
+                Permission.fromConfig({
+                  "*": "deny",
+                  read: "allow",
+                  grep: "allow",
+                  glob: "allow",
+                  tree: "allow",
+                  file_info: "allow",
+                  search: "allow",
+                  webfetch: "allow",
+                  websearch: "allow",
+                  codesearch: "allow",
+                  actor: "deny",
+                }),
+                user,
+              ),
               options: {},
               native: false,
             }
@@ -417,6 +434,14 @@ export const layer = Layer.effect(
           item.color = value.color ?? item.color
           item.hidden = value.hidden ?? item.hidden
           item.name = value.name ?? item.name
+          item.preset = value.preset ?? item.preset
+          item.displayName = value.display_name ?? item.displayName
+          item.avatar = value.avatar ?? item.avatar
+          item.icon = value.icon ?? item.icon
+          item.defaultExecution = value.default_execution ?? item.defaultExecution
+          item.defaultContext = value.default_context ?? item.defaultContext
+          item.modelInheritance = value.model_inheritance ?? (value.model ? "configured" : item.modelInheritance)
+          item.delegationAllowlist = value.delegation_allowlist ?? item.delegationAllowlist
           item.steps = value.steps ?? item.steps
           item.toolAllowlist = value.tool_allowlist ?? item.toolAllowlist
           item.options = mergeDeep(item.options, value.options ?? {})
@@ -452,7 +477,6 @@ export const layer = Layer.effect(
               [(x) => cfg.default_agent !== undefined && x.name === cfg.default_agent, "desc"],
               [(x) => x.name === "build", "desc"],
               [(x) => x.name === "plan", "desc"],
-              [(x) => x.name === "compose", "desc"],
               [(x) => x.name === "max", "desc"],
               [(x) => x.name, "asc"],
             ),
@@ -461,6 +485,16 @@ export const layer = Layer.effect(
 
         const defaultAgent = Effect.fnUntraced(function* () {
           const c = yield* config.get()
+          if (c.default_agent === "compose") {
+            const build = agents.build
+            if (!build || build.mode === "subagent" || build.hidden === true)
+              throw new Error('default agent "compose" has been removed and build is unavailable')
+            log.warn("deprecated default agent downgraded to build", {
+              configured: "compose",
+              resolved: build.name,
+            })
+            return build.name
+          }
           if (c.default_agent) {
             const agent = agents[c.default_agent]
             if (!agent) throw new Error(`default agent "${c.default_agent}" not found`)
@@ -491,6 +525,7 @@ export const layer = Layer.effect(
       defaultAgent: Effect.fn("Agent.defaultAgent")(function* () {
         return yield* InstanceState.useEffect(state, (s) => s.defaultAgent())
       }),
+      invalidate: Effect.fn("Agent.invalidate")(() => InstanceState.invalidateAll(state)),
       generate: Effect.fn("Agent.generate")(function* (input: {
         description: string
         model?: { providerID: ProviderID; modelID: ModelID }

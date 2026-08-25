@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "report_type": "ui-codebase-map",
+  "source": "workspace-registry",
+  "status": "unmapped",
+  "policy": {
+    "reference_only": true,
+    "do_not_invent_imports": true,
+    "unmapped_components_require_handoff": true
+  },
+  "conventions": {
+    "language": "typescript-when-framework-export-is-requested",
+    "styling": "css-plus-semantic-tokens",
+    "supported_frameworks": [
+      "react",
+      "vue",
+      "solid",
+      "svelte"
+    ]
+  },
+  "components": [],
+  "unresolved": [
+    "No registered components have an implementation mapping."
+  ]
+}

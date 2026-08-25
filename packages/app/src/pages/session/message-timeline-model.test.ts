@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AssistantMessage, Message as MessageType, Part, UserMessage } from "@lfcode-ai/sdk/v2"
-import { buildMessageTimelineModel } from "./message-timeline-model"
+import { buildMessageTimelineModel, sameTimelinePartStructure } from "./message-timeline-model"
 
 function user(id: string): UserMessage {
   return {
@@ -44,6 +44,32 @@ function part(messageID: string, value: Record<string, unknown>) {
 }
 
 describe("buildMessageTimelineModel", () => {
+  test("keeps the context snapshot stable for non-structural stream text deltas", () => {
+    const previous = {
+      "assistant-1": [part("assistant-1", { type: "text", text: "first streamed chunk" })],
+      "user-1": [part("user-1", { type: "text", text: "original prompt" })],
+    } satisfies Record<string, Part[]>
+    const next = {
+      "assistant-1": [part("assistant-1", { type: "text", text: "first streamed chunk with more text" })],
+      "user-1": [part("user-1", { type: "text", text: "edited prompt text" })],
+    } satisfies Record<string, Part[]>
+
+    expect(sameTimelinePartStructure(previous, next)).toBe(true)
+    expect(
+      sameTimelinePartStructure(previous, {
+        ...next,
+        "assistant-1": [part("assistant-1", { type: "text", text: "" })],
+      }),
+    ).toBe(false)
+    expect(
+      sameTimelinePartStructure(previous, {
+        ...next,
+        "user-1": [part("user-1", { type: "compaction", auto: true })],
+      }),
+    ).toBe(false)
+    expect(sameTimelinePartStructure({ "assistant-1": [] }, { "assistant-2": [] })).toBe(false)
+  })
+
   test("keeps compaction summary assistants attached when only the boundary turn is rendered", () => {
     const messages = [
       user("user-1"),

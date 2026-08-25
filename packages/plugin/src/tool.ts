@@ -27,11 +27,29 @@ type AskInput = {
   metadata: { [key: string]: any }
 }
 
-export type ToolResult = string | { output: string; metadata?: { [key: string]: any } }
+export type ToolAttachment = {
+  mime: string
+  url: string
+  filename?: string
+}
+
+export type ToolResult =
+  | string
+  | {
+      output: string
+      metadata?: { [key: string]: any }
+      attachments?: ToolAttachment[]
+    }
 
 export function tool<Args extends z.ZodRawShape>(input: {
   description: string
   args: Args
+  /**
+   * The tool becomes a native model tool only after this Skill was loaded in
+   * the current session. It remains unavailable to extension discovery before
+   * activation so a model cannot bypass the Skill instructions.
+   */
+  activationSkill?: string
   execute(args: z.infer<z.ZodObject<Args>>, context: ToolContext): Promise<ToolResult>
 }) {
   return input

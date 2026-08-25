@@ -20,6 +20,7 @@ import { AppFileSystem } from "@/filesystem"
 import { BootstrapRuntime } from "@/effect/bootstrap-runtime"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { InstanceState } from "@/effect"
+import { dispatchHooks } from "@/hook/runtime"
 
 const log = Log.create({ service: "worktree" })
 
@@ -288,12 +289,34 @@ export const layer: Layer.Layer<
     })
 
     const createFromInfo = Effect.fn("Worktree.createFromInfo")(function* (info: Info, startCommand?: string) {
+      const ctx = yield* InstanceState.context
+      const hook = yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "WorktreeCreate",
+          projectID: String(ctx.project.id),
+          cwd: ctx.worktree,
+          tool: info.name,
+          payload: { name: info.name, branch: info.branch, directory: info.directory },
+        }),
+      )
+      if (hook.blocked) throw new CreateFailedError({ message: "Worktree creation was blocked by a Hook" })
       yield* setup(info)
       yield* boot(info, startCommand)
     })
 
     const create = Effect.fn("Worktree.create")(function* (input?: CreateInput) {
       const info = yield* makeWorktreeInfo(input?.name)
+      const ctx = yield* InstanceState.context
+      const hook = yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "WorktreeCreate",
+          projectID: String(ctx.project.id),
+          cwd: ctx.worktree,
+          tool: info.name,
+          payload: { name: info.name, branch: info.branch, directory: info.directory },
+        }),
+      )
+      if (hook.blocked) throw new CreateFailedError({ message: "Worktree creation was blocked by a Hook" })
       yield* setup(info)
       yield* boot(info, input?.startCommand).pipe(
         Effect.catchCause((cause) => Effect.sync(() => log.error("worktree bootstrap failed", { cause }))),
@@ -425,6 +448,16 @@ export const layer: Layer.Layer<
           })
         }
       }
+
+      yield* Effect.promise(() =>
+        dispatchHooks({
+          event: "WorktreeRemove",
+          projectID: String(ctx.project.id),
+          cwd: ctx.worktree,
+          tool: input.directory,
+          payload: { directory: input.directory, branch },
+        }),
+      ).pipe(Effect.ignore)
 
       return true
     })

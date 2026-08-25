@@ -16,6 +16,7 @@ import { normalizeServerUrl, ServerConnection, useServer } from "@/context/serve
 import { useSync } from "@/context/sync"
 import { useCheckServerHealth, type ServerHealth } from "@/utils/server-health"
 import { formatServerError } from "@/utils/server-errors"
+import { startVisiblePolling } from "@/utils/visible-poll"
 
 const pollMs = 10_000
 
@@ -31,11 +32,19 @@ const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   )
 }
 
-type PluginItem = NonNullable<Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["plugin"]["list"]>>["data"]>[number]
-type BackgroundJobItem = NonNullable<Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["list"]>>["data"]>[number]
+type PluginItem = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["plugin"]["list"]>>["data"]
+>[number]
+type BackgroundJobItem = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["list"]>>["data"]
+>[number]
 type BackgroundJobDetail = Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["get"]>>["data"]
-type BackgroundJobLogItem = NonNullable<Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["logs"]>>["data"]>[number]
-type SessionTaskItem = NonNullable<Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["session"]["task"]>>["data"]>[number]
+type BackgroundJobLogItem = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["logs"]>>["data"]
+>[number]
+type SessionTaskItem = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["session"]["task"]>>["data"]
+>[number]
 
 const tOr = (language: ReturnType<typeof useLanguage>, key: string, fallback: string) => {
   const value = language.t(key)
@@ -139,10 +148,10 @@ const useServerHealth = (servers: Accessor<ServerConnection.Any[]>, enabled: Acc
     }
 
     void refresh()
-    const id = setInterval(() => void refresh(), pollMs)
+    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      stopPolling()
     })
   })
 
@@ -300,7 +309,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
       void sdk.client.plugin
         .list()
         .then((result) => {
-          setPlugins((result.data ?? []).toSorted((a, b) => (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec)))
+          setPlugins(
+            (result.data ?? []).toSorted((a, b) =>
+              (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec),
+            ),
+          )
         })
         .catch((err) => {
           setLoad("pluginsDone", true)
@@ -319,7 +332,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
       try {
         const result = await sdk.client.plugin.list()
         if (dead) return
-        setPlugins((result.data ?? []).toSorted((a, b) => (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec)))
+        setPlugins(
+          (result.data ?? []).toSorted((a, b) =>
+            (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec),
+          ),
+        )
       } catch (err) {
         if (dead) return
         fail(err)
@@ -327,10 +344,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
     }
 
     void refresh()
-    const id = setInterval(() => void refresh(), pollMs)
+    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      stopPolling()
     })
   })
 
@@ -357,10 +374,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
     }
 
     void refresh()
-    const id = setInterval(() => void refresh(), pollMs)
+    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      stopPolling()
     })
   })
 
@@ -387,10 +404,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
     }
 
     void refresh()
-    const id = setInterval(() => void refresh(), pollMs)
+    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      stopPolling()
     })
   })
 
@@ -428,10 +445,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
       await refreshJobDetail(jobID, true)
     }
     void refreshJobDetail(jobID, false)
-    const id = setInterval(() => void refresh(), pollMs)
+    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
     onCleanup(() => {
       dead = true
-      clearInterval(id)
+      stopPolling()
     })
   })
 
@@ -468,7 +485,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
     }),
   )
   const jobCount = createMemo(() => jobItems().length)
-  const planItems = createMemo(() => sessionTasks().filter((item) => item.status !== "done" && item.status !== "abandoned"))
+  const planItems = createMemo(() =>
+    sessionTasks().filter((item) => item.status !== "done" && item.status !== "abandoned"),
+  )
   const activeGoal = createMemo(() => (props.sessionID ? sync.data.session_goal[props.sessionID]?.state : undefined))
   const reconcileJobLabel = () => {
     return tOr(language, "status.popover.jobs.reconcile", "Reconcile")
@@ -620,8 +639,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                           classList={{
                             "size-1.5 rounded-full shrink-0": true,
                             "bg-icon-success-base": status() === "connected",
-                            "bg-icon-critical-base":
-                              status() === "failed" || status() === "needs_client_registration",
+                            "bg-icon-critical-base": status() === "failed" || status() === "needs_client_registration",
                             "bg-border-weak-base": status() === "disabled",
                             "bg-icon-warning-base": status() === "pending" || status() === "needs_auth",
                           }}
@@ -679,7 +697,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
             <div class="flex flex-col gap-2 p-3 bg-background-base rounded-sm min-h-14">
               <Show
                 when={!load.pluginsLoading}
-                fallback={<div class="text-14-regular text-text-base text-center my-auto">{language.t("common.loading")}...</div>}
+                fallback={
+                  <div class="text-14-regular text-text-base text-center my-auto">
+                    {language.t("common.loading")}...
+                  </div>
+                }
               >
                 <Show
                   when={pluginItems().length > 0}
@@ -689,7 +711,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                     {(plugin) => (
                       <div class="rounded-md border border-border-weak-base bg-surface-base px-3 py-2">
                         <div class="flex items-start gap-2">
-                          <div class={`mt-1 size-1.5 shrink-0 rounded-full ${pluginTargetTone(plugin.server.status === "ready" ? "ready" : plugin.tui.status)}`} />
+                          <div
+                            class={`mt-1 size-1.5 shrink-0 rounded-full ${pluginTargetTone(plugin.server.status === "ready" ? "ready" : plugin.tui.status)}`}
+                          />
                           <div class="min-w-0 flex-1">
                             <div class="truncate text-13-medium text-text-base">
                               {plugin.manifest?.name || plugin.packageName || plugin.spec}
@@ -773,13 +797,20 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                   <div id="status-popover-plan-content" class="mt-1">
                     <Show
                       when={!load.planLoading}
-                      fallback={<div class="px-1 py-2 text-12-regular text-text-weak">{language.t("common.loading")}...</div>}
+                      fallback={
+                        <div class="px-1 py-2 text-12-regular text-text-weak">{language.t("common.loading")}...</div>
+                      }
                     >
                       <Show
                         when={planItems().length > 0}
                         fallback={
-                          <Show when={activeGoal()?.objective} fallback={<div class="px-1 py-2 text-12-regular text-text-weak">No active plan</div>}>
-                            {(objective) => <div class="truncate px-1 py-2 text-13-regular text-text-base">{objective()}</div>}
+                          <Show
+                            when={activeGoal()?.objective}
+                            fallback={<div class="px-1 py-2 text-12-regular text-text-weak">No active plan</div>}
+                          >
+                            {(objective) => (
+                              <div class="truncate px-1 py-2 text-13-regular text-text-base">{objective()}</div>
+                            )}
                           </Show>
                         }
                       >
@@ -799,7 +830,10 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
 
               <div class="my-2 h-px bg-border-weak-base" aria-hidden="true" />
 
-              <section class="rounded-sm bg-background-base px-3 py-2" aria-labelledby="status-popover-background-title">
+              <section
+                class="rounded-sm bg-background-base px-3 py-2"
+                aria-labelledby="status-popover-background-title"
+              >
                 <button
                   type="button"
                   class="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-13-regular text-text-weak hover:bg-surface-raised-base-hover"
@@ -810,7 +844,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                     setProcessesCollapsed((value) => !value)
                   }}
                 >
-                  <span id="status-popover-background-title">Background processes</span>
+                  <span id="status-popover-background-title">Shell processes</span>
                   <span class="ml-auto text-12-regular text-text-weak">{jobCount()}</span>
                   <Icon name="chevron-down" size="small" class={processesCollapsed() ? "-rotate-90" : ""} />
                 </button>
@@ -818,199 +852,218 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                 <Show when={!processesCollapsed()}>
                   <div id="status-popover-background-content" class="mt-1">
                     <div class="flex flex-col gap-1">
-              <div class="flex flex-col gap-2 p-3 bg-background-base rounded-sm min-h-14">
-                <Show
-                  when={!load.jobsLoading}
-                  fallback={<div class="text-14-regular text-text-base text-center my-auto">{language.t("common.loading")}...</div>}
-                >
-                  <Show
-                    when={jobItems().length > 0}
-                    fallback={
-                      <div class="text-14-regular text-text-base text-center my-auto">
-                        {language.t("status.popover.jobs.empty")}
-                      </div>
-                    }
-                  >
-                    <For each={jobItems()}>
-                      {(job) => (
-                        <div class="group relative flex min-w-0 items-start gap-2 rounded-md px-1 py-2 hover:bg-surface-raised-base-hover">
-                          <Icon name="terminal" size="small" class="mt-0.5 shrink-0 text-icon-weak-base" />
-                          <div class="min-w-0 flex flex-1 items-start gap-2">
-                            <div class={`mt-1 size-1.5 shrink-0 rounded-full ${backgroundJobTone(job.status)}`} />
-                            <div class="min-w-0 flex-1">
-                              <div class="truncate text-13-medium text-text-base">{job.title}</div>
-                              <div class="mt-1 flex items-center gap-2 text-11-regular text-text-weak">
-                                <span>{backgroundJobStatusLabel(language, job.status)}</span>
-                                <span>•</span>
-                                <span>{formatJobTime(job.createdAt)}</span>
-                                <Show when={job.pid !== undefined}>
-                                  <span>• pid {job.pid}</span>
-                                </Show>
+                      <div class="flex flex-col gap-2 p-3 bg-background-base rounded-sm min-h-14">
+                        <Show
+                          when={!load.jobsLoading}
+                          fallback={
+                            <div class="text-14-regular text-text-base text-center my-auto">
+                              {language.t("common.loading")}...
+                            </div>
+                          }
+                        >
+                          <Show
+                            when={jobItems().length > 0}
+                            fallback={
+                              <div class="text-14-regular text-text-base text-center my-auto">
+                                {language.t("status.popover.jobs.empty")}
                               </div>
-                              <Show when={job.error}>
-                                {(error) => <div class="mt-1 line-clamp-2 text-11-regular text-text-danger">{error()}</div>}
-                              </Show>
-                              <Show when={job.cwd}>
-                                <div class="mt-1 truncate text-11-regular text-text-weak">{job.cwd}</div>
-                              </Show>
-                              <Show when={expandedJobID() === job.id}>
-                                <div class="mt-2 rounded-sm border border-border-weak-base bg-background-base px-2 py-2">
-                                  <Show
-                                    when={!jobLoading[job.id]}
-                                    fallback={<div class="text-11-regular text-text-weak">{language.t("common.loading")}...</div>}
-                                  >
-                                    <Show when={jobDetails[job.id]}>
-                                      {(detail) => (
-                                        <div class="space-y-2">
-                                          <div class="flex flex-wrap items-center gap-2 text-11-regular text-text-weak">
-                                            <span>{detail().kind}</span>
-                                            <span>•</span>
-                                            <span>{detail().source}</span>
-                                            <Show when={detail().completedAt}>
-                                              <span>• {formatJobTime(detail().completedAt!)}</span>
-                                            </Show>
-                                            <Show when={detail().exitCode !== undefined}>
-                                              <span>• exit {detail().exitCode}</span>
-                                            </Show>
+                            }
+                          >
+                            <For each={jobItems()}>
+                              {(job) => (
+                                <div class="group relative flex min-w-0 items-start gap-2 rounded-md px-1 py-2 hover:bg-surface-raised-base-hover">
+                                  <Icon name="terminal" size="small" class="mt-0.5 shrink-0 text-icon-weak-base" />
+                                  <div class="min-w-0 flex flex-1 items-start gap-2">
+                                    <div
+                                      class={`mt-1 size-1.5 shrink-0 rounded-full ${backgroundJobTone(job.status)}`}
+                                    />
+                                    <div class="min-w-0 flex-1">
+                                      <div class="truncate text-13-medium text-text-base">{job.title}</div>
+                                      <div class="mt-1 flex items-center gap-2 text-11-regular text-text-weak">
+                                        <span>{backgroundJobStatusLabel(language, job.status)}</span>
+                                        <span>•</span>
+                                        <span>{formatJobTime(job.createdAt)}</span>
+                                        <Show when={job.pid !== undefined}>
+                                          <span>• pid {job.pid}</span>
+                                        </Show>
+                                      </div>
+                                      <Show when={job.error}>
+                                        {(error) => (
+                                          <div class="mt-1 line-clamp-2 text-11-regular text-text-danger">
+                                            {error()}
                                           </div>
-                                          <Show when={Object.keys(detail().payload ?? {}).length > 0}>
-                                            <pre class="max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-surface-base px-2 py-1.5 text-[11px] leading-4 text-text-weak">
-                                              {JSON.stringify(detail().payload, null, 2)}
-                                            </pre>
+                                        )}
+                                      </Show>
+                                      <Show when={job.cwd}>
+                                        <div class="mt-1 truncate text-11-regular text-text-weak">{job.cwd}</div>
+                                      </Show>
+                                      <Show when={expandedJobID() === job.id}>
+                                        <div class="mt-2 rounded-sm border border-border-weak-base bg-background-base px-2 py-2">
+                                          <Show
+                                            when={!jobLoading[job.id]}
+                                            fallback={
+                                              <div class="text-11-regular text-text-weak">
+                                                {language.t("common.loading")}...
+                                              </div>
+                                            }
+                                          >
+                                            <Show when={jobDetails[job.id]}>
+                                              {(detail) => (
+                                                <div class="space-y-2">
+                                                  <div class="flex flex-wrap items-center gap-2 text-11-regular text-text-weak">
+                                                    <span>{detail().kind}</span>
+                                                    <span>•</span>
+                                                    <span>{detail().source}</span>
+                                                    <Show when={detail().completedAt}>
+                                                      <span>• {formatJobTime(detail().completedAt!)}</span>
+                                                    </Show>
+                                                    <Show when={detail().exitCode !== undefined}>
+                                                      <span>• exit {detail().exitCode}</span>
+                                                    </Show>
+                                                  </div>
+                                                  <Show when={Object.keys(detail().payload ?? {}).length > 0}>
+                                                    <pre class="max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-sm bg-surface-base px-2 py-1.5 text-[11px] leading-4 text-text-weak">
+                                                      {JSON.stringify(detail().payload, null, 2)}
+                                                    </pre>
+                                                  </Show>
+                                                </div>
+                                              )}
+                                            </Show>
+                                            <Show when={(jobLogs[job.id] ?? []).length > 0}>
+                                              <div class="mt-2 rounded-sm bg-surface-base px-2 py-1.5">
+                                                <div class="mb-1 text-11-regular text-text-weak">logs</div>
+                                                <div class="max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-text-base">
+                                                  <For each={jobLogs[job.id] ?? []}>
+                                                    {(entry) => (
+                                                      <div>
+                                                        <span class="text-text-weak">[{entry.stream}] </span>
+                                                        <span>{entry.text}</span>
+                                                      </div>
+                                                    )}
+                                                  </For>
+                                                </div>
+                                              </div>
+                                            </Show>
                                           </Show>
                                         </div>
-                                      )}
-                                    </Show>
-                                    <Show when={(jobLogs[job.id] ?? []).length > 0}>
-                                      <div class="mt-2 rounded-sm bg-surface-base px-2 py-1.5">
-                                        <div class="mb-1 text-11-regular text-text-weak">logs</div>
-                                        <div class="max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-text-base">
-                                          <For each={jobLogs[job.id] ?? []}>
-                                            {(entry) => (
-                                              <div>
-                                                <span class="text-text-weak">[{entry.stream}] </span>
-                                                <span>{entry.text}</span>
-                                              </div>
-                                            )}
-                                          </For>
-                                        </div>
+                                      </Show>
+                                    </div>
+                                    <div class="shrink-0 flex items-center gap-1.5">
+                                      <div class="relative" data-job-menu>
+                                        <button
+                                          type="button"
+                                          class="flex size-7 items-center justify-center rounded-md text-text-weak hover:bg-surface-raised-base-hover hover:text-text-base"
+                                          aria-label={`More actions for ${job.title}`}
+                                          aria-expanded={openJobMenuID() === job.id}
+                                          aria-haspopup="menu"
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            setOpenJobMenuID(openJobMenuID() === job.id ? undefined : job.id)
+                                          }}
+                                        >
+                                          <span class="flex gap-0.5" aria-hidden="true">
+                                            <span class="size-1 rounded-full bg-current" />
+                                            <span class="size-1 rounded-full bg-current" />
+                                            <span class="size-1 rounded-full bg-current" />
+                                          </span>
+                                        </button>
+                                        <Show when={openJobMenuID() === job.id}>
+                                          <div
+                                            class="absolute right-0 top-[calc(100%-2px)] z-30 w-56 max-w-[calc(100vw-4.5rem)] rounded-xl border border-border-weak-base bg-background-base p-1 shadow-[var(--shadow-lg-border-base)]"
+                                            role="menu"
+                                            aria-label="Background terminal actions"
+                                          >
+                                            <button
+                                              type="button"
+                                              role="menuitem"
+                                              class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover"
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                setOpenJobMenuID(undefined)
+                                                setExpandedJobID(job.id)
+                                                void refreshJobDetail(job.id, false)
+                                              }}
+                                            >
+                                              <Icon name="open-file" size="small" class="shrink-0" />
+                                              <span>Open output</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              role="menuitem"
+                                              class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover disabled:cursor-not-allowed disabled:text-text-weak"
+                                              disabled={job.status !== "running" || cancelJob.isPending}
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                setOpenJobMenuID(undefined)
+                                                cancelJob.mutate(job.id)
+                                              }}
+                                            >
+                                              <Icon name="stop" size="small" class="shrink-0" />
+                                              <span>Stop</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              role="menuitem"
+                                              class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover"
+                                              onClick={(event) => {
+                                                event.stopPropagation()
+                                                setOpenJobMenuID(undefined)
+                                                showToast({
+                                                  variant: "error",
+                                                  title: "Restart is not available yet",
+                                                  description:
+                                                    "This design action will connect to the background job restart API in a later step.",
+                                                })
+                                              }}
+                                            >
+                                              <Icon name="reset" size="small" class="shrink-0" />
+                                              <span>Restart</span>
+                                            </button>
+                                          </div>
+                                        </Show>
                                       </div>
-                                    </Show>
-                                  </Show>
-                                </div>
-                              </Show>
-                            </div>
-                            <div class="shrink-0 flex items-center gap-1.5">
-                              <div class="relative" data-job-menu>
-                                <button
-                                  type="button"
-                                  class="flex size-7 items-center justify-center rounded-md text-text-weak hover:bg-surface-raised-base-hover hover:text-text-base"
-                                  aria-label={`More actions for ${job.title}`}
-                                  aria-expanded={openJobMenuID() === job.id}
-                                  aria-haspopup="menu"
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    setOpenJobMenuID(openJobMenuID() === job.id ? undefined : job.id)
-                                  }}
-                                >
-                                  <span class="flex gap-0.5" aria-hidden="true">
-                                    <span class="size-1 rounded-full bg-current" />
-                                    <span class="size-1 rounded-full bg-current" />
-                                    <span class="size-1 rounded-full bg-current" />
-                                  </span>
-                                </button>
-                                <Show when={openJobMenuID() === job.id}>
-                                  <div class="absolute right-0 top-[calc(100%-2px)] z-30 w-56 max-w-[calc(100vw-4.5rem)] rounded-xl border border-border-weak-base bg-background-base p-1 shadow-[var(--shadow-lg-border-base)]" role="menu" aria-label="Background terminal actions">
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover"
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        setOpenJobMenuID(undefined)
-                                        setExpandedJobID(job.id)
-                                        void refreshJobDetail(job.id, false)
-                                      }}
-                                    >
-                                      <Icon name="open-file" size="small" class="shrink-0" />
-                                      <span>Open output</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover disabled:cursor-not-allowed disabled:text-text-weak"
-                                      disabled={job.status !== "running" || cancelJob.isPending}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        setOpenJobMenuID(undefined)
-                                        cancelJob.mutate(job.id)
-                                      }}
-                                    >
-                                      <Icon name="stop" size="small" class="shrink-0" />
-                                      <span>Stop</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-13-regular text-text-base hover:bg-surface-raised-base-hover"
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        setOpenJobMenuID(undefined)
-                                        showToast({
-                                          variant: "error",
-                                          title: "Restart is not available yet",
-                                          description: "This design action will connect to the background job restart API in a later step.",
-                                        })
-                                      }}
-                                    >
-                                      <Icon name="reset" size="small" class="shrink-0" />
-                                      <span>Restart</span>
-                                    </button>
+                                      <Button
+                                        size="small"
+                                        variant="ghost"
+                                        class="h-7 shrink-0 px-2"
+                                        onClick={() => {
+                                          if (expandedJobID() === job.id) {
+                                            setExpandedJobID(undefined)
+                                            return
+                                          }
+                                          setExpandedJobID(job.id)
+                                        }}
+                                      >
+                                        {expandedJobID() === job.id ? jobHideLabel() : jobDetailLabel()}
+                                      </Button>
+                                      <Show when={job.status === "running"}>
+                                        <Button
+                                          size="small"
+                                          variant="ghost"
+                                          class="h-7 shrink-0 px-2"
+                                          disabled={reconcileJob.isPending && reconcileJob.variables === job.id}
+                                          onClick={() => reconcileJob.mutate(job.id)}
+                                        >
+                                          {reconcileJobLabel()}
+                                        </Button>
+                                        <Button
+                                          size="small"
+                                          variant="secondary"
+                                          class="h-7 shrink-0 px-2"
+                                          disabled={cancelJob.isPending && cancelJob.variables === job.id}
+                                          onClick={() => cancelJob.mutate(job.id)}
+                                        >
+                                          {language.t("common.cancel")}
+                                        </Button>
+                                      </Show>
+                                    </div>
                                   </div>
-                                </Show>
-                              </div>
-                              <Button
-                                size="small"
-                                variant="ghost"
-                                class="h-7 shrink-0 px-2"
-                                onClick={() => {
-                                  if (expandedJobID() === job.id) {
-                                    setExpandedJobID(undefined)
-                                    return
-                                  }
-                                  setExpandedJobID(job.id)
-                                }}
-                              >
-                                {expandedJobID() === job.id ? jobHideLabel() : jobDetailLabel()}
-                              </Button>
-                              <Show when={job.status === "running"}>
-                                <Button
-                                  size="small"
-                                  variant="ghost"
-                                  class="h-7 shrink-0 px-2"
-                                  disabled={reconcileJob.isPending && reconcileJob.variables === job.id}
-                                  onClick={() => reconcileJob.mutate(job.id)}
-                                >
-                                  {reconcileJobLabel()}
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="secondary"
-                                  class="h-7 shrink-0 px-2"
-                                  disabled={cancelJob.isPending && cancelJob.variables === job.id}
-                                  onClick={() => cancelJob.mutate(job.id)}
-                                >
-                                  {language.t("common.cancel")}
-                                </Button>
-                              </Show>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </For>
-                  </Show>
-                </Show>
-              </div>
+                                </div>
+                              )}
+                            </For>
+                          </Show>
+                        </Show>
+                      </div>
                     </div>
                   </div>
                 </Show>

@@ -20,7 +20,7 @@ export const AppBrowserExtractResourceTool = Tool.define(
     description: "Extract the resolved resource metadata and contents behind a browser element such as an image, audio, or video node.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/extract-resource", {

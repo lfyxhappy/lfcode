@@ -36,7 +36,7 @@ export function toolCapability(tool: Tool.Def): CapabilityCatalogEntry {
     authentication: "not_required",
     dependencies: [],
     foreground: true,
-    background: metadata.kind === "execution" || metadata.kind === "task" || metadata.kind === "workflow",
+    background: metadata.kind === "execution" || metadata.kind === "task",
     subagent: true,
     reversible: metadata.readOnly || metadata.kind !== "execution",
   }

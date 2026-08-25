@@ -1,5 +1,4 @@
 import type { editor } from "monaco-editor"
-import { registerMonacoCodeEditorOpenHandler } from "@lfcode-ai/ui/monaco-kernel"
 
 export type CodeEditorNavigationSelection = {
   startLineNumber: number
@@ -22,6 +21,7 @@ const openHandlers = new WeakMap<editor.ICodeEditor, (input: { path: string; sel
 const backHistory: CodeEditorNavigationSnapshot[] = []
 const forwardHistory: CodeEditorNavigationSnapshot[] = []
 let registered = false
+let registration: Promise<void> | undefined
 
 export function normalizeCodeEditorNavigationPath(path: string) {
   return path.replaceAll("\\", "/")
@@ -111,45 +111,59 @@ export function applyCodeEditorNavigationSelection(
   target.focus()
 }
 
-export function registerCodeEditorOpenHandler(
+export async function registerCodeEditorOpenHandler(
   target: editor.ICodeEditor,
   handler: (input: { path: string; selection?: CodeEditorNavigationSelection }) => Promise<void> | void,
 ) {
-  ensureCodeEditorOpenHandlerRegistered()
   openHandlers.set(target, handler)
+  try {
+    await ensureCodeEditorOpenHandlerRegistered()
+  } catch (error) {
+    openHandlers.delete(target)
+    throw error
+  }
   return () => {
     openHandlers.delete(target)
   }
 }
 
 function ensureCodeEditorOpenHandlerRegistered() {
-  if (registered) return
+  if (registered) return Promise.resolve()
+  if (registration) return registration
 
-  registerMonacoCodeEditorOpenHandler(async (input, source) => {
-    if (!input.resource || input.resource.scheme !== "file" || !source) return null
-    if (source.getModel()?.uri.toString() === input.resource.toString()) return null
+  registration = import("@lfcode-ai/ui/monaco-kernel")
+    .then(({ registerMonacoCodeEditorOpenHandler }) => {
+      registerMonacoCodeEditorOpenHandler(async (input, source) => {
+        if (!input.resource || input.resource.scheme !== "file" || !source) return null
+        if (source.getModel()?.uri.toString() === input.resource.toString()) return null
 
-    const open = openHandlers.get(source)
-    if (!open) return null
+        const open = openHandlers.get(source)
+        if (!open) return null
 
-    const path = input.resource.fsPath ?? input.resource.path
-    if (!path) return null
+        const path = input.resource.fsPath ?? input.resource.path
+        if (!path) return null
 
-    await open({
-      path,
-      selection: input.options?.selection
-        ? {
-            startLineNumber: input.options.selection.startLineNumber,
-            startColumn: input.options.selection.startColumn,
-            endLineNumber: input.options.selection.endLineNumber,
-            endColumn: input.options.selection.endColumn,
-          }
-        : undefined,
+        await open({
+          path,
+          selection: input.options?.selection
+            ? {
+                startLineNumber: input.options.selection.startLineNumber,
+                startColumn: input.options.selection.startColumn,
+                endLineNumber: input.options.selection.endLineNumber,
+                endColumn: input.options.selection.endColumn,
+              }
+            : undefined,
+        })
+
+        return source
+      })
+      registered = true
     })
-
-    return source
-  })
-  registered = true
+    .catch((error: unknown) => {
+      registration = undefined
+      throw error
+    })
+  return registration
 }
 
 function cloneCodeEditorNavigationSnapshot(input: CodeEditorNavigationSnapshot) {

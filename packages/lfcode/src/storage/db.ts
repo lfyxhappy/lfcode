@@ -8,7 +8,7 @@ import { Log } from "../util"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import z from "zod"
 import path from "path"
-import { existsSync, readFileSync, readdirSync } from "fs"
+import { existsSync, readFileSync, readdirSync, rmSync } from "fs"
 import { Flag } from "../flag/flag"
 import { InstallationChannel } from "../installation/version"
 import { InstanceState } from "@/effect"
@@ -112,6 +112,12 @@ export const Client = lazy(() => {
     migrate(db, entries)
   }
 
+  if (!Flag.LFCODE_SKIP_MIGRATIONS) {
+    const removedWorkflowArtifacts = cleanupRetiredWorkflowArtifacts()
+    if (removedWorkflowArtifacts.length > 0)
+      log.info("cleaned retired workflow artifacts", { count: removedWorkflowArtifacts.length })
+  }
+
   repairRecentUserActivitySchema(db)
   repairOversizedMessageSummaryDiffs(db)
 
@@ -177,6 +183,15 @@ function repairRecentUserActivitySchema(db: Client) {
   `)
 
   log.warn("repaired recent user activity schema", { projectHas, sessionHas })
+}
+
+export function cleanupRetiredWorkflowArtifacts(dir = path.join(Global.Path.data, "workflow")) {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isFile() || !/^wf_[0-9A-Za-z]+\.(js|jsonl)$/.test(entry.name)) return []
+    rmSync(path.join(dir, entry.name), { force: true })
+    return [entry.name]
+  })
 }
 
 function repairOversizedMessageSummaryDiffs(db: Client) {

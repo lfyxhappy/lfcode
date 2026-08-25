@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, on, onCleanup, Show, Index, type JSX, createSignal } from "solid-js"
+import { For, createEffect, createMemo, createResource, on, onCleanup, Show, Index, type JSX, createSignal } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { useMutation } from "@tanstack/solid-query"
@@ -15,6 +15,7 @@ import type { RenderCodeBlockInput } from "@lfcode-ai/ui/message-code-blocks"
 import type { HtmlComponentEventDetail } from "@lfcode-ai/ui/markdown"
 import { ScrollView } from "@lfcode-ai/ui/scroll-view"
 import { TextField } from "@lfcode-ai/ui/text-field"
+import { Virtualizer } from "virtua/solid"
 import type { VirtualizerHandle } from "virtua/solid"
 import type { FileReferenceContextValue } from "@lfcode-ai/ui/context/file-reference"
 import type { Message as MessageType, Part, TextPart, UserMessage } from "@lfcode-ai/sdk/v2"
@@ -23,7 +24,8 @@ import { base64Encode } from "@lfcode-ai/shared/util/encode"
 import { getFilename } from "@lfcode-ai/shared/util/path"
 import { Popover as KobaltePopover } from "@kobalte/core/popover"
 import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/message-gesture"
-import { buildMessageTimelineModel } from "@/pages/session/message-timeline-model"
+import { buildMessageTimelineModel, sameTimelinePartStructure } from "@/pages/session/message-timeline-model"
+import { isRealUserMessage } from "@/pages/session/message-timeline-turns"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
@@ -41,10 +43,11 @@ import { isSessionWorking } from "@/utils/session-status"
 import { sessionTitle } from "@/utils/session-title"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { makeTimer } from "@solid-primitives/timer"
-import { ComposeRouteStatusBadge } from "./compose-route-banner"
-import { isCodeEditorFenceLanguageSupported } from "@/components/code-editor/core/language"
 import { CppMessageBlock } from "./cpp-message-block"
 import { MessageCodeBlock } from "./message-code-block"
+import { SessionHistoryRail } from "./session-history-rail"
+import { TavernMessageTurn } from "./tavern-message-turn"
+import { prependsTimelineTurns } from "./timeline-virtual-direction"
 import { buildSessionMenuActions, type MenuAction, sessionDeeplink } from "../layout/menu-actions"
 
 type MessageComment = {
@@ -57,6 +60,7 @@ type MessageComment = {
 }
 
 const emptyMessages: MessageType[] = []
+const emptyParts: Part[] = []
 const idle = { type: "idle" as const }
 type UserActions = {
   fork?: (input: { sessionID: string; messageID: string }) => Promise<void> | void
@@ -123,10 +127,27 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function indexTimelineMessages(messages: MessageType[]) {
+function indexTimelineMessages(messages: MessageType[], partsByMessageID: Record<string, Part[] | undefined>) {
   const turns = new Map<string, MessageType[]>()
+  let latestUserID: string | undefined
+
   for (const message of messages) {
-    const turnID = message.role === "user" ? message.id : message.role === "assistant" ? message.parentID : undefined
+    if (message.role === "user") {
+      if (!isRealUserMessage(message, partsByMessageID)) {
+        if (!latestUserID) continue
+        const turn = turns.get(latestUserID) ?? []
+        turn.push(message)
+        turns.set(latestUserID, turn)
+        continue
+      }
+      latestUserID = message.id
+      const turn = turns.get(message.id) ?? []
+      turn.push(message)
+      turns.set(message.id, turn)
+      continue
+    }
+
+    const turnID = message.role === "assistant" ? latestUserID : undefined
     if (!turnID) continue
     const turn = turns.get(turnID) ?? []
     turn.push(message)
@@ -137,6 +158,19 @@ function indexTimelineMessages(messages: MessageType[]) {
 
 function selectTimelineMessages(turns: Map<string, MessageType[]>, users: UserMessage[]) {
   return users.flatMap((message) => turns.get(message.id) ?? [])
+}
+
+function sameMessageReferences(left: MessageType[], right: MessageType[]) {
+  return left.length === right.length && left.every((message, index) => message === right[index])
+}
+
+function sameTimelineTurns(left: Map<string, MessageType[]>, right: Map<string, MessageType[]>) {
+  if (left.size !== right.size) return false
+  for (const [turnID, messages] of left) {
+    const next = right.get(turnID)
+    if (!next || !sameMessageReferences(messages, next)) return false
+  }
+  return true
 }
 
 export type MessageTimelineProps = {
@@ -209,6 +243,9 @@ export function MessageTimeline(props: MessageTimelineProps) {
   const working = createMemo(() => isSessionWorking(sessionStatus()))
   const tint = createMemo(() => messageAgentColor(timelineMessages(), sync.data.agent))
   const renderCodeBlock = (input: RenderCodeBlockInput) => {
+    // A fence is only an editable project card when it explicitly names a
+    // valid relative path. Untitled snippets stay in the Markdown renderer.
+    if (!input.projectPath) return
     if (["cpp", "c++", "cc", "cxx"].includes(input.language)) {
       return (
         <CppMessageBlock
@@ -218,10 +255,11 @@ export function MessageTimeline(props: MessageTimelineProps) {
           partID={input.partID}
           blockIndex={input.blockIndex}
           code={input.code}
+          raw={input.raw}
+          projectPath={input.projectPath}
         />
       )
     }
-    if (!isCodeEditorFenceLanguageSupported(input.language)) return
     return (
       <MessageCodeBlock
         blockKey={`${input.message.sessionID}:${input.message.id}:${input.partID}:${input.blockIndex}`}
@@ -231,6 +269,9 @@ export function MessageTimeline(props: MessageTimelineProps) {
         blockIndex={input.blockIndex}
         languageID={input.language}
         code={input.code}
+        raw={input.raw}
+        projectPath={input.projectPath}
+        title={input.title}
       />
     )
   }
@@ -255,6 +296,15 @@ export function MessageTimeline(props: MessageTimelineProps) {
     if (!id) return
     return sync.session.get(id)
   })
+  const tavernSession = createMemo(() => info()?.extension?.pluginID === "lfcode-tavern" && info()?.extension?.type === "tavern")
+  const [tavernData] = createResource(
+    () => (tavernSession() ? "lfcode-tavern" : undefined),
+    async (pluginID) =>
+      (await sdk.client.plugin.dataGet({ pluginID }).catch(() => ({ data: undefined }))).data?.value as
+        | { settings?: { html?: boolean } }
+        | undefined,
+  )
+  const tavernHtml = createMemo(() => tavernData()?.settings?.html ?? true)
   const titleValue = createMemo(() => info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()))
   const shareUrl = createMemo(() => info()?.share?.url)
@@ -303,19 +353,121 @@ export function MessageTimeline(props: MessageTimelineProps) {
   })
   const showHeader = createMemo(() => !props.embedded && !!(titleValue() || parentID()))
   const [scrollRoot, setScrollRoot] = createSignal<HTMLDivElement>()
-  const rendered = createMemo(() => props.renderedUserMessages.map((message) => message.id))
-  const timelineTurns = createMemo(() => indexTimelineMessages(timelineMessages()))
-  const timelineWindow = createMemo(() => selectTimelineMessages(timelineTurns(), props.renderedUserMessages))
+  const timelineUserParts = createMemo(
+    () =>
+      timelineMessages().reduce<Record<string, Part[] | undefined>>((result, message) => {
+        if (message.role === "user") result[message.id] = sync.data.part[message.id] ?? emptyParts
+        return result
+      }, {}),
+    undefined,
+    { equals: sameTimelinePartStructure },
+  )
+  const renderedUserMessages = createMemo(
+    () => props.renderedUserMessages.filter((message) => isRealUserMessage(message, timelineUserParts())),
+    undefined,
+    { equals: sameMessageReferences },
+  )
+  const rendered = createMemo(() => renderedUserMessages().map((message) => message.id), undefined, {
+    equals: (left, right) => left.length === right.length && left.every((id, index) => id === right[index]),
+  })
+  const railTurnIDs = rendered
+  const historyRailSpace = createMemo(
+    () => !props.embedded && props.viewAgentID === "main" && railTurnIDs().length > 0,
+  )
+  const virtualizerState = createMemo((previous?: { data: string[]; shift: boolean }) => {
+    const data = rendered()
+    return {
+      data,
+      shift: previous ? prependsTimelineTurns(previous.data, data) : false,
+    }
+  })
+  const timelineTurns = createMemo(() => indexTimelineMessages(timelineMessages(), timelineUserParts()), undefined, {
+    equals: sameTimelineTurns,
+  })
+  const timelineWindow = createMemo(() => selectTimelineMessages(timelineTurns(), renderedUserMessages()))
+  const timelineModelParts = createMemo(
+    () =>
+      timelineWindow().reduce<Record<string, Part[] | undefined>>((result, message) => {
+        result[message.id] = sync.data.part[message.id] ?? emptyParts
+        return result
+      }, {}),
+    undefined,
+    { equals: sameTimelinePartStructure },
+  )
   const timelineModel = createMemo(() =>
     buildMessageTimelineModel({
       messages: timelineWindow(),
-      renderedUsers: props.renderedUserMessages,
-      partsByMessageID: sync.data.part,
+      renderedUsers: renderedUserMessages(),
+      partsByMessageID: timelineModelParts(),
       sessionCompacting: info()?.time.compacting,
     }),
   )
   const timelineContext = createMemo(() => timelineModel().context)
   const turnLookup = createMemo(() => timelineModel().turnLookup)
+
+  let timelineVirtualizer: VirtualizerHandle | undefined
+  let railRevealFrame: number | undefined
+  let railRevealAttempts = 0
+  let railLoadRequested = false
+  const [virtualizerVersion, setVirtualizerVersion] = createSignal(0)
+  const [railTarget, setRailTarget] = createSignal<string>()
+
+  const bindVirtualizer = (handle: VirtualizerHandle | undefined) => {
+    timelineVirtualizer = handle
+    setVirtualizerVersion((value) => value + 1)
+    props.onVirtualizerRef?.(handle)
+  }
+
+  const requestRailTurn = (turnID: string) => {
+    railRevealAttempts = 0
+    railLoadRequested = false
+    const root = scrollRoot()
+    if (root) props.onMarkScrollGesture(root)
+    props.onUserScroll()
+    setRailTarget(turnID)
+  }
+
+  createEffect(() => {
+    const target = railTarget()
+    if (!target) return
+
+    virtualizerVersion()
+    const index = rendered().indexOf(target)
+    if (index >= 0) {
+      if (!timelineVirtualizer) return
+      if (railRevealFrame !== undefined) cancelAnimationFrame(railRevealFrame)
+      railRevealFrame = requestAnimationFrame(() => {
+        railRevealFrame = undefined
+        if (railTarget() !== target) return
+        const currentIndex = rendered().indexOf(target)
+        if (currentIndex < 0 || !timelineVirtualizer) return
+        timelineVirtualizer.scrollToIndex(currentIndex, { align: "start" })
+        setRailTarget()
+      })
+      return
+    }
+
+    if (props.historyLoading) {
+      railLoadRequested = false
+      return
+    }
+    if (props.turnStart <= 0 && !props.historyMore) {
+      setRailTarget()
+      return
+    }
+    if (railLoadRequested || railRevealAttempts >= 256) {
+      if (railRevealAttempts >= 256) setRailTarget()
+      return
+    }
+
+    railRevealAttempts += 1
+    railLoadRequested = true
+    props.onLoadEarlier()
+  })
+
+  onCleanup(() => {
+    if (railRevealFrame !== undefined) cancelAnimationFrame(railRevealFrame)
+  })
 
   const [title, setTitle] = createStore({
     draft: "",
@@ -673,26 +825,26 @@ export function MessageTimeline(props: MessageTimelineProps) {
       <div class="relative w-full h-full min-w-0">
         <div
           data-component="timeline-resume-control"
-          class="absolute left-1/2 -translate-x-1/2 bottom-6 z-[60] pointer-events-none"
+          class="absolute left-0 bottom-6 z-[60] pointer-events-none"
+          style={{ right: props.rightInset ? "clamp(336px, 22vw, 440px)" : "0" }}
           classList={{
+            "md:left-[76px]": historyRailSpace(),
             "opacity-100 translate-y-0 scale-100": props.scroll.overflow && props.scroll.jump,
             "opacity-0 translate-y-2 scale-95 pointer-events-none": !props.scroll.overflow || !props.scroll.jump,
           }}
         >
-          <button
-            class="pointer-events-auto flex items-center justify-center w-10 h-8 bg-transparent border-none cursor-pointer p-0 group"
-            onClick={props.onResumeScroll}
-          >
-            <div
-              class="flex items-center justify-center w-8 h-6 rounded-[6px] border border-border-weaker-base bg-[color-mix(in_srgb,var(--surface-raised-stronger-non-alpha)_80%,transparent)] backdrop-blur-[0.75px] transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]"
-              style={{
-                "box-shadow":
-                  "0 51px 60px 0 rgba(0,0,0,0.10), 0 15px 18px 0 rgba(0,0,0,0.12), 0 6.386px 7.513px 0 rgba(0,0,0,0.12), 0 2.31px 2.717px 0 rgba(0,0,0,0.20)",
-              }}
+          <div class="flex justify-center">
+            <button
+              class="pointer-events-auto flex items-center justify-center w-10 h-8 bg-transparent border-none cursor-pointer p-0 group"
+              onClick={props.onResumeScroll}
             >
-              <Icon name="arrow-down-to-line" size="small" />
-            </div>
-          </button>
+              <div
+                class="flex items-center justify-center w-8 h-6 rounded-md border border-border-weaker-base bg-surface-raised-stronger-non-alpha shadow-[var(--shadow-xs-border)] transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]"
+              >
+                <Icon name="arrow-down-to-line" size="small" />
+              </div>
+            </button>
+          </div>
         </div>
         <ScrollView
           viewportRef={(el) => {
@@ -754,8 +906,16 @@ export function MessageTimeline(props: MessageTimelineProps) {
           <div
             ref={props.setContentRef}
             data-session-id={sessionID() ?? ""}
+            data-component="session-timeline-content"
             class="min-w-0 w-full"
-            style={{ width: props.rightInset ? "calc(100% - clamp(336px, 22vw, 440px))" : undefined }}
+            style={{
+              "margin-left": historyRailSpace() ? "60px" : undefined,
+              width: historyRailSpace()
+                ? `calc(100% - 60px - ${props.rightInset ? "clamp(336px, 22vw, 440px)" : "0px"})`
+                : props.rightInset
+                  ? "calc(100% - clamp(336px, 22vw, 440px))"
+                  : undefined,
+            }}
           >
             <Show when={showHeader()}>
               <div
@@ -765,7 +925,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
                 }}
                 data-session-title
                 classList={{
-                  "sticky top-0 z-30 bg-[linear-gradient(to_bottom,var(--background-stronger)_48px,transparent)]": true,
+                  "sticky top-0 z-30 bg-background-stronger": true,
                   relative: true,
                   "w-full": true,
                   "pb-4": true,
@@ -862,13 +1022,6 @@ export function MessageTimeline(props: MessageTimelineProps) {
                             onBlur={closeTitleEditor}
                           />
                         </Show>
-                      </Show>
-                      <Show when={info()?.composeRoute}>
-                        {(route) => (
-                          <div class="ml-2 shrink-0 min-w-0">
-                            <ComposeRouteStatusBadge route={route()} />
-                          </div>
-                        )}
                       </Show>
                     </div>
                   </div>
@@ -1066,7 +1219,14 @@ export function MessageTimeline(props: MessageTimelineProps) {
                   </Button>
                 </div>
               </Show>
-              <For each={rendered()}>
+              <Virtualizer
+                data={virtualizerState().data}
+                ref={bindVirtualizer}
+                cache={props.virtualizerCache?.()}
+                scrollRef={scrollRoot()}
+                shift={virtualizerState().shift}
+                startMargin={props.turnStart > 0 || props.historyMore ? 44 : 0}
+              >
                 {(messageID) => {
                   const turn = createMemo(() => turnLookup().turns.get(messageID))
                   const comments = createMemo(() => messageComments(sync.data.part[messageID] ?? []), [], {
@@ -1141,32 +1301,47 @@ export function MessageTimeline(props: MessageTimelineProps) {
                           </div>
                         </div>
                       </Show>
-                      <SessionTurn
-                        sessionID={sessionID() ?? ""}
-                        messageID={messageID}
-                        turn={turn}
-                        messages={timelineWindow}
-                        anchor={props.domAnchor ?? props.anchor}
-                        actions={props.actions}
-                        showReasoningSummaries={settings.general.showReasoningSummaries()}
-                        shellToolDefaultOpen={settings.general.shellToolPartsExpanded()}
-                        editToolDefaultOpen={settings.general.editToolPartsExpanded()}
-                        classes={{
-                          root: "min-w-0 w-full relative",
-                          content: "flex flex-col justify-between !overflow-visible",
-                          container: "w-full px-4 md:px-5",
-                        }}
-                        fileReferences={props.fileReferences}
-                        onHtmlComponentEvent={props.onHtmlComponentEvent}
-                        renderCodeBlock={renderCodeBlock}
-                      />
+                      <Show
+                        when={tavernSession()}
+                        fallback={
+                          <SessionTurn
+                            sessionID={sessionID() ?? ""}
+                            messageID={messageID}
+                            turn={turn}
+                            messages={timelineWindow}
+                            anchor={props.domAnchor ?? props.anchor}
+                            actions={props.actions}
+                            showReasoningSummaries={settings.general.showReasoningSummaries()}
+                            classes={{
+                              root: "min-w-0 w-full relative",
+                              content: "flex flex-col justify-between !overflow-visible",
+                              container: "w-full px-4 md:px-5",
+                            }}
+                            fileReferences={props.fileReferences}
+                            onHtmlComponentEvent={props.onHtmlComponentEvent}
+                            renderCodeBlock={renderCodeBlock}
+                          />
+                        }
+                      >
+                        <TavernMessageTurn turn={turn()} parts={sync.data.part} html={tavernHtml()} />
+                      </Show>
                     </div>
                   )
                 }}
-              </For>
+              </Virtualizer>
             </div>
           </div>
         </ScrollView>
+        <Show when={historyRailSpace()}>
+          <SessionHistoryRail
+            turnIDs={railTurnIDs}
+            renderedTurnIDs={() => rendered()}
+            turnStart={() => props.turnStart}
+            viewport={scrollRoot}
+            ariaLabel={language.t("session.messages.renderEarlier")}
+            onSelect={requestRailTurn}
+          />
+        </Show>
       </div>
     </Show>
   )

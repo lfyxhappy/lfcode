@@ -30,6 +30,9 @@ export function stream(text: string, live: boolean) {
   if (!live) return [{ raw: text, src: text, mode: "full" }] satisfies Block[]
   const src = heal(text)
   if (refs(text)) return [{ raw: text, src, mode: "live" }] satisfies Block[]
+  // Lexer work is only needed to split an unfinished fenced code block.
+  // Plain prose has the same render result as one live block.
+  if (!/[`~]{3,}/.test(text)) return [{ raw: text, src, mode: "live" }] satisfies Block[]
   const tokens = marked.lexer(text)
   const tail = tokens.findLastIndex((token) => token.type !== "space")
   if (tail < 0) return [{ raw: text, src, mode: "live" }] satisfies Block[]

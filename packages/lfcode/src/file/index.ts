@@ -15,6 +15,7 @@ import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { Log } from "../util"
 import { Protected } from "./protected"
+import { authorize, grant } from "./reference-access"
 import { Ripgrep } from "./ripgrep"
 
 export const Info = z
@@ -42,6 +43,26 @@ export const Node = z
     ref: "FileNode",
   })
 export type Node = z.infer<typeof Node>
+
+export const Reference = z
+  .object({
+    exists: z.boolean(),
+    kind: z.enum(["file", "directory", "unknown"]),
+  })
+  .meta({
+    ref: "FileReference",
+  })
+export type Reference = z.infer<typeof Reference>
+
+export const ReferenceGrant = z
+  .object({
+    root: z.string(),
+    token: z.string(),
+  })
+  .meta({
+    ref: "FileReferenceGrant",
+  })
+export type ReferenceGrant = z.infer<typeof ReferenceGrant>
 
 export const Content = z
   .object({
@@ -483,7 +504,8 @@ interface State {
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Info[]>
-  readonly read: (file: string, options?: { withDiff?: boolean }) => Effect.Effect<Content>
+  readonly stat: (file: string) => Effect.Effect<Reference>
+  readonly read: (file: string, options?: { withDiff?: boolean; referenceToken?: string }) => Effect.Effect<Content>
   readonly write: (input: {
     path: string
     content: string
@@ -491,6 +513,8 @@ export interface Interface {
     createParents?: boolean
   }) => Effect.Effect<Content>
   readonly list: (dir?: string) => Effect.Effect<Node[]>
+  readonly grantReferenceDirectory: (dir: string) => Effect.Effect<ReferenceGrant, Error>
+  readonly listReferenceDirectory: (input: { path: string; token?: string }) => Effect.Effect<Node[], Error>
   readonly search: (input: {
     query: string
     limit?: number
@@ -640,13 +664,32 @@ export const layer = Layer.effect(
       })
     })
 
+    const stat: Interface["stat"] = Effect.fn("File.stat")(function* (file: string) {
+      const ctx = yield* InstanceState.context
+      const full = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
+
+      if (!Instance.containsPath(full, ctx)) {
+        throw new Error("Access denied: path escapes project directory")
+      }
+
+      const info = yield* appFs.stat(full).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!info) return { exists: false, kind: "unknown" }
+      if (info.type === "Directory") return { exists: true, kind: "directory" }
+      if (info.type === "File") return { exists: true, kind: "file" }
+      return { exists: true, kind: "unknown" }
+    })
+
     const read: Interface["read"] = Effect.fn("File.read")(function* (
       file: string,
-      options?: { withDiff?: boolean },
+      options?: { withDiff?: boolean; referenceToken?: string },
     ) {
       using _ = log.time("read", { file })
       const ctx = yield* InstanceState.context
-      const full = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
+      const resolved = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
+      const full =
+        path.isAbsolute(file) && !Instance.containsPath(resolved, ctx)
+          ? authorize({ owner: ctx.directory, path: resolved, token: options?.referenceToken })
+          : resolved
       const projectRelative = AppFileSystem.contains(ctx.directory, full) ? path.relative(ctx.directory, full) : undefined
 
       if (!path.isAbsolute(file) && !Instance.containsPath(full, ctx)) {
@@ -757,7 +800,7 @@ export const layer = Layer.effect(
         path.isAbsolute(input.path) ? input.path : path.join(ctx.directory, input.path),
       )
 
-      if (!path.isAbsolute(input.path) && !Instance.containsPath(full, ctx)) {
+      if (!Instance.containsPath(full, ctx)) {
         throw new Error("Access denied: path escapes project directory")
       }
 
@@ -829,6 +872,48 @@ export const layer = Layer.effect(
       })
     })
 
+    const grantReferenceDirectory: Interface["grantReferenceDirectory"] = Effect.fn("File.grantReferenceDirectory")(function* (
+      dir: string,
+    ) {
+      if (!path.isAbsolute(dir)) throw new Error("Reference directory path must be absolute")
+      const ctx = yield* InstanceState.context
+      const resolved = AppFileSystem.normalizePath(dir)
+      const info = yield* appFs.stat(resolved).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!info) throw new Error("Reference directory does not exist")
+      if (info.type !== "Directory") throw new Error("Reference path is not a directory")
+      return grant({ owner: ctx.directory, root: resolved })
+    })
+
+    const listReferenceDirectory: Interface["listReferenceDirectory"] = Effect.fn("File.listReferenceDirectory")(function* (
+      input: { path: string; token?: string },
+    ) {
+      if (!path.isAbsolute(input.path)) throw new Error("Reference directory path must be absolute")
+      const ctx = yield* InstanceState.context
+      const resolved = authorize({ owner: ctx.directory, path: input.path, token: input.token })
+      const info = yield* appFs.stat(resolved).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!info) throw new Error("Reference directory does not exist")
+      if (info.type !== "Directory") throw new Error("Reference path is not a directory")
+
+      const entries = yield* appFs.readDirectoryEntries(resolved)
+      const nodes: Node[] = []
+      for (const entry of entries) {
+        if (entry.name === ".git" || entry.name === ".DS_Store") continue
+        if (entry.type === "symlink" || entry.type === "other") continue
+        const absolute = path.join(resolved, entry.name)
+        nodes.push({
+          name: entry.name,
+          path: absolute,
+          absolute,
+          type: entry.type === "directory" ? "directory" : "file",
+          ignored: false,
+        })
+      }
+      return nodes.sort((a, b) => {
+        if (a.type !== b.type) return a.type === "directory" ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
+    })
+
     const search = Effect.fn("File.search")(function* (input: {
       query: string
       limit?: number
@@ -861,7 +946,7 @@ export const layer = Layer.effect(
     })
 
     log.info("init")
-    return Service.of({ init, status, read, write, list, search })
+    return Service.of({ init, status, stat, read, write, list, grantReferenceDirectory, listReferenceDirectory, search })
   }),
 )
 

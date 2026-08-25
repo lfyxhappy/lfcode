@@ -16,8 +16,10 @@ import type { TuiPlugin } from "./tui.js"
 
 import type { BunShell } from "./shell.js"
 import { type ToolDefinition } from "./tool.js"
+import type { ActionDefinition } from "./action.js"
 
 export * from "./tool.js"
+export * from "./action.js"
 export * from "./manifest.js"
 export * from "./library.js"
 
@@ -59,9 +61,14 @@ export type WorkspaceAdaptor = {
 
 export type PluginInput = {
   client: ReturnType<typeof createLfcodeClient>
+  clientV2?: ReturnType<(typeof import("@lfcode-ai/sdk/v2"))["createLfcodeClient"]>
   project: Project
   directory: string
   worktree: string
+  /** Absolute path to this local plugin's private `data/` directory when `lfcode.storage.data` is enabled. */
+  data?: string
+  /** Encrypted credential storage scoped to this plugin's private data directory. */
+  secureStorage?: PluginSecureStorage
   experimental_workspace: {
     register(type: string, adaptor: WorkspaceAdaptor): void
   }
@@ -81,6 +88,13 @@ export type PluginModule = {
   id?: string
   server: Plugin
   tui?: never
+}
+
+export type PluginSecureStorage = {
+  status(): "available" | "unavailable"
+  get(key: string): Promise<string | undefined>
+  set(key: string, value: string): Promise<void>
+  remove(key: string): Promise<void>
 }
 
 export type TuiPluginModule = {
@@ -330,6 +344,13 @@ export interface Hooks {
   config?: (input: Config) => Promise<void>
   tool?: {
     [key: string]: ToolDefinition
+  }
+  /**
+   * Explicit, schema-validated actions callable by trusted host UI. Plugin
+   * renderers never receive direct server or filesystem access.
+   */
+  action?: {
+    [key: string]: ActionDefinition
   }
   auth?: AuthHook
   provider?: ProviderHook

@@ -44,7 +44,7 @@ describe("tool.context_broker", () => {
         const tool = (yield* registry.tools({
           providerID: "lfcode" as never,
           modelID: "gpt-5" as never,
-          agent: { name: "build", mode: "primary", permission: [], options: {} },
+          agent: { name: "build", mode: "primary", permission: [], options: {}, toolAllowlist: [ContextBrokerTool.id] },
         })).find((item) => item.id === ContextBrokerTool.id)
         if (!tool) throw new Error("context_broker tool not found")
         const ctx: Tool.Context = {

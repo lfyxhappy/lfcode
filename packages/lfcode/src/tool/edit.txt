@@ -1,13 +1,12 @@
-Performs exact string replacements in files. 
+The only file-editing tool. Read the target before modifying it, then choose one operation:
 
-Usage:
-- You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. 
-- The `filePath` parameter may be absolute or relative. Relative paths are resolved from the current session working directory.
-- On Windows, prefer forward slashes in `filePath` (for example `C:/repo/file.ts`) instead of backslashes, to avoid JSON escaping mistakes in tool calls.
-- When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: line number + colon + space (e.g., `1: `). Everything after that space is the actual file content to match. Never include any part of the line number prefix in the oldString or newString.
-- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
-- This is a legacy compatibility tool. Prefer `replace_range`, `symbol_edit`, or `apply_patch` in normal coding turns.
-- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
-- The edit will FAIL if `oldString` is not found in the file with an error "oldString not found in content".
-- The edit will FAIL if `oldString` is found multiple times in the file with an error "Found multiple matches for oldString. Provide more surrounding lines in oldString to identify the correct match." Either provide a larger string with more surrounding context to make it unique or use `replaceAll` to change every instance of `oldString`. 
-- Use `replaceAll` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+- `replace` is the default. Use it for one verified text change in one file. Provide `filePath`, the exact current `oldString`, and `newString`. Include enough unchanged surrounding text for a unique match. Use `replaceAll` only when every match must change.
+- `patch` is for multiple hunks, files, or file add/delete/move operations. Provide only `patchText` with a pure `*** Begin Patch` / `*** End Patch` envelope.
+- `write` intentionally replaces an entire file or creates a new one. Provide `filePath` and complete `content`; do not use it for a small localized change.
+
+Rules:
+- Relative `filePath` values are resolved from the current session directory. On Windows, prefer forward slashes such as `C:/repo/file.ts` to avoid JSON escaping errors.
+- For existing files, perform a fresh Read before the first edit and after any context or version failure. Copy exact content after the line number prefix; never include the `line: ` prefix itself in `oldString`.
+- A `replace` with empty `oldString` creates a new file only. It never overwrites an existing file. Use `write` only when a whole-file replacement is intentional.
+- Do not use `shell`, Python, or another terminal command to bypass a failed edit. Read the current file, make one corrected `edit` call, then report the remaining blocker if it still fails.
+- Use only the canonical schema fields shown in the tool definition. Legacy editing tools and their argument shapes are not supported.

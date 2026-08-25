@@ -4,6 +4,8 @@ import path from "path"
 import { provideInstance, tmpdir, provideTmpdirInstance } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Agent } from "../../src/agent/agent"
+import { AgentPreset } from "../../src/agent/preset"
+import { SYSTEM_SPAWNED_AGENT_TYPES } from "../../src/agent/config"
 import { Global } from "../../src/global"
 import { Permission } from "../../src/permission"
 import { ToolRegistry } from "../../src/tool"
@@ -11,9 +13,7 @@ import { ModelID, ProviderID } from "../../src/provider/schema"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 
-const itTool = testEffect(
-  Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer),
-)
+const itTool = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 // Helper to evaluate permission for a tool with wildcard pattern
 function evalPerm(agent: Agent.Info | undefined, permission: string): Permission.Action | undefined {
@@ -76,7 +76,7 @@ test("plan agent denies edits except .lfcode/plans/*", async () => {
   })
 })
 
-test("explore agent denies edit and write", async () => {
+test("explore agent uses a read-only tool policy", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
@@ -87,11 +87,12 @@ test("explore agent denies edit and write", async () => {
       expect(evalPerm(explore, "edit")).toBe("deny")
       expect(evalPerm(explore, "write")).toBe("deny")
       expect(evalPerm(explore, "todowrite")).toBe("deny")
+      expect(evalPerm(explore, "glob")).toBe("allow")
     },
   })
 })
 
-test("explore agent asks for external directories and allows Truncate.GLOB", async () => {
+test("explore agent denies external directories and still allows Truncate.GLOB", async () => {
   const { Truncate } = await import("../../src/tool")
   await using tmp = await tmpdir()
   await Instance.provide({
@@ -99,7 +100,7 @@ test("explore agent asks for external directories and allows Truncate.GLOB", asy
     fn: async () => {
       const explore = await load(tmp.path, (svc) => svc.get("explore"))
       expect(explore).toBeDefined()
-      expect(Permission.evaluate("external_directory", "/some/other/path", explore!.permission).action).toBe("ask")
+      expect(Permission.evaluate("external_directory", "/some/other/path", explore!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", Truncate.GLOB, explore!.permission).action).toBe("allow")
     },
   })
@@ -172,6 +173,30 @@ test("custom agent config overrides native agent properties", async () => {
       expect(build?.temperature).toBe(0.7)
       expect(build?.color).toBe("#FF0000")
       expect(build?.native).toBe(true)
+    },
+  })
+})
+
+test("system-spawned agent config cannot disable or override context reviewer", async () => {
+  await using tmp = await tmpdir({
+    config: {
+      agent: {
+        "context-reviewer": {
+          disable: true,
+          description: "user-visible override",
+          permission: { "*": "allow" },
+        },
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const reviewer = await load(tmp.path, (svc) => svc.get("context-reviewer"))
+      expect(reviewer?.hidden).toBe(true)
+      expect(reviewer?.description).not.toBe("user-visible override")
+      expect(evalPerm(reviewer, "memory")).toBe("allow")
+      expect(evalPerm(reviewer, "bash")).toBe("deny")
     },
   })
 })
@@ -407,7 +432,7 @@ test("Agent.list keeps the default agent first, then native primaries, then the 
       // default_agent comes first
       expect(names[0]).toBe("plan")
       expect(names[1]).toBe("build")
-      expect(names[2]).toBe("compose")
+      expect(names[2]).toBe("alpha")
     },
   })
 })
@@ -556,7 +581,7 @@ test("explicit Truncate.GLOB deny is respected", async () => {
   })
 })
 
-test("skill directories are allowed for external_directory", async () => {
+test("configured global skill directories are allowed for external_directory", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
@@ -575,7 +600,9 @@ description: Permission skill.
   })
 
   const originalConfig = Global.Path.config
+  const originalConfigDir = process.env.LFCODE_CONFIG_DIR
   Object.assign(Global.Path, { config: tmp.path })
+  process.env.LFCODE_CONFIG_DIR = tmp.path
 
   try {
     await Instance.provide({
@@ -589,6 +616,8 @@ description: Permission skill.
     })
   } finally {
     Object.assign(Global.Path, { config: originalConfig })
+    if (originalConfigDir === undefined) delete process.env.LFCODE_CONFIG_DIR
+    else process.env.LFCODE_CONFIG_DIR = originalConfigDir
   }
 })
 
@@ -731,17 +760,32 @@ test("defaultAgent throws when all primary agents are disabled", async () => {
   })
 })
 
-test("bounded computation agents are exactly title, summary, compaction, checkpoint-writer, dream, distill", async () => {
+test("system-spawned agents include the hidden context reviewer without changing bounded computation agents", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
       const agents = await load(tmp.path, (svc) => svc.list())
-      const boundedComputations = agents
+      const hiddenNative = agents
         .filter((a) => a.native === true && a.hidden === true)
         .map((a) => a.name)
         .sort()
-      expect(boundedComputations).toEqual(["checkpoint-writer", "compaction", "distill", "dream", "summary", "title"])
+      expect(hiddenNative).toEqual([
+        "checkpoint-writer",
+        "compaction",
+        "context-reviewer",
+        "deep-research-coordinator",
+        "distill",
+        "dream",
+        "summary",
+        "title",
+      ])
+      expect([...SYSTEM_SPAWNED_AGENT_TYPES].toSorted()).toEqual([
+        "checkpoint-writer",
+        "context-reviewer",
+        "distill",
+        "dream",
+      ])
 
       // Spot-check a few durable agents are NOT classified as bounded.
       const build = agents.find((a) => a.name === "build")
@@ -836,39 +880,54 @@ test("title/summary/checkpoint-writer are mode=subagent + hidden (spawnable filt
   })
 })
 
-// Regression for ses_19d1aa927: the fork agent (checkpoint-writer) inherits
-// compose's tool list verbatim (Task 2.6 removed toolAllowlist). This test
-// confirms the patch-swap in registry.ts fires correctly per model family.
-itTool.live("compose's tool list stays patch-first across provider families", () =>
+// The primary agent exposes the same public editing tool across provider families.
+itTool.live("build's tool list exposes unified edit across provider families", () =>
   provideTmpdirInstance((dir) =>
     Effect.gen(function* () {
       const agents = yield* Agent.Service
-      const compose = yield* agents.get("compose")
-      expect(compose).toBeDefined()
+      const build = yield* agents.get("build")
+      expect(build).toBeDefined()
 
       const registry = yield* ToolRegistry.Service
 
       const gptTools = yield* registry.tools({
         modelID: ModelID.make("gpt-5.5"),
         providerID: ProviderID.make("openai"),
-        agent: compose!,
+        agent: build!,
       })
       const gptIDs = gptTools.map((t) => t.id)
-      expect(gptIDs).toContain("apply_patch")
-      expect(gptIDs).not.toContain("edit")
+      expect(gptIDs).toContain("edit")
+      expect(gptIDs).not.toContain("apply_patch")
       expect(gptIDs).not.toContain("write")
       expect(gptIDs).toContain("search")
 
       const claudeTools = yield* registry.tools({
         modelID: ModelID.make("claude-opus-4-7"),
         providerID: ProviderID.make("anthropic"),
-        agent: compose!,
+        agent: build!,
       })
       const claudeIDs = claudeTools.map((t) => t.id)
-      expect(claudeIDs).toContain("apply_patch")
+      expect(claudeIDs).toContain("edit")
       expect(claudeIDs).toContain("search")
-      expect(claudeIDs).not.toContain("edit")
+      expect(claudeIDs).not.toContain("apply_patch")
       expect(claudeIDs).not.toContain("write")
+    }),
+  ),
+)
+
+itTool.live("native subagent preset allowlists only reference registered tools", () =>
+  provideTmpdirInstance(() =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const registered = new Set((yield* registry.all()).map((tool) => tool.id))
+
+      for (const preset of AgentPreset.presets) {
+        expect(preset.toolAllowlist, `${preset.id} has a fixed allowlist`).toBeDefined()
+        expect(
+          preset.toolAllowlist?.filter((tool) => !registered.has(tool)),
+          `${preset.id} only allows registered tools`,
+        ).toEqual([])
+      }
     }),
   ),
 )

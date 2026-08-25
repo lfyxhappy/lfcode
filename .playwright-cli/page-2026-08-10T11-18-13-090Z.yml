@@ -1,0 +1,21 @@
+- generic [ref=f6e1]:
+  - generic [ref=f6e3]:
+    - banner [ref=f6e4]:
+      - button "切换菜单" [ref=f6e7]
+    - generic [ref=f6e13]:
+      - navigation "项目和会话" [ref=f6e14]:
+        - generic [ref=f6e16]:
+          - generic [ref=f6e20]:
+            - generic [ref=f6e21]:
+              - generic [ref=f6e22]: No projects open
+              - generic [ref=f6e23]: Open a project to get started
+            - button [ref=f6e24]
+          - generic [ref=f6e28]:
+            - button "打开项目" [ref=f6e31]
+            - generic [ref=f6e35]:
+              - button "设置" [ref=f6e37]
+              - button "帮助" [ref=f6e43]
+      - main [ref=f6e48]
+  - generic:
+    - region "Notifications (alt+T)":
+      - list

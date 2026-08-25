@@ -474,6 +474,30 @@ describe("tool.read binary detection", () => {
     }),
   )
 
+  it.live("reads an exact character range from a long line", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const content = "a".repeat(2_000) + "TARGET" + "z".repeat(2_000)
+      const filepath = path.join(dir, "long-line-range.txt")
+      yield* put(filepath, content)
+
+      const result = yield* exec(dir, { filePath: filepath, offset: 1, limit: 1, startChar: 2_001, endChar: 2_007 })
+      expect(result.output).toContain("1: TARGET")
+      expect(result.output).not.toContain("line truncated")
+    }),
+  )
+
+  it.live("rejects ambiguous character ranges", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const filepath = path.join(dir, "ambiguous-range.txt")
+      yield* put(filepath, "alpha\nbeta")
+
+      const err = yield* fail(dir, { filePath: filepath, startChar: 1 })
+      expect(err.message).toContain("require offset and limit=1")
+    }),
+  )
+
   it.live("returns binary metadata for known binary extensions", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped()

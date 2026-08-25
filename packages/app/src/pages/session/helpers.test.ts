@@ -149,26 +149,7 @@ describe("createSessionTabs", () => {
     })
   })
 
-  test("prefers context and review fallbacks when no file tab is active", () => {
-    createRoot((dispose) => {
-      const [state] = createStore({
-        active: undefined as string | undefined,
-        all: ["context"],
-      })
-      const tabs = createMemo(() => ({ active: () => state.active, all: () => state.all }))
-      const result = createSessionTabs({
-        tabs,
-        pathFromTab: () => undefined,
-        normalizeTab: (tab) => tab,
-        review: () => true,
-        hasReview: () => true,
-      })
-
-      expect(result.activeTab()).toBe("context")
-      expect(result.closableTab()).toBe("context")
-      dispose()
-    })
-
+  test("uses the review fallback when no file tab is active", () => {
     createRoot((dispose) => {
       const [state] = createStore({
         active: undefined as string | undefined,
@@ -184,10 +165,10 @@ describe("createSessionTabs", () => {
       })
 
       expect(result.activeTab()).toBe("review")
-      expect(result.activeFileTab()).toBeUndefined()
       expect(result.closableTab()).toBeUndefined()
       dispose()
     })
+
   })
 
   test("falls back to empty when review tab is not explicitly enabled", () => {

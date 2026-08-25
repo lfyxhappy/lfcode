@@ -9,9 +9,19 @@ import { Global } from "@/global"
 import { InstanceState } from "@/effect"
 import { MCP } from "./index"
 import { Flag } from "@/flag/flag"
+import {
+  MINIMAX_TOKEN_PLAN_MCP_DESCRIPTION,
+  MINIMAX_TOKEN_PLAN_MCP_HOST,
+  MINIMAX_TOKEN_PLAN_MCP_ID,
+  MINIMAX_TOKEN_PLAN_MCP_INSTALL_REASON,
+  MINIMAX_TOKEN_PLAN_MCP_TITLE,
+  formatMiniMaxTokenPlanError,
+  hasMiniMaxTokenPlanKey,
+  minimaxTokenPlanConfig,
+} from "./minimax-token-plan"
 
 const REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1/"
-const REGISTRY_CACHE_DIR = path.join(Global.Path.cache, "mcp-registry")
+const REGISTRY_CACHE_DIR = path.join(Global.Path.config, "mcps", "registry", "data")
 const REGISTRY_CACHE_FILE = path.join(REGISTRY_CACHE_DIR, "servers.json")
 const REGISTRY_CACHE_TTL_MS = 60 * 60 * 1000
 const MANAGED_DIR_NAME = "mcps"
@@ -32,6 +42,15 @@ const WINDOWS_COMPUTER_USE_COMMAND = [
 const WINDOWS_COMPUTER_USE_ENVIRONMENT = {
   ELECTRON_RUN_AS_NODE: "1",
 } as const
+const McpSource = z.enum(["official-registry", "builtin", "user"])
+const InstallAdapterSchema = z.enum([
+  "bundled-playwright",
+  "bundled-windows-computer-use",
+  "bundled-codegraph",
+  "minimax-token-plan",
+  "registry-remote",
+  "external-command",
+])
 
 const RegistryRemote = z.object({
   type: z.string(),
@@ -75,8 +94,8 @@ export const ManagedMcpManifest = z.object({
   id: z.string(),
   serverName: z.string(),
   title: z.string(),
-  source: z.literal("official-registry"),
-  adapter: z.enum(["bundled-playwright", "bundled-windows-computer-use", "registry-remote"]),
+  source: McpSource,
+  adapter: InstallAdapterSchema,
   installedAt: z.string(),
   configTarget: z.string(),
   configName: z.string(),
@@ -97,12 +116,12 @@ export const McpCatalogItem = z.object({
   serverName: z.string(),
   title: z.string(),
   description: z.string(),
-  source: z.literal("official-registry"),
+  source: McpSource,
   packageType: z.string(),
   transportType: z.string(),
   installable: z.boolean(),
   installed: z.boolean(),
-  installAdapter: z.enum(["bundled-playwright", "bundled-windows-computer-use", "registry-remote"]).nullable(),
+  installAdapter: InstallAdapterSchema.nullable(),
   installReason: z.string().optional(),
   official: z.boolean(),
   version: z.string().optional(),
@@ -120,7 +139,7 @@ export const McpManageItem = z.object({
     .nullable(),
   managed: z.boolean(),
   installable: z.boolean(),
-  installAdapter: z.enum(["bundled-playwright", "bundled-windows-computer-use", "registry-remote"]).nullable(),
+  installAdapter: InstallAdapterSchema.nullable(),
   manifest: ManagedMcpManifest.nullable(),
   config: ConfigMCP.Info.zod,
 })
@@ -141,7 +160,7 @@ type CatalogState = {
   lastFetchedAt?: number
 }
 
-type InstallAdapter = "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+type InstallAdapter = z.infer<typeof InstallAdapterSchema>
 
 type OfficialServer = z.infer<typeof RegistryServerListItem>
 
@@ -181,6 +200,14 @@ function configTarget(target: "project" | "global" | undefined) {
 }
 
 function bundledInfo(name: string): { title: string; adapter: InstallAdapter; config: ConfigMCP.Info } | undefined {
+  if (name === MINIMAX_TOKEN_PLAN_MCP_ID) {
+    return {
+      title: MINIMAX_TOKEN_PLAN_MCP_TITLE,
+      adapter: "minimax-token-plan",
+      config: minimaxTokenPlanConfig(),
+    }
+  }
+
   if (name === "playwright") {
     return {
       title: "Playwright",
@@ -207,6 +234,76 @@ function bundledInfo(name: string): { title: string; adapter: InstallAdapter; co
         enabled: true,
       },
     }
+  }
+
+  if (name === "codegraph" && process.env.LFCODE_CODEGRAPH_NODE_EXE && process.env.LFCODE_CODEGRAPH_ENTRY) {
+    return {
+      title: "CodeGraph",
+      adapter: "bundled-codegraph",
+      config: {
+        type: "local",
+        command: ["{env:LFCODE_CODEGRAPH_NODE_EXE}", "{env:LFCODE_CODEGRAPH_ENTRY}", "serve", "--mcp"],
+        enabled: true,
+      },
+    }
+  }
+
+  if (name === "codegraph" && process.env.LFCODE_CODEGRAPH_EXE) {
+    return {
+      title: "CodeGraph",
+      adapter: "bundled-codegraph",
+      config: {
+        type: "local",
+        command: ["{env:LFCODE_CODEGRAPH_EXE}", "serve", "--mcp"],
+        enabled: true,
+      },
+    }
+  }
+}
+
+export function minimaxTokenPlanCatalogItem(installed = false): McpCatalogItem {
+  return {
+    id: MINIMAX_TOKEN_PLAN_MCP_ID,
+    serverName: MINIMAX_TOKEN_PLAN_MCP_ID,
+    title: MINIMAX_TOKEN_PLAN_MCP_TITLE,
+    description: MINIMAX_TOKEN_PLAN_MCP_DESCRIPTION,
+    source: "builtin",
+    packageType: "uvx",
+    transportType: "stdio",
+    installable: true,
+    installed,
+    installAdapter: "minimax-token-plan",
+    installReason: MINIMAX_TOKEN_PLAN_MCP_INSTALL_REASON,
+    official: true,
+  }
+}
+
+function redactManagedConfig(name: string, config: ConfigMCP.Info): ConfigMCP.Info {
+  if (name !== MINIMAX_TOKEN_PLAN_MCP_ID) return config
+  if (config.type !== "local") return config
+  return {
+    ...config,
+    environment: {
+      ...config.environment,
+      MINIMAX_API_KEY: "{env:MINIMAX_API_KEY}",
+      MINIMAX_API_HOST: config.environment?.MINIMAX_API_HOST ?? MINIMAX_TOKEN_PLAN_MCP_HOST,
+    },
+  }
+}
+
+function statusForManagedItem(name: string, status: MCP.Status | undefined) {
+  const current = status ?? { status: "disabled" as const }
+  if (name !== MINIMAX_TOKEN_PLAN_MCP_ID || status?.status === "disabled") return current
+  if (!hasMiniMaxTokenPlanKey()) {
+    return {
+      status: "failed" as const,
+      error: formatMiniMaxTokenPlanError(new Error("MINIMAX_API_KEY is missing")),
+    }
+  }
+  if (current.status !== "failed") return current
+  return {
+    status: "failed" as const,
+    error: formatMiniMaxTokenPlanError(current.error),
   }
 }
 
@@ -419,13 +516,16 @@ export const layer = Layer.effect(
             const bundled = bundledInfo(name)
             return {
               name,
-              status: statuses[name] ?? { status: "disabled" as const },
+              status: statusForManagedItem(name, statuses[name]),
               origin: current.mcp_origins?.[name] ?? null,
               managed: !!manifest,
-              installable: !!bundled || !!manifest?.adapter || item.type === "remote",
-              installAdapter: manifest?.adapter ?? bundled?.adapter ?? (item.type === "remote" ? "registry-remote" : null),
+              installable: !!bundled || (manifest?.adapter !== undefined && manifest.adapter !== "external-command") || item.type === "remote",
+              installAdapter:
+                manifest?.adapter === "external-command"
+                  ? null
+                  : manifest?.adapter ?? bundled?.adapter ?? (item.type === "remote" ? "registry-remote" : null),
               manifest: manifest ?? null,
-              config: item,
+              config: redactManagedConfig(name, item),
             } satisfies McpManageItem
           }),
         { concurrency: "unbounded" },
@@ -435,10 +535,10 @@ export const layer = Layer.effect(
 
     const catalog: Interface["catalog"] = (query) =>
       Effect.fn("McpCatalog.catalog")(function* () {
-        const servers = yield* loadRegistry()
+        const servers = yield* loadRegistry().pipe(Effect.catch(() => Effect.succeed([] as OfficialServer[])))
         const current = yield* config.get()
         const term = query?.q?.trim().toLowerCase() ?? ""
-        return servers
+        const registryItems = servers
           .map((item: OfficialServer) => {
             const meta = item._meta?.["io.modelcontextprotocol.registry/official"]
             const install = installability(item)
@@ -463,6 +563,14 @@ export const layer = Layer.effect(
             return [item.serverName, item.title, item.description, item.packageType].some((value) => value.toLowerCase().includes(term))
           })
           .toSorted((a: McpCatalogItem, b: McpCatalogItem) => a.title.localeCompare(b.title))
+        return [minimaxTokenPlanCatalogItem(!!current.mcp?.[MINIMAX_TOKEN_PLAN_MCP_ID]), ...registryItems]
+          .filter((item: McpCatalogItem) => {
+            if (!term) return true
+            return [item.serverName, item.title, item.description, item.packageType, item.installReason ?? ""].some((value) =>
+              value.toLowerCase().includes(term),
+            )
+          })
+          .toSorted((a: McpCatalogItem, b: McpCatalogItem) => a.title.localeCompare(b.title))
       })().pipe(Effect.orDie)
 
     const install: Interface["install"] = (input) =>
@@ -476,15 +584,20 @@ export const layer = Layer.effect(
           return yield* Effect.die(new Error(item.installReason ?? `MCP ${input.id} is not installable`))
         }
 
-        const server = (yield* loadRegistry()).find((entry: OfficialServer) => entry.server.name === input.id)
-        if (!server) return yield* Effect.die(new Error(`Registry definition not found for ${input.id}`))
+        const isMiniMaxTokenPlan = item.installAdapter === "minimax-token-plan"
+        const server = isMiniMaxTokenPlan
+          ? undefined
+          : (yield* loadRegistry()).find((entry: OfficialServer) => entry.server.name === input.id)
+        if (!isMiniMaxTokenPlan && !server) return yield* Effect.die(new Error(`Registry definition not found for ${input.id}`))
 
-        const installedAt = new Date().toISOString()
+        const target = configTarget(input.target)
+        const existingManifest = yield* readManifestAt(directory, item.serverName, target)
+        const installedAt = existingManifest?.adapter === item.installAdapter ? existingManifest.installedAt : new Date().toISOString()
         const bundled = bundledInfo(item.serverName)
         const nextConfig =
           item.installAdapter === "registry-remote"
             ? yield* Effect.sync(() => {
-                const remote = server.server.remotes?.find((entry) => entry.type === "streamable-http" || entry.type === "remote")
+                const remote = server!.server.remotes?.find((entry) => entry.type === "streamable-http" || entry.type === "remote")
                 if (!remote) throw new Error(`Registry server ${input.id} has no supported remote transport`)
                 return {
                   type: "remote" as const,
@@ -496,14 +609,13 @@ export const layer = Layer.effect(
 
         if (!nextConfig) return yield* Effect.die(new Error(`Missing install config for ${input.id}`))
 
-        const target = configTarget(input.target)
         const updated = yield* config.upsertMcp(item.serverName, nextConfig, { target })
         const configFile = target === "global" ? Global.Path.config : path.join(directory, ".lfcode", "lfcode.jsonc")
         yield* writeManifest(directory, item.serverName, {
           id: item.id,
           serverName: item.serverName,
           title: item.title,
-          source: "official-registry",
+          source: isMiniMaxTokenPlan ? "builtin" : "official-registry",
           adapter: item.installAdapter,
           installedAt,
           configTarget: configFile,
@@ -511,10 +623,10 @@ export const layer = Layer.effect(
           payload: { kind: "none" },
           upstream: {
             url: nextConfig.type === "remote" ? nextConfig.url : undefined,
-            version: server.server.version,
+            version: server?.server.version,
           },
         }, target)
-        const status = (yield* mcp.status())[item.serverName] ?? { status: "disabled" as const }
+        const status = statusForManagedItem(item.serverName, (yield* mcp.status())[item.serverName])
         return {
           name: item.serverName,
           status,
@@ -522,8 +634,8 @@ export const layer = Layer.effect(
           managed: true,
           installable: true,
           installAdapter: item.installAdapter,
-          manifest: (yield* readManifest(directory, item.serverName)) ?? null,
-          config: nextConfig,
+          manifest: (yield* readManifestAt(directory, item.serverName, target)) ?? null,
+          config: redactManagedConfig(item.serverName, nextConfig),
         }
       })().pipe(Effect.orDie)
 

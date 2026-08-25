@@ -101,7 +101,7 @@ export function project<Def extends Definition>(
   return [def, func as ProjectorFunc]
 }
 
-function process<Def extends Definition>(def: Def, event: Event<Def>, options: { publish: boolean }) {
+function process<Def extends Definition>(def: Def, event: Event<Def>, options: { publish: boolean; persist: boolean }) {
   if (projectors == null) {
     throw new Error("No projectors available. Call `SyncEvent.init` to install projectors")
   }
@@ -116,7 +116,7 @@ function process<Def extends Definition>(def: Def, event: Event<Def>, options: {
   Database.transaction((tx) => {
     projector(tx, event.data)
 
-    if (Flag.LFCODE_EXPERIMENTAL_WORKSPACES) {
+    if (Flag.LFCODE_EXPERIMENTAL_WORKSPACES && options.persist) {
       tx.insert(EventSequenceTable)
         .values({
           aggregate_id: event.aggregateID,
@@ -190,7 +190,7 @@ export function replay(event: SerializedEvent, options?: { publish: boolean }) {
     throw new Error(`Sequence mismatch for aggregate "${event.aggregateID}": expected ${expected}, got ${event.seq}`)
   }
 
-  process(def, event, { publish: !!options?.publish })
+  process(def, event, { publish: !!options?.publish, persist: true })
 }
 
 export function replayAll(events: SerializedEvent[], options?: { publish: boolean }) {
@@ -212,7 +212,7 @@ export function replayAll(events: SerializedEvent[], options?: { publish: boolea
   return source
 }
 
-export function run<Def extends Definition>(def: Def, data: Event<Def>["data"], options?: { publish?: boolean }) {
+export function run<Def extends Definition>(def: Def, data: Event<Def>["data"], options?: { publish?: boolean; persist?: boolean }) {
   const agg = (data as Record<string, string>)[def.aggregate]
   // This should never happen: we've enforced it via typescript in
   // the definition
@@ -224,7 +224,7 @@ export function run<Def extends Definition>(def: Def, data: Event<Def>["data"], 
     throw new Error(`SyncEvent.run: running old versions of events is not allowed: ${def.type}`)
   }
 
-  const { publish = true } = options || {}
+  const { publish = true, persist = true } = options || {}
 
   // Note that this is an "immediate" transaction which is critical.
   // We need to make sure we can safely read and write with nothing
@@ -240,7 +240,7 @@ export function run<Def extends Definition>(def: Def, data: Event<Def>["data"], 
       const seq = row?.seq != null ? row.seq + 1 : 0
 
       const event = { id, seq, aggregateID: agg, data }
-      process(def, event, { publish })
+      process(def, event, { publish, persist })
     },
     {
       behavior: "immediate",

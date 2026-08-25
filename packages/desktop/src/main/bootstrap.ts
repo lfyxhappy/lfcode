@@ -39,10 +39,20 @@ const WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT = {
 const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
 const PLAYWRIGHT_MCP_REMOTE_KEYS = ["type", "url", "headers", "enabled"] as const
 const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
+const CODEGRAPH_EXECUTABLE_MCP_COMMAND = ["{env:LFCODE_CODEGRAPH_EXE}", "serve", "--mcp"] as const
+const CODEGRAPH_NODE_MCP_COMMAND = [
+  "{env:LFCODE_CODEGRAPH_NODE_EXE}",
+  "{env:LFCODE_CODEGRAPH_ENTRY}",
+  "serve",
+  "--mcp",
+] as const
+const CODEGRAPH_MCP_KEYS = ["type", "command", "enabled"] as const
 const BUNDLED_MCP_MIGRATION_VERSION = 3
+const CODEGRAPH_MCP_MIGRATION_VERSION = 2
 const DEFAULT_LSP_MIGRATION_VERSION = 1
 
 type RootEnv = {
+  readonly LFCODE_HOME: string
   readonly LFCODE_CONFIG_DIR: string
   readonly LFCODE_DATA_DIR: string
   readonly LFCODE_STATE_DIR: string
@@ -96,6 +106,10 @@ type DesktopBootstrapInput = {
   readonly appName: string
   readonly arch?: string
   readonly codegraphMode?: "bundled" | "shim" | "external"
+  readonly codegraphPath?: string
+  readonly codegraphNodePath?: string
+  readonly codegraphEntryPath?: string
+  readonly resourcesPath?: string
   readonly execPath: string
   readonly homeDir?: string
   readonly isPackaged: boolean
@@ -116,44 +130,70 @@ type MigrationSources = {
 
 let bootstrapState: DesktopBootstrapState | undefined
 
-type CodegraphBootstrap = {
+export type CodegraphBootstrap = {
   readonly kind: "bundled" | "shim" | "external"
   readonly entry?: string
   readonly nodePath?: string
   readonly platformDir?: string
 }
 
-function defaultRootConfig() {
+function codegraphConfig(codegraph: CodegraphBootstrap) {
+  return {
+    type: "local" as const,
+    command: codegraph.nodePath ? CODEGRAPH_NODE_MCP_COMMAND : CODEGRAPH_EXECUTABLE_MCP_COMMAND,
+    enabled: true,
+  }
+}
+
+function defaultRootConfig(codegraph?: CodegraphBootstrap) {
+  const mcp = {
+    playwright: {
+      type: "remote" as const,
+      url: PLAYWRIGHT_MCP_REMOTE_URL,
+      headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
+      enabled: true,
+    },
+    "windows-computer-use": {
+      type: "local" as const,
+      command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
+      environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
+      enabled: true,
+    },
+    ...(codegraph?.kind === "bundled" ? { codegraph: codegraphConfig(codegraph) } : {}),
+  }
   return {
     $schema: "https://lfcode.ai/config.json",
     lsp: true,
-    mcp: {
-      playwright: {
-        type: "remote",
-        url: PLAYWRIGHT_MCP_REMOTE_URL,
-        headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
-        enabled: true,
-      },
-      "windows-computer-use": {
-        type: "local",
-        command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
-        environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
-        enabled: true,
-      },
-    },
-  } as const
+    mcp,
+  }
 }
 
 export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
   app.setName(state.appName)
   app.setAppUserModelId(state.appId)
-  if (state.layout) ensureRootLayoutSync(state.layout)
+  if (state.layout) mkdirSync(state.layout.userDataDir, { recursive: true })
   process.env.LFCODE_BUNDLED_NODE = process.execPath.replaceAll("\\", "/")
   delete process.env.LFCODE_CODEGRAPH_NODE_EXE
   delete process.env.LFCODE_CODEGRAPH_ENTRY
   delete process.env.LFCODE_CODEGRAPH_NODE_PATH
   delete process.env.LFCODE_CODEGRAPH_RUN_AS_NODE
   delete process.env.LFCODE_CODEGRAPH_INSTALL_DIR
+  delete process.env.LFCODE_CODEGRAPH_DATA_DIR
+  delete process.env.LFCODE_CODEGRAPH_EXE
+  if (state.codegraph.kind === "bundled" && state.codegraph.entry) {
+    if (state.codegraph.nodePath) {
+      process.env.LFCODE_CODEGRAPH_NODE_EXE = state.codegraph.nodePath.replaceAll("\\", "/")
+      process.env.LFCODE_CODEGRAPH_ENTRY = state.codegraph.entry.replaceAll("\\", "/")
+    } else {
+      process.env.LFCODE_CODEGRAPH_EXE = state.codegraph.entry.replaceAll("\\", "/")
+    }
+    if (state.codegraph.platformDir) {
+      process.env.LFCODE_CODEGRAPH_INSTALL_DIR = state.codegraph.platformDir.replaceAll("\\", "/")
+    }
+    if (state.layout) {
+      process.env.LFCODE_CODEGRAPH_DATA_DIR = join(state.layout.configDir, "mcps", "codegraph", "data").replaceAll("\\", "/")
+    }
+  }
   delete process.env.LFCODE_GIT_PATH
   delete process.env.LFCODE_GIT_SSH_PATH
   delete process.env.LFCODE_GIT_LESS_PATH
@@ -161,7 +201,7 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
     ? join(process.resourcesPath, "mcp", "windows-computer-use-mcp").replaceAll("\\", "/")
     : join(app.getAppPath(), "../../.windows-computer-use-mcp").replaceAll("\\", "/")
   if (process.platform === "win32") {
-    const managedPythonRoot = state.layout ? join(state.layout.dataDir, "python", "runtime") : undefined
+    const managedPythonRoot = state.layout ? join(state.layout.configDir, "plugins", "runtime-python", "data") : undefined
     const managedPythonPath = managedPythonRoot ? join(managedPythonRoot, "Scripts", "python.exe").replaceAll("\\", "/") : ""
     const managedScriptsPath = managedPythonRoot ? join(managedPythonRoot, "Scripts").replaceAll("\\", "/") : ""
     const bundledGitRoot = app.isPackaged ? join(process.resourcesPath, "git") : ""
@@ -278,6 +318,7 @@ export function resolveBootstrapTarget(input: BootstrapTargetInput): DesktopBoot
     appName: input.appName,
     codegraph: { kind: "external" },
     env: {
+      LFCODE_HOME: layout.root,
       LFCODE_CONFIG_DIR: layout.configDir,
       LFCODE_DATA_DIR: layout.dataDir,
       LFCODE_STATE_DIR: layout.stateDir,
@@ -324,16 +365,37 @@ export function resolveDesktopBootstrap(input: DesktopBootstrapInput) {
     rootKind,
     rootWritable: root ? canWriteDirectorySync(root) : false,
   })
+  const codegraph = resolveCodegraphBootstrap(input)
   const next: DesktopBootstrapState = {
     ...target,
-    notes: [...target.notes, "desktop bootstrap codegraph disabled"],
-    codegraph: { kind: "external" },
+    notes: [
+      ...target.notes,
+      codegraph.kind === "bundled"
+        ? `desktop bootstrap using bundled CodeGraph ${codegraph.entry}`
+        : "desktop bootstrap CodeGraph runtime unavailable; using external fallback",
+    ],
+    codegraph,
   }
   return next
 }
 
-export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
-  const state = resolveDesktopBootstrap(input)
+export function resolveCodegraphBootstrap(input: DesktopBootstrapInput): CodegraphBootstrap {
+  if (input.platform !== "win32" || (input.arch ?? "x64") !== "x64") return { kind: "external" }
+  if (input.codegraphMode !== "bundled") return { kind: "external" }
+  const executable = input.codegraphPath ?? (input.resourcesPath ? join(input.resourcesPath, "codegraph", "codegraph.exe") : undefined)
+  if (executable && isFileSync(executable)) {
+    return { kind: "bundled", entry: executable, platformDir: dirname(executable) }
+  }
+
+  const nodePath = input.codegraphNodePath ?? (input.resourcesPath ? join(input.resourcesPath, "codegraph", "node.exe") : undefined)
+  const entry =
+    input.codegraphEntryPath ??
+    (input.resourcesPath ? join(input.resourcesPath, "codegraph", "lib", "dist", "bin", "codegraph.js") : undefined)
+  if (!nodePath || !entry || !isFileSync(nodePath) || !isFileSync(entry)) return { kind: "external" }
+  return { kind: "bundled", entry, nodePath, platformDir: dirname(nodePath) }
+}
+
+export async function prepareDesktopBootstrap(input: DesktopBootstrapInput, state = resolveDesktopBootstrap(input)) {
   if (state.mode !== "root" || !state.layout) {
     bootstrapState = state
     return state
@@ -344,9 +406,16 @@ export async function prepareDesktopBootstrap(input: DesktopBootstrapInput) {
     appId: input.appId,
     sources: getMigrationSources(input, state),
   })
-  await compactMigrationMarker(state.layout)
-  await ensureRootConfigFile(state.layout)
-  const managedMcpMigrated = await upgradeManagedRootConfigFile(state.layout)
+  const migrationMarker = await compactMigrationMarker(state.layout)
+  await ensureRootConfigFile(state.layout, state.codegraph)
+  const configMigrationComplete =
+    migrationMarker !== undefined &&
+    migrationMarker["bundledMcpVersion"] === BUNDLED_MCP_MIGRATION_VERSION &&
+    migrationMarker["defaultLspVersion"] === DEFAULT_LSP_MIGRATION_VERSION &&
+    (state.codegraph.kind !== "bundled" || migrationMarker["codegraphMcpVersion"] === CODEGRAPH_MCP_MIGRATION_VERSION)
+  const managedMcpMigrated = configMigrationComplete
+    ? false
+    : await upgradeManagedRootConfigFile(state.layout, state.codegraph)
   const next: DesktopBootstrapState = {
     ...state,
     migration,
@@ -472,44 +541,43 @@ async function ensureRootLayout(layout: RootLayout) {
   ])
 }
 
-async function ensureRootConfigFile(layout: RootLayout) {
+async function ensureRootConfigFile(layout: RootLayout, codegraph: CodegraphBootstrap = { kind: "external" }) {
   if (await pathExists(layout.configFile)) return
   const current = await findLfcodeConfigFile(layout.root)
   if (current && current !== layout.configFile) {
     await copyFile(current, layout.configFile)
     return
   }
-  await writeFile(layout.configFile, `${JSON.stringify(defaultRootConfig(), null, 2)}\n`)
+  await writeFile(layout.configFile, `${JSON.stringify(defaultRootConfig(codegraph), null, 2)}\n`)
 }
 
-async function compactMigrationMarker(layout: RootLayout) {
+async function compactMigrationMarker(layout: RootLayout): Promise<Record<string, unknown> | undefined> {
   const marker = await readMigrationMarker(layout)
   if (!marker) return
-  if (!Array.isArray(marker.copied) && !Array.isArray(marker.preserved) && marker.deprecatedConfigMigrationVersion === undefined) return
+  if (!Array.isArray(marker.copied) && !Array.isArray(marker.preserved) && marker.deprecatedConfigMigrationVersion === undefined) {
+    return marker
+  }
 
   const { copied, deprecatedConfigMigrationVersion, preserved, ...current } = marker
-  await writeFile(
-    layout.migrationMarker,
-    JSON.stringify(
-      {
-        ...current,
-        copiedEntries: Array.isArray(copied) ? copied.length : current.copiedEntries,
-        preservedEntries: Array.isArray(preserved) ? preserved.length : current.preservedEntries,
-        scope: "lfcode-root-layout",
-      },
-      null,
-      2,
-    ),
-  )
+  const next: Record<string, unknown> = {
+    ...current,
+    copiedEntries: Array.isArray(copied) ? copied.length : current.copiedEntries,
+    preservedEntries: Array.isArray(preserved) ? preserved.length : current.preservedEntries,
+    scope: "lfcode-root-layout",
+  }
+  await writeFile(layout.migrationMarker, JSON.stringify(next, null, 2))
+  return next
 }
 
-async function upgradeManagedRootConfigFile(layout: RootLayout) {
+async function upgradeManagedRootConfigFile(layout: RootLayout, codegraph: CodegraphBootstrap = { kind: "external" }) {
   const text = await readFile(layout.configFile, "utf8").catch(() => undefined)
   if (!text) return false
 
   const marker = await readMigrationMarker(layout)
   const bundledMcpVersion = typeof marker?.bundledMcpVersion === "number" ? marker.bundledMcpVersion : 0
   const bundledMcpMigrationPending = bundledMcpVersion < BUNDLED_MCP_MIGRATION_VERSION
+  const codegraphMcpVersion = typeof marker?.codegraphMcpVersion === "number" ? marker.codegraphMcpVersion : 0
+  const codegraphMcpMigrationPending = codegraph.kind === "bundled" && codegraphMcpVersion < CODEGRAPH_MCP_MIGRATION_VERSION
   const lspVersion = typeof marker?.defaultLspVersion === "number" ? marker.defaultLspVersion : 0
   const defaultLspMigrationPending = lspVersion < DEFAULT_LSP_MIGRATION_VERSION
   const parsed = parseJsonc(text)
@@ -535,7 +603,7 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
   if (bundledMcpMigrationPending && !mcp) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp"], defaultRootConfig().mcp, {
+      modify(updated, ["mcp"], defaultRootConfig(codegraph).mcp, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -555,7 +623,7 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
     ) {
       updated = applyEdits(
         updated,
-        modify(updated, ["mcp", "playwright"], defaultRootConfig().mcp.playwright, {
+        modify(updated, ["mcp", "playwright"], defaultRootConfig(codegraph).mcp.playwright, {
           formattingOptions: {
             insertSpaces: true,
             tabSize: 2,
@@ -572,7 +640,25 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
     ) {
       updated = applyEdits(
         updated,
-        modify(updated, ["mcp", "windows-computer-use"], defaultRootConfig().mcp["windows-computer-use"], {
+        modify(updated, ["mcp", "windows-computer-use"], defaultRootConfig(codegraph).mcp["windows-computer-use"], {
+          formattingOptions: {
+            insertSpaces: true,
+            tabSize: 2,
+          },
+        }),
+      )
+      changed = true
+    }
+
+    const bundledCodegraph = codegraph.kind === "bundled" ? codegraphConfig(codegraph) : undefined
+    const existingCodegraph = mcp.codegraph
+    if (
+      bundledCodegraph &&
+      ((codegraphMcpMigrationPending && existingCodegraph === undefined) || isLegacyCodegraphConfig(existingCodegraph))
+    ) {
+      updated = applyEdits(
+        updated,
+        modify(updated, ["mcp", "codegraph"], bundledCodegraph, {
           formattingOptions: {
             insertSpaces: true,
             tabSize: 2,
@@ -594,16 +680,14 @@ async function upgradeManagedRootConfigFile(layout: RootLayout) {
       defaultLspVersion: DEFAULT_LSP_MIGRATION_VERSION,
     })
   }
+  if (codegraphMcpMigrationPending) {
+    await writeMigrationMarker(layout, {
+      codegraphMcpVersion: CODEGRAPH_MCP_MIGRATION_VERSION,
+    })
+  }
 
   if (!changed) return false
   return true
-}
-
-function ensureRootLayoutSync(layout: RootLayout) {
-  mkdirSync(layout.dataDir, { recursive: true })
-  mkdirSync(layout.stateDir, { recursive: true })
-  mkdirSync(layout.cacheDir, { recursive: true })
-  mkdirSync(layout.userDataDir, { recursive: true })
 }
 
 async function findLfcodeConfigFile(directory: string) {
@@ -721,6 +805,17 @@ function isLegacyWindowsComputerUseConfig(value: unknown) {
   )
 }
 
+function isLegacyCodegraphConfig(value: unknown) {
+  if (!isRecord(value)) return false
+  if (!hasExactKeys(value, CODEGRAPH_MCP_KEYS)) return false
+  if (value.type !== "local" || value.enabled !== true) return false
+  return (
+    isStringArray(value.command, ["codegraph", "serve", "--mcp"]) ||
+    isStringArray(value.command, ["codegraph.exe", "serve", "--mcp"]) ||
+    isStringArray(value.command, CODEGRAPH_EXECUTABLE_MCP_COMMAND)
+  )
+}
+
 function isBrokenWindowsComputerUseCommand(value: unknown) {
   if (!Array.isArray(value) || value.length !== 4) return false
   if (value[0] !== "cmd" || value[1] !== "/c" || value[2] !== "node") return false
@@ -736,6 +831,14 @@ function pathExistsSync(file: string) {
   try {
     accessSync(file)
     return true
+  } catch {
+    return false
+  }
+}
+
+function isFileSync(file: string) {
+  try {
+    return statSync(file).isFile()
   } catch {
     return false
   }

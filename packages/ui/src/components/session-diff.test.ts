@@ -15,6 +15,8 @@ describe("session diff", () => {
 
     expect(view.patch).toBe(diff.patch)
     expect(view.fileDiff.name).toBe("a.ts")
+    expect(view.before).toBe("one\ntwo\n")
+    expect(view.after).toBe("one\nthree\n")
     expect(text(view, "deletions")).toBe("one\ntwo\n")
     expect(text(view, "additions")).toBe("one\nthree\n")
   })
@@ -33,5 +35,19 @@ describe("session diff", () => {
     expect(view.patch).toContain("@@ -1,1 +1,1 @@")
     expect(text(view, "deletions")).toBe("one\n")
     expect(text(view, "additions")).toBe("two\n")
+  })
+
+  test("keeps added-file content when the patch parser cannot read its header", () => {
+    const view = normalize({
+      file: "styles.css",
+      patch: "unrecognized header\n@@ -0,0 +1,3 @@\n+:root {\n+  color: red;\n+}\n",
+      additions: 3,
+      deletions: 0,
+      status: "added" as const,
+    })
+
+    expect(view.before).toBe("")
+    expect(view.after).toBe(":root {\n  color: red;\n}\n")
+    expect(text(view, "additions")).toContain("color: red")
   })
 })

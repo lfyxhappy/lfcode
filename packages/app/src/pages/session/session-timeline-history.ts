@@ -1,10 +1,15 @@
-import type { Message, UserMessage } from "@lfcode-ai/sdk/v2"
+import type { Message, Part, UserMessage } from "@lfcode-ai/sdk/v2"
 import { createEffect, createMemo, on, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
 import { same } from "@/utils/same"
+import { isRealUserMessage } from "./message-timeline-turns"
 
 const emptyUserMessages: UserMessage[] = []
 const emptyMessages: Message[] = []
+
+export function shiftSessionHistoryTurnStartForPrepend(turnStart: number, prepended: number) {
+  return Math.max(0, Math.trunc(turnStart)) + Math.max(0, Math.trunc(prepended))
+}
 
 export function retainTimelineMessages(next: Message[] | undefined, previous: Message[] | undefined) {
   return next ?? previous ?? emptyMessages
@@ -57,7 +62,7 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
     return start
   }
 
-  const turnStart = createMemo(() => {
+  const turnStart = () => {
     const id = input.sessionID()
     const messages = input.visibleUserMessages()
     const len = messages.length
@@ -68,7 +73,7 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
       return normalizeTurnStart(remembered, messages)
     }
     return normalizeTurnStart(state.turnStart, messages)
-  })
+  }
 
   const setTurnStart = (start: number) => {
     const id = input.sessionID()
@@ -81,16 +86,12 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
     setState({ turnID: id, turnStart: next })
   }
 
-  const renderedUserMessages = createMemo(
-    () => {
-      const messages = input.visibleUserMessages()
-      const start = turnStart()
-      if (start <= 0) return messages
-      return messages.slice(start)
-    },
-    emptyUserMessages,
-    { equals: same },
-  )
+  const renderedUserMessages = () => {
+    const messages = input.visibleUserMessages()
+    const start = turnStart()
+    if (start <= 0) return messages
+    return messages.slice(start)
+  }
 
   const resetToRecent = () => setTurnStart(initialTurnStart(input.visibleUserMessages()))
 
@@ -183,7 +184,7 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
 
     if (added <= 0 || growth <= 0) return
     if (options?.prefetch) {
-      preserveScroll(() => setTurnStart(turnStart() + growth))
+      preserveScroll(() => setTurnStart(shiftSessionHistoryTurnStartForPrepend(turnStart(), growth)))
       return
     }
     if (turnStart() !== start) return
@@ -223,7 +224,7 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
         const messages = input.visibleUserMessages()
         const remembered = input.storedTurnStart()
         const next = remembered === undefined ? initialTurnStart(messages) : normalizeTurnStart(remembered, messages)
-        if (state.turnID === id && state.turnStart === next) return
+        if (state.turnID === id) return
         setTurnStart(next)
       },
       { defer: true },
@@ -245,6 +246,7 @@ export function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
 
 export function buildSessionMessageViews(input: {
   messages: Message[]
+  partsByMessageID?: Record<string, Part[] | undefined>
   revertMessageID?: string
   viewAgentID: string
 }) {
@@ -258,7 +260,7 @@ export function buildSessionMessageViews(input: {
     const agentID = message.agentID ?? "main"
     const visible = !input.revertMessageID || message.id < input.revertMessageID
 
-    if (agentID === "main" && message.role === "user") {
+    if (agentID === "main" && message.role === "user" && isRealUserMessage(message, input.partsByMessageID ?? {})) {
       mainUserMessages.push(message as UserMessage)
       if (visible) visibleUserMessages.push(message as UserMessage)
     }
@@ -295,6 +297,7 @@ export type SessionTimelineMessageSource = {
 export function createSessionTimelineMessageSource(input: {
   sessionID: string
   messages: (sessionID: string) => Message[] | undefined
+  partsByMessageID: (sessionID: string) => Record<string, Part[] | undefined>
   revertMessageID: (sessionID: string) => string | undefined
   viewAgentID: Accessor<string>
 }): SessionTimelineMessageSource {
@@ -313,6 +316,7 @@ export function createSessionTimelineMessageSource(input: {
   const views = createMemo(() =>
     buildSessionMessageViews({
       messages: messages(),
+      partsByMessageID: input.partsByMessageID(input.sessionID),
       revertMessageID: input.revertMessageID(input.sessionID),
       viewAgentID: input.viewAgentID(),
     }),

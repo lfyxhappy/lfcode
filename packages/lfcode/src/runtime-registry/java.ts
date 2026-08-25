@@ -1,6 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { Archive, Filesystem, Log } from "@/util"
 import { which } from "@/util/which"
 import { getRuntimeActivationTarget } from "./config"
@@ -62,7 +62,7 @@ const MANAGED_JAVA_SOURCES: Record<ManagedJavaArtifactID, ManagedJavaSource[]> =
 }
 
 export function managedJavaRoot() {
-  return path.join(Global.Path.data, "runtime", "java")
+  return PluginPath.data("runtime-java")
 }
 
 export function managedJavaRuntimeRoot() {
@@ -245,7 +245,7 @@ async function resolveManagedJavaSourceUrl(source: ManagedJavaSource) {
 }
 
 async function installFromManagedJavaSource(id: ManagedJavaArtifactID, source: ManagedJavaSource, url: string) {
-  const tempDir = path.join(Global.Path.cache, "runtime", "java", id, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const tempDir = path.join(managedJavaRoot(), "cache", id, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   const archivePath = path.join(tempDir, `${id}.zip`)
   const extractDir = path.join(tempDir, "extract")
   const targetRoot = rootForArtifact(id)

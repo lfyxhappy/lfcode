@@ -28,6 +28,36 @@ describe("createChildStoreManager", () => {
     expect(Object.keys(manager.children)).toEqual([])
   })
 
+  test("admits one initial bootstrap for equivalent directory paths", () => {
+    const owner = createRoot((dispose) => {
+      const current = getOwner()
+      dispose()
+      return current
+    })
+    if (!owner) throw new Error("owner required")
+
+    let bootstraps = 0
+    const manager = createChildStoreManager({
+      owner,
+      isBooting: () => false,
+      isLoadingSessions: () => false,
+      onBootstrap() {
+        bootstraps += 1
+      },
+      onDispose() {},
+      translate: (key) => key,
+    })
+    const directory = "C:/workspace"
+    const store = createStore<State>({ status: "loading" } as State)
+    manager.children[directory] = store
+
+    manager.child("C:\\workspace")
+    manager.child(directory)
+
+    expect(bootstraps).toBe(1)
+    expect(store[0].status).toBe("partial")
+  })
+
   test("does not evict the active directory during mark", () => {
     const owner = createRoot((dispose) => {
       const current = getOwner()

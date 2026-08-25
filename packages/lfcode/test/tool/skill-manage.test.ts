@@ -1,4 +1,5 @@
 import path from "path"
+import matter from "gray-matter"
 import { afterEach, describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -35,7 +36,7 @@ describe("tool.skill_manage", () => {
           const tool = (yield* registry.tools({
             providerID: "lfcode" as never,
             modelID: "gpt-5" as never,
-            agent: { name: "build", mode: "primary", permission: [], options: {} },
+            agent: { name: "build", mode: "primary", permission: [], options: {}, toolAllowlist: [SkillManageTool.id] },
           })).find((item) => item.id === SkillManageTool.id)
           if (!tool) throw new Error("skill_manage tool not found")
           const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
@@ -50,13 +51,41 @@ describe("tool.skill_manage", () => {
             ask: (request) => Effect.sync(() => requests.push(request)),
           }
 
+          const listed = yield* tool.execute({ action: "list" }, ctx)
+          expect(listed.title).toBe("List managed Skills")
+          expect(requests).toEqual([])
+
           yield* tool.execute({ action: "create", name: "managed-skill", description: "Created by the management tool.", reason: "Create a test Skill" }, ctx)
           expect(requests[0]?.permission).toBe("edit")
           expect(
             yield* Effect.promise(() => Bun.file(path.join(directory, ".lfcode", "skills", "managed-skill", "SKILL.md")).exists()),
           ).toBe(true)
 
+          yield* tool.execute(
+            {
+              action: "create",
+              name: "yaml-content-skill",
+              content: `---
+name: ignored-name
+description: 'YAML: # and "quotes" remain valid'
+---
+
+# YAML Content Skill
+`,
+              reason: "Create a frontmatter-only Skill test",
+            },
+            ctx,
+          )
+          const created = yield* Effect.promise(() =>
+            Bun.file(path.join(directory, ".lfcode", "skills", "yaml-content-skill", "SKILL.md")).text(),
+          )
+          expect(matter(created).data).toMatchObject({
+            name: "yaml-content-skill",
+            description: 'YAML: # and "quotes" remain valid',
+          })
+
           yield* tool.execute({ action: "delete", name: "managed-skill", reason: "Remove the test Skill" }, ctx)
+          yield* tool.execute({ action: "delete", name: "yaml-content-skill", reason: "Remove the YAML test Skill" }, ctx)
           expect(
             yield* Effect.promise(() => Bun.file(path.join(directory, ".lfcode", "skills", "managed-skill", "SKILL.md")).exists()),
           ).toBe(false)

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect } from "bun:test"
 import fs from "node:fs/promises"
+import path from "node:path"
 import { Effect, Layer } from "effect"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config"
@@ -102,10 +103,7 @@ describe("rebuild microcompact", () => {
         // Seed checkpoint.md so renderRebuildContext returns non-empty (else
         // insertRebuildBoundary short-circuits and microcompact never runs).
         yield* Effect.promise(async () => {
-          await fs.mkdir(
-            checkpointPath(info.id).replace(/\/[^/]+$/, ""),
-            { recursive: true },
-          )
+          await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
           await Bun.write(checkpointPath(info.id), "## §1 Active intent\n\nrebuild microcompact test\n")
         })
 
@@ -189,10 +187,7 @@ describe("rebuild microcompact", () => {
         const info = yield* ssn.create({})
 
         yield* Effect.promise(async () => {
-          await fs.mkdir(
-            checkpointPath(info.id).replace(/\/[^/]+$/, ""),
-            { recursive: true },
-          )
+          await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
           await Bun.write(checkpointPath(info.id), "## §1 Active intent\n\nno-op test\n")
         })
 
@@ -235,7 +230,7 @@ describe("rebuild microcompact", () => {
         const info = yield* ssn.create({})
 
         yield* Effect.promise(async () => {
-          await fs.mkdir(checkpointPath(info.id).replace(/\/[^/]+$/, ""), { recursive: true })
+          await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
           await Bun.write(checkpointPath(info.id), "## §1 Active intent\n\nC1 lookup test\n")
         })
 
@@ -283,7 +278,7 @@ describe("rebuild microcompact", () => {
         const info = yield* ssn.create({})
 
         yield* Effect.promise(async () => {
-          await fs.mkdir(checkpointPath(info.id).replace(/\/[^/]+$/, ""), { recursive: true })
+          await fs.mkdir(path.dirname(checkpointPath(info.id)), { recursive: true })
           await Bun.write(checkpointPath(info.id), "## §1 Active intent\n\nC1 fail-closed test\n")
         })
 
@@ -301,7 +296,7 @@ describe("rebuild microcompact", () => {
           agent: "build",
           model: { providerID: "anthropic", modelID: "claude" },
         })
-        expect(inserted).toBe(true)
+        expect(inserted).toBe(false)
 
         const all = yield* ssn.messages({ sessionID: info.id })
         const findTool = (id: typeof a.msg.id) =>

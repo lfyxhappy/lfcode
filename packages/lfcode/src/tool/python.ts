@@ -1,30 +1,26 @@
-import os from "os"
 import path from "path"
 import z from "zod"
 import { Effect } from "effect"
 import * as Tool from "./tool"
 import DESCRIPTION from "./python.txt"
 import { AppFileSystem } from "@/filesystem"
-import { Global } from "@/global"
-import { Process } from "@/util"
-import { Instance } from "../project/instance"
 import { ensureManagedPythonCommand } from "@/python/environment"
 import { SessionCwd } from "./session-cwd"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { formatPythonCommand } from "@/python/runtime"
-import { startForegroundJob } from "@/background-job/foreground"
+import { shellBackgroundRuntimeRef } from "@/background-job/runtime-ref"
+import * as PatchRecovery from "./patch-recovery"
 
-const DEFAULT_TIMEOUT = 2 * 60 * 1000
 const MODULE_NOT_FOUND = /ModuleNotFoundError:\s+No module named ['"]([^'"]+)['"]/i
 
 const Parameters = z.object({
   code: z.string().describe("The Python code to execute."),
   args: z.array(z.string()).optional().describe("Optional CLI args exposed to the script as sys.argv[1:]."),
-  timeout: z.number().optional().describe("Optional timeout in milliseconds. Defaults to 120000."),
-  workdir: z
-    .string()
+  timeout: z
+    .number()
     .optional()
-    .describe("Optional working directory. Defaults to the current session directory."),
+    .describe("Optional reminder threshold in milliseconds. It never terminates the script."),
+  workdir: z.string().optional().describe("Optional working directory. Defaults to the current session directory."),
   description: z.string().describe("Clear, concise description of what the script does in 5-10 words."),
 })
 
@@ -68,6 +64,8 @@ export const PythonTool = Tool.define(
           }
 
           yield* assertExternalDirectoryEffect(ctx, normalized, { kind: "directory" })
+          const patchBypass = PatchRecovery.blockedShellWrite(ctx.sessionID, ctx.messageID, normalized, params.code)
+          if (patchBypass) throw new Error(patchBypass)
           yield* ctx.ask({
             permission: "bash",
             patterns: [python.command],
@@ -78,63 +76,33 @@ export const PythonTool = Tool.define(
             },
           })
 
-          const dir = yield* fs.makeTempDirectoryScoped({
-            directory: Global.Path.cache || os.tmpdir(),
-            prefix: "python-tool-",
-          })
-          const script = path.join(dir, "script.py")
-          yield* fs.writeFileString(script, params.code)
-
-          const timeout = params.timeout ?? DEFAULT_TIMEOUT
-          const timeoutAbort = AbortSignal.timeout(timeout)
-          const abort = AbortSignal.any([ctx.abort, timeoutAbort])
-          const job = startForegroundJob({
+          const runtime = shellBackgroundRuntimeRef.current
+          if (!runtime) throw new Error("Shell background runtime is not available in this process.")
+          const job = yield* runtime.start({
             sessionID: ctx.sessionID,
             source: "python",
-            title: params.description || path.relative(Instance.worktree, normalized) || "python",
+            title: params.description || path.basename(normalized),
             cwd: normalized,
-            payload: {
-              command: [python.command, ...python.args, script, ...(params.args ?? [])],
-              tool: "python",
-            },
+            env: Object.fromEntries(
+              Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            ),
+            shell: "",
+            shellName: "argv",
+            argv: [python.command, ...python.args, "{jobRoot}/script.py", ...(params.args ?? [])],
+            files: [{ name: "script.py", content: params.code }],
+            ...(params.timeout !== undefined ? { remindAfterMs: params.timeout } : {}),
             ...(ctx.messageID ? { sourceMessageID: ctx.messageID } : {}),
             ...(ctx.callID ? { sourceToolCallID: ctx.callID } : {}),
           })
-          const result = yield* Effect.promise(() =>
-            Process.run([python.command, ...python.args, script, ...(params.args ?? [])], {
-              cwd: normalized,
-              abort,
-              nothrow: true,
-              onSpawn: (process) => job.attach(process.pid),
-              onOutput: (entry) => job.append(entry.stream, entry.chunk.toString("utf8")),
-            }),
-          )
-
-          const stdout = result.stdout.toString("utf8").trimEnd()
-          const stderr = result.stderr.toString("utf8").trimEnd()
-          const timedOut = timeoutAbort.aborted && !ctx.abort.aborted
-          job.complete({
-            status: ctx.abort.aborted ? "cancelled" : timedOut || result.code !== 0 ? "failed" : "completed",
-            exitCode: result.code,
-            ...(timedOut ? { error: `Python script timed out after ${timeout}ms.` } : {}),
-          })
-          const output = renderOutput({
-            stdout,
-            stderr,
-            exit: result.code,
-            timeout,
-            timedOut,
-          })
-          const hint = renderDependencyHint(stderr)
 
           return {
-            title: params.description || path.relative(Instance.worktree, normalized) || "python",
-            output: hint ? `${output}\n\n${hint}` : output,
+            title: params.description || path.basename(normalized),
+            output: `Started tracked Python shell process.\n<job_id>${job.id}</job_id>\n<status>${job.status}</status>\nCompletion is reported automatically; use shell_process only when inspection is needed. Only shell_process.cancel after an explicit user request can terminate it.`,
             metadata: {
-              exit: result.code,
               python: formatPythonCommand(python),
               description: params.description,
-              timedOut,
+              jobID: job.id,
+              status: job.status,
             },
           }
         }).pipe(Effect.scoped, Effect.orDie),

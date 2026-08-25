@@ -87,6 +87,162 @@ export type MaintenanceCandidateEvent = {
   createdAt: number
 }
 
+export type AutomationSchedule =
+  | {
+      kind: "once"
+      at: number
+    }
+  | {
+      kind: "interval"
+      everyMs: number
+      anchorAt?: number
+    }
+  | {
+      kind: "cron"
+      expression: string
+    }
+  | {
+      kind: "hourly"
+      minute?: number
+    }
+  | {
+      kind: "daily"
+      hour?: number
+      minute?: number
+    }
+  | {
+      kind: "weekly"
+      dayOfWeek?: number
+      hour?: number
+      minute?: number
+    }
+
+export type AutomationTarget =
+  | {
+      kind: "session"
+      sessionID: string
+    }
+  | {
+      kind: "project"
+      projectID: string
+    }
+  | {
+      kind: "global"
+    }
+
+export type AutomationModel = {
+  providerID: string
+  modelID: string
+}
+
+export type AutomationPermissionMode = "ask" | "full"
+
+export type AutomationTimeZone = string
+
+export type AutomationNotification = "all" | "failures" | "none"
+
+export type AutomationTask = {
+  id: string
+  name: string
+  schedule: AutomationSchedule
+  target: AutomationTarget
+  message: string
+  agent: string
+  model?: AutomationModel
+  permissionMode: AutomationPermissionMode
+  timezone: AutomationTimeZone
+  enabled: boolean
+  status: "active" | "paused" | "completed" | "deleted"
+  notifications: AutomationNotification
+  sourceSessionID?: string
+  nextRunAt?: number
+  lastRunAt?: number
+  deletedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type AutomationTaskList = {
+  items: Array<AutomationTask>
+}
+
+export type AutomationSettings = {
+  concurrency: number
+}
+
+export type AutomationTaskCreate = {
+  name?: string
+  schedule: AutomationSchedule
+  target: AutomationTarget
+  message: string
+  agent?: string
+  model?: AutomationModel
+  permissionMode?: AutomationPermissionMode
+  timezone?: AutomationTimeZone
+  enabled?: boolean
+  notifications?: AutomationNotification
+  sourceSessionID?: string
+}
+
+export type AutomationRunStatus =
+  | "queued"
+  | "running"
+  | "waiting_for_session"
+  | "awaiting_user"
+  | "completed"
+  | "failed"
+  | "cancelled"
+
+export type AutomationRun = {
+  id: string
+  taskID: string
+  status: AutomationRunStatus
+  trigger: "schedule" | "manual" | "recovery"
+  scheduledFor: number
+  late: boolean
+  attempt: number
+  sessionID?: string
+  leaseOwner?: string
+  leaseExpiresAt?: number
+  result?: string
+  error?: string
+  startedAt?: number
+  finishedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type AutomationSessionResolution = {
+  task: AutomationTask
+  run: AutomationRun | null
+  directory: string
+}
+
+export type AutomationTaskPatch = {
+  name?: string
+  schedule?: AutomationSchedule
+  target?: AutomationTarget
+  message?: string
+  agent?: string
+  model?: AutomationModel | null
+  permissionMode?: AutomationPermissionMode
+  timezone?: AutomationTimeZone
+  enabled?: boolean
+  notifications?: AutomationNotification
+  sourceSessionID?: string | null
+}
+
+export type ConflictError = {
+  name: "UnknownError"
+  data: {
+    message: string
+  }
+}
+
+export type AutomationRunList = {
+  items: Array<AutomationRun>
+}
+
 export type EventServerConnected = {
   type: "server.connected"
   properties: {
@@ -101,6 +257,50 @@ export type EventGlobalDisposed = {
   }
 }
 
+export type EventHookRunCompleted = {
+  type: "hook.run.completed"
+  properties: {
+    sessionID?: string
+    hookID: string
+    hookName: string
+    event:
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    status: "started" | "completed" | "blocked" | "failed" | "timeout" | "skipped"
+    durationMs: number
+    summary: string
+    timeCreated: number
+  }
+}
+
 export type EventActorRegistered = {
   type: "actor.registered"
   properties: {
@@ -111,6 +311,7 @@ export type EventActorRegistered = {
     description: string
     agent: string
     background: boolean
+    visible: boolean
   }
 }
 
@@ -124,6 +325,7 @@ export type EventActorStatus = {
     turnCount: number
     lastTurnTime: number
     error?: string
+    visible: boolean
   }
 }
 
@@ -132,6 +334,7 @@ export type EventActorRemoved = {
   properties: {
     sessionID: string
     actorID: string
+    visible: boolean
   }
 }
 
@@ -143,6 +346,7 @@ export type EventActorStuck = {
     description: string
     lastTurnTime: number
     stuckDuration: number
+    visible: boolean
   }
 }
 
@@ -343,65 +547,16 @@ export type EventTuiInstructionsLoaded = {
   }
 }
 
-export type EventWorkflowPhase = {
-  type: "workflow.phase"
+export type EventAutomationRunUpdated = {
+  type: "automation.run.updated"
   properties: {
-    sessionID: string
+    taskID: string
+    taskName: string
     runID: string
-    title: string
-  }
-}
-
-export type EventWorkflowLog = {
-  type: "workflow.log"
-  properties: {
-    sessionID: string
-    runID: string
-    message: string
-  }
-}
-
-export type EventWorkflowStarted = {
-  type: "workflow.started"
-  properties: {
-    sessionID: string
-    runID: string
-    name: string
-  }
-}
-
-export type EventWorkflowFinished = {
-  type: "workflow.finished"
-  properties: {
-    sessionID: string
-    runID: string
-    status: "completed" | "failed" | "cancelled"
-    error?: string
-  }
-}
-
-export type EventWorkflowAgentFailed = {
-  type: "workflow.agent_failed"
-  properties: {
-    sessionID: string
-    runID: string
-    actorID?: string
-    agentType: string
-    label?: string
-    phase?: string
-    reason: "over-cap" | "spawn-reject" | "timeout" | "actor-error" | "no-deliverable"
-    errorMessage?: string
-  }
-}
-
-export type EventWorkflowChildFailed = {
-  type: "workflow.child_failed"
-  properties: {
-    sessionID: string
-    runID: string
-    childRunID: string
-    name: string
-    status: "failed" | "cancelled"
+    status: AutomationRunStatus
+    notifications: AutomationNotification
+    late: boolean
+    sessionID?: string
     error?: string
   }
 }
@@ -421,6 +576,10 @@ export type Project = {
      * Startup script to run when creating a new workspace (worktree)
      */
     start?: string
+  }
+  extension?: {
+    pluginID: string
+    type: string
   }
   time: {
     created: number
@@ -636,6 +795,7 @@ export type EventSessionError = {
   type: "session.error"
   properties: {
     sessionID?: string
+    visible?: boolean
     error?:
       | ProviderAuthError
       | UnknownError
@@ -1054,12 +1214,26 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
-export type Provenance = {
+export type TavernContext = {
+  depth: Array<{
+    content: string
+    depth: number
+  }>
+}
+
+export type HookProvenance = {
   hookPhase: "pre" | "post"
   hookIteration: number
   pluginNames: Array<string>
   hookIDs: Array<string>
 }
+
+export type AutomationProvenance = {
+  taskID: string
+  runID: string
+}
+
+export type Provenance = HookProvenance | AutomationProvenance
 
 export type UserMessage = {
   id: string
@@ -1082,9 +1256,11 @@ export type UserMessage = {
     variant?: string
   }
   system?: string
+  tavernContext?: TavernContext
   tools?: {
     [key: string]: boolean
   }
+  source?: "user" | "spawn" | "hook" | "automation"
   provenance?: Provenance
 }
 
@@ -1182,6 +1358,19 @@ export type TextPart = {
   }
 }
 
+export type ResearchDispatchSnapshot = {
+  kind: "deep-research"
+  title?: string
+  depth: "quick" | "standard" | "deep"
+  phase?: "planning" | "retrieving" | "verifying" | "synthesizing" | "completed" | "failed" | "cancelled"
+  subtaskCount?: number
+  sourceCount?: number
+  citations?: Array<string>
+  summary?: string
+  startedAt?: number
+  completedAt?: number
+}
+
 export type SubtaskPart = {
   id: string
   sessionID: string
@@ -1190,11 +1379,16 @@ export type SubtaskPart = {
   prompt: string
   description: string
   agent: string
+  execution?: "wait" | "background"
+  context?: "none" | "state" | "full"
   model?: {
     providerID: string
     modelID: string
   }
+  contextRefs?: Array<string>
+  declaredFiles?: Array<string>
   command?: string
+  research?: ResearchDispatchSnapshot
 }
 
 export type ReasoningPart = {
@@ -1500,43 +1694,6 @@ export type SessionInteraction = {
   message?: string
 }
 
-export type ComposeRouteTaskType =
-  | "bug-fix"
-  | "small-feature"
-  | "refactor"
-  | "investigation"
-  | "design"
-  | "migration"
-  | "large-project"
-
-export type ComposeRouteDifficulty = "simple" | "moderate" | "complex" | "very-complex"
-
-export type ComposeRouteStrategy =
-  | "direct-execute"
-  | "research-then-execute"
-  | "design-then-execute"
-  | "full-orchestration"
-
-export type ComposeRouteExecutionShape = "single-shot" | "research-first" | "design-first" | "multi-workstream"
-
-export type ComposeRoute = {
-  sourceMessageID: string
-  summary: string
-  taskType: ComposeRouteTaskType
-  difficulty: ComposeRouteDifficulty
-  strategy: ComposeRouteStrategy
-  executionShape: ComposeRouteExecutionShape
-  requiresTaskBoard: boolean
-  requiresPlan: boolean
-  requiresReview: boolean
-  requiresVerify: boolean
-  reason: string
-  time: {
-    created: number
-    updated: number
-  }
-}
-
 export type Session = {
   id: string
   slug: string
@@ -1557,6 +1714,7 @@ export type Session = {
   }
   title: string
   version: string
+  temporary?: boolean
   time: {
     created: number
     updated: number
@@ -1567,7 +1725,10 @@ export type Session = {
   permission?: PermissionRuleset
   goal?: GoalState
   interaction?: SessionInteraction
-  composeRoute?: ComposeRoute
+  extension?: {
+    pluginID: string
+    type: string
+  }
   revert?: {
     messageID: string
     partID?: string
@@ -1689,6 +1850,7 @@ export type SyncEventSessionUpdated = {
       }
       title: string | null
       version: string | null
+      temporary: boolean | null
       time?: {
         created: number | null
         updated: number | null
@@ -1699,7 +1861,10 @@ export type SyncEventSessionUpdated = {
       permission: PermissionRuleset | null
       goal: GoalState | null
       interaction: SessionInteraction | null
-      composeRoute: ComposeRoute | null
+      extension: {
+        pluginID: string
+        type: string
+      } | null
       revert: {
         messageID: string
         partID?: string
@@ -1728,6 +1893,7 @@ export type GlobalEvent = {
   payload:
     | EventServerConnected
     | EventGlobalDisposed
+    | EventHookRunCompleted
     | EventActorRegistered
     | EventActorStatus
     | EventActorRemoved
@@ -1746,12 +1912,7 @@ export type GlobalEvent = {
     | EventTuiToastShow
     | EventTuiSessionSelect
     | EventTuiInstructionsLoaded
-    | EventWorkflowPhase
-    | EventWorkflowLog
-    | EventWorkflowStarted
-    | EventWorkflowFinished
-    | EventWorkflowAgentFailed
-    | EventWorkflowChildFailed
+    | EventAutomationRunUpdated
     | EventProjectUpdated
     | EventServerInstanceDisposed
     | EventFileEdited
@@ -1901,6 +2062,38 @@ export type AgentConfig = {
    * Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)
    */
   hidden?: boolean
+  /**
+   * Optional native preset this agent was copied or overridden from.
+   */
+  preset?: string
+  /**
+   * Display name shown in subagent management and dispatch surfaces.
+   */
+  display_name?: string
+  /**
+   * Stable avatar token shown for this agent.
+   */
+  avatar?: string
+  /**
+   * Stable icon token shown for this agent.
+   */
+  icon?: string
+  /**
+   * Default dispatch behavior: wait for completion or run in the background.
+   */
+  default_execution?: "wait" | "background"
+  /**
+   * Default context policy: minimal checkpoint state, full conversation, or task only.
+   */
+  default_context?: "minimal" | "full" | "task"
+  /**
+   * Whether this agent inherits the primary model or uses an explicit configured model.
+   */
+  model_inheritance?: "primary" | "configured"
+  /**
+   * Subagent role IDs this role may delegate to. Omit or leave empty to prohibit recursive delegation.
+   */
+  delegation_allowlist?: Array<string>
   options?: {
     [key: string]: unknown
   }
@@ -1932,6 +2125,14 @@ export type AgentConfig = {
     | "subagent"
     | "primary"
     | "all"
+    | "wait"
+    | "background"
+    | "minimal"
+    | "full"
+    | "task"
+    | "primary"
+    | "configured"
+    | Array<string>
     | {
         [key: string]: unknown
       }
@@ -1988,6 +2189,12 @@ export type ProviderConfig = {
       protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
       attachment?: boolean
       reasoning?: boolean
+      reasoning_options?: Array<{
+        type: string
+        values?: Array<string>
+        min?: number
+        max?: number
+      }>
       temperature?: boolean
       tool_call?: boolean
       capabilities?: {
@@ -2170,6 +2377,453 @@ export type McpRemoteConfig = {
  */
 export type LayoutConfig = "auto" | "stretch"
 
+export type ConfigPublic = {
+  /**
+   * JSON schema reference for configuration validation
+   */
+  $schema?: string
+  logLevel?: LogLevel
+  server?: ServerConfig
+  /**
+   * Command configuration, see https://lfcode.ai/docs/commands
+   */
+  command?: {
+    [key: string]: {
+      template: string
+      description?: string
+      agent?: string
+      model?: string
+      subtask?: boolean
+    }
+  }
+  watcher?: {
+    ignore?: Array<string>
+  }
+  /**
+   * Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.
+   */
+  snapshot?: boolean
+  plugin?: Array<
+    | string
+    | [
+        string,
+        {
+          [key: string]: unknown
+        },
+      ]
+  >
+  /**
+   * Enable or disable configured plugins by their canonical spec without removing their configuration
+   */
+  plugin_enabled?: {
+    [key: string]: boolean
+  }
+  /**
+   * Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing
+   */
+  share?: "manual" | "auto" | "disabled"
+  /**
+   * @deprecated Use 'share' field instead. Share newly created sessions automatically
+   */
+  autoshare?: boolean
+  /**
+   * Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications
+   */
+  autoupdate?: boolean | "notify"
+  /**
+   * Disable providers that are loaded automatically
+   */
+  disabled_providers?: Array<string>
+  /**
+   * When set, ONLY these providers will be enabled. All other providers will be ignored
+   */
+  enabled_providers?: Array<string>
+  /**
+   * Model to use in the format of provider/model, eg anthropic/claude-2
+   */
+  model?: string
+  /**
+   * Small model to use for tasks like title generation in the format of provider/model
+   */
+  small_model?: string
+  /**
+   * Named model groups (capability tiers, e.g. ultra/standard/lite). Each group has a default model and optional member models. A group name can be used anywhere a provider/model string is accepted.
+   */
+  model_groups?: {
+    [key: string]:
+      | string
+      | {
+          default: string
+          models?: Array<string>
+        }
+  }
+  /**
+   * Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.
+   */
+  default_agent?: string
+  /**
+   * Custom username to display in conversations instead of system username
+   */
+  username?: string
+  /**
+   * @deprecated Use `agent` field instead.
+   */
+  mode?: {
+    build?: AgentConfig
+    plan?: AgentConfig
+    [key: string]: AgentConfig | undefined
+  }
+  /**
+   * Agent configuration, see https://lfcode.ai/docs/agents
+   */
+  agent?: {
+    plan?: AgentConfig
+    build?: AgentConfig
+    general?: AgentConfig
+    explore?: AgentConfig
+    title?: AgentConfig
+    summary?: AgentConfig
+    compaction?: AgentConfig
+    [key: string]: AgentConfig | undefined
+  }
+  /**
+   * Custom provider configurations and model overrides
+   */
+  provider?: {
+    [key: string]: ProviderConfig
+  }
+  /**
+   * MCP (Model Context Protocol) server configurations
+   */
+  mcp?: {
+    [key: string]:
+      | McpLocalConfig
+      | McpRemoteConfig
+      | {
+          enabled: boolean
+        }
+  }
+  formatter?:
+    | boolean
+    | {
+        [key: string]: {
+          disabled?: boolean
+          command?: Array<string>
+          environment?: {
+            [key: string]: string
+          }
+          extensions?: Array<string>
+        }
+      }
+  lsp?:
+    | boolean
+    | {
+        [key: string]:
+          | {
+              disabled: true
+            }
+          | {
+              command: Array<string>
+              extensions?: Array<string>
+              disabled?: boolean
+              env?: {
+                [key: string]: string
+              }
+              initialization?: {
+                [key: string]: unknown
+              }
+            }
+      }
+  /**
+   * Additional instruction files or patterns to include
+   */
+  instructions?: Array<string>
+  layout?: LayoutConfig
+  permission?: PermissionConfig
+  tools?: {
+    [key: string]: boolean
+  }
+  /**
+   * Tool invocation style configuration (JSON vs shell-style).
+   */
+  tool?: {
+    /**
+     * Default invocation style for all tools. 'json' (default) exposes the original Zod schema; 'shell' exposes a single `script` parameter and uses the tool's shell.parse mapping.
+     */
+    invocation_style?: "json" | "shell"
+    /**
+     * Per-tool override of invocation_style. Keys are tool IDs. A tool without a `shell` field falls back to JSON regardless of this setting.
+     */
+    invocation_style_by_tool?: {
+      [key: string]: "json" | "shell"
+    }
+    /**
+     * How tools are presented to the model. auto (default) selects Code Mode when more than 24 tools or 16KB of tool schemas would be visible.
+     */
+    presentation?: "native" | "code" | "both" | "auto"
+  }
+  /**
+   * Host-level desktop app-control configuration.
+   */
+  app_control?: {
+    /**
+     * Enable or disable model access to local desktop app-control tools. Default: true.
+     */
+    enabled?: boolean
+    /**
+     * Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, and 'full_app_control' allows all app-control actions. 'browser_control' is a legacy value that migrates to session_control; built-in browser access is configured independently with browser_control.
+     */
+    permission?: "read_only" | "session_control" | "browser_control" | "full_app_control"
+  }
+  /**
+   * Host-level built-in browser control configuration.
+   */
+  browser_control?: {
+    /**
+     * Enable or disable model access to the built-in side browser. Default: true.
+     */
+    enabled?: boolean
+    /**
+     * Browser permission. 'read_only' allows inspection and diagnostics; 'interactive' also allows navigation and page interaction.
+     */
+    permission?: "read_only" | "interactive"
+  }
+  enterprise?: {
+    /**
+     * Enterprise URL
+     */
+    url?: string
+  }
+  compaction?: {
+    /**
+     * Context recovery strategy. Defaults to layered; legacy preserves direct LLM compaction.
+     */
+    strategy?: "layered" | "legacy"
+    /**
+     * Enable automatic compaction when context is full (default: true)
+     */
+    auto?: boolean
+    /**
+     * Opt in to persistent pruning of old tool outputs (default: false; active-context projection remains non-destructive)
+     */
+    prune?: boolean
+    /**
+     * Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)
+     */
+    tail_turns?: number
+    /**
+     * Maximum number of tokens from recent turns to preserve verbatim after compaction
+     */
+    preserve_recent_tokens?: number
+    /**
+     * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
+     */
+    reserved?: number
+  }
+  checkpoint?: {
+    /**
+     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. In layered compaction, omitted thresholds default to 55% and 70%; an explicit empty array disables checkpoint writes.
+     */
+    thresholds?: Array<string>
+    /**
+     * Token buffer reserved for checkpoint operations. Default: 20000.
+     */
+    reserved?: number
+    /**
+     * Maximum consecutive writer failures per session before checkpointing stops retrying until process restart. Default: 3.
+     */
+    max_writer_failures?: number
+    /**
+     * Whether to fork the parent agent's message prefix into the writer session for prefix-cache reuse. Requires provider cache-breakpoint support. Default: false.
+     */
+    fork?: boolean
+    /**
+     * Per-section token caps for rebuild context (renderRebuildContext). Each section is loaded up to its cap so the rebuild stays within a predictable budget.
+     */
+    push_caps?: {
+      /**
+       * Token cap for the tasks ledger section of rebuild context. Default: 2000.
+       */
+      tasks_ledger?: number
+      /**
+       * Token cap for the focus task body in rebuild context. Default: 4000.
+       */
+      focus_task?: number
+      /**
+       * Token cap for the actor ledger section of rebuild context. Default: 500.
+       */
+      actor_ledger?: number
+      /**
+       * Token cap for memory titles in rebuild context. Default: 500.
+       */
+      memory_titles?: number
+      /**
+       * Token cap for the global memory section (global/MEMORY.md) of rebuild context. Default: 6000.
+       */
+      global?: number
+      /**
+       * Token cap for the session checkpoint section (checkpoint.md) of rebuild context. Default: 11000.
+       */
+      checkpoint?: number
+      /**
+       * Token cap for the project memory section (MEMORY.md) of rebuild context. Default: 16000.
+       */
+      memory?: number
+      /**
+       * Token cap for the total relevant topic memory spillover content auto-injected into rebuild context. Default: 4000.
+       */
+      memory_spillover_total?: number
+      /**
+       * Maximum number of project MEMORY-<topic>.md spillover files auto-injected into rebuild context. Default: 2.
+       */
+      memory_spillover_files?: number
+      /**
+       * Token cap for the session notes (notes.md) of rebuild context. Default: 6000.
+       */
+      notes?: number
+      /**
+       * Token cap for §10 Design decisions section of checkpoint.md (writer-side budget validation). Default: 3000.
+       */
+      design_decisions?: number
+      /**
+       * Token cap for §11 Open notes section of checkpoint.md (writer-side budget validation). Default: 800.
+       */
+      open_notes?: number
+    }
+    /**
+     * Number of days after task done/abandoned before it's filtered out of `list({include_archived: false})`. Rows are NOT deleted — see v9 for true GC. Default: 7.
+     */
+    task_archive_days?: number
+    /**
+     * [deprecated] Alias for task_archive_days. Will be removed in v9.
+     */
+    task_cleanup_days?: number
+    /**
+     * Whether to reconcile memory state on search operations. Default: true.
+     */
+    memory_reconcile_on_search?: boolean
+    /**
+     * Relative BM25 floor for memory.search (OR-joined query): keep results scoring >= this fraction of the top hit, dropping common-word-only noise. The #1 result is always kept. Default: 0.15. Set 0 to keep all matches.
+     */
+    memory_search_score_floor?: number
+  }
+  memory?: {
+    /**
+     * Index Claude Code memory (~/.claude/projects/<slug>/memory) and expose under scope='cc'. Default: false. Note: when enabled, every lfcode agent (build/explore/subagents) can search these memories via the builtin `memory` tool — including CC's `type: user` (your role/preferences) and `type: feedback` (your guidance) categories. CC originally writes them for future CC sessions; flipping this on widens the consumer set to lfcode agents on the same machine. Leave disabled (default) if you don't want personal context recallable from a prompt-injection-vulnerable agent.
+     */
+    cc_index?: boolean
+  }
+  /**
+   * Trajectory (conversation history) FTS index configuration.
+   */
+  history?: {
+    /**
+     * Which part kinds the history FTS index should cover. Defaults to text (user/assistant) + tool input + tool errors. Add 'reasoning' or 'tool_output' to grow recall at the cost of database size. Note: enabling 'tool_output' reclassifies completed tools from kind='tool_input' to kind='tool_output' (input remains searchable in the body, but kind:['tool_input'] filter will then only match pending/error tools).
+     */
+    kinds?: Array<"user_text" | "assistant_text" | "tool_input" | "tool_error" | "reasoning" | "tool_output">
+  }
+  dream?: {
+    /**
+     * Auto-trigger dream memory consolidation on new session start. Default: true.
+     */
+    auto?: boolean
+    /**
+     * Minimum days between automatic dream runs. Set to 0 to trigger on every new session. Default: 7.
+     */
+    interval_days?: number
+  }
+  distill?: {
+    /**
+     * Auto-trigger distill workflow packaging on new session start. Default: true.
+     */
+    auto?: boolean
+    /**
+     * Minimum days between automatic distill runs. Default: 30.
+     */
+    interval_days?: number
+  }
+  maintenance?: {
+    /**
+     * Enable host-level Dream and Distill memory maintenance. Default: true.
+     */
+    enabled?: boolean
+    /**
+     * Allow the daily maintenance scheduler to claim automatic runs. Default: true.
+     */
+    scheduler_enabled?: boolean
+    /**
+     * Run Dream consolidation as part of maintenance. Default: true.
+     */
+    dream_enabled?: boolean
+    /**
+     * Run Distill candidate analysis as part of maintenance. Default: true.
+     */
+    distill_enabled?: boolean
+  }
+  context_review?: {
+    /**
+     * Enable the invisible background review that checks for omitted Skills and Memory context. Default: true.
+     */
+    enabled?: boolean
+  }
+  experimental?: {
+    disable_paste_summary?: boolean
+    /**
+     * Enable the batch tool
+     */
+    batch_tool?: boolean
+    /**
+     * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
+     */
+    openTelemetry?: boolean
+    /**
+     * Tools that should only be available to primary agents.
+     */
+    primary_tools?: Array<string>
+    /**
+     * Continue the agent loop when a tool call is denied
+     */
+    continue_loop_on_deny?: boolean
+    /**
+     * Timeout in milliseconds for model context protocol (MCP) requests
+     */
+    mcp_timeout?: number
+    /**
+     * Predict the user's likely next prompt after each turn and show it as inline ghost text (Tab to accept). Enabled by default; set to false to disable.
+     */
+    predict_next_prompt?: boolean
+    /**
+     * Max mode (experimental): the 'max' agent runs N parallel reasoning candidates each step, picks the best via a judge call, and executes only the winner.
+     */
+    maxMode?: {
+      /**
+       * Number of parallel reasoning candidates per step in max mode (default 5).
+       */
+      candidates?: number
+    }
+  }
+}
+
+export type ConfigPatch = {
+  [key: string]: unknown
+}
+
+export type GlobalPersonalizationMemory = {
+  ccIndex: boolean
+  autoConsolidation: boolean
+}
+
+export type GlobalPersonalizationMaintenance = {
+  enabled: boolean
+  schedulerEnabled: boolean
+  dreamEnabled: boolean
+  distillEnabled: boolean
+}
+
+export type GlobalPersonalizationContextReview = {
+  enabled: boolean
+}
+
 export type Config = {
   /**
    * JSON schema reference for configuration validation
@@ -2350,19 +3004,36 @@ export type Config = {
     invocation_style_by_tool?: {
       [key: string]: "json" | "shell"
     }
+    /**
+     * How tools are presented to the model. auto (default) selects Code Mode when more than 24 tools or 16KB of tool schemas would be visible.
+     */
+    presentation?: "native" | "code" | "both" | "auto"
   }
   /**
    * Host-level desktop app-control configuration.
    */
   app_control?: {
     /**
-     * Enable or disable model access to local desktop app-control tools. Default: false.
+     * Enable or disable model access to local desktop app-control tools. Default: true.
      */
     enabled?: boolean
     /**
-     * Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, 'browser_control' additionally allows side-browser actions, and 'full_app_control' reserves broader future control.
+     * Permission level for desktop app-control tools. 'read_only' allows state inspection only, 'session_control' allows navigation and composer actions, and 'full_app_control' allows all app-control actions. 'browser_control' is a legacy value that migrates to session_control; built-in browser access is configured independently with browser_control.
      */
     permission?: "read_only" | "session_control" | "browser_control" | "full_app_control"
+  }
+  /**
+   * Host-level built-in browser control configuration.
+   */
+  browser_control?: {
+    /**
+     * Enable or disable model access to the built-in side browser. Default: true.
+     */
+    enabled?: boolean
+    /**
+     * Browser permission. 'read_only' allows inspection and diagnostics; 'interactive' also allows navigation and page interaction.
+     */
+    permission?: "read_only" | "interactive"
   }
   enterprise?: {
     /**
@@ -2372,11 +3043,15 @@ export type Config = {
   }
   compaction?: {
     /**
+     * Context recovery strategy. Defaults to layered; legacy preserves direct LLM compaction.
+     */
+    strategy?: "layered" | "legacy"
+    /**
      * Enable automatic compaction when context is full (default: true)
      */
     auto?: boolean
     /**
-     * Enable pruning of old tool outputs (default: true)
+     * Opt in to persistent pruning of old tool outputs (default: false; active-context projection remains non-destructive)
      */
     prune?: boolean
     /**
@@ -2394,7 +3069,7 @@ export type Config = {
   }
   checkpoint?: {
     /**
-     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. No default thresholds are applied; direct compaction is the default hot path unless thresholds are explicitly configured.
+     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. In layered compaction, omitted thresholds default to 55% and 70%; an explicit empty array disables checkpoint writes.
      */
     thresholds?: Array<string>
     /**
@@ -2532,6 +3207,12 @@ export type Config = {
      */
     distill_enabled?: boolean
   }
+  context_review?: {
+    /**
+     * Enable the invisible background review that checks for omitted Skills and Memory context. Default: true.
+     */
+    enabled?: boolean
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**
@@ -2568,43 +3249,7 @@ export type Config = {
       candidates?: number
     }
   }
-  /**
-   * Dynamic workflow runtime settings.
-   */
-  workflow?: {
-    /**
-     * Process-wide ceiling on subagents running concurrently across ALL workflow runs (including nested children). Default min(16, 2x CPU cores). No upper clamp: the previous 2x-cores hard cap was removed so an operator can match real provider capacity — but that also means a misconfigured value (e.g. an extra zero) can exhaust provider rate limits or host memory. This is the only concurrency ceiling, so set it deliberately.
-     */
-    maxConcurrentAgents?: number
-    /**
-     * Max nesting depth for workflow()-calls-workflow. Default 8. Exceeding it fails the run.
-     */
-    maxDepth?: number
-    /**
-     * Hard ceiling on total agents a single workflow run may spawn over its life. Default 1000. Over-cap agent() calls return null (graceful degradation). PER-RUN, not tree-wide: each child workflow has its own independent budget, so a deep nesting can spawn maxDepth × this over the whole tree (concurrent in-flight is still bounded by maxConcurrentAgents).
-     */
-    maxLifecycleAgents?: number
-    /**
-     * Wall-clock budget for a whole workflow script, in milliseconds. Default 12h. The sandbox interrupt handler enforces this as a hard kill-switch.
-     */
-    scriptDeadlineMs?: number
-  }
-}
-
-export type ConfigPatch = {
-  [key: string]: unknown
-}
-
-export type GlobalPersonalizationMemory = {
-  ccIndex: boolean
-  autoConsolidation: boolean
-}
-
-export type GlobalPersonalizationMaintenance = {
-  enabled: boolean
-  schedulerEnabled: boolean
-  dreamEnabled: boolean
-  distillEnabled: boolean
+  workflow?: unknown
 }
 
 export type GlobalPersonalization = {
@@ -2612,6 +3257,7 @@ export type GlobalPersonalization = {
   instructionFile: string
   memory: GlobalPersonalizationMemory
   maintenance: GlobalPersonalizationMaintenance
+  contextReview: GlobalPersonalizationContextReview
   config: Config
 }
 
@@ -2619,6 +3265,7 @@ export type GlobalPersonalizationSave = {
   customInstructions: string
   memory: GlobalPersonalizationMemory
   maintenance: GlobalPersonalizationMaintenance
+  contextReview: GlobalPersonalizationContextReview
 }
 
 export type RuntimeManageItemId =
@@ -2700,6 +3347,13 @@ export type RuntimeOperationLogState = {
 
 export type GlobalAppControlPermission = "read_only" | "session_control" | "browser_control" | "full_app_control"
 
+export type GlobalBrowserControlPermission = "read_only" | "interactive"
+
+export type GlobalBrowserControlSave = {
+  enabled: boolean
+  permission: GlobalBrowserControlPermission
+}
+
 export type GlobalAppControlService = {
   discoveryFile: string
   detected: boolean
@@ -2708,6 +3362,8 @@ export type GlobalAppControlService = {
   pid?: number
   version?: string
   startedAt?: number
+  protocolVersion?: number
+  instanceID?: string
 }
 
 export type GlobalAppControl = {
@@ -2715,6 +3371,7 @@ export type GlobalAppControl = {
   permission: GlobalAppControlPermission
   target: "app"
   availableTargets: Array<"app">
+  browser: GlobalBrowserControlSave
   service: GlobalAppControlService
   config: Config
 }
@@ -2722,6 +3379,10 @@ export type GlobalAppControl = {
 export type GlobalAppControlSave = {
   enabled: boolean
   permission: GlobalAppControlPermission
+  browser?: {
+    enabled: boolean
+    permission: "read_only" | "interactive"
+  }
 }
 
 export type OAuth = {
@@ -2757,6 +3418,19 @@ export type Workspace = {
   directory: string | null
   extra: unknown | null
   projectID: string
+}
+
+export type ClaudeCodeSession = {
+  sessionID: string
+  claudeSessionID: string
+  directory: string
+  status: "ready" | "running"
+  ptyID?: string
+  models: Array<{
+    id: string
+    label: string
+  }>
+  permissionMode?: "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions"
 }
 
 export type Model = {
@@ -2826,6 +3500,12 @@ export type Model = {
     [key: string]: string
   }
   release_date: string
+  reasoning_options?: Array<{
+    type: string
+    values?: Array<string>
+    min?: number
+    max?: number
+  }>
   variants?: {
     [key: string]: {
       [key: string]: unknown
@@ -2914,6 +3594,7 @@ export type GlobalSession = {
   }
   title: string
   version: string
+  temporary?: boolean
   time: {
     created: number
     updated: number
@@ -2924,7 +3605,10 @@ export type GlobalSession = {
   permission?: PermissionRuleset
   goal?: GoalState
   interaction?: SessionInteraction
-  composeRoute?: ComposeRoute
+  extension?: {
+    pluginID: string
+    type: string
+  }
   revert?: {
     messageID: string
     partID?: string
@@ -2949,11 +3633,28 @@ export type SnapshotFileDiff = {
   status?: "added" | "deleted" | "modified"
 }
 
-export type ConflictError = {
-  name: "UnknownError"
-  data: {
-    message: string
+export type SessionContextStatus = {
+  usable_tokens: number | null
+  used_tokens: number
+  pressure: "idle" | "monitoring" | "checkpoint" | "rebuild"
+  source: "raw" | "checkpoint" | "compaction"
+  boundary: {
+    message_id: string
+    kind: "checkpoint" | "compaction"
+    valid: boolean
+  } | null
+  tail_tokens: number
+  projection: {
+    media: number
+    reasoning: number
+    tool_results: number
   }
+  checkpoint: {
+    exists: boolean
+    writer_running: boolean
+    watermark: string | null
+  }
+  fallback_reason: string | null
 }
 
 export type TextPartInput = {
@@ -3004,11 +3705,16 @@ export type SubtaskPartInput = {
   prompt: string
   description: string
   agent: string
+  execution?: "wait" | "background"
+  context?: "none" | "state" | "full"
   model?: {
     providerID: string
     modelID: string
   }
+  contextRefs?: Array<string>
+  declaredFiles?: Array<string>
   command?: string
+  research?: ResearchDispatchSnapshot
 }
 
 export type ProviderAuthMethod = {
@@ -3084,6 +3790,16 @@ export type FileNode = {
   ignored: boolean
 }
 
+export type FileReferenceGrant = {
+  root: string
+  token: string
+}
+
+export type FileReference = {
+  exists: boolean
+  kind: "file" | "directory" | "unknown"
+}
+
 export type FileContent = {
   exists: boolean
   type: "text" | "binary"
@@ -3111,6 +3827,7 @@ export type FileContent = {
 export type Event =
   | EventServerConnected
   | EventGlobalDisposed
+  | EventHookRunCompleted
   | EventActorRegistered
   | EventActorStatus
   | EventActorRemoved
@@ -3129,12 +3846,7 @@ export type Event =
   | EventTuiToastShow
   | EventTuiSessionSelect
   | EventTuiInstructionsLoaded
-  | EventWorkflowPhase
-  | EventWorkflowLog
-  | EventWorkflowStarted
-  | EventWorkflowFinished
-  | EventWorkflowAgentFailed
-  | EventWorkflowChildFailed
+  | EventAutomationRunUpdated
   | EventProjectUpdated
   | EventServerInstanceDisposed
   | EventFileEdited
@@ -3184,6 +3896,111 @@ export type Event =
   | EventSessionCreated
   | EventSessionUpdated
   | EventSessionDeleted
+
+export type AgentManageNativeLayer = {
+  scope: "native"
+  config: {
+    [key: string]: unknown
+  }
+  prompt: string
+}
+
+export type AgentManageLayer = {
+  scope: "global" | "project"
+  path: string
+  config: {
+    [key: string]: unknown
+  }
+  prompt: string
+}
+
+export type AgentManageEffective = {
+  name: string
+  config: {
+    [key: string]: unknown
+  }
+  prompt: string
+} | null
+
+export type AgentManageItem = {
+  id: string
+  name: string
+  description?: string
+  prompt: string
+  config: {
+    [key: string]: unknown
+  }
+  native: AgentManageNativeLayer | null
+  isNative: boolean
+  global: AgentManageLayer | null
+  project: AgentManageLayer | null
+  effective: AgentManageEffective
+  source: "native" | "global" | "project" | "custom"
+  origins: Array<"native" | "global" | "project">
+  sources: Array<{
+    scope: "native" | "global" | "project"
+    path?: string
+  }>
+  editable: {
+    global: true
+    project: true
+    delete: boolean
+  }
+}
+
+export type AgentManageResponse = {
+  items: Array<AgentManageItem>
+}
+
+export type AgentManageMutation = {
+  id: string
+  scope: "global" | "project"
+  restored: boolean
+}
+
+export type ActorDispatch = {
+  id: string
+  sessionID: string
+  actorID: string
+  parentActorID?: string
+  agent: string
+  description: string
+  status: "queued" | "running" | "interrupted" | "completed" | "failed" | "cancelled"
+  execution: "background"
+  context: "none" | "state" | "full"
+  model?: {
+    providerID: string
+    modelID: string
+  }
+  contextRefs: Array<string>
+  declaredFiles: Array<string>
+  actualFiles: Array<string>
+  research?: ResearchDispatchSnapshot
+  writeAccess: boolean
+  conflicts: Array<string>
+  queuePosition?: number
+  result?: string
+  error?: string
+  unread: boolean
+  acknowledgedAt?: number
+  manualResume: boolean
+  resumedFrom?: string
+  attempt: number
+  time: {
+    created: number
+    updated: number
+    started?: number
+    completed?: number
+  }
+}
+
+export type ActorDispatchList = {
+  items: Array<ActorDispatch>
+}
+
+export type ActorDispatchConfig = {
+  backgroundConcurrency: number
+}
 
 export type BackgroundJobSummary = {
   id: string
@@ -3240,6 +4057,29 @@ export type BackgroundJobReconcile = {
   job: BackgroundJobSummary
 }
 
+export type PluginActionResult = {
+  value: unknown
+}
+
+export type PluginActionInput = {
+  input: unknown
+}
+
+export type PluginData = {
+  value: unknown
+}
+
+export type PluginDataFileResult = {
+  path: string
+  bytes: number
+}
+
+export type PluginDataFile = {
+  kind: "characters" | "worldbooks"
+  filename: string
+  base64: string
+}
+
 export type PluginManifestSummary = {
   id?: string
   name?: string
@@ -3261,8 +4101,22 @@ export type PluginManifestSummary = {
     required?: boolean
   }>
   uiContributions?: Array<{
-    slot: "tui-slot" | "desktop-settings-panel" | "desktop-session-toolbar"
+    slot: "tui-slot" | "desktop-settings-panel" | "desktop-session-toolbar" | "desktop-session-composer"
     title?: string
+    sessionComposer?: {
+      type: string
+      mode: "replace" | "append"
+      renderer: "conversation"
+      placeholder?: string
+      submitLabel?: string
+      description?: string
+      hiddenComponents?: Array<"summary" | "jobs-rail" | "side-panel">
+    }
+    managedSession?: {
+      type: string
+      title?: string
+      label?: string
+    }
   }>
 }
 
@@ -3551,17 +4405,6 @@ export type VcsInfo = {
   default_branch?: string
 }
 
-export type Command = {
-  name: string
-  description?: string
-  agent?: string
-  model?: string
-  source?: "command" | "mcp" | "skill"
-  template: string
-  subtask?: boolean
-  hints: Array<string>
-}
-
 export type Agent = {
   name: string
   description?: string
@@ -3571,6 +4414,14 @@ export type Agent = {
   topP?: number
   temperature?: number
   color?: string
+  preset?: string
+  displayName?: string
+  avatar?: string
+  icon?: string
+  defaultExecution?: "wait" | "background"
+  defaultContext?: "minimal" | "full" | "task"
+  modelInheritance?: "primary" | "configured"
+  delegationAllowlist?: Array<string>
   permission: PermissionRuleset
   model?: {
     modelID: string
@@ -3591,6 +4442,10 @@ export type FormatterStatus = {
   extensions: Array<string>
   enabled: boolean
 }
+
+export type PluginActionParams = string
+
+export type PluginDataParams = string
 
 export type GlobalMaintenanceGetData = {
   body?: never
@@ -3811,6 +4666,405 @@ export type GlobalMaintenanceRunResponses = {
 
 export type GlobalMaintenanceRunResponse = GlobalMaintenanceRunResponses[keyof GlobalMaintenanceRunResponses]
 
+export type GlobalAutomationListData = {
+  body?: never
+  path?: never
+  query?: {
+    includeDeleted?: "true" | "false"
+  }
+  url: "/global/automation"
+}
+
+export type GlobalAutomationListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAutomationListError = GlobalAutomationListErrors[keyof GlobalAutomationListErrors]
+
+export type GlobalAutomationListResponses = {
+  /**
+   * Scheduled automation tasks
+   */
+  200: AutomationTaskList
+}
+
+export type GlobalAutomationListResponse = GlobalAutomationListResponses[keyof GlobalAutomationListResponses]
+
+export type GlobalAutomationCreateData = {
+  body: AutomationTaskCreate
+  path?: never
+  query?: never
+  url: "/global/automation"
+}
+
+export type GlobalAutomationCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAutomationCreateError = GlobalAutomationCreateErrors[keyof GlobalAutomationCreateErrors]
+
+export type GlobalAutomationCreateResponses = {
+  /**
+   * Created scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationCreateResponse = GlobalAutomationCreateResponses[keyof GlobalAutomationCreateResponses]
+
+export type GlobalAutomationSettingsGetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/automation/settings"
+}
+
+export type GlobalAutomationSettingsGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAutomationSettingsGetError =
+  GlobalAutomationSettingsGetErrors[keyof GlobalAutomationSettingsGetErrors]
+
+export type GlobalAutomationSettingsGetResponses = {
+  /**
+   * Scheduled automation settings
+   */
+  200: AutomationSettings
+}
+
+export type GlobalAutomationSettingsGetResponse =
+  GlobalAutomationSettingsGetResponses[keyof GlobalAutomationSettingsGetResponses]
+
+export type GlobalAutomationSettingsUpdateData = {
+  body: AutomationSettings
+  path?: never
+  query?: never
+  url: "/global/automation/settings"
+}
+
+export type GlobalAutomationSettingsUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAutomationSettingsUpdateError =
+  GlobalAutomationSettingsUpdateErrors[keyof GlobalAutomationSettingsUpdateErrors]
+
+export type GlobalAutomationSettingsUpdateResponses = {
+  /**
+   * Updated scheduled automation settings
+   */
+  200: AutomationSettings
+}
+
+export type GlobalAutomationSettingsUpdateResponse =
+  GlobalAutomationSettingsUpdateResponses[keyof GlobalAutomationSettingsUpdateResponses]
+
+export type GlobalAutomationSessionResolveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/global/automation/session/{sessionID}"
+}
+
+export type GlobalAutomationSessionResolveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationSessionResolveError =
+  GlobalAutomationSessionResolveErrors[keyof GlobalAutomationSessionResolveErrors]
+
+export type GlobalAutomationSessionResolveResponses = {
+  /**
+   * Automation session resolution
+   */
+  200: AutomationSessionResolution
+}
+
+export type GlobalAutomationSessionResolveResponse =
+  GlobalAutomationSessionResolveResponses[keyof GlobalAutomationSessionResolveResponses]
+
+export type GlobalAutomationDeleteData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}"
+}
+
+export type GlobalAutomationDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationDeleteError = GlobalAutomationDeleteErrors[keyof GlobalAutomationDeleteErrors]
+
+export type GlobalAutomationDeleteResponses = {
+  /**
+   * Deleted scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationDeleteResponse = GlobalAutomationDeleteResponses[keyof GlobalAutomationDeleteResponses]
+
+export type GlobalAutomationGetData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}"
+}
+
+export type GlobalAutomationGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationGetError = GlobalAutomationGetErrors[keyof GlobalAutomationGetErrors]
+
+export type GlobalAutomationGetResponses = {
+  /**
+   * Scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationGetResponse = GlobalAutomationGetResponses[keyof GlobalAutomationGetResponses]
+
+export type GlobalAutomationUpdateData = {
+  body: AutomationTaskPatch
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}"
+}
+
+export type GlobalAutomationUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationUpdateError = GlobalAutomationUpdateErrors[keyof GlobalAutomationUpdateErrors]
+
+export type GlobalAutomationUpdateResponses = {
+  /**
+   * Updated scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationUpdateResponse = GlobalAutomationUpdateResponses[keyof GlobalAutomationUpdateResponses]
+
+export type GlobalAutomationPauseData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}/pause"
+}
+
+export type GlobalAutomationPauseErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationPauseError = GlobalAutomationPauseErrors[keyof GlobalAutomationPauseErrors]
+
+export type GlobalAutomationPauseResponses = {
+  /**
+   * Scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationPauseResponse = GlobalAutomationPauseResponses[keyof GlobalAutomationPauseResponses]
+
+export type GlobalAutomationResumeData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}/resume"
+}
+
+export type GlobalAutomationResumeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationResumeError = GlobalAutomationResumeErrors[keyof GlobalAutomationResumeErrors]
+
+export type GlobalAutomationResumeResponses = {
+  /**
+   * Scheduled automation task
+   */
+  200: AutomationTask
+}
+
+export type GlobalAutomationResumeResponse = GlobalAutomationResumeResponses[keyof GlobalAutomationResumeResponses]
+
+export type GlobalAutomationRunData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: never
+  url: "/global/automation/{id}/run"
+}
+
+export type GlobalAutomationRunErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type GlobalAutomationRunError = GlobalAutomationRunErrors[keyof GlobalAutomationRunErrors]
+
+export type GlobalAutomationRunResponses = {
+  /**
+   * Queued automation run
+   */
+  200: AutomationRun
+}
+
+export type GlobalAutomationRunResponse = GlobalAutomationRunResponses[keyof GlobalAutomationRunResponses]
+
+export type GlobalAutomationRunsData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query?: {
+    limit?: number
+  }
+  url: "/global/automation/{id}/runs"
+}
+
+export type GlobalAutomationRunsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalAutomationRunsError = GlobalAutomationRunsErrors[keyof GlobalAutomationRunsErrors]
+
+export type GlobalAutomationRunsResponses = {
+  /**
+   * Scheduled automation runs
+   */
+  200: AutomationRunList
+}
+
+export type GlobalAutomationRunsResponse = GlobalAutomationRunsResponses[keyof GlobalAutomationRunsResponses]
+
+export type GlobalAutomationRunCancelData = {
+  body?: never
+  path: {
+    id: string
+    runID: string
+  }
+  query?: never
+  url: "/global/automation/{id}/runs/{runID}/cancel"
+}
+
+export type GlobalAutomationRunCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type GlobalAutomationRunCancelError = GlobalAutomationRunCancelErrors[keyof GlobalAutomationRunCancelErrors]
+
+export type GlobalAutomationRunCancelResponses = {
+  /**
+   * Cancelled automation run
+   */
+  200: AutomationRun
+}
+
+export type GlobalAutomationRunCancelResponse =
+  GlobalAutomationRunCancelResponses[keyof GlobalAutomationRunCancelResponses]
+
 export type GlobalHealthData = {
   body?: never
   path?: never
@@ -3829,6 +5083,114 @@ export type GlobalHealthResponses = {
 }
 
 export type GlobalHealthResponse = GlobalHealthResponses[keyof GlobalHealthResponses]
+
+export type GlobalAppControlMetaData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/app-control/meta"
+}
+
+export type GlobalAppControlMetaErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlMetaError = GlobalAppControlMetaErrors[keyof GlobalAppControlMetaErrors]
+
+export type GlobalAppControlMetaResponses = {
+  /**
+   * Desktop automation protocol metadata
+   */
+  200: {
+    protocolVersion: number
+    instanceID: string
+    pid: number
+    startedAt: number
+    version: string
+    capability: string
+    features: Array<string>
+  }
+}
+
+export type GlobalAppControlMetaResponse = GlobalAppControlMetaResponses[keyof GlobalAppControlMetaResponses]
+
+export type GlobalAppControlEventsNextData = {
+  body?: never
+  path?: never
+  query?: {
+    after?: number
+    scope?: "main" | "renderer" | "server"
+    type?: string
+    limit?: number
+    waitMs?: number
+  }
+  url: "/global/app-control/events/next"
+}
+
+export type GlobalAppControlEventsNextErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalAppControlEventsNextError = GlobalAppControlEventsNextErrors[keyof GlobalAppControlEventsNextErrors]
+
+export type GlobalAppControlEventsNextResponses = {
+  /**
+   * Cursor-based desktop automation events
+   */
+  200: {
+    events: Array<{
+      id: number
+      at: number
+      timestamp: number
+      isoTime: string
+      scope: string
+      type: string
+      windowID?: number
+      data?: {
+        [key: string]: unknown
+      }
+    }>
+    nextCursor: number
+    oldestID: number
+    latestID: number
+    resetRequired: boolean
+  }
+}
+
+export type GlobalAppControlEventsNextResponse =
+  GlobalAppControlEventsNextResponses[keyof GlobalAppControlEventsNextResponses]
+
+export type GlobalSessionTemporaryCleanupData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/session/temporary/cleanup"
+}
+
+export type GlobalSessionTemporaryCleanupErrors = {
+  /**
+   * Only the local desktop server may clean up temporary sessions
+   */
+  403: unknown
+}
+
+export type GlobalSessionTemporaryCleanupResponses = {
+  /**
+   * Temporary sessions removed
+   */
+  200: {
+    removed: number
+  }
+}
+
+export type GlobalSessionTemporaryCleanupResponse =
+  GlobalSessionTemporaryCleanupResponses[keyof GlobalSessionTemporaryCleanupResponses]
 
 export type GlobalEventData = {
   body?: never
@@ -3857,7 +5219,7 @@ export type GlobalConfigGetResponses = {
   /**
    * Get global config info
    */
-  200: Config
+  200: ConfigPublic
 }
 
 export type GlobalConfigGetResponse = GlobalConfigGetResponses[keyof GlobalConfigGetResponses]
@@ -4100,9 +5462,12 @@ export type GlobalAppControlEventsResponses = {
    */
   200: Array<{
     id: number
+    at: number
+    timestamp: number
+    isoTime: string
     scope: string
     type: string
-    timestamp: number
+    windowID?: number
     data?: {
       [key: string]: unknown
     }
@@ -4245,7 +5610,7 @@ export type GlobalConfigRemoveCustomProviderResponses = {
   /**
    * Successfully removed custom provider
    */
-  200: Config
+  200: ConfigPublic
 }
 
 export type GlobalConfigRemoveCustomProviderResponse =
@@ -4277,7 +5642,7 @@ export type GlobalConfigUpsertCustomProviderResponses = {
   /**
    * Successfully saved custom provider
    */
-  200: Config
+  200: ConfigPublic
 }
 
 export type GlobalConfigUpsertCustomProviderResponse =
@@ -4643,6 +6008,114 @@ export type ProjectCurrentResponses = {
 
 export type ProjectCurrentResponse = ProjectCurrentResponses[keyof ProjectCurrentResponses]
 
+export type ProjectCreateManagedData = {
+  body?: {
+    extension: {
+      pluginID: string
+      type: string
+    }
+    worktree: string
+    name?: string
+    icon?: {
+      url?: string
+      override?: string
+      color?: string
+    }
+    commands?: {
+      /**
+       * Startup script to run when creating a new workspace (worktree)
+       */
+      start?: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed"
+}
+
+export type ProjectCreateManagedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectCreateManagedError = ProjectCreateManagedErrors[keyof ProjectCreateManagedErrors]
+
+export type ProjectCreateManagedResponses = {
+  /**
+   * Managed project information
+   */
+  200: Project
+}
+
+export type ProjectCreateManagedResponse = ProjectCreateManagedResponses[keyof ProjectCreateManagedResponses]
+
+export type ProjectRemoveManagedData = {
+  body?: never
+  path: {
+    pluginID: string
+    type: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed/{pluginID}/{type}"
+}
+
+export type ProjectRemoveManagedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectRemoveManagedError = ProjectRemoveManagedErrors[keyof ProjectRemoveManagedErrors]
+
+export type ProjectRemoveManagedResponses = {
+  /**
+   * Whether a project record was removed
+   */
+  200: boolean
+}
+
+export type ProjectRemoveManagedResponse = ProjectRemoveManagedResponses[keyof ProjectRemoveManagedResponses]
+
+export type ProjectGetManagedData = {
+  body?: never
+  path: {
+    pluginID: string
+    type: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed/{pluginID}/{type}"
+}
+
+export type ProjectGetManagedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectGetManagedError = ProjectGetManagedErrors[keyof ProjectGetManagedErrors]
+
+export type ProjectGetManagedResponses = {
+  /**
+   * Managed project information, when it exists
+   */
+  200: Project | null
+}
+
+export type ProjectGetManagedResponse = ProjectGetManagedResponses[keyof ProjectGetManagedResponses]
+
 export type ProjectDeleteSnapshotData = {
   body?: never
   path: {
@@ -4920,6 +6393,295 @@ export type PtyConnectResponses = {
 
 export type PtyConnectResponse = PtyConnectResponses[keyof PtyConnectResponses]
 
+export type ClaudeCodeCapabilityData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/capability"
+}
+
+export type ClaudeCodeCapabilityResponses = {
+  /**
+   * Claude Code capability
+   */
+  200: {
+    available: boolean
+    reason?: "desktop_only" | "remote_instance" | "command_not_found"
+  }
+}
+
+export type ClaudeCodeCapabilityResponse = ClaudeCodeCapabilityResponses[keyof ClaudeCodeCapabilityResponses]
+
+export type ClaudeCodeCreateData = {
+  body?: {
+    title?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code"
+}
+
+export type ClaudeCodeCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ClaudeCodeCreateError = ClaudeCodeCreateErrors[keyof ClaudeCodeCreateErrors]
+
+export type ClaudeCodeCreateResponses = {
+  /**
+   * Created Claude Code session
+   */
+  200: {
+    session: Session
+    binding: ClaudeCodeSession
+  }
+}
+
+export type ClaudeCodeCreateResponse = ClaudeCodeCreateResponses[keyof ClaudeCodeCreateResponses]
+
+export type ClaudeCodeGetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}"
+}
+
+export type ClaudeCodeGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeGetError = ClaudeCodeGetErrors[keyof ClaudeCodeGetErrors]
+
+export type ClaudeCodeGetResponses = {
+  /**
+   * Claude Code binding
+   */
+  200: ClaudeCodeSession | null
+}
+
+export type ClaudeCodeGetResponse = ClaudeCodeGetResponses[keyof ClaudeCodeGetResponses]
+
+export type ClaudeCodeResetData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/reset"
+}
+
+export type ClaudeCodeResetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeResetError = ClaudeCodeResetErrors[keyof ClaudeCodeResetErrors]
+
+export type ClaudeCodeResetResponses = {
+  /**
+   * Reset Claude Code binding
+   */
+  200: ClaudeCodeSession
+}
+
+export type ClaudeCodeResetResponse = ClaudeCodeResetResponses[keyof ClaudeCodeResetResponses]
+
+export type ClaudeCodeOpenData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/open"
+}
+
+export type ClaudeCodeOpenErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeOpenError = ClaudeCodeOpenErrors[keyof ClaudeCodeOpenErrors]
+
+export type ClaudeCodeOpenResponses = {
+  /**
+   * Active Claude Code binding
+   */
+  200: ClaudeCodeSession
+}
+
+export type ClaudeCodeOpenResponse = ClaudeCodeOpenResponses[keyof ClaudeCodeOpenResponses]
+
+export type ClaudeCodeInputData = {
+  body?: {
+    data: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/input"
+}
+
+export type ClaudeCodeInputErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeInputError = ClaudeCodeInputErrors[keyof ClaudeCodeInputErrors]
+
+export type ClaudeCodeInputResponses = {
+  /**
+   * Sent
+   */
+  200: boolean
+}
+
+export type ClaudeCodeInputResponse = ClaudeCodeInputResponses[keyof ClaudeCodeInputResponses]
+
+export type ClaudeCodeSetPermissionModeData = {
+  body?: {
+    mode: "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions"
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/permission-mode"
+}
+
+export type ClaudeCodeSetPermissionModeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeSetPermissionModeError =
+  ClaudeCodeSetPermissionModeErrors[keyof ClaudeCodeSetPermissionModeErrors]
+
+export type ClaudeCodeSetPermissionModeResponses = {
+  /**
+   * Reopened Claude Code binding
+   */
+  200: ClaudeCodeSession
+}
+
+export type ClaudeCodeSetPermissionModeResponse =
+  ClaudeCodeSetPermissionModeResponses[keyof ClaudeCodeSetPermissionModeResponses]
+
+export type ClaudeCodeKeyData = {
+  body?: {
+    data: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/key"
+}
+
+export type ClaudeCodeKeyErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeKeyError = ClaudeCodeKeyErrors[keyof ClaudeCodeKeyErrors]
+
+export type ClaudeCodeKeyResponses = {
+  /**
+   * Sent
+   */
+  200: boolean
+}
+
+export type ClaudeCodeKeyResponse = ClaudeCodeKeyResponses[keyof ClaudeCodeKeyResponses]
+
+export type ClaudeCodeCloseData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/claude-code/{sessionID}/close"
+}
+
+export type ClaudeCodeCloseErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ClaudeCodeCloseError = ClaudeCodeCloseErrors[keyof ClaudeCodeCloseErrors]
+
+export type ClaudeCodeCloseResponses = {
+  /**
+   * Closed
+   */
+  200: boolean
+}
+
+export type ClaudeCodeCloseResponse = ClaudeCodeCloseResponses[keyof ClaudeCodeCloseResponses]
+
 export type ConfigGetData = {
   body?: never
   path?: never
@@ -4934,13 +6696,13 @@ export type ConfigGetResponses = {
   /**
    * Get config info
    */
-  200: Config
+  200: ConfigPublic
 }
 
 export type ConfigGetResponse = ConfigGetResponses[keyof ConfigGetResponses]
 
 export type ConfigUpdateData = {
-  body?: Config
+  body?: ConfigPublic
   path?: never
   query?: {
     directory?: string
@@ -4962,7 +6724,7 @@ export type ConfigUpdateResponses = {
   /**
    * Successfully updated config
    */
-  200: Config
+  200: ConfigPublic
 }
 
 export type ConfigUpdateResponse = ConfigUpdateResponses[keyof ConfigUpdateResponses]
@@ -5337,6 +7099,7 @@ export type SessionCreateData = {
     title?: string
     permission?: PermissionRuleset
     workspaceID?: string
+    temporary?: boolean
   }
   path?: never
   query?: {
@@ -5615,6 +7378,96 @@ export type SessionTaskResponses = {
 
 export type SessionTaskResponse = SessionTaskResponses[keyof SessionTaskResponses]
 
+export type SessionCreateManagedData = {
+  body?: {
+    projectID: string
+    extension: {
+      pluginID: string
+      type: string
+    }
+    title?: string
+    permission?: PermissionRuleset
+    temporary?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/managed"
+}
+
+export type SessionCreateManagedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionCreateManagedError = SessionCreateManagedErrors[keyof SessionCreateManagedErrors]
+
+export type SessionCreateManagedResponses = {
+  /**
+   * Successfully created managed session
+   */
+  200: Session
+}
+
+export type SessionCreateManagedResponse = SessionCreateManagedResponses[keyof SessionCreateManagedResponses]
+
+export type SessionImportHistoryData = {
+  body?: {
+    projectID: string
+    extension: {
+      pluginID: string
+      type: string
+    }
+    title?: string
+    permission?: PermissionRuleset
+    temporary?: boolean
+    sessionID?: string
+    messages: Array<{
+      role: "user" | "assistant"
+      text: string
+      time?: number
+      swipes?: Array<string>
+      swipeID?: number
+    }>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/import-history"
+}
+
+export type SessionImportHistoryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionImportHistoryError = SessionImportHistoryErrors[keyof SessionImportHistoryErrors]
+
+export type SessionImportHistoryResponses = {
+  /**
+   * Imported managed session
+   */
+  200: Session
+}
+
+export type SessionImportHistoryResponse = SessionImportHistoryResponses[keyof SessionImportHistoryResponses]
+
 export type SessionInitData = {
   body?: {
     modelID: string
@@ -5656,6 +7509,7 @@ export type SessionInitResponse = SessionInitResponses[keyof SessionInitResponse
 export type SessionForkData = {
   body?: {
     messageID?: string
+    includeMessage?: boolean
   }
   path: {
     sessionID: string
@@ -5839,6 +7693,40 @@ export type SessionSummarizeResponses = {
 
 export type SessionSummarizeResponse = SessionSummarizeResponses[keyof SessionSummarizeResponses]
 
+export type SessionContextStatusData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/context-status"
+}
+
+export type SessionContextStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionContextStatusError = SessionContextStatusErrors[keyof SessionContextStatusErrors]
+
+export type SessionContextStatusResponses = {
+  /**
+   * Session context status
+   */
+  200: SessionContextStatus
+}
+
+export type SessionContextStatusResponse = SessionContextStatusResponses[keyof SessionContextStatusResponses]
+
 export type SessionMessagesData = {
   body?: never
   path: {
@@ -5902,7 +7790,7 @@ export type SessionPromptData = {
      * If the spawning caller bound this prompt to a specific user-task (T4 etc), pass its TID. Propagates to Tool.Context.taskId so memory-path-guard allows writes to tasks/<task_id>*.md.
      */
     task_id?: string
-    source?: "user" | "spawn" | "hook"
+    source?: "user" | "spawn" | "hook" | "automation"
     provenance?: Provenance
     noReply?: boolean
     /**
@@ -5913,6 +7801,7 @@ export type SessionPromptData = {
     }
     format?: OutputFormat
     system?: string
+    tavernContext?: TavernContext
     variant?: string
     delivery?: "default" | "steer"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
@@ -6118,7 +8007,7 @@ export type SessionPromptAsyncData = {
      * If the spawning caller bound this prompt to a specific user-task (T4 etc), pass its TID. Propagates to Tool.Context.taskId so memory-path-guard allows writes to tasks/<task_id>*.md.
      */
     task_id?: string
-    source?: "user" | "spawn" | "hook"
+    source?: "user" | "spawn" | "hook" | "automation"
     provenance?: Provenance
     noReply?: boolean
     /**
@@ -6129,6 +8018,7 @@ export type SessionPromptAsyncData = {
     }
     format?: OutputFormat
     system?: string
+    tavernContext?: TavernContext
     variant?: string
     delivery?: "default" | "steer"
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
@@ -6164,6 +8054,96 @@ export type SessionPromptAsyncResponses = {
 }
 
 export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof SessionPromptAsyncResponses]
+
+export type SessionTavernContinuationData = {
+  body?: {
+    agent: string
+    model: {
+      providerID: string
+      modelID: string
+    }
+    variant?: string
+    system: string
+    tavernContext?: TavernContext
+    nudge: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/tavern-continuation"
+}
+
+export type SessionTavernContinuationErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type SessionTavernContinuationError = SessionTavernContinuationErrors[keyof SessionTavernContinuationErrors]
+
+export type SessionTavernContinuationResponses = {
+  /**
+   * Continuation accepted
+   */
+  204: void
+}
+
+export type SessionTavernContinuationResponse =
+  SessionTavernContinuationResponses[keyof SessionTavernContinuationResponses]
+
+export type SessionRegenerateData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/regenerate"
+}
+
+export type SessionRegenerateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type SessionRegenerateError = SessionRegenerateErrors[keyof SessionRegenerateErrors]
+
+export type SessionRegenerateResponses = {
+  /**
+   * Regenerated assistant message
+   */
+  200: {
+    info: Message
+    parts: Array<Part>
+  }
+}
+
+export type SessionRegenerateResponse = SessionRegenerateResponses[keyof SessionRegenerateResponses]
 
 export type SessionCommandData = {
   body?: {
@@ -6308,6 +8288,53 @@ export type SessionShellResponses = {
 }
 
 export type SessionShellResponse = SessionShellResponses[keyof SessionShellResponses]
+
+export type SessionRoadwayData = {
+  body?: {
+    providerID: string
+    modelID: string
+    mode?: "suggest" | "impersonate" | "summary"
+    prompt: string
+    extractionStrategy?: "bullet" | "none"
+    maxContextMessages?: number
+    maxOutputTokens?: number
+    messageRole?: "system" | "user" | "assistant"
+    selectedOption?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/roadway"
+}
+
+export type SessionRoadwayErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionRoadwayError = SessionRoadwayErrors[keyof SessionRoadwayErrors]
+
+export type SessionRoadwayResponses = {
+  /**
+   * Generated Roadway result
+   */
+  200: {
+    text: string
+    options?: Array<string>
+  }
+}
+
+export type SessionRoadwayResponse = SessionRoadwayResponses[keyof SessionRoadwayResponses]
 
 export type SessionRevertData = {
   body?: {
@@ -6539,50 +8566,6 @@ export type PermissionListResponses = {
 }
 
 export type PermissionListResponse = PermissionListResponses[keyof PermissionListResponses]
-
-export type WorkflowListData = {
-  body?: never
-  path?: never
-  query: {
-    directory?: string
-    workspace?: string
-    sessionID: string
-  }
-  url: "/workflows"
-}
-
-export type WorkflowListResponses = {
-  /**
-   * Workflow runs
-   */
-  200: Array<unknown>
-}
-
-export type WorkflowListResponse = WorkflowListResponses[keyof WorkflowListResponses]
-
-export type WorkflowResumeData = {
-  body?: never
-  path: {
-    runID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/workflows/{runID}/resume"
-}
-
-export type WorkflowResumeResponses = {
-  /**
-   * Resume result
-   */
-  200: {
-    runID: string
-    resumed: boolean
-  }
-}
-
-export type WorkflowResumeResponse = WorkflowResumeResponses[keyof WorkflowResumeResponses]
 
 export type QuestionListData = {
   body?: never
@@ -6820,6 +8803,618 @@ export type ProviderListResponses = {
 
 export type ProviderListResponse = ProviderListResponses[keyof ProviderListResponses]
 
+export type ProviderModelsDiscoverData = {
+  body?: {
+    providerID: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/models/discover"
+}
+
+export type ProviderModelsDiscoverResponses = {
+  /**
+   * Provider model discovery result
+   */
+  200: {
+    source: "remote" | "specialized"
+    models: Array<{
+      id: string
+      name?: string
+      protocol?: string
+    }>
+    warning?: string
+    error?: "unsupported" | "missing_credentials" | "unauthorized" | "invalid_response" | "network" | "unsafe_url"
+  }
+}
+
+export type ProviderModelsDiscoverResponse = ProviderModelsDiscoverResponses[keyof ProviderModelsDiscoverResponses]
+
+export type ProviderModelsMatchData = {
+  body?: {
+    providerID: string
+    query: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/models/match"
+}
+
+export type ProviderModelsMatchResponses = {
+  /**
+   * Matching model candidates
+   */
+  200: {
+    models: Array<{
+      providerID: string
+      providerName: string
+      modelID: string
+      displayName: string
+    }>
+  }
+}
+
+export type ProviderModelsMatchResponse = ProviderModelsMatchResponses[keyof ProviderModelsMatchResponses]
+
+export type ProviderModelsSuggestData = {
+  body?: {
+    providerID: string
+    modelID: string
+    displayName?: string
+    providerName?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/models/suggest"
+}
+
+export type ProviderModelsSuggestErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderModelsSuggestError = ProviderModelsSuggestErrors[keyof ProviderModelsSuggestErrors]
+
+export type ProviderModelsSuggestResponses = {
+  /**
+   * Model capability suggestion
+   */
+  200: {
+    providerID: string
+    modelID: string
+    displayName: string
+    source: "catalog" | "alias" | "online" | "inferred" | "none"
+    patch: {
+      [key: string]: unknown
+    }
+    warning?: string
+    matchedProviderID?: string
+    candidates?: Array<{
+      providerID: string
+      providerName: string
+      modelID: string
+      displayName: string
+      patch: {
+        [key: string]: unknown
+      }
+    }>
+  }
+}
+
+export type ProviderModelsSuggestResponse = ProviderModelsSuggestResponses[keyof ProviderModelsSuggestResponses]
+
+export type ProviderA6ApiModelsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/a6api/models/discover"
+}
+
+export type ProviderA6ApiModelsListResponses = {
+  /**
+   * Filtered A6API model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses" | "anthropic-messages"
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses" | "anthropic-messages"
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderA6ApiModelsListResponse = ProviderA6ApiModelsListResponses[keyof ProviderA6ApiModelsListResponses]
+
+export type ProviderA6ApiModelsDiscoverData = {
+  body?: {
+    /**
+     * Temporary A6API key. It is used only for this request and is never stored.
+     */
+    apiKey?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/a6api/models/discover"
+}
+
+export type ProviderA6ApiModelsDiscoverResponses = {
+  /**
+   * Filtered A6API model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses" | "anthropic-messages"
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses" | "anthropic-messages"
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderA6ApiModelsDiscoverResponse =
+  ProviderA6ApiModelsDiscoverResponses[keyof ProviderA6ApiModelsDiscoverResponses]
+
+export type ProviderOpencodeModelsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode/models/discover"
+}
+
+export type ProviderOpencodeModelsListResponses = {
+  /**
+   * OpenCode Zen model catalog
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning: boolean
+            temperature: boolean
+            tool_call: boolean
+          }
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning: boolean
+            temperature: boolean
+            tool_call: boolean
+          }
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeModelsListResponse =
+  ProviderOpencodeModelsListResponses[keyof ProviderOpencodeModelsListResponses]
+
+export type ProviderOpencodeModelsDiscoverData = {
+  body?: {
+    /**
+     * Temporary OpenCode Zen key. It is used only for this request and is never stored.
+     */
+    apiKey?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode/models/discover"
+}
+
+export type ProviderOpencodeModelsDiscoverResponses = {
+  /**
+   * OpenCode Zen model catalog
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning: boolean
+            temperature: boolean
+            tool_call: boolean
+          }
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning: boolean
+            temperature: boolean
+            tool_call: boolean
+          }
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeModelsDiscoverResponse =
+  ProviderOpencodeModelsDiscoverResponses[keyof ProviderOpencodeModelsDiscoverResponses]
+
+export type ProviderOpencodeUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode/usage"
+}
+
+export type ProviderOpencodeUsageResponses = {
+  /**
+   * OpenCode Zen quota usage
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          rolling: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+          weekly: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+          monthly: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeUsageResponse = ProviderOpencodeUsageResponses[keyof ProviderOpencodeUsageResponses]
+
+export type ProviderOpencodeGoModelsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode-go/models/discover"
+}
+
+export type ProviderOpencodeGoModelsListResponses = {
+  /**
+   * OpenCode Go model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning?: boolean
+            temperature?: boolean
+            tool_call?: boolean
+          }
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning?: boolean
+            temperature?: boolean
+            tool_call?: boolean
+          }
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeGoModelsListResponse =
+  ProviderOpencodeGoModelsListResponses[keyof ProviderOpencodeGoModelsListResponses]
+
+export type ProviderOpencodeGoModelsDiscoverData = {
+  body?: {
+    /**
+     * Temporary OpenCode Go key. It is used only for this request and is never stored.
+     */
+    apiKey?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode-go/models/discover"
+}
+
+export type ProviderOpencodeGoModelsDiscoverResponses = {
+  /**
+   * OpenCode Go model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning?: boolean
+            temperature?: boolean
+            tool_call?: boolean
+          }
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat"
+          reasoning_options?: Array<{
+            type: string
+            values?: Array<string>
+            min?: number
+            max?: number
+          }>
+          capabilities?: {
+            reasoning?: boolean
+            temperature?: boolean
+            tool_call?: boolean
+          }
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeGoModelsDiscoverResponse =
+  ProviderOpencodeGoModelsDiscoverResponses[keyof ProviderOpencodeGoModelsDiscoverResponses]
+
+export type ProviderOpencodeGoUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/opencode-go/usage"
+}
+
+export type ProviderOpencodeGoUsageResponses = {
+  /**
+   * OpenCode Go quota usage or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          rolling: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+          weekly: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+          monthly: {
+            status: "ok" | "rate-limited"
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpencodeGoUsageResponse = ProviderOpencodeGoUsageResponses[keyof ProviderOpencodeGoUsageResponses]
+
+export type ProviderMinimaxUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/minimax/usage"
+}
+
+export type ProviderMinimaxUsageResponses = {
+  /**
+   * MiniMax quota usage or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          windows: Array<{
+            id: string
+            percent: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt: string
+            resetInSeconds?: number
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
+            remaining?: number
+            total?: number
+            used?: number
+            unit?: "requests" | "tokens" | "unknown"
+          }>
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderMinimaxUsageResponse = ProviderMinimaxUsageResponses[keyof ProviderMinimaxUsageResponses]
+
 export type ProviderAuthData = {
   body?: never
   path?: never
@@ -6886,6 +9481,12 @@ export type ProviderModelDetectResponses = {
       protocol?: "openai-chat" | "openai-responses" | "anthropic-messages" | "gemini"
       attachment?: boolean
       reasoning?: boolean
+      reasoning_options?: Array<{
+        type: string
+        values?: Array<string>
+        min?: number
+        max?: number
+      }>
       temperature?: boolean
       tool_call?: boolean
       capabilities?: {
@@ -7569,6 +10170,68 @@ export type FileListResponses = {
 
 export type FileListResponse = FileListResponses[keyof FileListResponses]
 
+export type FileReferenceTreeData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    path: string
+    token?: string
+  }
+  url: "/file/reference-tree"
+}
+
+export type FileReferenceTreeResponses = {
+  /**
+   * Files and directories
+   */
+  200: Array<FileNode>
+}
+
+export type FileReferenceTreeResponse = FileReferenceTreeResponses[keyof FileReferenceTreeResponses]
+
+export type FileReferenceGrantData = {
+  body?: {
+    path: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/reference-grant"
+}
+
+export type FileReferenceGrantResponses = {
+  /**
+   * Reference directory grant
+   */
+  200: FileReferenceGrant
+}
+
+export type FileReferenceGrantResponse = FileReferenceGrantResponses[keyof FileReferenceGrantResponses]
+
+export type FileStatData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    path: string
+  }
+  url: "/file/stat"
+}
+
+export type FileStatResponses = {
+  /**
+   * File reference state
+   */
+  200: FileReference
+}
+
+export type FileStatResponse = FileStatResponses[keyof FileStatResponses]
+
 export type FileReadData = {
   body?: never
   path?: never
@@ -7577,6 +10240,7 @@ export type FileReadData = {
     workspace?: string
     path: string
     with_diff?: "true" | "false"
+    reference_token?: string
   }
   url: "/file/content"
 }
@@ -7652,7 +10316,8 @@ export type SkillsListResponses = {
     description: string
     location: string
     content: string
-    hidden?: boolean
+    displayName?: string
+    shortDescription?: string
   }>
 }
 
@@ -7677,54 +10342,13 @@ export type SkillsManageListResponses = {
     description: string
     location: string
     content: string
-    hidden?: boolean
+    displayName?: string
+    shortDescription?: string
     directory: string
   }>
 }
 
 export type SkillsManageListResponse = SkillsManageListResponses[keyof SkillsManageListResponses]
-
-export type SkillsManageUpdateData = {
-  body?: {
-    directory: string
-    hidden?: boolean | null
-  }
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/skills/manage/update"
-}
-
-export type SkillsManageUpdateErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type SkillsManageUpdateError = SkillsManageUpdateErrors[keyof SkillsManageUpdateErrors]
-
-export type SkillsManageUpdateResponses = {
-  /**
-   * Updated local skill
-   */
-  200: {
-    name: string
-    description: string
-    location: string
-    content: string
-    hidden?: boolean
-    directory: string
-  }
-}
-
-export type SkillsManageUpdateResponse = SkillsManageUpdateResponses[keyof SkillsManageUpdateResponses]
 
 export type SkillsManageDeleteData = {
   body?: {
@@ -7842,7 +10466,8 @@ export type SkillsDiscoverInstallResponses = {
     description: string
     location: string
     content: string
-    hidden?: boolean
+    displayName?: string
+    shortDescription?: string
   }
 }
 
@@ -7918,7 +10543,8 @@ export type SkillsImportResponses = {
     description: string
     location: string
     content: string
-    hidden?: boolean
+    displayName?: string
+    shortDescription?: string
   }>
 }
 
@@ -7955,11 +10581,304 @@ export type SkillsCreateResponses = {
     description: string
     location: string
     content: string
-    hidden?: boolean
+    displayName?: string
+    shortDescription?: string
   }
 }
 
 export type SkillsCreateResponse = SkillsCreateResponses[keyof SkillsCreateResponses]
+
+export type AgentManageListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/agent/manage"
+}
+
+export type AgentManageListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AgentManageListError = AgentManageListErrors[keyof AgentManageListErrors]
+
+export type AgentManageListResponses = {
+  /**
+   * Managed subagents
+   */
+  200: AgentManageResponse
+}
+
+export type AgentManageListResponse = AgentManageListResponses[keyof AgentManageListResponses]
+
+export type AgentManageDeleteData = {
+  body?: never
+  path: {
+    id: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    scope: "global" | "project"
+  }
+  url: "/agent/manage/{id}"
+}
+
+export type AgentManageDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type AgentManageDeleteError = AgentManageDeleteErrors[keyof AgentManageDeleteErrors]
+
+export type AgentManageDeleteResponses = {
+  /**
+   * Deleted override
+   */
+  200: AgentManageMutation
+}
+
+export type AgentManageDeleteResponse = AgentManageDeleteResponses[keyof AgentManageDeleteResponses]
+
+export type AgentManagePutData = {
+  body: {
+    scope: "global" | "project"
+    config: {
+      [key: string]: unknown
+    }
+    prompt?: string
+  }
+  path: {
+    id: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/agent/manage/{id}"
+}
+
+export type AgentManagePutErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AgentManagePutError = AgentManagePutErrors[keyof AgentManagePutErrors]
+
+export type AgentManagePutResponses = {
+  /**
+   * Saved override
+   */
+  200: AgentManageMutation
+}
+
+export type AgentManagePutResponse = AgentManagePutResponses[keyof AgentManagePutResponses]
+
+export type ActorDispatchListData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/actor-dispatch"
+}
+
+export type ActorDispatchListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ActorDispatchListError = ActorDispatchListErrors[keyof ActorDispatchListErrors]
+
+export type ActorDispatchListResponses = {
+  /**
+   * Actor dispatches
+   */
+  200: ActorDispatchList
+}
+
+export type ActorDispatchListResponse = ActorDispatchListResponses[keyof ActorDispatchListResponses]
+
+export type ActorDispatchConfigGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/actor-dispatch/config"
+}
+
+export type ActorDispatchConfigGetResponses = {
+  /**
+   * Actor dispatch configuration
+   */
+  200: ActorDispatchConfig
+}
+
+export type ActorDispatchConfigGetResponse = ActorDispatchConfigGetResponses[keyof ActorDispatchConfigGetResponses]
+
+export type ActorDispatchConfigPutData = {
+  body: ActorDispatchConfig
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/actor-dispatch/config"
+}
+
+export type ActorDispatchConfigPutErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ActorDispatchConfigPutError = ActorDispatchConfigPutErrors[keyof ActorDispatchConfigPutErrors]
+
+export type ActorDispatchConfigPutResponses = {
+  /**
+   * Updated Actor dispatch configuration
+   */
+  200: ActorDispatchConfig
+}
+
+export type ActorDispatchConfigPutResponse = ActorDispatchConfigPutResponses[keyof ActorDispatchConfigPutResponses]
+
+export type ActorDispatchCancelData = {
+  body?: never
+  path: {
+    dispatchID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/actor-dispatch/{dispatchID}/cancel"
+}
+
+export type ActorDispatchCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type ActorDispatchCancelError = ActorDispatchCancelErrors[keyof ActorDispatchCancelErrors]
+
+export type ActorDispatchCancelResponses = {
+  /**
+   * Actor dispatch
+   */
+  200: ActorDispatch
+}
+
+export type ActorDispatchCancelResponse = ActorDispatchCancelResponses[keyof ActorDispatchCancelResponses]
+
+export type ActorDispatchResumeData = {
+  body?: never
+  path: {
+    dispatchID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/actor-dispatch/{dispatchID}/resume"
+}
+
+export type ActorDispatchResumeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type ActorDispatchResumeError = ActorDispatchResumeErrors[keyof ActorDispatchResumeErrors]
+
+export type ActorDispatchResumeResponses = {
+  /**
+   * Actor dispatch
+   */
+  200: ActorDispatch
+}
+
+export type ActorDispatchResumeResponse = ActorDispatchResumeResponses[keyof ActorDispatchResumeResponses]
+
+export type ActorDispatchReceiveData = {
+  body?: never
+  path: {
+    dispatchID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/actor-dispatch/{dispatchID}/receive"
+}
+
+export type ActorDispatchReceiveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
+}
+
+export type ActorDispatchReceiveError = ActorDispatchReceiveErrors[keyof ActorDispatchReceiveErrors]
+
+export type ActorDispatchReceiveResponses = {
+  /**
+   * Actor dispatch
+   */
+  200: ActorDispatch
+}
+
+export type ActorDispatchReceiveResponse = ActorDispatchReceiveResponses[keyof ActorDispatchReceiveResponses]
 
 export type BackgroundJobListData = {
   body?: never
@@ -8127,6 +11046,135 @@ export type BackgroundJobReconcileResponses = {
 }
 
 export type BackgroundJobReconcileResponse = BackgroundJobReconcileResponses[keyof BackgroundJobReconcileResponses]
+
+export type PluginActionData = {
+  body: PluginActionInput
+  path: {
+    pluginID: string
+    action: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/{pluginID}/action/{action}"
+}
+
+export type PluginActionErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type PluginActionError = PluginActionErrors[keyof PluginActionErrors]
+
+export type PluginActionResponses = {
+  /**
+   * Plugin action result
+   */
+  200: PluginActionResult
+}
+
+export type PluginActionResponse = PluginActionResponses[keyof PluginActionResponses]
+
+export type PluginDataGetData = {
+  body?: never
+  path: {
+    pluginID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/{pluginID}/data"
+}
+
+export type PluginDataGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type PluginDataGetError = PluginDataGetErrors[keyof PluginDataGetErrors]
+
+export type PluginDataGetResponses = {
+  /**
+   * Plugin UI data
+   */
+  200: PluginData
+}
+
+export type PluginDataGetResponse = PluginDataGetResponses[keyof PluginDataGetResponses]
+
+export type PluginDataSetData = {
+  body: PluginData
+  path: {
+    pluginID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/{pluginID}/data"
+}
+
+export type PluginDataSetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type PluginDataSetError = PluginDataSetErrors[keyof PluginDataSetErrors]
+
+export type PluginDataSetResponses = {
+  /**
+   * Saved plugin UI data
+   */
+  200: PluginData
+}
+
+export type PluginDataSetResponse = PluginDataSetResponses[keyof PluginDataSetResponses]
+
+export type PluginDataFilePutData = {
+  body: PluginDataFile
+  path: {
+    pluginID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plugin/{pluginID}/data/file"
+}
+
+export type PluginDataFilePutErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type PluginDataFilePutError = PluginDataFilePutErrors[keyof PluginDataFilePutErrors]
+
+export type PluginDataFilePutResponses = {
+  /**
+   * Stored plugin file
+   */
+  200: PluginDataFileResult
+}
+
+export type PluginDataFilePutResponse = PluginDataFilePutResponses[keyof PluginDataFilePutResponses]
 
 export type PluginListData = {
   body?: never
@@ -8568,6 +11616,1565 @@ export type CapabilityGetResponses = {
 
 export type CapabilityGetResponse = CapabilityGetResponses[keyof CapabilityGetResponses]
 
+export type ResearchRouteData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    query: string
+    url?: string
+    browserEngine?: "bing" | "google" | "baidu" | "custom"
+    browserURLTemplate?: string
+  }
+  url: "/research/route"
+}
+
+export type ResearchRouteResponses = {
+  /**
+   * Search route decision
+   */
+  200: {
+    [key: string]: unknown
+  }
+}
+
+export type ResearchRouteResponse = ResearchRouteResponses[keyof ResearchRouteResponses]
+
+export type ResearchSettingsGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+  }
+  url: "/research/settings"
+}
+
+export type ResearchSettingsGetResponses = {
+  /**
+   * Research settings
+   */
+  200: {
+    projectID: string
+    browserSearchEngine?: "bing" | "google" | "baidu" | "custom"
+    browserSearchURLTemplate?: string
+    createdAt: number
+    updatedAt: number
+  } | null
+}
+
+export type ResearchSettingsGetResponse = ResearchSettingsGetResponses[keyof ResearchSettingsGetResponses]
+
+export type ResearchSettingsUpdateData = {
+  body?: {
+    browserSearchEngine?: "bing" | "google" | "baidu" | "custom" | null
+    browserSearchURLTemplate?: string | null
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+  }
+  url: "/research/settings"
+}
+
+export type ResearchSettingsUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ResearchSettingsUpdateError = ResearchSettingsUpdateErrors[keyof ResearchSettingsUpdateErrors]
+
+export type ResearchSettingsUpdateResponses = {
+  /**
+   * Research settings
+   */
+  200: {
+    projectID: string
+    browserSearchEngine?: "bing" | "google" | "baidu" | "custom"
+    browserSearchURLTemplate?: string
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchSettingsUpdateResponse = ResearchSettingsUpdateResponses[keyof ResearchSettingsUpdateResponses]
+
+export type ResearchSourcesListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    enabledOnly?: boolean
+  }
+  url: "/research/sources"
+}
+
+export type ResearchSourcesListResponses = {
+  /**
+   * Source profiles
+   */
+  200: Array<{
+    id: string
+    projectID: string
+    subject: string
+    domains: Array<string>
+    paths?: Array<string>
+    kind?: "technical" | "academic" | "policy" | "product" | "news" | "custom"
+    identity?: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    officialRepository?: string
+    refreshPolicy?: {
+      strategy?: "manual" | "hourly" | "daily" | "weekly"
+      ttlSeconds?: number
+    }
+    priority?: number
+    enabled?: boolean
+    createdAt: number
+    updatedAt: number
+  }>
+}
+
+export type ResearchSourcesListResponse = ResearchSourcesListResponses[keyof ResearchSourcesListResponses]
+
+export type ResearchSourcesUpsertData = {
+  body?: {
+    projectID: string
+    subject: string
+    domains: Array<string>
+    paths?: Array<string>
+    kind?: "technical" | "academic" | "policy" | "product" | "news" | "custom"
+    identity?: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    officialRepository?: string
+    refreshPolicy?: {
+      strategy?: "manual" | "hourly" | "daily" | "weekly"
+      ttlSeconds?: number
+    }
+    priority?: number
+    enabled?: boolean
+    id?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/sources"
+}
+
+export type ResearchSourcesUpsertErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ResearchSourcesUpsertError = ResearchSourcesUpsertErrors[keyof ResearchSourcesUpsertErrors]
+
+export type ResearchSourcesUpsertResponses = {
+  /**
+   * Source profile
+   */
+  200: {
+    id: string
+    projectID: string
+    subject: string
+    domains: Array<string>
+    paths?: Array<string>
+    kind?: "technical" | "academic" | "policy" | "product" | "news" | "custom"
+    identity?: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    officialRepository?: string
+    refreshPolicy?: {
+      strategy?: "manual" | "hourly" | "daily" | "weekly"
+      ttlSeconds?: number
+    }
+    priority?: number
+    enabled?: boolean
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchSourcesUpsertResponse = ResearchSourcesUpsertResponses[keyof ResearchSourcesUpsertResponses]
+
+export type ResearchSourcesDeleteData = {
+  body?: never
+  path: {
+    sourceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/sources/{sourceID}"
+}
+
+export type ResearchSourcesDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: unknown
+}
+
+export type ResearchSourcesGetData = {
+  body?: never
+  path: {
+    sourceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/sources/{sourceID}"
+}
+
+export type ResearchSourcesGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ResearchSourcesGetError = ResearchSourcesGetErrors[keyof ResearchSourcesGetErrors]
+
+export type ResearchSourcesGetResponses = {
+  /**
+   * Source profile
+   */
+  200: {
+    id: string
+    projectID: string
+    subject: string
+    domains: Array<string>
+    paths?: Array<string>
+    kind?: "technical" | "academic" | "policy" | "product" | "news" | "custom"
+    identity?: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    officialRepository?: string
+    refreshPolicy?: {
+      strategy?: "manual" | "hourly" | "daily" | "weekly"
+      ttlSeconds?: number
+    }
+    priority?: number
+    enabled?: boolean
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchSourcesGetResponse = ResearchSourcesGetResponses[keyof ResearchSourcesGetResponses]
+
+export type ResearchEvidenceClearData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+  }
+  url: "/research/evidence"
+}
+
+export type ResearchEvidenceClearResponses = {
+  /**
+   * Cleared
+   */
+  200: unknown
+}
+
+export type ResearchEvidenceListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    limit?: number
+    freshOnly?: boolean
+    sourceProfileID?: string
+  }
+  url: "/research/evidence"
+}
+
+export type ResearchEvidenceListResponses = {
+  /**
+   * Evidence records
+   */
+  200: Array<{
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    canonicalURL: string
+    finalURL?: string
+    domain: string
+    title?: string
+    author?: string
+    publishedAt?: string
+    sourceUpdatedAt?: string
+    fetchedAt: number
+    contentHash: string
+    etag?: string
+    lastModified?: string
+    excerpts?: Array<{
+      text: string
+      locator?: string
+    }>
+    locator?: {
+      [key: string]: unknown
+    }
+    attachments?: Array<string>
+    body?: string
+    sourceIdentity: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    evidenceStatus: "unverified" | "metadata_verified" | "content_verified" | "corroborated"
+    route: "native" | "direct" | "browser" | "cache" | "compat"
+    expiresAt?: number
+    version?: number
+    metadata?: {
+      [key: string]: unknown
+    }
+    createdAt: number
+    updatedAt: number
+  }>
+}
+
+export type ResearchEvidenceListResponse = ResearchEvidenceListResponses[keyof ResearchEvidenceListResponses]
+
+export type ResearchEvidenceUpsertData = {
+  body?: {
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    canonicalURL: string
+    finalURL?: string
+    domain: string
+    title?: string
+    author?: string
+    publishedAt?: string
+    sourceUpdatedAt?: string
+    contentHash: string
+    etag?: string
+    lastModified?: string
+    excerpts?: Array<{
+      text: string
+      locator?: string
+    }>
+    locator?: {
+      [key: string]: unknown
+    }
+    attachments?: Array<string>
+    body?: string
+    sourceIdentity: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    evidenceStatus: "unverified" | "metadata_verified" | "content_verified" | "corroborated"
+    route: "native" | "direct" | "browser" | "cache" | "compat"
+    expiresAt?: number
+    metadata?: {
+      [key: string]: unknown
+    }
+    id?: string
+    fetchedAt?: number
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/evidence"
+}
+
+export type ResearchEvidenceUpsertErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ResearchEvidenceUpsertError = ResearchEvidenceUpsertErrors[keyof ResearchEvidenceUpsertErrors]
+
+export type ResearchEvidenceUpsertResponses = {
+  /**
+   * Evidence record
+   */
+  200: {
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    canonicalURL: string
+    finalURL?: string
+    domain: string
+    title?: string
+    author?: string
+    publishedAt?: string
+    sourceUpdatedAt?: string
+    fetchedAt: number
+    contentHash: string
+    etag?: string
+    lastModified?: string
+    excerpts?: Array<{
+      text: string
+      locator?: string
+    }>
+    locator?: {
+      [key: string]: unknown
+    }
+    attachments?: Array<string>
+    body?: string
+    sourceIdentity: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    evidenceStatus: "unverified" | "metadata_verified" | "content_verified" | "corroborated"
+    route: "native" | "direct" | "browser" | "cache" | "compat"
+    expiresAt?: number
+    version?: number
+    metadata?: {
+      [key: string]: unknown
+    }
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchEvidenceUpsertResponse = ResearchEvidenceUpsertResponses[keyof ResearchEvidenceUpsertResponses]
+
+export type ResearchEvidenceDeleteData = {
+  body?: never
+  path: {
+    evidenceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/evidence/{evidenceID}"
+}
+
+export type ResearchEvidenceDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: unknown
+}
+
+export type ResearchEvidenceGetData = {
+  body?: never
+  path: {
+    evidenceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/evidence/{evidenceID}"
+}
+
+export type ResearchEvidenceGetErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ResearchEvidenceGetError = ResearchEvidenceGetErrors[keyof ResearchEvidenceGetErrors]
+
+export type ResearchEvidenceGetResponses = {
+  /**
+   * Evidence record
+   */
+  200: {
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    canonicalURL: string
+    finalURL?: string
+    domain: string
+    title?: string
+    author?: string
+    publishedAt?: string
+    sourceUpdatedAt?: string
+    fetchedAt: number
+    contentHash: string
+    etag?: string
+    lastModified?: string
+    excerpts?: Array<{
+      text: string
+      locator?: string
+    }>
+    locator?: {
+      [key: string]: unknown
+    }
+    attachments?: Array<string>
+    body?: string
+    sourceIdentity: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    evidenceStatus: "unverified" | "metadata_verified" | "content_verified" | "corroborated"
+    route: "native" | "direct" | "browser" | "cache" | "compat"
+    expiresAt?: number
+    version?: number
+    metadata?: {
+      [key: string]: unknown
+    }
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchEvidenceGetResponse = ResearchEvidenceGetResponses[keyof ResearchEvidenceGetResponses]
+
+export type ResearchEvidenceRefreshData = {
+  body?: never
+  path: {
+    evidenceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/evidence/{evidenceID}/refresh"
+}
+
+export type ResearchEvidenceRefreshErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ResearchEvidenceRefreshError = ResearchEvidenceRefreshErrors[keyof ResearchEvidenceRefreshErrors]
+
+export type ResearchEvidenceRefreshResponses = {
+  /**
+   * Refreshed evidence
+   */
+  200: {
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    canonicalURL: string
+    finalURL?: string
+    domain: string
+    title?: string
+    author?: string
+    publishedAt?: string
+    sourceUpdatedAt?: string
+    fetchedAt: number
+    contentHash: string
+    etag?: string
+    lastModified?: string
+    excerpts?: Array<{
+      text: string
+      locator?: string
+    }>
+    locator?: {
+      [key: string]: unknown
+    }
+    attachments?: Array<string>
+    body?: string
+    sourceIdentity: "official" | "institutional" | "independent" | "practitioner" | "discovery"
+    evidenceStatus: "unverified" | "metadata_verified" | "content_verified" | "corroborated"
+    route: "native" | "direct" | "browser" | "cache" | "compat"
+    expiresAt?: number
+    version?: number
+    metadata?: {
+      [key: string]: unknown
+    }
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchEvidenceRefreshResponse = ResearchEvidenceRefreshResponses[keyof ResearchEvidenceRefreshResponses]
+
+export type ResearchSubscriptionsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    dueBefore?: number
+    enabledOnly?: boolean
+  }
+  url: "/research/subscriptions"
+}
+
+export type ResearchSubscriptionsListResponses = {
+  /**
+   * Subscriptions
+   */
+  200: Array<{
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    kind: "rss" | "atom" | "sitemap" | "release" | "document"
+    enabled: boolean
+    nextCheckAt?: number
+    lastCheckedAt?: number
+    etag?: string
+    lastModified?: string
+    contentHash?: string
+    failureSummary?: string
+    createdAt: number
+    updatedAt: number
+  }>
+}
+
+export type ResearchSubscriptionsListResponse =
+  ResearchSubscriptionsListResponses[keyof ResearchSubscriptionsListResponses]
+
+export type ResearchSubscriptionsUpsertData = {
+  body?: {
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    kind: "rss" | "atom" | "sitemap" | "release" | "document"
+    enabled: boolean
+    nextCheckAt?: number
+    lastCheckedAt?: number
+    etag?: string
+    lastModified?: string
+    contentHash?: string
+    failureSummary?: string
+    id?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/subscriptions"
+}
+
+export type ResearchSubscriptionsUpsertErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ResearchSubscriptionsUpsertError =
+  ResearchSubscriptionsUpsertErrors[keyof ResearchSubscriptionsUpsertErrors]
+
+export type ResearchSubscriptionsUpsertResponses = {
+  /**
+   * Subscription
+   */
+  200: {
+    id: string
+    projectID: string
+    sourceProfileID?: string
+    url: string
+    kind: "rss" | "atom" | "sitemap" | "release" | "document"
+    enabled: boolean
+    nextCheckAt?: number
+    lastCheckedAt?: number
+    etag?: string
+    lastModified?: string
+    contentHash?: string
+    failureSummary?: string
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type ResearchSubscriptionsUpsertResponse =
+  ResearchSubscriptionsUpsertResponses[keyof ResearchSubscriptionsUpsertResponses]
+
+export type ResearchSubscriptionsEnableData = {
+  body?: {
+    enabled: boolean
+  }
+  path: {
+    subscriptionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/subscriptions/{subscriptionID}/enable"
+}
+
+export type ResearchSubscriptionsEnableResponses = {
+  /**
+   * Subscription
+   */
+  200: unknown
+}
+
+export type ResearchSubscriptionsRefreshData = {
+  body?: never
+  path: {
+    subscriptionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/subscriptions/{subscriptionID}/refresh"
+}
+
+export type ResearchSubscriptionsRefreshResponses = {
+  /**
+   * Refresh result
+   */
+  200: unknown
+}
+
+export type ResearchSubscriptionsObservationsData = {
+  body?: never
+  path: {
+    subscriptionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    limit?: number
+  }
+  url: "/research/subscriptions/{subscriptionID}/observations"
+}
+
+export type ResearchSubscriptionsObservationsResponses = {
+  /**
+   * Observations
+   */
+  200: unknown
+}
+
+export type ResearchSubscriptionsObserveData = {
+  body?: {
+    changed: boolean
+    title?: string
+    url?: string
+    contentHash?: string
+    detail?: {
+      [key: string]: unknown
+    }
+    checkedAt?: number
+    nextCheckAt?: number
+    etag?: string
+    lastModified?: string
+    failureSummary?: string
+  }
+  path: {
+    subscriptionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/research/subscriptions/{subscriptionID}/observations"
+}
+
+export type ResearchSubscriptionsObserveResponses = {
+  /**
+   * Observation
+   */
+  200: unknown
+}
+
+export type ResearchProjectClearData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+  }
+  url: "/research/project"
+}
+
+export type ResearchProjectClearResponses = {
+  /**
+   * Cleared
+   */
+  200: unknown
+}
+
+export type HooksListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    sessionID?: string
+    includeExpired?: boolean
+    limit?: number
+  }
+  url: "/hooks"
+}
+
+export type HooksListResponses = {
+  /**
+   * Hooks
+   */
+  200: Array<{
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+    id: string
+    remainingRuns: number | null
+    expiredAt: number | null
+    createdAt: number
+    updatedAt: number
+  }>
+}
+
+export type HooksListResponse = HooksListResponses[keyof HooksListResponses]
+
+export type HooksCreateData = {
+  body?: {
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks"
+}
+
+export type HooksCreateResponses = {
+  /**
+   * Hook
+   */
+  200: {
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+    id: string
+    remainingRuns: number | null
+    expiredAt: number | null
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type HooksCreateResponse = HooksCreateResponses[keyof HooksCreateResponses]
+
+export type HooksDeleteData = {
+  body?: never
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}"
+}
+
+export type HooksDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: unknown
+}
+
+export type HooksGetData = {
+  body?: never
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}"
+}
+
+export type HooksGetResponses = {
+  /**
+   * Hook
+   */
+  200: {
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+    id: string
+    remainingRuns: number | null
+    expiredAt: number | null
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type HooksGetResponse = HooksGetResponses[keyof HooksGetResponses]
+
+export type HooksUpdateData = {
+  body?: {
+    name?: string
+    description?: string
+    enabled?: boolean
+    scope?: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events?: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler?:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+  }
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}"
+}
+
+export type HooksUpdateResponses = {
+  /**
+   * Hook
+   */
+  200: {
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+    id: string
+    remainingRuns: number | null
+    expiredAt: number | null
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type HooksUpdateResponse = HooksUpdateResponses[keyof HooksUpdateResponses]
+
+export type HooksEnabledData = {
+  body?: {
+    enabled: boolean
+  }
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}/enabled"
+}
+
+export type HooksEnabledResponses = {
+  /**
+   * Hook
+   */
+  200: {
+    name: string
+    description?: string
+    enabled?: boolean
+    scope: "global" | "project" | "session"
+    projectID?: string
+    sessionID?: string
+    ownerSessionID?: string
+    events: Array<
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    >
+    matcher?: string
+    handler:
+      | {
+          type: "command"
+          command: string
+          shell?: "auto" | "powershell" | "sh"
+          timeoutMs?: number
+          async?: boolean
+          blockOnNonZero?: boolean
+        }
+      | {
+          type: "prompt"
+          prompt: string
+          timeoutMs?: number
+        }
+    lifetime?: "permanent" | "temporary"
+    expiry?: {
+      kind: "once" | "max_runs" | "current_turn" | "session_end" | "expires_at"
+      maxRuns?: number
+      expiresAt?: number
+    }
+    source?: "model" | "user" | "import"
+    id: string
+    remainingRuns: number | null
+    expiredAt: number | null
+    createdAt: number
+    updatedAt: number
+  }
+}
+
+export type HooksEnabledResponse = HooksEnabledResponses[keyof HooksEnabledResponses]
+
+export type HooksTestData = {
+  body?: {
+    event:
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    sessionID?: string
+    projectID?: string
+    cwd?: string
+    payload?: {
+      [key: string]: unknown
+    }
+    tool?: string
+  }
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}/test"
+}
+
+export type HooksTestResponses = {
+  /**
+   * Run
+   */
+  200: {
+    id: string
+    hookID: string
+    sessionID?: string
+    event:
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    status: "started" | "completed" | "blocked" | "failed" | "timeout" | "skipped"
+    durationMs: number
+    summary: string
+    input: {
+      [key: string]: unknown
+    }
+    output: {
+      [key: string]: unknown
+    }
+    timeCreated: number
+  }
+}
+
+export type HooksTestResponse = HooksTestResponses[keyof HooksTestResponses]
+
+export type HooksRunsClearData = {
+  body?: never
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/hooks/{hookID}/runs"
+}
+
+export type HooksRunsClearResponses = {
+  /**
+   * Cleared
+   */
+  200: unknown
+}
+
+export type HooksRunsListData = {
+  body?: never
+  path: {
+    hookID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    projectID?: string
+    sessionID?: string
+    includeExpired?: boolean
+    limit?: number
+  }
+  url: "/hooks/{hookID}/runs"
+}
+
+export type HooksRunsListResponses = {
+  /**
+   * Runs
+   */
+  200: Array<{
+    id: string
+    hookID: string
+    sessionID?: string
+    event:
+      | "SessionStart"
+      | "Setup"
+      | "InstructionsLoaded"
+      | "UserPromptSubmit"
+      | "UserPromptExpansion"
+      | "MessageDisplay"
+      | "PreToolUse"
+      | "PermissionRequest"
+      | "PostToolUse"
+      | "PostToolUseFailure"
+      | "PostToolBatch"
+      | "PermissionDenied"
+      | "Notification"
+      | "SubagentStart"
+      | "SubagentStop"
+      | "TaskCreated"
+      | "TaskCompleted"
+      | "Stop"
+      | "StopFailure"
+      | "TeammateIdle"
+      | "ConfigChange"
+      | "CwdChanged"
+      | "FileChanged"
+      | "WorktreeCreate"
+      | "WorktreeRemove"
+      | "PreCompact"
+      | "PostCompact"
+      | "SessionEnd"
+      | "Elicitation"
+      | "ElicitationResult"
+    status: "started" | "completed" | "blocked" | "failed" | "timeout" | "skipped"
+    durationMs: number
+    summary: string
+    input: {
+      [key: string]: unknown
+    }
+    output: {
+      [key: string]: unknown
+    }
+    timeCreated: number
+  }>
+}
+
+export type HooksRunsListResponse = HooksRunsListResponses[keyof HooksRunsListResponses]
+
 export type McpManageListData = {
   body?: never
   path?: never
@@ -8591,13 +13198,26 @@ export type McpManageListResponses = {
     } | null
     managed: boolean
     installable: boolean
-    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    installAdapter:
+      | "bundled-playwright"
+      | "bundled-windows-computer-use"
+      | "bundled-codegraph"
+      | "minimax-token-plan"
+      | "registry-remote"
+      | "external-command"
+      | null
     manifest: {
       id: string
       serverName: string
       title: string
-      source: "official-registry"
-      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      source: "official-registry" | "builtin" | "user"
+      adapter:
+        | "bundled-playwright"
+        | "bundled-windows-computer-use"
+        | "bundled-codegraph"
+        | "minimax-token-plan"
+        | "registry-remote"
+        | "external-command"
       installedAt: string
       configTarget: string
       configName: string
@@ -8635,12 +13255,19 @@ export type McpCatalogListResponses = {
     serverName: string
     title: string
     description: string
-    source: "official-registry"
+    source: "official-registry" | "builtin" | "user"
     packageType: string
     transportType: string
     installable: boolean
     installed: boolean
-    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    installAdapter:
+      | "bundled-playwright"
+      | "bundled-windows-computer-use"
+      | "bundled-codegraph"
+      | "minimax-token-plan"
+      | "registry-remote"
+      | "external-command"
+      | null
     installReason?: string
     official: boolean
     version?: string
@@ -8688,13 +13315,26 @@ export type McpCatalogInstallResponses = {
     } | null
     managed: boolean
     installable: boolean
-    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    installAdapter:
+      | "bundled-playwright"
+      | "bundled-windows-computer-use"
+      | "bundled-codegraph"
+      | "minimax-token-plan"
+      | "registry-remote"
+      | "external-command"
+      | null
     manifest: {
       id: string
       serverName: string
       title: string
-      source: "official-registry"
-      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      source: "official-registry" | "builtin" | "user"
+      adapter:
+        | "bundled-playwright"
+        | "bundled-windows-computer-use"
+        | "bundled-codegraph"
+        | "minimax-token-plan"
+        | "registry-remote"
+        | "external-command"
       installedAt: string
       configTarget: string
       configName: string
@@ -9008,13 +13648,26 @@ export type McpManageUpdateResponses = {
     } | null
     managed: boolean
     installable: boolean
-    installAdapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote" | null
+    installAdapter:
+      | "bundled-playwright"
+      | "bundled-windows-computer-use"
+      | "bundled-codegraph"
+      | "minimax-token-plan"
+      | "registry-remote"
+      | "external-command"
+      | null
     manifest: {
       id: string
       serverName: string
       title: string
-      source: "official-registry"
-      adapter: "bundled-playwright" | "bundled-windows-computer-use" | "registry-remote"
+      source: "official-registry" | "builtin" | "user"
+      adapter:
+        | "bundled-playwright"
+        | "bundled-windows-computer-use"
+        | "bundled-codegraph"
+        | "minimax-token-plan"
+        | "registry-remote"
+        | "external-command"
       installedAt: string
       configTarget: string
       configName: string
@@ -9060,6 +13713,7 @@ export type UsageGetData = {
     directory?: string
     workspace?: string
     range?: "today" | "7d" | "30d" | "all"
+    heatmap_granularity?: "month" | "week" | "day"
     provider?: string
     model?: string
     project?: string
@@ -9116,6 +13770,15 @@ export type UsageGetResponses = {
       cacheHit: number
       cost: number
     }>
+    heatmap: Array<{
+      time: number
+      totalTokens: number
+    }>
+    heatmapSummary: {
+      totalTokens: number
+      peakDailyTokens: number
+      activeDays: number
+    }
     logs: Array<{
       id: string
       projectID: string
@@ -9182,6 +13845,7 @@ export type UsageGetResponses = {
     }>
     filters: {
       range: "today" | "7d" | "30d" | "all"
+      heatmap_granularity: "month" | "week" | "day"
       provider: string | null
       model: string | null
       project: string | null
@@ -9581,7 +14245,15 @@ export type CommandListResponses = {
   /**
    * List of commands
    */
-  200: Array<Command>
+  200: Array<{
+    name: string
+    description?: string
+    agent?: string
+    model?: string
+    source?: "command" | "mcp" | "skill"
+    subtask?: boolean
+    hints: Array<string>
+  }>
 }
 
 export type CommandListResponse = CommandListResponses[keyof CommandListResponses]
@@ -9624,8 +14296,6 @@ export type AppSkillsResponses = {
     description: string
     location: string
     content: string
-    triggers?: Array<string>
-    hidden?: boolean
   }>
 }
 

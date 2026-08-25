@@ -13,7 +13,7 @@ export const AppReadBrowserPageTool = Tool.define(
     description: "Read the current side browser page, including URL, title, text snapshot, and resource summary.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/read-page", {

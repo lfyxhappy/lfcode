@@ -1,6 +1,9 @@
 import { createContext, useContext, type ParentProps } from "solid-js"
 import type { AppIconProps } from "../components/app-icon"
 import type { FileReferenceKind } from "../components/file-reference-path"
+import type { FileReferenceValidation } from "../components/markdown-file-reference-card"
+
+export type { FileReferenceValidation } from "../components/markdown-file-reference-card"
 
 export type FileReferenceApp = {
   id: string
@@ -13,16 +16,20 @@ export type FileReferenceContextValue = {
   baseDir?: string
   canOpenPaths?: boolean
   canExternalOpenPaths?: boolean
+  canBrowseInAppPaths?: boolean
   enableMarkdownDecorations?: boolean
   allowContextMenu?: boolean
   resolvePath?: (value: string, baseDir?: string) => string | undefined
+  validatePath?: (path: string) => Promise<FileReferenceValidation>
   openWithApps?: FileReferenceApp[]
   onPreviewPath?: (path: string) => void
   onOpenDefaultApp?: (path: string) => void
+  onOpenInApp?: (path: string) => void
   onOpenFolder?: (path: string) => void
   onOpenWith?: (path: string, app: string) => void
   onCopyPath?: (path: string) => void
   onReviewPath?: (path: string) => void
+  onRequestOpenWithApps?: () => void
   inferKind?: (value: string) => FileReferenceKind
 }
 

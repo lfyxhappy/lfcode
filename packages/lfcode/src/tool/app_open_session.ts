@@ -19,7 +19,7 @@ export const AppOpenSessionTool = Tool.define(
       parameters,
       execute: (args: z.infer<typeof parameters>) =>
         Effect.gen(function* () {
-          const current = yield* config.get()
+          const current = yield* config.getGlobal()
           ensureAppControlAccess(current, "session_control")
           const client = yield* Effect.promise(() => createAppControlClient())
           const result = yield* Effect.promise(() =>

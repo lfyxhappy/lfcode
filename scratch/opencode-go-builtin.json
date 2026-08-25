@@ -1,0 +1,507 @@
+[
+  {
+    "id": "minimax-m3",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 128000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "minimax-m2.7",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 204800,
+      "output": 131072
+    },
+    "reasoning": true
+  },
+  {
+    "id": "minimax-m2.5",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 204800,
+      "output": 131072
+    },
+    "reasoning": true
+  },
+  {
+    "id": "kimi-k3",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "effort",
+        "values": [
+          "low",
+          "high",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kimi-k2.7-code",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 262144,
+      "output": 262144
+    },
+    "reasoning": true
+  },
+  {
+    "id": "kimi-k2.6",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 262144,
+      "output": 262144
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "kimi-k2.5",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 262144,
+      "output": 262144
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "glm-5.2",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "effort",
+        "values": [
+          "high",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "glm-5.3",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 202752,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "effort",
+        "values": [
+          "high",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "glm-5.1",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 200000,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "glm-5",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 204800,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "deepseek-v4-pro",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 384000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "effort",
+        "values": [
+          "high",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "deepseek-v4-flash",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 384000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "effort",
+        "values": [
+          "high",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "qwen3.7-max",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 65536
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "budget_tokens"
+      }
+    ]
+  },
+  {
+    "id": "qwen3.8-max",
+    "input": [
+      "text",
+      "image",
+      "video",
+      "pdf"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 65536
+    },
+    "reasoning": true
+  },
+  {
+    "id": "qwen3.7-plus",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 65536
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "budget_tokens"
+      }
+    ]
+  },
+  {
+    "id": "qwen3.6-plus",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 65536
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "budget_tokens"
+      }
+    ]
+  },
+  {
+    "id": "qwen3.5-plus",
+    "input": [
+      "text",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1000000,
+      "output": 65536
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "budget_tokens"
+      }
+    ]
+  },
+  {
+    "id": "mimo-v2-pro",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "mimo-v2-omni",
+    "input": [
+      "text",
+      "audio",
+      "image",
+      "video",
+      "pdf"
+    ],
+    "limit": {
+      "context": 262144,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "mimo-v2.5-pro",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "mimo-v2.5",
+    "input": [
+      "text",
+      "audio",
+      "image",
+      "video"
+    ],
+    "limit": {
+      "context": 1048576,
+      "output": 131072
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      }
+    ]
+  },
+  {
+    "id": "hy3",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 256000,
+      "output": 64000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "toggle"
+      },
+      {
+        "type": "effort",
+        "values": [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hy3-preview",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 262144,
+      "output": 262144
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "effort",
+        "values": [
+          "none",
+          "low",
+          "high"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "gpt-5.6-luna",
+    "input": [
+      "text",
+      "image",
+      "pdf"
+    ],
+    "limit": {
+      "context": 1050000,
+      "output": 128000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "effort",
+        "values": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "grok-4.5",
+    "input": [
+      "text",
+      "image",
+      "pdf"
+    ],
+    "limit": {
+      "context": 500000,
+      "output": 500000
+    },
+    "reasoning": true,
+    "options": [
+      {
+        "type": "effort",
+        "values": [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "muse-spark-1.2-contributor",
+    "input": [
+      "text"
+    ],
+    "limit": {
+      "context": 128000,
+      "output": 16000
+    },
+    "reasoning": false
+  }
+]

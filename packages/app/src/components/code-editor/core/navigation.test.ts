@@ -193,7 +193,7 @@ describe("registerCodeEditorOpenHandler", () => {
       }),
     } as unknown as editor.ICodeEditor
     const open = mock(async (_input: { path: string }) => {})
-    const cleanup = navigation.registerCodeEditorOpenHandler(source, open)
+    const cleanup = await navigation.registerCodeEditorOpenHandler(source, open)
     const handler = installedOpenHandler
 
     expect(registerMonacoCodeEditorOpenHandler).toHaveBeenCalledTimes(1)

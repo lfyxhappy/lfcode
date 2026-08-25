@@ -9,7 +9,7 @@ import { ProviderIcon } from "@lfcode-ai/ui/provider-icon"
 import { Spinner } from "@lfcode-ai/ui/spinner"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { createEffect, createMemo, createResource, Match, onCleanup, onMount, Switch } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, Match, onCleanup, onMount, Switch } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useGlobalSDK } from "@/context/global-sdk"
@@ -21,7 +21,7 @@ import {
   VOLCENGINE_CODING_PLAN_PROVIDER_ID,
 } from "@lfcode-ai/shared/volcengine-coding-plan"
 
-export function DialogConnectProvider(props: { provider: string; returnTo?: "models" | "settings-models" }) {
+export function DialogConnectProvider(props: { provider: string; returnTo?: "models" | "settings-models"; configured?: boolean }) {
   const dialog = useDialog()
   const globalSync = useGlobalSync()
   const globalSDK = useGlobalSDK()
@@ -101,6 +101,8 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
     state: "pending" as undefined | "pending" | "complete" | "error" | "prompt",
     error: undefined as string | undefined,
   })
+  const [reconfigure, setReconfigure] = createSignal(false)
+  const hasStoredCredential = () => props.configured ?? globalSync.data.provider.connected.includes(props.provider)
 
   type Action =
     | { type: "method.select"; index: number }
@@ -463,6 +465,25 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
       await complete()
     }
 
+    if (hasStoredCredential() && !reconfigure()) {
+      return (
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-col gap-1.5">
+            <div class="text-14-medium text-text-strong">已配置 API 密钥</div>
+            <div class="text-14-regular text-text-weak">将直接复用当前已保存的凭据，不需要再次输入。</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <Button class="w-auto" type="button" size="large" variant="primary" onClick={() => void complete()}>
+              使用已配置凭据
+            </Button>
+            <Button class="w-auto" type="button" size="large" variant="secondary" onClick={() => setReconfigure(true)}>
+              更换 API 密钥
+            </Button>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div class="flex flex-col gap-6">
         <Switch>
@@ -621,6 +642,7 @@ export function DialogConnectProvider(props: { provider: string; returnTo?: "mod
 
   return (
     <Dialog
+      fit
       title={
         <IconButton
           tabIndex={-1}

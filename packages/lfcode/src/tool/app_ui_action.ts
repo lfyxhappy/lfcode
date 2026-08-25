@@ -3,13 +3,13 @@ import { Effect } from "effect"
 import * as Tool from "./tool"
 import { Config } from "@/config"
 import { createAppControlClient, ensureAppControlAccess } from "@/app-control/client"
-import { appUiShared, buildAppUiBody } from "./app_ui_shared"
+import { appUiWriteShared, buildAppUiBody } from "./app_ui_shared"
 
 const parameters = z.union([
-  appUiShared.extend({
+  appUiWriteShared.extend({
     action: z.literal("click"),
   }),
-  appUiShared.extend({
+  appUiWriteShared.extend({
     action: z.literal("type"),
     text: z.string().describe("Text to place into the target. Works with composers and phase0 code editors."),
     append: z.boolean().optional().describe("Append to the current value instead of replacing it."),
@@ -26,7 +26,7 @@ export const AppUiActionTool = Tool.define(
       parameters,
       execute: (args: z.infer<typeof parameters>) =>
         Effect.gen(function* () {
-          const current = yield* config.get()
+          const current = yield* config.getGlobal()
           ensureAppControlAccess(current, "session_control")
           const client = yield* Effect.promise(() => createAppControlClient())
           const result = yield* Effect.promise(() => {

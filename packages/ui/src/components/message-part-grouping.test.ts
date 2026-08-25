@@ -3,7 +3,9 @@ import type { Part as PartType } from "@lfcode-ai/sdk/v2"
 import {
   groupAnchorMessageIDs,
   groupParts,
+  isCommandGroupTool,
   isContextGroupTool,
+  isGroupedTool,
   partDefaultOpen,
   renderable,
   sameGroups,
@@ -114,6 +116,124 @@ describe("message-part-grouping", () => {
     ])
   })
 
+  test("groups commands with their process updates across assistant text", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: completedToolPart("p1", "shell") },
+      { messageID: "m1", part: completedToolPart("p2", "shell_process") },
+      { messageID: "m1", part: completedToolPart("p3", "shell") },
+      { messageID: "m1", part: completedToolPart("p4", "shell_process") },
+      { messageID: "m1", part: textPart("p5", "done") },
+      { messageID: "m1", part: completedToolPart("p6", "shell") },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        key: "command:p1",
+        type: "command",
+        refs: [
+          { messageID: "m1", partID: "p1" },
+          { messageID: "m1", partID: "p2" },
+          { messageID: "m1", partID: "p3" },
+          { messageID: "m1", partID: "p4" },
+          { messageID: "m1", partID: "p6" },
+        ],
+      },
+      {
+        key: "part:m1:p5",
+        type: "part",
+        ref: { messageID: "m1", partID: "p5" },
+      },
+    ])
+    expect(isCommandGroupTool(completedToolPart("p5", "bash"))).toBe(true)
+    expect(isCommandGroupTool(completedToolPart("p6", "shell_process"))).toBe(true)
+  })
+
+  test("keeps consecutive commands together across assistant text and process updates", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: completedToolPart("p1", "shell") },
+      { messageID: "m1", part: textPart("p2", "checking output") },
+      { messageID: "m2", part: completedToolPart("p3", "shell_process") },
+      { messageID: "m3", part: completedToolPart("p4", "shell") },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        key: "command:p1",
+        type: "command",
+        refs: [
+          { messageID: "m1", partID: "p1" },
+          { messageID: "m2", partID: "p3" },
+          { messageID: "m3", partID: "p4" },
+        ],
+      },
+      {
+        key: "part:m1:p2",
+        type: "part",
+        ref: { messageID: "m1", partID: "p2" },
+      },
+    ])
+  })
+
+  test("does not create an empty command group from process updates alone", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: completedToolPart("p1", "shell_process") },
+      { messageID: "m2", part: completedToolPart("p2", "shell_process") },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        key: "part:m1:p1",
+        type: "part",
+        ref: { messageID: "m1", partID: "p1" },
+      },
+      {
+        key: "part:m2:p2",
+        type: "part",
+        ref: { messageID: "m2", partID: "p2" },
+      },
+    ])
+  })
+
+  test("groups repeated tools across assistant text", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: completedToolPart("p1", "browser") },
+      { messageID: "m1", part: textPart("p2", "page loaded") },
+      { messageID: "m2", part: completedToolPart("p3", "browser") },
+      { messageID: "m3", part: completedToolPart("p4", "browser") },
+    ])
+
+    expect(grouped).toEqual([
+      {
+        key: "tool:browser:p1",
+        type: "tool",
+        refs: [
+          { messageID: "m1", partID: "p1" },
+          { messageID: "m2", partID: "p3" },
+          { messageID: "m3", partID: "p4" },
+        ],
+      },
+      {
+        key: "part:m1:p2",
+        type: "part",
+        ref: { messageID: "m1", partID: "p2" },
+      },
+    ])
+    expect(isGroupedTool(completedToolPart("p5", "browser"))).toBe(true)
+    expect(isGroupedTool(completedToolPart("p6", "shell"))).toBe(false)
+  })
+
+  test("keeps each actor dispatch visible instead of collapsing them into a tool group", () => {
+    const grouped = groupParts([
+      { messageID: "m1", part: completedToolPart("p1", "actor") },
+      { messageID: "m1", part: completedToolPart("p2", "actor") },
+    ])
+
+    expect(grouped).toEqual([
+      { key: "part:m1:p1", type: "part", ref: { messageID: "m1", partID: "p1" } },
+      { key: "part:m1:p2", type: "part", ref: { messageID: "m1", partID: "p2" } },
+    ])
+  })
+
   test("compares grouped entries structurally", () => {
     const left = groupParts([
       { messageID: "m1", part: completedToolPart("p1", "read") },
@@ -195,6 +315,9 @@ describe("message-part-grouping", () => {
     expect(isContextGroupTool(read)).toBe(true)
     expect(isContextGroupTool(bash)).toBe(false)
     expect(toolDefaultOpen("bash", true, false)).toBe(true)
+    expect(toolDefaultOpen("shell", true, false)).toBe(true)
+    expect(toolDefaultOpen("shell_process", true, false)).toBe(true)
+    expect(toolDefaultOpen("shell_process", false, false)).toBe(false)
     expect(toolDefaultOpen("edit", false, true)).toBe(true)
     expect(partDefaultOpen(edit, false, true)).toBe(true)
     expect(partDefaultOpen(read, true, true)).toBeUndefined()

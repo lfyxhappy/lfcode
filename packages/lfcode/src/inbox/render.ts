@@ -1,11 +1,41 @@
 import type { InboxRow } from "./inbox.sql"
 
 export function renderInboxRow(row: InboxRow): string {
+  if (row.type === "completion_notification") {
+    const content = row.content as { text?: string }
+    try {
+      const notification = JSON.parse(content.text ?? "{}") as {
+        source?: string
+        id?: string
+        status?: string
+        summary?: string
+        finishedAt?: number
+        collectAction?: string
+      }
+      return [
+        "<completion-notification>",
+        `Source: ${notification.source ?? "unknown"}`,
+        `ID: ${notification.id ?? "unknown"}`,
+        `Status: ${notification.status ?? "unknown"}`,
+        `Summary: ${notification.summary ?? "(none)"}`,
+        `Finished: ${notification.finishedAt ? new Date(notification.finishedAt).toISOString() : "unknown"}`,
+        `Next: ${notification.collectAction ?? "Inspect the completed work before finalizing."}`,
+        "Do not busy-poll completed work. Continue independent work and collect only relevant results before answering.",
+        "</completion-notification>",
+      ].join("\n")
+    } catch {
+      return "<completion-notification>Malformed completion notification.</completion-notification>"
+    }
+  }
   if (row.type === "actor_notification") {
     // Pre-rendered notification text — sender produced the full
     // <actor-notification>...</actor-notification> wrapper.
     const content = row.content as { text?: string }
     return content.text ?? "(no notification body)"
+  }
+  if (row.type === "actor_followup") {
+    const content = row.content as { text?: string }
+    return content.text ?? "(empty message)"
   }
   // Default: type === "text" or unknown — wrap as <inbox> element so
   // the LLM can route by sender; the wrapper format mirrors the

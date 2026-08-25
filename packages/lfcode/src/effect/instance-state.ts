@@ -79,3 +79,5 @@ export const invalidate = <A, E, R>(self: InstanceState<A, E, R>) =>
   Effect.gen(function* () {
     return yield* ScopedCache.invalidate(self.cache, yield* directory)
   })
+
+export const invalidateAll = <A, E, R>(self: InstanceState<A, E, R>) => ScopedCache.invalidateAll(self.cache)

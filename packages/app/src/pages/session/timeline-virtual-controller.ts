@@ -374,6 +374,13 @@ export class TimelineVirtualController {
           ? (this.#options.anchorElement(current, request.state.viewport.anchorRenderBlockID) ??
             this.#options.turnElement(current, request.state.viewport.anchorTurnID))
           : undefined
+      if (request.state.viewport.mode === "bottom" && !atBottom(current)) {
+        this.#options.scrollToBottom()
+        this.#stabilityFrames = 0
+        this.#stabilitySignature = undefined
+        this.#stabilityFrame = requestAnimationFrame(check)
+        return
+      }
       const signature = [
         current.scrollHeight,
         current.clientHeight,
@@ -398,7 +405,19 @@ export class TimelineVirtualController {
       this.#stabilityObserver.observe(root)
       if (root.firstElementChild instanceof HTMLElement) this.#stabilityObserver.observe(root.firstElementChild)
     }
-    this.#stabilityTimer = window.setTimeout(() => this.#commit(token), 450)
+    this.#stabilityTimer = window.setTimeout(() => {
+      const request = this.#current(token)
+      const current = this.#root
+      if (!request || !current) return
+      if (request.state.viewport.mode === "bottom" && !atBottom(current)) {
+        this.#options.scrollToBottom()
+        this.#stabilityFrames = 0
+        this.#stabilitySignature = undefined
+        this.#stabilityFrame = requestAnimationFrame(check)
+        return
+      }
+      this.#commit(token)
+    }, 450)
     this.#stabilityFrame = requestAnimationFrame(check)
   }
 
@@ -464,4 +483,8 @@ function decisionFor(state: SessionViewStateV4 | SessionViewStateV4["viewport"])
     turnID: viewport.anchorTurnID,
     offsetPx: viewport.offsetPx,
   }
+}
+
+function atBottom(root: HTMLElement) {
+  return root.scrollHeight - root.clientHeight - root.scrollTop <= 2
 }

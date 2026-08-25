@@ -11,6 +11,8 @@ node_modules
 .codegraph/
 .playwright-mcp/
 .windows-computer-use-mcp/
+.codegraph-runtime/
+.codegraph-runtime-cache/
 *~
 playground
 tmp

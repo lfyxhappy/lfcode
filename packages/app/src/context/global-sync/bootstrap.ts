@@ -67,6 +67,16 @@ export function clearProviderRev(directory: string) {
   providerRev.delete(directory)
 }
 
+function waitForIdle() {
+  return new Promise<void>((resolve) => {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => resolve(), { timeout: 3_000 })
+      return
+    }
+    setTimeout(resolve, 100)
+  })
+}
+
 function runAll(list: Array<() => Promise<unknown>>) {
   return Promise.allSettled(list.map((item) => item()))
 }
@@ -112,6 +122,7 @@ export async function bootstrapGlobal(input: {
           const projects = (x.data ?? [])
             .filter((p) => !!p?.id)
             .filter((p) => !!p.worktree && !p.worktree.includes("lfcode-test") && !p.worktree.includes("legacy-test"))
+            .filter((p) => p.extension?.pluginID !== "lfcode-automation" || p.extension.type !== "global")
             .slice()
             .sort((a, b) => cmp(a.id, b.id))
           input.setGlobalStore("project", projects)
@@ -257,8 +268,12 @@ export async function bootstrapDirectory(input: {
   store: Store<State>
   setStore: SetStoreFunction<State>
   onSessionStatusSnapshot?: (directory: string) => void
+  reconcilePendingRequests?: boolean
+  pendingRequestVersion?: () => number
   vcsCache: VcsCache
   loadSessions: (directory: string) => Promise<void> | void
+  loadCommands: (directory: string) => Promise<void> | void
+  isCurrent?: () => boolean
   translate: (key: string, vars?: Record<string, string | number>) => string
   global: {
     config: Config
@@ -282,6 +297,9 @@ export async function bootstrapDirectory(input: {
   if (loading || input.store.provider.all.length === 0) {
     input.setStore("provider_ready", false)
   }
+  if (loading) input.setStore("command_ready", false)
+  input.setStore("permission_ready", false)
+  input.setStore("permission_error", false)
   input.setStore("mcp_ready", false)
   input.setStore("mcp", {})
   input.setStore("lsp_ready", false)
@@ -290,7 +308,7 @@ export async function bootstrapDirectory(input: {
 
   const rev = (providerRev.get(input.directory) ?? 0) + 1
   providerRev.set(input.directory, rev)
-  ;(async () => {
+  return (async () => {
     const critical = [
       () => Promise.resolve(input.loadSessions(input.directory)),
       () =>
@@ -318,15 +336,6 @@ export async function bootstrapDirectory(input: {
         ),
       () => retry(() => input.sdk.config.get().then((x) => input.setStore("config", x.data!))),
       () =>
-        retry(() =>
-          input.sdk.vcs.get().then((x) => {
-            const next = x.data ?? input.store.vcs
-            input.setStore("vcs", next)
-            if (next) input.vcsCache.setStore("value", next)
-          }),
-        ),
-      () => retry(() => input.sdk.command.list().then((x) => input.setStore("command", x.data ?? []))),
-      () =>
         input.queryClient.ensureQueryData({
           ...loadProvidersQuery(input.directory),
           queryFn: () =>
@@ -350,12 +359,18 @@ export async function bootstrapDirectory(input: {
       () =>
         retry(() =>
           input.sdk.permission.list().then((x) => {
+            const version = input.pendingRequestVersion?.()
             const ids = (x.data ?? []).map((perm) => perm?.sessionID).filter((id): id is string => !!id)
             const grouped = groupBySession(
               (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm.sessionID),
             )
             return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
               batch(() => {
+                if (input.reconcilePendingRequests && version === input.pendingRequestVersion?.()) {
+                  input.setStore("permission", reconcile(grouped, { key: "id" }))
+                  input.setStore("permission_ready", true)
+                  return
+                }
                 for (const sessionID of Object.keys(input.store.permission)) {
                   if (grouped[sessionID]) continue
                 }
@@ -366,17 +381,27 @@ export async function bootstrapDirectory(input: {
                     reconcile(mergeBootstrapRequests(input.store.permission[sessionID], permissions), { key: "id" }),
                   )
                 }
+                input.setStore("permission_ready", true)
               }),
             )
           }),
-        ),
+        ).catch((error) => {
+          input.setStore("permission_error", true)
+          input.setStore("permission_ready", true)
+          throw error
+        }),
       () =>
         retry(() =>
           input.sdk.question.list().then((x) => {
+            const version = input.pendingRequestVersion?.()
             const ids = (x.data ?? []).map((question) => question?.sessionID).filter((id): id is string => !!id)
             const grouped = groupBySession((x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID))
             return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
               batch(() => {
+                if (input.reconcilePendingRequests && version === input.pendingRequestVersion?.()) {
+                  input.setStore("question", reconcile(grouped, { key: "id" }))
+                  return
+                }
                 for (const sessionID of Object.keys(input.store.question)) {
                   if (grouped[sessionID]) continue
                 }
@@ -391,6 +416,19 @@ export async function bootstrapDirectory(input: {
             )
           }),
         ),
+    ] as (() => Promise<any>)[]
+    const idle = [
+      () =>
+        retry(() =>
+          input.sdk.vcs.get().then((x) => {
+            if (input.isCurrent && !input.isCurrent()) return
+            const next = x.data ?? input.store.vcs
+            input.setStore("vcs", next)
+            if (next) input.vcsCache.setStore("value", next)
+          }),
+        ),
+      () =>
+        Promise.resolve(input.loadCommands(input.directory)),
     ] as (() => Promise<any>)[]
 
     await waitForPaint()
@@ -415,5 +453,14 @@ export async function bootstrapDirectory(input: {
         console.error("Failed to finish deferred bootstrap instance work", deferredErrs[0])
       })
     }, 0)
+
+    void waitForIdle().then(() => {
+      if (input.isCurrent && !input.isCurrent()) return
+      return runAll(idle).then((results) => {
+        const idleErrs = errors(results)
+        if (idleErrs.length === 0) return
+        console.error("Failed to finish idle bootstrap instance work", idleErrs[0])
+      })
+    })
   })()
 }

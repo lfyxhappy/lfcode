@@ -6,6 +6,7 @@ import { ActorRegistry } from "@/actor/registry"
 import { Session } from "@/session"
 import { MessageID, PartID } from "@/session/schema"
 import { InboxArrived } from "@/actor/events"
+import { runTurn } from "@/actor/turn"
 import type { SessionID } from "@/session/schema"
 import { Log } from "@/util"
 import { InboxTable } from "./inbox.sql"
@@ -16,6 +17,17 @@ const log = Log.create({ service: "inbox" })
 
 const GC_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_DRAIN_PER_TURN = 100
+export const MAX_CONSECUTIVE_COMPLETION_WAKES = 3
+
+export type CompletionNotification = {
+  source: "actor" | "shell-job" | "task"
+  id: string
+  status: "completed" | "failed" | "cancelled"
+  summary: string
+  finishedAt: number
+  collectAction: string
+  dedupeKey: string
+}
 
 /** Delete inbox rows whose created_at is at or before cutoffMs. Unit-testable without layer reset. */
 export function gcInboxRows(cutoffMs: number) {
@@ -39,14 +51,27 @@ export interface SendInput {
   senderActorID?: string
   content: string
   type?: string
+  /** Persist and publish the notification without scheduling a model turn. */
+  wake?: boolean
 }
 
 export interface SendResult {
   inboxID: string
+  /** Whether this delivery scheduled a receiver turn. */
+  wakeScheduled?: boolean
 }
 
 export interface Interface {
   readonly send: (input: SendInput) => Effect.Effect<SendResult, InboxReceiverNotFound>
+  readonly sendCompletion?: (input: {
+    receiverSessionID: SessionID
+    receiverActorID: string
+    senderSessionID?: SessionID
+    senderActorID?: string
+    notification: CompletionNotification
+  }) => Effect.Effect<SendResult, InboxReceiverNotFound>
+  /** A real user prompt makes this owner eligible for another bounded idle wake sequence. */
+  readonly resetCompletionWakeBudget?: (input: { sessionID: SessionID; actorID: string }) => Effect.Effect<void>
   readonly drain: (sessionID: SessionID, actorID: string) => Effect.Effect<number>
 }
 
@@ -63,6 +88,7 @@ export const layer: Layer.Layer<
     const reg = yield* ActorRegistry.Service
     const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
+    const completionWakeCount = new Map<string, number>()
 
     // 7-day GC at init. Idempotent: deletes any rows older than now-7d.
     yield* gcInboxRows(Date.now() - GC_TTL_MS)
@@ -103,11 +129,18 @@ export const layer: Layer.Layer<
       // Fork-and-forget wake (B2). Sender returns after fork is scheduled;
       // wake fiber lives in the service scope, so sender lifecycle does
       // not affect delivery.
+      if (input.wake === false) return { inboxID: row.id, wakeScheduled: false }
+
       const promptRef = sessionPromptRef.current
       if (promptRef) {
-        yield* promptRef
-          .loop({ sessionID: input.receiverSessionID, agentID: input.receiverActorID })
-          .pipe(Effect.ignore, Effect.forkIn(scope))
+        const wake = promptRef.loop({ sessionID: input.receiverSessionID, agentID: input.receiverActorID })
+        yield* (receiver.status === "idle"
+          ? wake.pipe(
+              (work) => runTurn(input.receiverSessionID, input.receiverActorID, work),
+              Effect.provideService(ActorRegistry.Service, reg),
+            )
+          : wake
+        ).pipe(Effect.ignore, Effect.forkIn(scope))
       } else {
         // Test fixtures / renderer-only paths can run without SessionPrompt.
         // Row is durable; will be drained on next runLoop iteration.
@@ -116,7 +149,63 @@ export const layer: Layer.Layer<
         })
       }
 
-      return { inboxID: row.id }
+      return { inboxID: row.id, wakeScheduled: true }
+    })
+
+    const sendCompletion = Effect.fn("Inbox.sendCompletion")(function* (input: {
+      receiverSessionID: SessionID
+      receiverActorID: string
+      senderSessionID?: SessionID
+      senderActorID?: string
+      notification: CompletionNotification
+    }) {
+      const receiver = yield* reg.get(input.receiverSessionID, input.receiverActorID)
+      if (!receiver) {
+        return yield* Effect.fail(
+          new InboxReceiverNotFound({
+            receiverSessionID: input.receiverSessionID,
+            receiverActorID: input.receiverActorID,
+          }),
+        )
+      }
+      const pending = yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .select({ id: InboxTable.id, content: InboxTable.content })
+            .from(InboxTable)
+            .where(
+              and(
+                eq(InboxTable.receiver_session_id, input.receiverSessionID),
+                eq(InboxTable.receiver_actor_id, input.receiverActorID),
+                eq(InboxTable.type, "completion_notification"),
+              ),
+            )
+            .all(),
+        ),
+      )
+      const duplicate = pending.find((item) => completionNotification(item.content)?.dedupeKey === input.notification.dedupeKey)
+      if (duplicate) return { inboxID: duplicate.id, wakeScheduled: false }
+      const wakeKey = `${input.receiverSessionID}\0${input.receiverActorID}`
+      const idleWake = receiver.status === "idle"
+      const wakes = completionWakeCount.get(wakeKey) ?? 0
+      const wake = !idleWake || wakes < MAX_CONSECUTIVE_COMPLETION_WAKES
+      if (idleWake && wake) completionWakeCount.set(wakeKey, wakes + 1)
+      return yield* send({
+        receiverSessionID: input.receiverSessionID,
+        receiverActorID: input.receiverActorID,
+        ...(input.senderSessionID ? { senderSessionID: input.senderSessionID } : {}),
+        ...(input.senderActorID ? { senderActorID: input.senderActorID } : {}),
+        type: "completion_notification",
+        content: JSON.stringify(input.notification),
+        wake,
+      })
+    })
+
+    const resetCompletionWakeBudget = Effect.fn("Inbox.resetCompletionWakeBudget")(function* (input: {
+      sessionID: SessionID
+      actorID: string
+    }) {
+      completionWakeCount.delete(`${input.sessionID}\0${input.actorID}`)
     })
 
     const drain = Effect.fn("Inbox.drain")(function* (
@@ -189,7 +278,7 @@ export const layer: Layer.Layer<
           messageID: msgID,
           sessionID,
           type: "text" as const,
-          synthetic: true,
+          synthetic: row.type !== "actor_followup",
           text: renderInboxRow(row),
         })
       }
@@ -205,7 +294,7 @@ export const layer: Layer.Layer<
       return rows.length
     })
 
-    const impl = Service.of({ send, drain })
+    const impl = Service.of({ send, sendCompletion, resetCompletionWakeBudget, drain })
     inboxServiceRef.current = impl
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -215,6 +304,16 @@ export const layer: Layer.Layer<
     return impl
   }),
 )
+
+function completionNotification(content: unknown): CompletionNotification | undefined {
+  if (!content || typeof content !== "object" || !("text" in content) || typeof content.text !== "string") return
+  try {
+    const parsed = JSON.parse(content.text) as Partial<CompletionNotification>
+    return typeof parsed.dedupeKey === "string" ? (parsed as CompletionNotification) : undefined
+  } catch {
+    return
+  }
+}
 
 export const defaultLayer = layer.pipe(
   Layer.provide(Bus.defaultLayer),

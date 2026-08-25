@@ -1,5 +1,6 @@
-Use this tool for .docx, .xlsx, and .pptx files when you need structured inspection, creation, editing, rendering, validation, or template merging.
+Use this tool for .docx, .xlsx, and .pptx files when you need structured inspection, creation, editing, rendering, validation, or template merging through a durable background job.
 
 Use `inspect` first for an unfamiliar document. Use `query` to find a stable selector before `edit`. Use `render` after significant edits so the rendered HTML, SVG, screenshot, or PDF can be reviewed. Use `validate` before delivering a document.
 
 All mutation actions write the document through OfficeCLI. `batch` receives a JSON command list. Do not use raw XML operations unless a normal structured operation cannot express the change. For work outside the session directory, the tool requests directory permission. OfficeCLI is managed by Lfcode and may ask once to install a verified release if missing.
+Completion is reported automatically; use `shell_process` only to inspect or wait for OfficeCLI. Cancel only after the user explicitly requests it. `timeout` is only a reminder threshold and never terminates the process.

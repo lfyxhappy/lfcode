@@ -1,0 +1,2633 @@
+{
+  "snapshotID": "s4qog3y1qoac50-a",
+  "revision": 83,
+  "region": "body",
+  "offset": 0,
+  "limit": 300,
+  "total": 66,
+  "root": {
+    "ref": "r1",
+    "fingerprint": "body::0",
+    "tag": "body",
+    "text": "搜索 闲聊 Ctrl+K Memory 新对话 已安排 插件 闲聊 问候 解压压缩包的安全步骤 压缩包解压与安全处理步骤 解压压缩包的安全处理步骤 解压ZIP并处理嵌套目录 解压目录的规则说明 酒馆 pre-experience-lab 构建任何东西 C:/算法/小应用/闲聊 主分支 最后修改 0秒钟前 随便问点什么... \"哪些依赖已经过期？\" Shell Build 更多 deepseek-v4-flash-vision-exp · low · 正常 选择模型 OpenCode Go deepseek-v4-flash-vision-exp hy3 mimo-v2.5 ox-alpha-free MiniMax Token Plan (minimaxi.com) MiniMax-M2.7-highspeed MiniMax-M3 grok gpt-5.4 grok-4.5 low 正常",
+    "disabled": false,
+    "checked": false,
+    "expanded": false,
+    "selected": false,
+    "editable": false,
+    "visible": true,
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1296,
+      "height": 831.2000122070312
+    }
+  },
+  "children": [
+    {
+      "ref": "r2",
+      "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换菜单",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r3",
+      "fingerprint": "div::0/header::0/div::0/div::1/div::0/button:切换侧边栏:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换侧边栏",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 16,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r4",
+      "fingerprint": "div::1/div::1/div::0/div::0/div::0/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r5",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::0/button:返回:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "返回",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52,
+        "y": 8,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r6",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::1/button:前进:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "前进",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 76,
+        "y": 8,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r7",
+      "fingerprint": "div::0/header::0/div::1/div:lfcode-titlebar-center:0/div::0/button:搜索文件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "搜索文件",
+      "text": "搜索 闲聊 Ctrl+K",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 480.3937683105469,
+        "y": 8,
+        "width": 240,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r8",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:在 文件资源管理器 中打开:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "在 文件资源管理器 中打开",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 798.6625366210938,
+        "y": 8.800000190734863,
+        "width": 24,
+        "height": 22.399999618530273
+      }
+    },
+    {
+      "ref": "r9",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:dropdownmenu-cl-51-trigger:1",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-51-trigger",
+      "name": "打开选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 822.6625366210938,
+        "y": 8.800000190734863,
+        "width": 20,
+        "height": 22.399999618530273
+      }
+    },
+    {
+      "ref": "ra",
+      "fingerprint": "div::2/div:lfcode-titlebar-right:0/div::0/div::0/div::1/button:Memory maintenance:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "Memory maintenance",
+      "text": "Memory",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 851.4625244140625,
+        "y": 8,
+        "width": 104.5374984741211,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rb",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::0/button:状态:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "状态",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 960,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rc",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::1/button:切换终端:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换终端",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 996,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rd",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::0/button:打开浏览器:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开浏览器",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1036,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "re",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::1/button:切换审查:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换审查",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1076,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rf",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::2/button:切换文件树:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换文件树",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1116,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rg",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:新对话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新对话",
+      "text": "新对话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 52,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rh",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::1/button:已安排:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "已安排",
+      "text": "已安排",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 96,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "ri",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::2/button:插件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "插件",
+      "text": "插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 140,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rj",
+      "fingerprint": "div::0/div::1/div::0/div::0/div:contextmenu-cl-157-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 188,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "rk",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-157-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 190,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "rl",
+      "fingerprint": "div::0/div:contextmenu-cl-157-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-159-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-159-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 190,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "rm",
+      "fingerprint": "div:contextmenu-cl-161-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "问候",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 224,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rn",
+      "fingerprint": "div:contextmenu-cl-161-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-164-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-164-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 226.60000610351562,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ro",
+      "fingerprint": "div:contextmenu-cl-167-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压压缩包的安全步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 255.1999969482422,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rp",
+      "fingerprint": "div:contextmenu-cl-167-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-170-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-170-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 257.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rq",
+      "fingerprint": "div:contextmenu-cl-173-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "压缩包解压与安全处理步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 286.3999938964844,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rr",
+      "fingerprint": "div:contextmenu-cl-173-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-176-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-176-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 289,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rs",
+      "fingerprint": "div:contextmenu-cl-179-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压压缩包的安全处理步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 317.6000061035156,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rt",
+      "fingerprint": "div:contextmenu-cl-179-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-182-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-182-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 320.20001220703125,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ru",
+      "fingerprint": "div:contextmenu-cl-185-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压ZIP并处理嵌套目录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 348.8000183105469,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rv",
+      "fingerprint": "div:contextmenu-cl-185-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-188-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-188-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 351.3999938964844,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rw",
+      "fingerprint": "div:contextmenu-cl-191-trigger:5/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压目录的规则说明",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 380,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rx",
+      "fingerprint": "div:contextmenu-cl-191-trigger:5/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-194-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-194-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 382.6000061035156,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ry",
+      "fingerprint": "div::0/div::1/div::0/div::1/div:contextmenu-cl-197-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "酒馆",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 425.20001220703125,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "rz",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-197-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 427.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r10",
+      "fingerprint": "div::1/div:contextmenu-cl-197-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-199-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-199-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 427.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r11",
+      "fingerprint": "div::0/div::1/div::0/div::2/div:contextmenu-cl-201-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "pre-experience-lab",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 473.20001220703125,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r12",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-201-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 475.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r13",
+      "fingerprint": "div::2/div:contextmenu-cl-201-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-203-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-203-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 475.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r14",
+      "fingerprint": "div::0/div::0/div::2/div::0/div::0/button:打开项目:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开项目",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r15",
+      "fingerprint": "div::0/div::0/div::0/div::2/div::1/button:查看用量:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "查看用量",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 120,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r16",
+      "fingerprint": "div::0/div::0/div::2/div::1/div::0/button:设置:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "设置",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 160,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r17",
+      "fingerprint": "div::0/div::0/div::2/div::1/div::1/button:帮助:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "帮助",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 200,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r2i",
+      "fingerprint": "div::0/div::0/form::0/div::0/div::0/div:随便问点什么... \"哪些依赖已经过期？\":0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "textbox",
+      "name": "随便问点什么... \"哪些依赖已经过期？\"",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 390.3999938964844,
+        "y": 712,
+        "width": 760,
+        "height": 57.20000076293945
+      }
+    },
+    {
+      "ref": "r19",
+      "fingerprint": "div::0/div::0/form::0/div::0/div::2/input::0",
+      "parentRef": "r1",
+      "tag": "input",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1a",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button:dropdownmenu-cl-206-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-206-trigger",
+      "text": "Build",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 400.3999938964844,
+        "y": 778.2000122070312,
+        "width": 77.0062484741211,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1b",
+      "fingerprint": "div::0/div::0/div::0/div::1/div::1/button:dropdownmenu-cl-48-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-48-trigger",
+      "name": "更多",
+      "text": "更多",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 483.40625,
+        "y": 778.2000122070312,
+        "width": 67.5999984741211,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1c",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "deepseek-v4-flash-vision-exp · low · 正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 784.4750366210938,
+        "y": 778.2000122070312,
+        "width": 321.9250183105469,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1d",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::1/button:发送:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "发送",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1112.4000244140625,
+        "y": 767.2000122070312,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1e",
+      "fingerprint": "body::0/div::1/div:toast-region-cl-44:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "id": "toast-region-cl-44",
+      "role": "region",
+      "name": "Notifications (alt+T)",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 864,
+        "y": 783.2000122070312,
+        "width": 400,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1f",
+      "fingerprint": "body::0/div::1/div:toast-region-cl-44:0/ol::0",
+      "parentRef": "r1",
+      "tag": "ol",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 864,
+        "y": 783.2000122070312,
+        "width": 400,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1g",
+      "fingerprint": "body::0/div::2/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "添加到对话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1h",
+      "fingerprint": "body::0/div::2/div::0/button::1",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "在侧边对话中询问",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r23",
+      "fingerprint": "body::0/div::4/div::0/div:popover-cl-209-content:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "id": "popover-cl-209-content",
+      "role": "dialog",
+      "text": "选择模型 OpenCode Go deepseek-v4-flash-vision-exp hy3 mimo-v2.5 ox-alpha-free MiniMax Token Plan (minimaxi.com) MiniMax-M2.7-highspeed MiniMax-M3 grok gpt-5.4 grok-4.5 low 正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 784,
+        "y": 454,
+        "width": 288,
+        "height": 320
+      }
+    },
+    {
+      "ref": "r24",
+      "fingerprint": "div::0/div::0/div::0/div:textfield-cl-258:1/div::0/input:textfield-cl-258-input:0",
+      "parentRef": "r1",
+      "tag": "input",
+      "id": "textfield-cl-258-input",
+      "name": "textfield-cl-258",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 832.7999877929688,
+        "y": 474.3000183105469,
+        "width": 158.40000915527344,
+        "height": 21
+      }
+    },
+    {
+      "ref": "r25",
+      "fingerprint": "div:popover-cl-209-content:0/div::0/div::0/div::1/div::0/button:连接提供商:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "连接提供商",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1007.2000122070312,
+        "y": 472.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r26",
+      "fingerprint": "div:popover-cl-209-content:0/div::0/div::0/div::1/div::1/button:管理模型:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "管理模型",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1035.2000732421875,
+        "y": 472.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r27",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "deepseek-v4-flash-vision-exp",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 555.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r28",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "hy3",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 588.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r29",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::2/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "mimo-v2.5",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 621.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2a",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::3/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "ox-alpha-free",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 654.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2b",
+      "fingerprint": "div::0/div::1/div::1/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "MiniMax-M2.7-highspeed",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 736.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2c",
+      "fingerprint": "div::0/div::1/div::1/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "MiniMax-M3",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 769.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2d",
+      "fingerprint": "div::0/div::1/div::2/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "gpt-5.4",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 851.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2e",
+      "fingerprint": "div::0/div::1/div::2/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "grok-4.5",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 884.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2f",
+      "fingerprint": "div::4/div::0/div:popover-cl-209-content:0/div::1/div:select-cl-280:0/button:select-cl-280-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "select-cl-280-trigger",
+      "text": "low",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 737.2000122070312,
+        "width": 59.59375,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r2g",
+      "fingerprint": "div::4/div::0/div:popover-cl-209-content:0/div::1/div:select-cl-282:1/button:select-cl-282-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "select-cl-282-trigger",
+      "text": "正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 862.3937377929688,
+        "y": 737.2000122070312,
+        "width": 63.60000228881836,
+        "height": 28
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "ref": "r1",
+      "fingerprint": "body::0",
+      "tag": "body",
+      "text": "搜索 闲聊 Ctrl+K Memory 新对话 已安排 插件 闲聊 问候 解压压缩包的安全步骤 压缩包解压与安全处理步骤 解压压缩包的安全处理步骤 解压ZIP并处理嵌套目录 解压目录的规则说明 酒馆 pre-experience-lab 构建任何东西 C:/算法/小应用/闲聊 主分支 最后修改 0秒钟前 随便问点什么... \"哪些依赖已经过期？\" Shell Build 更多 deepseek-v4-flash-vision-exp · low · 正常 选择模型 OpenCode Go deepseek-v4-flash-vision-exp hy3 mimo-v2.5 ox-alpha-free MiniMax Token Plan (minimaxi.com) MiniMax-M2.7-highspeed MiniMax-M3 grok gpt-5.4 grok-4.5 low 正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1296,
+        "height": 831.2000122070312
+      }
+    },
+    {
+      "ref": "r2",
+      "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换菜单",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r3",
+      "fingerprint": "div::0/header::0/div::0/div::1/div::0/button:切换侧边栏:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换侧边栏",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 16,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r4",
+      "fingerprint": "div::1/div::1/div::0/div::0/div::0/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r5",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::0/button:返回:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "返回",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52,
+        "y": 8,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r6",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::1/button:前进:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "前进",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 76,
+        "y": 8,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r7",
+      "fingerprint": "div::0/header::0/div::1/div:lfcode-titlebar-center:0/div::0/button:搜索文件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "搜索文件",
+      "text": "搜索 闲聊 Ctrl+K",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 480.3937683105469,
+        "y": 8,
+        "width": 240,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r8",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:在 文件资源管理器 中打开:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "在 文件资源管理器 中打开",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 798.6625366210938,
+        "y": 8.800000190734863,
+        "width": 24,
+        "height": 22.399999618530273
+      }
+    },
+    {
+      "ref": "r9",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:dropdownmenu-cl-51-trigger:1",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-51-trigger",
+      "name": "打开选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 822.6625366210938,
+        "y": 8.800000190734863,
+        "width": 20,
+        "height": 22.399999618530273
+      }
+    },
+    {
+      "ref": "ra",
+      "fingerprint": "div::2/div:lfcode-titlebar-right:0/div::0/div::0/div::1/button:Memory maintenance:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "Memory maintenance",
+      "text": "Memory",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 851.4625244140625,
+        "y": 8,
+        "width": 104.5374984741211,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rb",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::0/button:状态:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "状态",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 960,
+        "y": 8,
+        "width": 32,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rc",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::1/button:切换终端:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换终端",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 996,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rd",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::0/button:打开浏览器:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开浏览器",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1036,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "re",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::1/button:切换审查:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换审查",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1076,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rf",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::2/button:切换文件树:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换文件树",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1116,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rg",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:新对话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新对话",
+      "text": "新对话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 52,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rh",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::1/button:已安排:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "已安排",
+      "text": "已安排",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 96,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "ri",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::2/button:插件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "插件",
+      "text": "插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 140,
+        "width": 220,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rj",
+      "fingerprint": "div::0/div::1/div::0/div::0/div:contextmenu-cl-157-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 188,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "rk",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-157-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 190,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "rl",
+      "fingerprint": "div::0/div:contextmenu-cl-157-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-159-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-159-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 190,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "rm",
+      "fingerprint": "div:contextmenu-cl-161-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "问候",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 224,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rn",
+      "fingerprint": "div:contextmenu-cl-161-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-164-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-164-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 226.60000610351562,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ro",
+      "fingerprint": "div:contextmenu-cl-167-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压压缩包的安全步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 255.1999969482422,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rp",
+      "fingerprint": "div:contextmenu-cl-167-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-170-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-170-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 257.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rq",
+      "fingerprint": "div:contextmenu-cl-173-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "压缩包解压与安全处理步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 286.3999938964844,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rr",
+      "fingerprint": "div:contextmenu-cl-173-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-176-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-176-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 289,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rs",
+      "fingerprint": "div:contextmenu-cl-179-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压压缩包的安全处理步骤",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 317.6000061035156,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rt",
+      "fingerprint": "div:contextmenu-cl-179-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-182-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-182-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 320.20001220703125,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ru",
+      "fingerprint": "div:contextmenu-cl-185-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压ZIP并处理嵌套目录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 348.8000183105469,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rv",
+      "fingerprint": "div:contextmenu-cl-185-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-188-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-188-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 351.3999938964844,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "rw",
+      "fingerprint": "div:contextmenu-cl-191-trigger:5/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压目录的规则说明",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 60,
+        "y": 380,
+        "width": 156,
+        "height": 29.200000762939453
+      }
+    },
+    {
+      "ref": "rx",
+      "fingerprint": "div:contextmenu-cl-191-trigger:5/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-194-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-194-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220,
+        "y": 382.6000061035156,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "ry",
+      "fingerprint": "div::0/div::1/div::0/div::1/div:contextmenu-cl-197-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "酒馆",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 425.20001220703125,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "rz",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-197-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 427.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r10",
+      "fingerprint": "div::1/div:contextmenu-cl-197-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-199-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-199-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 427.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r11",
+      "fingerprint": "div::0/div::1/div::0/div::2/div:contextmenu-cl-201-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "pre-experience-lab",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 473.20001220703125,
+        "width": 220,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r12",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-201-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 162,
+        "y": 475.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r13",
+      "fingerprint": "div::2/div:contextmenu-cl-201-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-203-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-203-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 192,
+        "y": 475.20001220703125,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r14",
+      "fingerprint": "div::0/div::0/div::2/div::0/div::0/button:打开项目:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开项目",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r15",
+      "fingerprint": "div::0/div::0/div::0/div::2/div::1/button:查看用量:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "查看用量",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 120,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r16",
+      "fingerprint": "div::0/div::0/div::2/div::1/div::0/button:设置:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "设置",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 160,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r17",
+      "fingerprint": "div::0/div::0/div::2/div::1/div::1/button:帮助:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "帮助",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 200,
+        "y": 787.2000122070312,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r2i",
+      "fingerprint": "div::0/div::0/form::0/div::0/div::0/div:随便问点什么... \"哪些依赖已经过期？\":0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "textbox",
+      "name": "随便问点什么... \"哪些依赖已经过期？\"",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 390.3999938964844,
+        "y": 712,
+        "width": 760,
+        "height": 57.20000076293945
+      }
+    },
+    {
+      "ref": "r19",
+      "fingerprint": "div::0/div::0/form::0/div::0/div::2/input::0",
+      "parentRef": "r1",
+      "tag": "input",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1a",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button:dropdownmenu-cl-206-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-206-trigger",
+      "text": "Build",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 400.3999938964844,
+        "y": 778.2000122070312,
+        "width": 77.0062484741211,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1b",
+      "fingerprint": "div::0/div::0/div::0/div::1/div::1/button:dropdownmenu-cl-48-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-48-trigger",
+      "name": "更多",
+      "text": "更多",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 483.40625,
+        "y": 778.2000122070312,
+        "width": 67.5999984741211,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1c",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "deepseek-v4-flash-vision-exp · low · 正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 784.4750366210938,
+        "y": 778.2000122070312,
+        "width": 321.9250183105469,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1d",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::1/button:发送:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "发送",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1112.4000244140625,
+        "y": 767.2000122070312,
+        "width": 28,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r1e",
+      "fingerprint": "body::0/div::1/div:toast-region-cl-44:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "id": "toast-region-cl-44",
+      "role": "region",
+      "name": "Notifications (alt+T)",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 864,
+        "y": 783.2000122070312,
+        "width": 400,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1f",
+      "fingerprint": "body::0/div::1/div:toast-region-cl-44:0/ol::0",
+      "parentRef": "r1",
+      "tag": "ol",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 864,
+        "y": 783.2000122070312,
+        "width": 400,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1g",
+      "fingerprint": "body::0/div::2/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "添加到对话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1h",
+      "fingerprint": "body::0/div::2/div::0/button::1",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "在侧边对话中询问",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r23",
+      "fingerprint": "body::0/div::4/div::0/div:popover-cl-209-content:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "id": "popover-cl-209-content",
+      "role": "dialog",
+      "text": "选择模型 OpenCode Go deepseek-v4-flash-vision-exp hy3 mimo-v2.5 ox-alpha-free MiniMax Token Plan (minimaxi.com) MiniMax-M2.7-highspeed MiniMax-M3 grok gpt-5.4 grok-4.5 low 正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 784,
+        "y": 454,
+        "width": 288,
+        "height": 320
+      }
+    },
+    {
+      "ref": "r24",
+      "fingerprint": "div::0/div::0/div::0/div:textfield-cl-258:1/div::0/input:textfield-cl-258-input:0",
+      "parentRef": "r1",
+      "tag": "input",
+      "id": "textfield-cl-258-input",
+      "name": "textfield-cl-258",
+      "value": "",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": true,
+      "visible": true,
+      "rect": {
+        "x": 832.7999877929688,
+        "y": 474.3000183105469,
+        "width": 158.40000915527344,
+        "height": 21
+      }
+    },
+    {
+      "ref": "r25",
+      "fingerprint": "div:popover-cl-209-content:0/div::0/div::0/div::1/div::0/button:连接提供商:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "连接提供商",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1007.2000122070312,
+        "y": 472.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r26",
+      "fingerprint": "div:popover-cl-209-content:0/div::0/div::0/div::1/div::1/button:管理模型:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "管理模型",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1035.2000732421875,
+        "y": 472.8000183105469,
+        "width": 24,
+        "height": 24
+      }
+    },
+    {
+      "ref": "r27",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "deepseek-v4-flash-vision-exp",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 555.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r28",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "hy3",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 588.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r29",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::2/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "mimo-v2.5",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 621.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2a",
+      "fingerprint": "div::0/div::1/div::0/div::1/div::3/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "ox-alpha-free",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 654.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2b",
+      "fingerprint": "div::0/div::1/div::1/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "MiniMax-M2.7-highspeed",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 736.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2c",
+      "fingerprint": "div::0/div::1/div::1/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "MiniMax-M3",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 769.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2d",
+      "fingerprint": "div::0/div::1/div::2/div::1/div::0/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "gpt-5.4",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 851.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2e",
+      "fingerprint": "div::0/div::1/div::2/div::1/div::1/button::0",
+      "parentRef": "r1",
+      "tag": "button",
+      "text": "grok-4.5",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 884.7999877929688,
+        "width": 262.3999938964844,
+        "height": 33
+      }
+    },
+    {
+      "ref": "r2f",
+      "fingerprint": "div::4/div::0/div:popover-cl-209-content:0/div::1/div:select-cl-280:0/button:select-cl-280-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "select-cl-280-trigger",
+      "text": "low",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 796.7999877929688,
+        "y": 737.2000122070312,
+        "width": 59.59375,
+        "height": 28
+      }
+    },
+    {
+      "ref": "r2g",
+      "fingerprint": "div::4/div::0/div:popover-cl-209-content:0/div::1/div:select-cl-282:1/button:select-cl-282-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "select-cl-282-trigger",
+      "text": "正常",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 862.3937377929688,
+        "y": 737.2000122070312,
+        "width": 63.60000228881836,
+        "height": 28
+      }
+    }
+  ],
+  "windowID": 1,
+  "window": {
+    "id": 1,
+    "title": "Lfcode",
+    "url": "oc://renderer/index.html#/Qzov566X5rOVL-Wwj-W6lOeUqC_pl7LogYo/session",
+    "focused": true,
+    "visible": true,
+    "minimized": false,
+    "destroyed": false,
+    "detached": false,
+    "bounds": {
+      "x": 134,
+      "y": 29,
+      "width": 1292,
+      "height": 830
+    }
+  }
+}

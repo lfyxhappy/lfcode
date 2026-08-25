@@ -169,7 +169,7 @@ export function CodeEditorCommandStrip(props: {
   const toolbarButtonClass = () => (props.compact ? "size-7 min-w-7 rounded-lg p-0" : "size-8 min-w-8 rounded-lg p-0")
   const hiddenPopoverTriggerClass = "pointer-events-none absolute right-0 top-0 h-px w-px overflow-hidden opacity-0"
   const menuContentClass =
-    "min-w-[280px] max-h-[min(78vh,720px)] overflow-auto rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl"
+    "min-w-[280px] max-h-[min(78vh,720px)] overflow-auto rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md"
   const menuItemClass = "rounded-lg"
   const menuSectionLabelClass = "px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-[0.08em] text-text-weak first:pt-0"
   const menuRowClass = "flex items-center gap-2.5"
@@ -625,7 +625,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[420px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[420px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -651,7 +651,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[380px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[380px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -697,7 +697,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -729,7 +729,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -761,7 +761,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -793,7 +793,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -825,7 +825,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -857,7 +857,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -889,7 +889,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -921,7 +921,7 @@ export function CodeEditorCommandStrip(props: {
               class: hiddenPopoverTriggerClass,
             }}
             trigger={<span />}
-            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-xl border border-border-weak-base bg-background-panel shadow-2xl"
+            class="[&_[data-slot=popover-body]]:p-1.5 w-[360px] max-w-[calc(100vw-40px)] rounded-lg border border-border-weak-base bg-background-panel shadow-md"
             placement="bottom-end"
             gutter={6}
           >
@@ -976,7 +976,7 @@ export function CodeEditorCommandStrip(props: {
               <Icon name="magnifying-glass" class={toolbarIconClass()} />
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content class="min-w-[240px] rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl">
+              <DropdownMenu.Content class="min-w-[240px] rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md">
                 {renderMenuSection(searchSection())}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1047,7 +1047,7 @@ export function CodeEditorCommandStrip(props: {
               <span />
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content class="min-w-[260px] max-w-[360px] max-h-[320px] overflow-auto rounded-xl border border-border-weak-base bg-background-panel p-1.5 shadow-2xl">
+              <DropdownMenu.Content class="min-w-[260px] max-w-[360px] max-h-[320px] overflow-auto rounded-lg border border-border-weak-base bg-background-panel p-1.5 shadow-md">
                 <Show
                   when={!outlineLoading()}
                   fallback={<div class="px-3 py-2 text-12-regular text-text-weak">{label().outlineLoading}</div>}

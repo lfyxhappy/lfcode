@@ -282,9 +282,9 @@ export const ExportCommand = cmd({
 
       try {
         const sessionInfo = await AppRuntime.runPromise(Session.Service.use((svc) => svc.get(sessionID!)))
-        const messages = await AppRuntime.runPromise(
+        const messages = (await AppRuntime.runPromise(
           Session.Service.use((svc) => svc.messages({ sessionID: sessionInfo.id, agentID: "*" })),
-        )
+        )).filter((message) => MessageV2.isUserVisible(message.info))
 
         const exportData = {
           info: sessionInfo,

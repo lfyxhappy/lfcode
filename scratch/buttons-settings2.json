@@ -1,0 +1,64 @@
+{
+  "snapshotID": "s13ljq5d7jrgy1-8",
+  "revision": 44,
+  "region": "button",
+  "offset": 0,
+  "limit": 300,
+  "total": 0,
+  "root": {
+    "ref": "r2",
+    "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+    "tag": "button",
+    "name": "切换菜单",
+    "disabled": false,
+    "checked": false,
+    "expanded": false,
+    "selected": false,
+    "editable": false,
+    "visible": false,
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0
+    }
+  },
+  "children": [],
+  "nodes": [
+    {
+      "ref": "r2",
+      "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+      "tag": "button",
+      "name": "切换菜单",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    }
+  ],
+  "windowID": 1,
+  "window": {
+    "id": 1,
+    "title": "Lfcode",
+    "url": "oc://renderer/index.html#/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session",
+    "focused": true,
+    "visible": true,
+    "minimized": false,
+    "destroyed": false,
+    "detached": false,
+    "bounds": {
+      "x": 68,
+      "y": 50,
+      "width": 1280,
+      "height": 808
+    }
+  }
+}

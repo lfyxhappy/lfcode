@@ -1,4 +1,4 @@
-Compile or run a single C++ source file with the preferred local compiler.
+Compile or run a single C++ source file with the preferred local compiler as a durable background job.
 
 Use this when:
 - you need to build or execute one `.cpp` / `.cc` / `.cxx` / `.c++` file
@@ -10,3 +10,4 @@ Notes:
 - `mode="run"` compiles first, then executes the produced binary.
 - Use `args` for runtime CLI arguments and `compilerArgs` for extra compiler flags.
 - The default standard is `c++20`.
+- `timeout` is an optional reminder threshold and never terminates compilation or execution. Completion is reported automatically; use `shell_process` only to inspect or wait. Cancel only after the user explicitly requests it.

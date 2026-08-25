@@ -1,0 +1,3968 @@
+{
+  "snapshotID": "sr9mjlm1d6zjs7-1",
+  "revision": 0,
+  "region": "body",
+  "offset": 0,
+  "limit": 100,
+  "total": 310,
+  "nextOffset": 100,
+  "root": {
+    "ref": "r1",
+    "fingerprint": "body::0",
+    "tag": "body",
+    "text": "搜索 闲聊 Ctrl+K Memory ImageMaker 闲聊 解压图册文件夹 解压A2-2-KRS_No.001文件夹 你好 解压 Hegre 2026 合集文件夹 你好 浏览器应用 看一下这个项目的现状 项目查看 浏览器插件 查看项目结构 浏览器备忘录 项目查看 酒馆 No chats 解包 碧蓝航线解包进度查看 电脑可用APK解包工具列表 帮助寻找在线资源 知识库 查看Java学习项目现有内容 构建任何东西 C:/算法/小应用/闲聊 主分支（codex/winui-settings-and-send-polish） 最后修改 21秒钟前 随便问点什么... \"为这个接口实现缓存\" Shell Build 更多 MiniMax-M3 · high · 正常 Review Ctrl+Shift+R Terminal Browser Ctrl+Shift+B Files Ctrl+K Side chat Ctrl+Alt+S 0 更改 所有文件 __pycache__ _tmp_video .codegraph .codex .gradle .kotlin .lfcode .playwright-mcp .tmp 良风のai助手 通用模板 网页端api生图 相册 app baidupan-cli CodexInputHelper cos_covers edge-video-downloader exports games gradle migration_bundle_test mimo-codex-bridge notion-mcp-codex-video output personal-blog ppt_microbial_biomimicry qq-napcat-mcp-plugin rawchat-web rawchat-windows scratch test tests tiny-app xianyu-auto-reply 阿什莉·辛克莱_中文角色卡.json 阿什莉·辛克莱_中文角色卡.png AGENTS.md browser-screenshot.png build.gradle.kts build.log cos_次元_目录.html cos_次元_目录.md cos_次元_all.json cos_local.json cos_p1_par",
+    "disabled": false,
+    "checked": false,
+    "expanded": false,
+    "selected": false,
+    "editable": false,
+    "visible": true,
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 1463.4285888671875,
+      "height": 867.4285888671875
+    }
+  },
+  "children": [
+    {
+      "ref": "r2",
+      "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换菜单",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r3",
+      "fingerprint": "div::0/header::0/div::0/div::1/div::0/button:切换侧边栏:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换侧边栏",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 16,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r4",
+      "fingerprint": "div::1/div::1/div::0/div::0/div::0/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52.000003814697266,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r5",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::0/button:返回:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "返回",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52.000003814697266,
+        "y": 8,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r6",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::1/button:前进:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "前进",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 76,
+        "y": 8,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r7",
+      "fingerprint": "div::0/header::0/div::1/div:lfcode-titlebar-center:0/div::0/button:搜索文件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "搜索文件",
+      "text": "搜索 闲聊 Ctrl+K",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 606.6517944335938,
+        "y": 8,
+        "width": 240.00001525878906,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r8",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:在 文件资源管理器 中打开:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "在 文件资源管理器 中打开",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 966.77685546875,
+        "y": 8.571429252624512,
+        "width": 24.000001907348633,
+        "height": 22.85714340209961
+      }
+    },
+    {
+      "ref": "r9",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:dropdownmenu-cl-600-trigger:1",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-600-trigger",
+      "name": "打开选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 990.77685546875,
+        "y": 8.571429252624512,
+        "width": 20,
+        "height": 22.85714340209961
+      }
+    },
+    {
+      "ref": "ra",
+      "fingerprint": "div::2/div:lfcode-titlebar-right:0/div::0/div::0/div::1/button:Memory maintenance:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "Memory maintenance",
+      "text": "Memory",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1019.3482666015625,
+        "y": 8,
+        "width": 104.08036041259766,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rb",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::0/button:状态:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "状态",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1127.4285888671875,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rc",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::1/button:切换终端:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换终端",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1163.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rd",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::0/button:打开浏览器:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开浏览器",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1203.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "re",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::1/button:切换审查:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换审查",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1243.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rf",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::2/button:切换文件树:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换文件树",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1283.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rg",
+      "fingerprint": "div::0/div::0/div::0/div::0/div:contextmenu-cl-3339-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "ImageMaker",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 52.000003814697266,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rh",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-3339-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 58.000003814697266,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "ri",
+      "fingerprint": "div::0/div:contextmenu-cl-3339-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3341-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3341-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 58.000003814697266,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rj",
+      "fingerprint": "div::0/div::0/div::0/div::1/div:contextmenu-cl-3343-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 108.00000762939453,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rk",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-3343-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 114.00000762939453,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rl",
+      "fingerprint": "div::1/div:contextmenu-cl-3343-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3345-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3345-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 114.00000762939453,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rm",
+      "fingerprint": "div:contextmenu-cl-3347-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压图册文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 152,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rn",
+      "fingerprint": "div:contextmenu-cl-3347-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3350-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3350-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 154.5982208251953,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "ro",
+      "fingerprint": "div:contextmenu-cl-3353-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压A2-2-KRS_No.001文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 183.19644165039062,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rp",
+      "fingerprint": "div:contextmenu-cl-3353-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3356-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3356-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 185.79464721679688,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rq",
+      "fingerprint": "div:contextmenu-cl-3359-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 214.3928680419922,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rr",
+      "fingerprint": "div:contextmenu-cl-3359-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3362-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3362-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 216.99107360839844,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rs",
+      "fingerprint": "div:contextmenu-cl-3365-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压 Hegre 2026 合集文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 245.58929443359375,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rt",
+      "fingerprint": "div:contextmenu-cl-3365-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3368-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3368-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 248.18751525878906,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "ru",
+      "fingerprint": "div:contextmenu-cl-3371-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 276.7857360839844,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rv",
+      "fingerprint": "div:contextmenu-cl-3371-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3374-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3374-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 279.3839416503906,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rw",
+      "fingerprint": "div::0/div::0/div::0/div::2/div:contextmenu-cl-3377-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器应用",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 321.9821472167969,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rx",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-3377-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 327.9821472167969,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "ry",
+      "fingerprint": "div::2/div:contextmenu-cl-3377-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3379-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3379-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 327.9821472167969,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rz",
+      "fingerprint": "div:contextmenu-cl-3381-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "看一下这个项目的现状",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 365.9821472167969,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r10",
+      "fingerprint": "div:contextmenu-cl-3381-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3384-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3384-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 368.58038330078125,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r11",
+      "fingerprint": "div:contextmenu-cl-3387-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 397.1785888671875,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r12",
+      "fingerprint": "div:contextmenu-cl-3387-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3390-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3390-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 399.77679443359375,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r13",
+      "fingerprint": "div::0/div::0/div::0/div::3/div:contextmenu-cl-3393-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 442.3750305175781,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r14",
+      "fingerprint": "div::0/div::3/div:contextmenu-cl-3393-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 448.3750305175781,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r15",
+      "fingerprint": "div::3/div:contextmenu-cl-3393-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3395-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3395-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 448.3750305175781,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r16",
+      "fingerprint": "div:contextmenu-cl-3397-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看项目结构",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 486.3750305175781,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r17",
+      "fingerprint": "div:contextmenu-cl-3397-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3400-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3400-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 488.9732360839844,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r18",
+      "fingerprint": "div::0/div::0/div::0/div::4/div:contextmenu-cl-3403-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器备忘录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 531.5714721679688,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r19",
+      "fingerprint": "div::0/div::4/div:contextmenu-cl-3403-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 537.5714721679688,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1a",
+      "fingerprint": "div::4/div:contextmenu-cl-3403-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3405-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3405-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 537.5714721679688,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1b",
+      "fingerprint": "div:contextmenu-cl-3407-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 575.5714721679688,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1c",
+      "fingerprint": "div:contextmenu-cl-3407-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3410-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3410-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 578.169677734375,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1d",
+      "fingerprint": "div::0/div::0/div::0/div::5/div:contextmenu-cl-3413-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "酒馆",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 620.7678833007812,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1e",
+      "fingerprint": "div::0/div::5/div:contextmenu-cl-3413-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 626.7678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1f",
+      "fingerprint": "div::5/div:contextmenu-cl-3413-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3415-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3415-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 626.7678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1g",
+      "fingerprint": "div::0/div::0/div::0/div::6/div:contextmenu-cl-3417-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "解包",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 712.2678833007812,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1h",
+      "fingerprint": "div::0/div::6/div:contextmenu-cl-3417-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 718.2678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1i",
+      "fingerprint": "div::6/div:contextmenu-cl-3417-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3419-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3419-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 718.2678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1j",
+      "fingerprint": "div:contextmenu-cl-3421-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "碧蓝航线解包进度查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 756.2678833007812,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1k",
+      "fingerprint": "div:contextmenu-cl-3421-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3424-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3424-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 758.8660888671875,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1l",
+      "fingerprint": "div:contextmenu-cl-3427-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "电脑可用APK解包工具列表",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 787.4642944335938,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1m",
+      "fingerprint": "div:contextmenu-cl-3427-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3430-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3430-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 790.0625610351562,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1n",
+      "fingerprint": "div:contextmenu-cl-3433-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "帮助寻找在线资源",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 818.6607666015625,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1o",
+      "fingerprint": "div:contextmenu-cl-3433-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3436-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3436-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 821.2589721679688,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1p",
+      "fingerprint": "div::0/div::0/div::0/div::7/div:contextmenu-cl-3439-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "知识库",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 863.857177734375,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1q",
+      "fingerprint": "div::0/div::7/div:contextmenu-cl-3439-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 869.857177734375,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1r",
+      "fingerprint": "div::7/div:contextmenu-cl-3439-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3441-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3441-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 869.857177734375,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1s",
+      "fingerprint": "div:contextmenu-cl-3443-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看Java学习项目现有内容",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 907.857177734375,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1t",
+      "fingerprint": "div:contextmenu-cl-3443-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3446-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3446-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 910.4553833007812,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1u",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button:打开项目:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开项目",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1v",
+      "fingerprint": "div::0/div::0/div::1/div::1/div::0/button:设置:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "设置",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 160,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1w",
+      "fingerprint": "div::0/div::0/div::1/div::1/div::1/button:帮助:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "帮助",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 200.00001525878906,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1x",
+      "fingerprint": "div::0/div::0/div::0/div::0/div:contextmenu-cl-3449-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "ImageMaker",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1y",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-3449-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1z",
+      "fingerprint": "div::0/div:contextmenu-cl-3449-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3451-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3451-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r20",
+      "fingerprint": "div::0/div::0/div::0/div::1/div:contextmenu-cl-3453-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r21",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-3453-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r22",
+      "fingerprint": "div::1/div:contextmenu-cl-3453-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3455-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3455-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r23",
+      "fingerprint": "div:contextmenu-cl-3457-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压图册文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r24",
+      "fingerprint": "div:contextmenu-cl-3457-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3460-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3460-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r25",
+      "fingerprint": "div:contextmenu-cl-3463-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压A2-2-KRS_No.001文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r26",
+      "fingerprint": "div:contextmenu-cl-3463-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3466-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3466-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r27",
+      "fingerprint": "div:contextmenu-cl-3469-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r28",
+      "fingerprint": "div:contextmenu-cl-3469-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3472-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3472-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r29",
+      "fingerprint": "div:contextmenu-cl-3475-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压 Hegre 2026 合集文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2a",
+      "fingerprint": "div:contextmenu-cl-3475-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3478-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3478-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2b",
+      "fingerprint": "div:contextmenu-cl-3481-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2c",
+      "fingerprint": "div:contextmenu-cl-3481-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3484-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3484-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2d",
+      "fingerprint": "div::0/div::0/div::0/div::2/div:contextmenu-cl-3487-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器应用",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2e",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-3487-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2f",
+      "fingerprint": "div::2/div:contextmenu-cl-3487-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3489-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3489-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2g",
+      "fingerprint": "div:contextmenu-cl-3491-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "看一下这个项目的现状",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2h",
+      "fingerprint": "div:contextmenu-cl-3491-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3494-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3494-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2i",
+      "fingerprint": "div:contextmenu-cl-3497-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2j",
+      "fingerprint": "div:contextmenu-cl-3497-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3500-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3500-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2k",
+      "fingerprint": "div::0/div::0/div::0/div::3/div:contextmenu-cl-3503-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2l",
+      "fingerprint": "div::0/div::3/div:contextmenu-cl-3503-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2m",
+      "fingerprint": "div::3/div:contextmenu-cl-3503-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3505-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3505-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2n",
+      "fingerprint": "div:contextmenu-cl-3507-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看项目结构",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2o",
+      "fingerprint": "div:contextmenu-cl-3507-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3510-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3510-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2p",
+      "fingerprint": "div::0/div::0/div::0/div::4/div:contextmenu-cl-3513-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器备忘录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2q",
+      "fingerprint": "div::0/div::4/div:contextmenu-cl-3513-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2r",
+      "fingerprint": "div::4/div:contextmenu-cl-3513-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3515-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3515-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2s",
+      "fingerprint": "div:contextmenu-cl-3517-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2t",
+      "fingerprint": "div:contextmenu-cl-3517-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3520-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3520-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "ref": "r1",
+      "fingerprint": "body::0",
+      "tag": "body",
+      "text": "搜索 闲聊 Ctrl+K Memory ImageMaker 闲聊 解压图册文件夹 解压A2-2-KRS_No.001文件夹 你好 解压 Hegre 2026 合集文件夹 你好 浏览器应用 看一下这个项目的现状 项目查看 浏览器插件 查看项目结构 浏览器备忘录 项目查看 酒馆 No chats 解包 碧蓝航线解包进度查看 电脑可用APK解包工具列表 帮助寻找在线资源 知识库 查看Java学习项目现有内容 构建任何东西 C:/算法/小应用/闲聊 主分支（codex/winui-settings-and-send-polish） 最后修改 21秒钟前 随便问点什么... \"为这个接口实现缓存\" Shell Build 更多 MiniMax-M3 · high · 正常 Review Ctrl+Shift+R Terminal Browser Ctrl+Shift+B Files Ctrl+K Side chat Ctrl+Alt+S 0 更改 所有文件 __pycache__ _tmp_video .codegraph .codex .gradle .kotlin .lfcode .playwright-mcp .tmp 良风のai助手 通用模板 网页端api生图 相册 app baidupan-cli CodexInputHelper cos_covers edge-video-downloader exports games gradle migration_bundle_test mimo-codex-bridge notion-mcp-codex-video output personal-blog ppt_microbial_biomimicry qq-napcat-mcp-plugin rawchat-web rawchat-windows scratch test tests tiny-app xianyu-auto-reply 阿什莉·辛克莱_中文角色卡.json 阿什莉·辛克莱_中文角色卡.png AGENTS.md browser-screenshot.png build.gradle.kts build.log cos_次元_目录.html cos_次元_目录.md cos_次元_all.json cos_local.json cos_p1_par",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 1463.4285888671875,
+        "height": 867.4285888671875
+      }
+    },
+    {
+      "ref": "r2",
+      "fingerprint": "div:root:0/div::0/header::0/div::0/div::0/button:切换菜单:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换菜单",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r3",
+      "fingerprint": "div::0/header::0/div::0/div::1/div::0/button:切换侧边栏:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换侧边栏",
+      "disabled": false,
+      "checked": false,
+      "expanded": true,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 16,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r4",
+      "fingerprint": "div::1/div::1/div::0/div::0/div::0/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52.000003814697266,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r5",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::0/button:返回:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "返回",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 52.000003814697266,
+        "y": 8,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r6",
+      "fingerprint": "div::1/div::1/div::1/div::0/div::1/button:前进:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "前进",
+      "disabled": true,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 76,
+        "y": 8,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r7",
+      "fingerprint": "div::0/header::0/div::1/div:lfcode-titlebar-center:0/div::0/button:搜索文件:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "搜索文件",
+      "text": "搜索 闲聊 Ctrl+K",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 606.6517944335938,
+        "y": 8,
+        "width": 240.00001525878906,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r8",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:在 文件资源管理器 中打开:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "在 文件资源管理器 中打开",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 966.77685546875,
+        "y": 8.571429252624512,
+        "width": 24.000001907348633,
+        "height": 22.85714340209961
+      }
+    },
+    {
+      "ref": "r9",
+      "fingerprint": "div::0/div::0/div::0/div::0/div::0/button:dropdownmenu-cl-600-trigger:1",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-600-trigger",
+      "name": "打开选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 990.77685546875,
+        "y": 8.571429252624512,
+        "width": 20,
+        "height": 22.85714340209961
+      }
+    },
+    {
+      "ref": "ra",
+      "fingerprint": "div::2/div:lfcode-titlebar-right:0/div::0/div::0/div::1/button:Memory maintenance:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "Memory maintenance",
+      "text": "Memory",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1019.3482666015625,
+        "y": 8,
+        "width": 104.08036041259766,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rb",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::0/button:状态:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "状态",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1127.4285888671875,
+        "y": 8,
+        "width": 32,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rc",
+      "fingerprint": "div:lfcode-titlebar-right:0/div::0/div::0/div::1/div::1/button:切换终端:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换终端",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1163.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rd",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::0/button:打开浏览器:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开浏览器",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1203.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "re",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::1/button:切换审查:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换审查",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1243.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rf",
+      "fingerprint": "div::0/div::0/div::1/div::2/div::2/button:切换文件树:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "切换文件树",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 1283.4285888671875,
+        "y": 2,
+        "width": 36,
+        "height": 36
+      }
+    },
+    {
+      "ref": "rg",
+      "fingerprint": "div::0/div::0/div::0/div::0/div:contextmenu-cl-3339-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "ImageMaker",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 52.000003814697266,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rh",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-3339-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 58.000003814697266,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "ri",
+      "fingerprint": "div::0/div:contextmenu-cl-3339-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3341-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3341-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 58.000003814697266,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rj",
+      "fingerprint": "div::0/div::0/div::0/div::1/div:contextmenu-cl-3343-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 108.00000762939453,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rk",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-3343-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 114.00000762939453,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rl",
+      "fingerprint": "div::1/div:contextmenu-cl-3343-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3345-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3345-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 114.00000762939453,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rm",
+      "fingerprint": "div:contextmenu-cl-3347-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压图册文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 152,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rn",
+      "fingerprint": "div:contextmenu-cl-3347-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3350-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3350-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 154.5982208251953,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "ro",
+      "fingerprint": "div:contextmenu-cl-3353-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压A2-2-KRS_No.001文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 183.19644165039062,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rp",
+      "fingerprint": "div:contextmenu-cl-3353-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3356-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3356-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 185.79464721679688,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rq",
+      "fingerprint": "div:contextmenu-cl-3359-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 214.3928680419922,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rr",
+      "fingerprint": "div:contextmenu-cl-3359-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3362-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3362-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 216.99107360839844,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rs",
+      "fingerprint": "div:contextmenu-cl-3365-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压 Hegre 2026 合集文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 245.58929443359375,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rt",
+      "fingerprint": "div:contextmenu-cl-3365-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3368-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3368-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 248.18751525878906,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "ru",
+      "fingerprint": "div:contextmenu-cl-3371-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 276.7857360839844,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "rv",
+      "fingerprint": "div:contextmenu-cl-3371-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3374-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3374-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 279.3839416503906,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "rw",
+      "fingerprint": "div::0/div::0/div::0/div::2/div:contextmenu-cl-3377-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器应用",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 321.9821472167969,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "rx",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-3377-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 327.9821472167969,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "ry",
+      "fingerprint": "div::2/div:contextmenu-cl-3377-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3379-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3379-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 327.9821472167969,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "rz",
+      "fingerprint": "div:contextmenu-cl-3381-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "看一下这个项目的现状",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 365.9821472167969,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r10",
+      "fingerprint": "div:contextmenu-cl-3381-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3384-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3384-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 368.58038330078125,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r11",
+      "fingerprint": "div:contextmenu-cl-3387-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 397.1785888671875,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r12",
+      "fingerprint": "div:contextmenu-cl-3387-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3390-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3390-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 399.77679443359375,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r13",
+      "fingerprint": "div::0/div::0/div::0/div::3/div:contextmenu-cl-3393-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 442.3750305175781,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r14",
+      "fingerprint": "div::0/div::3/div:contextmenu-cl-3393-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 448.3750305175781,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r15",
+      "fingerprint": "div::3/div:contextmenu-cl-3393-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3395-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3395-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 448.3750305175781,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r16",
+      "fingerprint": "div:contextmenu-cl-3397-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看项目结构",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 486.3750305175781,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r17",
+      "fingerprint": "div:contextmenu-cl-3397-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3400-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3400-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 488.9732360839844,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r18",
+      "fingerprint": "div::0/div::0/div::0/div::4/div:contextmenu-cl-3403-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器备忘录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 531.5714721679688,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r19",
+      "fingerprint": "div::0/div::4/div:contextmenu-cl-3403-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 537.5714721679688,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1a",
+      "fingerprint": "div::4/div:contextmenu-cl-3403-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3405-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3405-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 537.5714721679688,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1b",
+      "fingerprint": "div:contextmenu-cl-3407-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 575.5714721679688,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1c",
+      "fingerprint": "div:contextmenu-cl-3407-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3410-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3410-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 578.169677734375,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1d",
+      "fingerprint": "div::0/div::0/div::0/div::5/div:contextmenu-cl-3413-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "酒馆",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 620.7678833007812,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1e",
+      "fingerprint": "div::0/div::5/div:contextmenu-cl-3413-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 626.7678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1f",
+      "fingerprint": "div::5/div:contextmenu-cl-3413-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3415-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3415-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 626.7678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1g",
+      "fingerprint": "div::0/div::0/div::0/div::6/div:contextmenu-cl-3417-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "解包",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 712.2678833007812,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1h",
+      "fingerprint": "div::0/div::6/div:contextmenu-cl-3417-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 718.2678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1i",
+      "fingerprint": "div::6/div:contextmenu-cl-3417-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3419-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3419-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 718.2678833007812,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1j",
+      "fingerprint": "div:contextmenu-cl-3421-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "碧蓝航线解包进度查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 756.2678833007812,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1k",
+      "fingerprint": "div:contextmenu-cl-3421-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3424-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3424-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 758.8660888671875,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1l",
+      "fingerprint": "div:contextmenu-cl-3427-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "电脑可用APK解包工具列表",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 787.4642944335938,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1m",
+      "fingerprint": "div:contextmenu-cl-3427-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3430-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3430-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 790.0625610351562,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1n",
+      "fingerprint": "div:contextmenu-cl-3433-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "帮助寻找在线资源",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 818.6607666015625,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1o",
+      "fingerprint": "div:contextmenu-cl-3433-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3436-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3436-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 821.2589721679688,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1p",
+      "fingerprint": "div::0/div::0/div::0/div::7/div:contextmenu-cl-3439-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "知识库",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 863.857177734375,
+        "width": 220.00001525878906,
+        "height": 40
+      }
+    },
+    {
+      "ref": "r1q",
+      "fingerprint": "div::0/div::7/div:contextmenu-cl-3439-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 166,
+        "y": 869.857177734375,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1r",
+      "fingerprint": "div::7/div:contextmenu-cl-3439-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3441-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3441-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 196.00001525878906,
+        "y": 869.857177734375,
+        "width": 28.000001907348633,
+        "height": 28.000001907348633
+      }
+    },
+    {
+      "ref": "r1s",
+      "fingerprint": "div:contextmenu-cl-3443-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看Java学习项目现有内容",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 36,
+        "y": 907.857177734375,
+        "width": 180.00001525878906,
+        "height": 29.196430206298828
+      }
+    },
+    {
+      "ref": "r1t",
+      "fingerprint": "div:contextmenu-cl-3443-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3446-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3446-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 220.00001525878906,
+        "y": 910.4553833007812,
+        "width": 24.000001907348633,
+        "height": 24.000001907348633
+      }
+    },
+    {
+      "ref": "r1u",
+      "fingerprint": "div::0/div::0/div::1/div::0/div::0/button:打开项目:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "打开项目",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 12.000000953674316,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1v",
+      "fingerprint": "div::0/div::0/div::1/div::1/div::0/button:设置:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "设置",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 160,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1w",
+      "fingerprint": "div::0/div::0/div::1/div::1/div::1/button:帮助:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "帮助",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": true,
+      "rect": {
+        "x": 200.00001525878906,
+        "y": 823.4285888671875,
+        "width": 32,
+        "height": 32
+      }
+    },
+    {
+      "ref": "r1x",
+      "fingerprint": "div::0/div::0/div::0/div::0/div:contextmenu-cl-3449-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "ImageMaker",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1y",
+      "fingerprint": "div::0/div::0/div:contextmenu-cl-3449-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r1z",
+      "fingerprint": "div::0/div:contextmenu-cl-3449-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3451-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3451-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r20",
+      "fingerprint": "div::0/div::0/div::0/div::1/div:contextmenu-cl-3453-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "闲聊",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r21",
+      "fingerprint": "div::0/div::1/div:contextmenu-cl-3453-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r22",
+      "fingerprint": "div::1/div:contextmenu-cl-3453-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3455-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3455-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r23",
+      "fingerprint": "div:contextmenu-cl-3457-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压图册文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r24",
+      "fingerprint": "div:contextmenu-cl-3457-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3460-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3460-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r25",
+      "fingerprint": "div:contextmenu-cl-3463-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压A2-2-KRS_No.001文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r26",
+      "fingerprint": "div:contextmenu-cl-3463-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3466-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3466-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r27",
+      "fingerprint": "div:contextmenu-cl-3469-trigger:2/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r28",
+      "fingerprint": "div:contextmenu-cl-3469-trigger:2/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3472-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3472-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r29",
+      "fingerprint": "div:contextmenu-cl-3475-trigger:3/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "解压 Hegre 2026 合集文件夹",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2a",
+      "fingerprint": "div:contextmenu-cl-3475-trigger:3/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3478-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3478-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2b",
+      "fingerprint": "div:contextmenu-cl-3481-trigger:4/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "你好",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2c",
+      "fingerprint": "div:contextmenu-cl-3481-trigger:4/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3484-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3484-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2d",
+      "fingerprint": "div::0/div::0/div::0/div::2/div:contextmenu-cl-3487-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器应用",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2e",
+      "fingerprint": "div::0/div::2/div:contextmenu-cl-3487-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2f",
+      "fingerprint": "div::2/div:contextmenu-cl-3487-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3489-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3489-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2g",
+      "fingerprint": "div:contextmenu-cl-3491-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "看一下这个项目的现状",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2h",
+      "fingerprint": "div:contextmenu-cl-3491-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3494-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3494-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2i",
+      "fingerprint": "div:contextmenu-cl-3497-trigger:1/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2j",
+      "fingerprint": "div:contextmenu-cl-3497-trigger:1/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3500-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3500-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2k",
+      "fingerprint": "div::0/div::0/div::0/div::3/div:contextmenu-cl-3503-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器插件",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2l",
+      "fingerprint": "div::0/div::3/div:contextmenu-cl-3503-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2m",
+      "fingerprint": "div::3/div:contextmenu-cl-3503-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3505-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3505-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2n",
+      "fingerprint": "div:contextmenu-cl-3507-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "查看项目结构",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2o",
+      "fingerprint": "div:contextmenu-cl-3507-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3510-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3510-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2p",
+      "fingerprint": "div::0/div::0/div::0/div::4/div:contextmenu-cl-3513-trigger:0/div:button:0",
+      "parentRef": "r1",
+      "tag": "div",
+      "role": "button",
+      "text": "浏览器备忘录",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2q",
+      "fingerprint": "div::0/div::4/div:contextmenu-cl-3513-trigger:0/div:button:0/div::1/button:新建会话:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "name": "新建会话",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2r",
+      "fingerprint": "div::4/div:contextmenu-cl-3513-trigger:0/div:button:0/div::1/div::0/button:dropdownmenu-cl-3515-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3515-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2s",
+      "fingerprint": "div:contextmenu-cl-3517-trigger:0/div::0/div::0/div::0/div::0/a::0",
+      "parentRef": "r1",
+      "tag": "a",
+      "text": "项目查看",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "ref": "r2t",
+      "fingerprint": "div:contextmenu-cl-3517-trigger:0/div::0/div::0/div::1/div::0/button:dropdownmenu-cl-3520-trigger:0",
+      "parentRef": "r1",
+      "tag": "button",
+      "id": "dropdownmenu-cl-3520-trigger",
+      "name": "更多选项",
+      "disabled": false,
+      "checked": false,
+      "expanded": false,
+      "selected": false,
+      "editable": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0
+      }
+    }
+  ],
+  "windowID": 1,
+  "window": {
+    "id": 1,
+    "title": "Lfcode",
+    "url": "oc://renderer/index.html#/Qzpc566X5rOVXOWwj-W6lOeUqFzpl7LogYo/session",
+    "focused": true,
+    "visible": true,
+    "minimized": false,
+    "destroyed": false,
+    "detached": false,
+    "bounds": {
+      "x": 1527,
+      "y": 152,
+      "width": 1482,
+      "height": 886
+    }
+  }
+}

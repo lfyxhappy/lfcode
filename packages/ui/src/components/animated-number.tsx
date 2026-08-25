@@ -1,5 +1,6 @@
 import { For, Index, createEffect, createMemo, on } from "solid-js"
 import { createStore } from "solid-js/store"
+import { useMotionEnabled } from "./motion-presence"
 
 const TRACK = Array.from({ length: 30 }, (_, index) => index % 10)
 const DURATION = 240
@@ -22,11 +23,25 @@ function Digit(props: { value: number; direction: 1 | -1 }) {
   const step = () => state.step
   const animating = () => state.animating
   let last = props.value
+  const enabled = useMotionEnabled()
+
+  createEffect(() => {
+    if (enabled()) return
+    last = props.value
+    setState("animating", false)
+    setState("step", props.value + 10)
+  })
 
   createEffect(
     on(
       () => props.value,
       (next) => {
+        if (!enabled()) {
+          last = next
+          setState("animating", false)
+          setState("step", next + 10)
+          return
+        }
         const delta = spin(last, next, props.direction)
         last = next
         if (!delta) {
@@ -47,6 +62,7 @@ function Digit(props: { value: number; direction: 1 | -1 }) {
       <span
         data-slot="animated-number-strip"
         data-animating={animating() ? "true" : "false"}
+        data-motion={enabled() ? "enabled" : "off"}
         onTransitionEnd={() => {
           setState("animating", false)
           setState("step", (value) => normalize(value) + 10)

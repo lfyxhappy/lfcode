@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -45,21 +46,47 @@ const migrations = await Promise.all(
 )
 console.log(`Loaded ${migrations.length} migrations`)
 
-await Bun.build({
+const appDir = path.join(import.meta.dirname, "../../app")
+const appDist = path.join(appDir, "dist")
+const embeddedWebUI =
+  process.env.LFCODE_BUILD_NODE_SKIP_EMBEDDED_WEB_UI === "true"
+    ? "export default {}"
+    : await (async () => {
+        await $`bun run --cwd ${appDir} build`
+        const appFiles = (await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: appDist })))
+          .map((file) => file.replaceAll("\\\\", "/"))
+          .sort()
+        if (!appFiles.includes("index.html")) {
+          throw new Error(`Web UI build did not produce index.html in ${appDist}`)
+        }
+        return [
+          "// Generated package map for the sidecar Web UI.",
+          ...appFiles.map((file, index) => {
+            const spec = path.relative(dir, path.join(appDist, file)).replaceAll("\\\\", "/")
+            return `import file_${index} from ${JSON.stringify(spec.startsWith(".") ? spec : `./${spec}`)} with { type: "file" };`
+          }),
+          "export default {",
+          ...appFiles.map((file, index) => `  ${JSON.stringify(file)}: file_${index},`),
+          "}",
+        ].join("\n")
+      })()
+
+const build = await Bun.build({
   target: "node",
-  entrypoints: ["./src/node.ts"],
+  entrypoints: ["./src/node.ts", "lfcode-web-ui.gen.ts"],
   outdir: "./dist/node",
   format: "esm",
   sourcemap: "linked",
   external: ["jsonc-parser", "@lydell/node-pty"],
+  files: {
+    "lfcode-web-ui.gen.ts": embeddedWebUI,
+  },
   define: {
     LFCODE_MIGRATIONS: JSON.stringify(migrations),
     LFCODE_CHANNEL: JSON.stringify(channel),
     LFCODE_VERSION: JSON.stringify(version),
   },
-  files: {
-    "lfcode-web-ui.gen.ts": "",
-  },
 })
+if (!build.success) throw new Error("Unable to build the sidecar with its embedded Web UI")
 
 console.log("Build complete")

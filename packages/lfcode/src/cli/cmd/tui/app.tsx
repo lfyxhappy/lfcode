@@ -38,7 +38,6 @@ import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
 import { DialogAgent } from "@tui/component/dialog-agent"
 import { DialogSessionList } from "@tui/component/dialog-session-list"
-import { DialogWorkflows } from "@tui/component/dialog-workflows"
 import { DialogConsoleOrg } from "@tui/component/dialog-console-org"
 import { KeybindProvider, useKeybind } from "@tui/context/keybind"
 import { ThemeProvider, useTheme } from "@tui/context/theme"
@@ -438,18 +437,6 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
       },
       onSelect: () => {
         dialog.replace(() => <DialogSessionList />)
-      },
-    },
-    {
-      title: t("tui.command.workflow.list.title"),
-      value: "workflow.list",
-      category: "session",
-      enabled: Flag.LFCODE_EXPERIMENTAL_WORKFLOW_TOOL,
-      slash: {
-        name: "workflows",
-      },
-      onSelect: () => {
-        dialog.replace(() => <DialogWorkflows />)
       },
     },
     {
@@ -919,6 +906,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   })
 
   event.on("session.error", (evt) => {
+    if (evt.properties.visible === false) return
     const error = evt.properties.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
     const message = errorMessage(error)

@@ -36,12 +36,37 @@ const ctx = {
   callID: "",
   agent: "build",
   abort: AbortSignal.any([]),
-  messages: [],
+  messages: [
+    {
+      info: { id: MessageID.make("msg_memory_request"), sessionID: SessionID.make("ses_test"), role: "user" },
+      parts: [
+        {
+          id: "prt_memory_request",
+          messageID: MessageID.make("msg_memory_request"),
+          sessionID: SessionID.make("ses_test"),
+          type: "text",
+          text: "查一下保存的记忆",
+        },
+      ],
+    },
+  ] as never,
   metadata: () => Effect.void,
   ask: () => Effect.void,
 }
 
 describe("memory tool", () => {
+  it.live("rejects search without an explicit user memory request", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const info = yield* MemoryTool
+        const tool = yield* info.init()
+        const result = yield* tool.execute({ operation: "search", query: "JWT" }, { ...ctx, messages: [] })
+        expect(result.output).toContain("Memory search is opt-in")
+        expect(result.metadata).toMatchObject({ status: "blocked", reason: "not-requested" })
+      }),
+    ),
+  )
+
   it.live("search operation returns formatted results", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {

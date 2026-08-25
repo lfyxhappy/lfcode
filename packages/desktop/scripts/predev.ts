@@ -4,6 +4,7 @@ import { join, resolve } from "node:path"
 
 await $`bun ./scripts/copy-icons.ts ${process.env.LFCODE_CHANNEL ?? "stable"}`
 
+await $`bun run build`.cwd(resolve(import.meta.dir, "../../plugin"))
 await $`bun ${join(resolve(import.meta.dir, "../../lfcode"), "script/build-node.ts")}`
 
 const electronBinary = join(

@@ -11,6 +11,7 @@ import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
 
 const DEFAULT_SERVER_URL_KEY = "lfcode.settings.dat:defaultServerUrl"
+const COLOR_SCHEME_KEY = "lfcode-color-scheme"
 
 const getLocale = () => {
   if (typeof navigator !== "object") return "en" as const
@@ -52,6 +53,10 @@ const setStorage = (key: string, value: string | null) => {
 
 const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
 const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
+
+// A browser has no access to the desktop renderer's saved theme. Use the
+// desktop default on first visit, but never override an explicit browser choice.
+if (getStorage(COLOR_SCHEME_KEY) === null) setStorage(COLOR_SCHEME_KEY, "dark")
 
 const notify: Platform["notify"] = async (title, description, href) => {
   if (!("Notification" in window)) return
@@ -117,6 +122,19 @@ const getDefaultUrl = () => {
   return getCurrentUrl()
 }
 
+const lanAwareFetch = Object.assign(
+  async (input: URL | RequestInfo, init?: RequestInit) => {
+    const response = await fetch(input, init)
+    if (response.status === 401 && response.headers.get("X-Lfcode-Lan-Authorization") === "pairing-required") {
+      window.dispatchEvent(new Event("lfcode:lan-pairing-required"))
+    }
+    return response
+  },
+  // `fetch.preconnect` is available in Bun/Electron, but not in browsers.
+  // The LAN Web UI must retain the fetch shape without assuming that extension.
+  { preconnect: globalThis.fetch.preconnect?.bind(globalThis.fetch) ?? (() => undefined) },
+) satisfies typeof fetch
+
 const platform: Platform = {
   platform: "web",
   version: pkg.version,
@@ -126,6 +144,7 @@ const platform: Platform = {
   forward,
   restart,
   notify,
+  fetch: lanAwareFetch,
   getDefaultServer: async () => {
     const stored = readDefaultServerUrl()
     return stored ? ServerConnection.Key.make(stored) : null

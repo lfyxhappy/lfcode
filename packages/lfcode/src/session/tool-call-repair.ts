@@ -83,15 +83,6 @@ function resolveToolAlias(requestedToolName: string, input: unknown, activeTools
     }
   }
 
-  const workflow = key.match(/^workflow_(run|status|wait|cancel|resume)(?:_op)?$/)
-  if (workflow) {
-    return {
-      toolName: "workflow",
-      input: wrapOperation(workflow[1], input),
-      reason: `legacy workflow alias ${requestedToolName}`,
-    }
-  }
-
   const history = key.match(/^history_(search|around|session)(?:_op)?$/)
   if (history) {
     return {
@@ -136,11 +127,11 @@ function resolveToolAlias(requestedToolName: string, input: unknown, activeTools
       reason: `legacy plan alias ${requestedToolName}`,
     }
 
-  if (key === "compose_enter_op")
+  if (key === "background_job")
     return {
-      toolName: "compose_enter",
+      toolName: "shell_process",
       input: parseObjectInput(input),
-      reason: `legacy compose alias ${requestedToolName}`,
+      reason: "obsolete shell-process alias",
     }
 
   if (key === "pwsh" || key === "powershell" || key === "shell" || key === "terminal" || key === "bash") {
@@ -161,17 +152,8 @@ function listAvailableTools(activeTools: ReadonlyArray<string>) {
 }
 
 function describeEditingToolFallback(activeTools: ReadonlyArray<string>) {
-  const suggestions: string[] = []
-  if (activeTools.includes("replace_range"))
-    suggestions.push('use "replace_range" when you know the exact line/character span to change')
-  if (activeTools.includes("symbol_edit"))
-    suggestions.push('use "symbol_edit" when replacing a whole function, class, or method')
-  if (activeTools.includes("apply_patch"))
-    suggestions.push(
-      'use "apply_patch" only with pure patch text wrapped in "*** Begin Patch" and "*** End Patch" (no explanation text outside the patch)',
-    )
-  if (suggestions.length === 0) return
-  return `This turn uses patch-first editing; do not call legacy write/edit tools. Instead, ${suggestions.join("; ")}.`
+  if (activeTools.includes("edit"))
+    return 'Use "edit" only: operation="replace" for one exact current text block, operation="patch" for multiple hunks/files, or operation="write" for an intentional whole-file replacement.'
 }
 
 function describeSearchToolFallback(requestedToolName: string, activeTools: ReadonlyArray<string>) {
@@ -192,7 +174,13 @@ export function findAvailableToolByNormalizedName(activeTools: ReadonlyArray<str
 export function describeUnavailableTool(requestedToolName: string, activeTools: ReadonlyArray<string>) {
   const base = `Tool "${requestedToolName}" is not available in this turn. Available tools: ${listAvailableTools(activeTools)}`
   const requested = normalizeToolNameKey(requestedToolName)
-  if (requested === "write" || requested === "edit") {
+  if (
+    requested === "write" ||
+    requested === "edit" ||
+    requested === "replace_range" ||
+    requested === "symbol_edit" ||
+    requested === "apply_patch"
+  ) {
     const fallback = describeEditingToolFallback(activeTools)
     if (fallback) return `${base} ${fallback}`
   }
@@ -212,11 +200,7 @@ export function repairToolCallAlias(input: {
   if ((requested === "glob" || requested === "grep") && input.activeTools.includes("search")) {
     const parsed = parseObjectInput(input.toolInput)
     const rawPath =
-      typeof parsed.path === "string"
-        ? parsed.path
-        : typeof parsed.cwd === "string"
-          ? parsed.cwd
-          : undefined
+      typeof parsed.path === "string" ? parsed.path : typeof parsed.cwd === "string" ? parsed.cwd : undefined
     const rawInclude =
       typeof parsed.include === "string"
         ? parsed.include

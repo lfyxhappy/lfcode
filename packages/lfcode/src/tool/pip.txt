@@ -1,4 +1,4 @@
-Manage packages inside Lfcode's managed Python environment.
+Manage packages inside Lfcode's managed Python environment as a durable background job.
 
 Use this when you need to maintain Python dependencies:
 - install missing packages before running Python code
@@ -10,3 +10,4 @@ Rules:
 - The environment is writable and persists across runs.
 - Common packages such as `httpx`, `beautifulsoup4`, `lxml`, `pydantic`, `openpyxl`, `python-docx`, `pypdf`, `pillow`, `PyYAML`, and `tenacity` are already preinstalled, so avoid reinstalling them unless you truly need a different version.
 - Do not install packages into the app bundle or system Python manually.
+- `timeout` is an optional reminder threshold and never terminates pip. Completion is reported automatically; use `shell_process` only to inspect or wait. Cancel only after the user explicitly requests it.

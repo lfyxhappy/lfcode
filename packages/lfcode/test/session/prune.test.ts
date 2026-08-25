@@ -3,7 +3,11 @@ import { Effect, Layer } from "effect"
 import { Bus } from "../../src/bus"
 import { Config } from "../../src/config"
 import { Agent } from "../../src/agent/agent"
-import { SessionCheckpoint, type WriterOutcome } from "../../src/session/checkpoint"
+import {
+  SessionCheckpoint,
+  type TryStartCheckpointWriterResult,
+  type WriterOutcome,
+} from "../../src/session/checkpoint"
 import { SessionPrune, defaultThresholdsFor } from "../../src/session/prune"
 import { Log } from "../../src/util"
 import { Plugin } from "../../src/plugin"
@@ -232,6 +236,7 @@ describe("SessionPrune.fireCheckpoints writer-failure retry", () => {
   // Each test constructs a fresh harness so module state is per-test.
   function makeRetryHarness() {
     const outcomes: Array<WriterOutcome | "no-writer"> = []
+    const starts: TryStartCheckpointWriterResult[] = []
     const state = { enqueueCount: 0 }
 
     const stubLayer = Layer.succeed(
@@ -240,7 +245,7 @@ describe("SessionPrune.fireCheckpoints writer-failure retry", () => {
         tryStartCheckpointWriter: () =>
           Effect.sync(() => {
             state.enqueueCount++
-            return "started" as const
+            return starts.shift() ?? ("started" as const)
           }),
         waitForWriter: () => Effect.sync(() => outcomes.shift() ?? ("no-writer" as const)),
         drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
@@ -267,7 +272,7 @@ describe("SessionPrune.fireCheckpoints writer-failure retry", () => {
       ),
     )
 
-    return { env, outcomes, state }
+    return { env, outcomes, starts, state }
   }
 
   // Helper: run a prune-layer effect inside a tmpdir + Instance context.
@@ -367,28 +372,55 @@ describe("SessionPrune.fireCheckpoints writer-failure retry", () => {
       { checkpoint: { thresholds: ["50%"] } },
     )
   })
+
+  test("queues a later crossed threshold while a writer is active", async () => {
+    const harness = makeRetryHarness()
+    const promptOps = {} as any
+
+    await runWithHarness(
+      harness,
+      Effect.gen(function* () {
+        const svc = yield* SessionPrune.Service
+        const ssn = yield* SessionNs.Service
+        const info = yield* ssn.create({})
+        const model = createModel({ context: 200_000, output: 20_000 })
+        harness.starts.push("started", "queued")
+
+        yield* svc.fireCheckpoints({
+          sessionID: info.id,
+          model,
+          tokens: { input: 120_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          promptOps,
+        })
+
+        expect(harness.state.enqueueCount).toBe(2)
+      }),
+      { checkpoint: { thresholds: ["55%", "70%"], reserved: 0 } },
+    )
+  })
 })
 
 describe("defaultThresholdsFor (Part 2 density)", () => {
-  test("returns empty for small windows", () => {
-    expect(defaultThresholdsFor(0)).toEqual([])
-    expect(defaultThresholdsFor(20_000)).toEqual([])
-    expect(defaultThresholdsFor(24_999)).toEqual([])
+  test("uses layered defaults for small windows", () => {
+    expect(defaultThresholdsFor(0)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(20_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(24_999)).toEqual(["55%", "70%"])
   })
 
-  test("returns empty for mid-size windows", () => {
-    expect(defaultThresholdsFor(25_000)).toEqual([])
-    expect(defaultThresholdsFor(50_000)).toEqual([])
-    expect(defaultThresholdsFor(100_000)).toEqual([])
-    expect(defaultThresholdsFor(150_000)).toEqual([])
-    expect(defaultThresholdsFor(200_000)).toEqual([])
+  test("uses layered defaults for mid-size windows", () => {
+    expect(defaultThresholdsFor(25_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(50_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(100_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(150_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(200_000)).toEqual(["55%", "70%"])
   })
 
-  test("returns empty for large windows unless explicitly configured", () => {
-    expect(defaultThresholdsFor(200_001)).toEqual([])
-    expect(defaultThresholdsFor(300_000)).toEqual([])
-    expect(defaultThresholdsFor(500_000)).toEqual([])
-    expect(defaultThresholdsFor(500_001)).toEqual([])
-    expect(defaultThresholdsFor(1_000_000)).toEqual([])
+  test("uses layered defaults for large windows", () => {
+    expect(defaultThresholdsFor(200_001)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(300_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(500_000)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(500_001)).toEqual(["55%", "70%"])
+    expect(defaultThresholdsFor(1_000_000)).toEqual(["55%", "70%"])
   })
+
 })

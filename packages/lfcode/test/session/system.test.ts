@@ -12,6 +12,23 @@ function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
 }
 
 describe("session.system", () => {
+  test("default prompt keeps routine coding work in the direct loop", () => {
+    const prompt = SystemPrompt.provider({ capabilities: { patch_editing: true } } as never).join("\n")
+
+    expect(prompt).toContain("Do not perform a ritualized preflight")
+    expect(prompt).toContain("Do not look up memory unless the user explicitly asks")
+    expect(prompt).toContain("When the stated objective is complete, stop")
+  })
+
+  test("editing strategy directs fresh reads and long-line ranges", () => {
+    const prompt = SystemPrompt.editingStrategy(true)
+
+    expect(prompt).toContain("single edit tool")
+    expect(prompt).toContain("fresh read")
+    expect(prompt).toContain("offset, limit=1, startChar, and endChar")
+    expect(prompt).toContain("Never bypass a failed structured edit")
+  })
+
   test("skills output is sorted by name and stable across calls", async () => {
     await using tmp = await tmpdir({
       git: true,
@@ -21,7 +38,7 @@ describe("session.system", () => {
           ["alpha-skill", "Alpha skill."],
           ["middle-skill", "Middle skill."],
         ]) {
-          const skillDir = path.join(dir, "skills", name)
+          const skillDir = path.join(dir, ".lfcode", "skills", name)
           await Bun.write(
             path.join(skillDir, "SKILL.md"),
             `---
@@ -36,8 +53,8 @@ description: ${description}
       },
     })
 
-    const originalConfig = Global.Path.config
-    Object.assign(Global.Path, { config: tmp.path })
+    const originalHome = Object.getOwnPropertyDescriptor(Global.Path, "home")
+    Object.defineProperty(Global.Path, "home", { configurable: true, value: tmp.path })
 
     try {
       await Instance.provide({
@@ -54,20 +71,15 @@ description: ${description}
 
           expect(first).toBe(second)
 
-          const alpha = first!.indexOf("<name>alpha-skill</name>")
-          const middle = first!.indexOf("<name>middle-skill</name>")
-          const zeta = first!.indexOf("<name>zeta-skill</name>")
-
-          expect(alpha).toBeGreaterThan(-1)
-          expect(middle).toBeGreaterThan(alpha)
-          expect(zeta).toBeGreaterThan(middle)
-          expect(first).toContain("<name>playwright-browser</name>")
-          expect(first).toContain("embedded side browser")
-          expect(first).toContain("hidden or collapsed")
+          expect(first).toContain("<available_skills> catalog with every currently usable Skill")
+          expect(first).toContain("Before any substantive answer or non-Skill tool action")
+          expect(first).toContain("MUST call skill with the exact name")
+          expect(first).toContain("Never use search_tool to find Skills")
+          expect(first).not.toContain("alpha-skill")
         },
       })
     } finally {
-      Object.assign(Global.Path, { config: originalConfig })
+      Object.defineProperty(Global.Path, "home", originalHome!)
     }
   })
 })

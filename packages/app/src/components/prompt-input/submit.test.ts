@@ -281,6 +281,64 @@ beforeEach(() => {
 })
 
 describe("prompt submit worktree selection", () => {
+  test("sends an external agent draft without creating an Lfcode message", async () => {
+    params = { id: "session-external" }
+    const sent: Prompt[] = []
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-external" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "shell",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      externalSubmit: async (input) => {
+        sent.push(input.prompt)
+      },
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(sent).toEqual([promptValue])
+    expect(createdSessions).toEqual([])
+    expect(sentShell).toEqual([])
+    expect(sentPromptAsync).toEqual([])
+  })
+
+  test("retains the draft when an external agent write fails", async () => {
+    params = { id: "session-external" }
+    let modes = 0
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-external" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => modes++,
+      setPopover: () => undefined,
+      externalSubmit: async () => {
+        throw new Error("terminal disconnected")
+      },
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(modes).toBe(0)
+    expect(promptValue).toEqual([{ type: "text", content: "ls", start: 0, end: 2 }])
+  })
+
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       info: () => undefined,
@@ -490,6 +548,37 @@ describe("prompt submit worktree selection", () => {
     await submit.handleSubmit(event)
     await Promise.resolve()
 
+    expect(sentPromptAsync[0]?.input.system).toBeUndefined()
+  })
+
+  test("creates a normal session after leaving tavern mode", async () => {
+    let tavernMode = false
+    const submit = createPromptSubmit({
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      streaming: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+      tavernMode: () => tavernMode,
+      tavern: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+
+    expect(createdSessions).toEqual(["/repo/worktree-a"])
     expect(sentPromptAsync[0]?.input.system).toBeUndefined()
   })
 

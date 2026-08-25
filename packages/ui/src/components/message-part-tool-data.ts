@@ -31,6 +31,23 @@ export function readStringField(source: Record<string, unknown> | undefined, key
   return readString(source?.[key])
 }
 
+export function readActorToolOutput(value: unknown) {
+  if (typeof value !== "string") return
+  try {
+    const output = record(JSON.parse(value))
+    if (!output) return
+    const status = readString(output.status)
+    const actorID = readString(output.actor_id)
+    const description = readString(output.description)
+    const agent = readString(output.agent)
+    const error = readString(output.error)
+    if (!status && !actorID && !description && !agent && !error) return
+    return { status, actorID, description, agent, error }
+  } catch {
+    return
+  }
+}
+
 function diagnostic(value: unknown): value is ToolDiagnostic {
   const item = record(value)
   return !!item && typeof item.message === "string" && !!record(item.range)

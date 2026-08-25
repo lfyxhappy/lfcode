@@ -24,7 +24,7 @@ describe("tool.capability_manage", () => {
         const tool = (yield* registry.tools({
           providerID: "lfcode" as never,
           modelID: "gpt-5" as never,
-          agent: { name: "build", mode: "primary", permission: [], options: {} },
+          agent: { name: "build", mode: "primary", permission: [], options: {}, toolAllowlist: [CapabilityManageTool.id] },
         })).find((item) => item.id === CapabilityManageTool.id)
         if (!tool) throw new Error("capability_manage tool not found")
         const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []

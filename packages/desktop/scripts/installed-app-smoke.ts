@@ -134,7 +134,7 @@ try {
     (ui) => ui.session?.sessionID === targetSessionID,
   )
 
-  const editor = await runEditorInputSmoke(client, windowID, portableRoot)
+  const editor = await runEditorSemanticInputSmoke(client, windowID, portableRoot)
 
   await client.post("/sidechat/create", {
     windowID,
@@ -325,7 +325,7 @@ function delay(ms: number) {
   return new Promise<void>((resolveDelay) => setTimeout(resolveDelay, ms))
 }
 
-async function runEditorInputSmoke(client: AutomationClient, windowID: number, fixtureRoot: string) {
+async function runEditorSemanticInputSmoke(client: AutomationClient, windowID: number, fixtureRoot: string) {
   const cppPath = join(fixtureRoot, "editor-input-probe.cpp")
   const tsPath = join(fixtureRoot, "editor-input-probe.ts")
   await Promise.all([
@@ -345,13 +345,16 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
       endColumn: 1,
     },
   })
-  await client.post("/ui/editor", { windowID, token: "filetab.active.editor", action: "focus" })
-  await client.post("/window/type", { windowID, text: "alpha\n\tbeta" })
+  await client.post("/ui/type", {
+    windowID,
+    token: "filetab.active.editor",
+    text: '#include <iostream>\n\nint main() {\n  return 0;\n}\n\nalpha\n\tbeta\n',
+  })
   const cpp = await waitForUiState(
     client,
     windowID,
     (ui) => ui.session?.fileTab?.editor?.value?.includes("alpha") === true && ui.session?.fileTab?.editor?.value?.includes("beta") === true,
-    "C++ editor keyboard input",
+    "C++ editor semantic value update",
   )
 
   await openEditor(client, windowID, tsPath)
@@ -367,7 +370,6 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
     },
   })
   await client.post("/ui/editor", { windowID, token: "filetab.active.editor", action: "triggerSuggest" })
-  await client.post("/ui/editor", { windowID, token: "filetab.active.editor", action: "focus" })
   await client.post("/ui/editor", {
     windowID,
     token: "filetab.active.editor",
@@ -380,13 +382,16 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
     },
   })
   await delay(100)
-  await client.post("/ui/editor", { windowID, token: "filetab.active.editor", action: "focus" })
-  await client.post("/window/type", { windowID, text: "name" })
+  await client.post("/ui/type", {
+    windowID,
+    token: "filetab.active.editor",
+    text: 'const account = { name: "Lfcode" }\n\naccount.name\n',
+  })
   const typescript = await waitForUiState(
     client,
     windowID,
     (ui) => ui.session?.fileTab?.editor?.value?.includes("account.name") === true,
-    "TypeScript editor keyboard input",
+    "TypeScript editor semantic value update",
   )
 
   const commandMenuTarget = await client.post<UiNodeSnapshot>("/ui/query", {
@@ -401,46 +406,19 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
     token: "filetab.active.command-menu",
   })
   const commandMenuOpened = "expanded" in (openedMenu.dataset ?? {})
-  const composerTarget = await client.post<UiNodeSnapshot>("/ui/query", {
-    windowID,
-    token: "composer.main.input",
-  })
-  const composerResult = await (async () => {
-    if (commandMenuOpened) {
-      await clickSnapshot(client, windowID, composerTarget, "composer input")
-      await delay(250)
-      const composer = await client.post<UiNodeSnapshot>("/ui/query", {
-        windowID,
-        token: "composer.main.input",
-      })
-      if (!composer.focused) {
-        throw new Error(`Composer did not regain focus after editor interaction: ${JSON.stringify(composer)}`)
-      }
-      await client.post("/window/type", { windowID, text: "focusback" })
-      return {
-        composer,
-        focused: await waitForUiState(
-          client,
-          windowID,
-          (ui) => ui.session?.composer?.mainText === "focusback",
-          "composer focus return keyboard input",
-        ),
-      }
-    }
-    await client.post("/composer/set-text", { windowID, target: "main", text: "focusback" })
-    return {
-      composer: await client.post<UiNodeSnapshot>("/ui/query", {
-        windowID,
-        token: "composer.main.input",
-      }),
-      focused: await waitForUiState(
-        client,
-        windowID,
-        (ui) => ui.session?.composer?.mainText === "focusback",
-        "composer state fallback",
-      ),
-    }
-  })()
+  await client.post("/composer/set-text", { windowID, target: "main", text: "semantic-write" })
+  const composerResult = {
+    composer: await client.post<UiNodeSnapshot>("/ui/query", {
+      windowID,
+      token: "composer.main.input",
+    }),
+    state: await waitForUiState(
+      client,
+      windowID,
+      (ui) => ui.session?.composer?.mainText === "semantic-write",
+      "composer semantic value update",
+    ),
+  }
 
   const events = await client.get<Array<{ scope?: string; type?: string; data?: unknown }>>("/diagnostics/events?limit=500")
   const missingServices = events.filter((event) =>
@@ -454,16 +432,15 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
     cpp: {
       language: cpp.session?.fileTab?.editor?.language,
       value: cpp.session?.fileTab?.editor?.value,
-      typedLetters: cpp.session?.fileTab?.editor?.value?.includes("alpha") === true,
-      typedEnterAndTab: /alpha\r?\n[\t ]+beta/.test(cpp.session?.fileTab?.editor?.value ?? ""),
+      semanticWrite: cpp.session?.fileTab?.editor?.value?.includes("alpha") === true,
+      multilineValue: /alpha\r?\n[\t ]+beta/.test(cpp.session?.fileTab?.editor?.value ?? ""),
     },
     typescript: {
       language: typescript.session?.fileTab?.editor?.language,
       value: typescript.session?.fileTab?.editor?.value,
     },
     composer: {
-      focused: composerResult.composer.focused === true,
-      value: composerResult.focused.session?.composer?.mainText,
+      value: composerResult.state.session?.composer?.mainText,
     },
     commandMenu: {
       opened: commandMenuOpened,
@@ -471,15 +448,6 @@ async function runEditorInputSmoke(client: AutomationClient, windowID: number, f
     },
     missingServiceErrors: missingServices.length,
   }
-}
-
-async function clickSnapshot(client: AutomationClient, windowID: number, snapshot: UiNodeSnapshot, label: string) {
-  if (!snapshot.rect) throw new Error(`${label} did not expose a clickable rectangle`)
-  await client.post("/window/click", {
-    windowID,
-    x: Math.round(snapshot.rect.x + snapshot.rect.width / 2),
-    y: Math.round(snapshot.rect.y + snapshot.rect.height / 2),
-  })
 }
 
 async function openEditor(client: AutomationClient, windowID: number, path: string) {

@@ -25,6 +25,7 @@ export interface TerminalProps extends ComponentProps<"div"> {
   onCleanup?: (pty: Partial<LocalPTY> & { id: string }) => void
   onConnect?: () => void
   onConnectError?: (error: unknown) => void
+  onScreenChange?: (screen: string[]) => void
 }
 
 let shared: Promise<{ mod: typeof import("ghostty-web"); ghostty: Ghostty }> | undefined
@@ -175,7 +176,7 @@ export const Terminal = (props: TerminalProps) => {
   const password = auth?.password ?? ""
   const sameOrigin = new URL(url, location.href).origin === location.origin
   let container!: HTMLDivElement
-  const [local, others] = splitProps(props, ["pty", "class", "classList", "autoFocus", "onConnect", "onConnectError"])
+  const [local, others] = splitProps(props, ["pty", "class", "classList", "autoFocus", "onConnect", "onConnectError", "onScreenChange"])
   const id = local.pty.id
   const restore = typeof local.pty.buffer === "string" ? local.pty.buffer : ""
   const restoreSize =
@@ -373,6 +374,13 @@ export const Terminal = (props: TerminalProps) => {
           done?.()
         }),
       )
+      const emitScreen = () => {
+        const buffer = t.buffer.active
+        const start = Math.max(0, buffer.length - t.rows)
+        local.onScreenChange?.(
+          Array.from({ length: buffer.length - start }, (_, index) => buffer.getLine(start + index)?.translateToString(true) ?? ""),
+        )
+      }
 
       t.attachCustomKeyEventHandler((event) => {
         const key = event.key.toLowerCase()
@@ -441,7 +449,10 @@ export const Terminal = (props: TerminalProps) => {
             return
           }
           output.push(data)
-          output.flush(resolve)
+          output.flush(() => {
+            emitScreen()
+            resolve()
+          })
         })
 
       if (restore && restoreSize) {
@@ -547,6 +558,7 @@ export const Terminal = (props: TerminalProps) => {
           const data = typeof event.data === "string" ? event.data : ""
           if (!data) return
           output?.push(data)
+          output?.flush(emitScreen)
           cursor += data.length
           seek = cursor
         }

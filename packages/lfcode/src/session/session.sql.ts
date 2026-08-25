@@ -9,7 +9,7 @@ import type { WorkspaceID } from "../control-plane/schema"
 import { Timestamps } from "../storage/schema.sql"
 import type { GoalState } from "./goal-state"
 import type { Info as SessionInteractionInfo } from "./interaction"
-import type { ComposeRoute } from "./compose-route"
+import type { ProjectExtension } from "../project/project"
 
 type PartData = Omit<MessageV2.Part, "id" | "sessionID" | "messageID">
 type InfoData = Omit<MessageV2.Info, "id" | "sessionID">
@@ -30,6 +30,7 @@ export const SessionTable = sqliteTable(
     directory: text().notNull(),
     title: text().notNull(),
     version: text().notNull(),
+    temporary: integer().notNull().default(0),
     share_url: text(),
     summary_additions: integer(),
     summary_deletions: integer(),
@@ -39,7 +40,7 @@ export const SessionTable = sqliteTable(
     permission: text({ mode: "json" }).$type<Permission.Ruleset>(),
     goal: text({ mode: "json" }).$type<GoalState>(),
     interaction: text({ mode: "json" }).$type<SessionInteractionInfo>(),
-    compose_route: text({ mode: "json" }).$type<ComposeRoute>(),
+    extension: text({ mode: "json" }).$type<ProjectExtension>(),
     ...Timestamps,
     time_last_user: integer(),
     time_compacting: integer(),
@@ -51,6 +52,8 @@ export const SessionTable = sqliteTable(
     index("session_workspace_idx").on(table.workspace_id),
     index("session_parent_idx").on(table.parent_id),
     index("session_context_from_idx").on(table.context_from),
+    index("session_temporary_idx").on(table.temporary),
+    index("session_extension_idx").on(table.extension),
   ],
 )
 

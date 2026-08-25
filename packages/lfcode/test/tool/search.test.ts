@@ -88,4 +88,25 @@ describe("search tool", () => {
       }),
     ),
   )
+
+  it.live("accepts a specific file as a path-search scope", () =>
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const file = path.join(dir, "src", "actor.ts")
+        yield* Effect.promise(() => Bun.write(file, "export const actor = true\n"))
+        const tool = yield* init()
+        const result = yield* tool.execute(
+          {
+            kind: "path",
+            query: "actor",
+            path: file,
+          },
+          ctx,
+        )
+
+        expect(result.output).toContain(file)
+        expect((result.metadata as { count?: number }).count).toBe(1)
+      }),
+    ),
+  )
 })

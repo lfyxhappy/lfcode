@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono"
+import { Hono, type Context, type MiddlewareHandler } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { streamSSE } from "hono/streaming"
 import { Effect } from "effect"
@@ -8,6 +8,7 @@ import { BusEvent } from "@/bus/bus-event"
 import { SyncEvent } from "@/sync"
 import { GlobalBus } from "@/bus/global"
 import { AppRuntime } from "@/effect/app-runtime"
+import { Flag } from "@/flag/flag"
 import { AsyncQueue } from "@/util/queue"
 import { Instance } from "../../project/instance"
 import { Installation } from "@/installation"
@@ -21,7 +22,9 @@ import { errors } from "../error"
 import { NamedError } from "@lfcode-ai/shared/util/error"
 import { PlaywrightMcpRoutes } from "./global-playwright"
 import { MaintenanceRoutes } from "./global-maintenance"
+import { GlobalAutomationRoutes } from "./global-automation"
 import { createAppControlClient } from "@/app-control/client"
+import { Session } from "@/session"
 import {
   getRuntimeManageState,
   activateRuntime,
@@ -36,6 +39,35 @@ import {
 } from "@/runtime-registry"
 
 const log = Log.create({ service: "server" })
+
+const AppControlEvent = z.object({
+  id: z.number(),
+  at: z.number(),
+  timestamp: z.number(),
+  isoTime: z.string(),
+  scope: z.string(),
+  type: z.string(),
+  windowID: z.number().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+})
+
+const AppControlMetadata = z.object({
+  protocolVersion: z.number().int().positive(),
+  instanceID: z.string(),
+  pid: z.number().int().positive(),
+  startedAt: z.number(),
+  version: z.string(),
+  capability: z.string(),
+  features: z.array(z.string()),
+})
+
+const AppControlNextEvents = z.object({
+  events: z.array(AppControlEvent),
+  nextCursor: z.number().int().nonnegative(),
+  oldestID: z.number().int().positive(),
+  latestID: z.number().int().nonnegative(),
+  resetRequired: z.boolean(),
+})
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
 
@@ -93,6 +125,9 @@ export const GlobalRoutes = lazy(() =>
   new Hono()
     .route("/", PlaywrightMcpRoutes())
     .route("/maintenance", MaintenanceRoutes())
+    .use("/automation", desktopAutomationOnly)
+    .use("/automation/*", desktopAutomationOnly)
+    .route("/automation", GlobalAutomationRoutes())
     .get(
       "/health",
       describeRoute({
@@ -112,6 +147,111 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json({ healthy: true, version: InstallationVersion })
+      },
+    )
+    .get(
+      "/app-control/meta",
+      describeRoute({
+        summary: "Get desktop app-control protocol metadata",
+        description: "Read authenticated capability and protocol metadata from the running local desktop automation bridge.",
+        operationId: "global.appControl.meta",
+        responses: {
+          200: {
+            description: "Desktop automation protocol metadata",
+            content: {
+              "application/json": {
+                schema: resolver(AppControlMetadata),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      async (c) => {
+        return c.json(
+          await AppRuntime.runPromise(
+            Config.Service.use(() =>
+              Effect.promise(async () => {
+                const client = await createAppControlClient()
+                return client.getMetadata()
+              }),
+            ),
+          ),
+        )
+      },
+    )
+    .get(
+      "/app-control/events/next",
+      describeRoute({
+        summary: "Wait for the next desktop app-control events",
+        description: "Read cursor-based desktop automation events without polling the full diagnostic history.",
+        operationId: "global.appControl.eventsNext",
+        responses: {
+          200: {
+            description: "Cursor-based desktop automation events",
+            content: {
+              "application/json": {
+                schema: resolver(AppControlNextEvents),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          after: z.coerce.number().int().nonnegative().optional(),
+          scope: z.enum(["main", "renderer", "server"]).optional(),
+          type: z.string().optional(),
+          limit: z.coerce.number().int().positive().max(200).optional(),
+          waitMs: z.coerce.number().int().nonnegative().max(30_000).optional(),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        return c.json(
+          await AppRuntime.runPromise(
+            Config.Service.use(() =>
+              Effect.promise(async () => {
+                const client = await createAppControlClient()
+                const params = new URLSearchParams()
+                if (query.after !== undefined) params.set("after", String(query.after))
+                if (query.scope) params.set("scope", query.scope)
+                if (query.type) params.set("type", query.type)
+                if (query.limit) params.set("limit", String(query.limit))
+                if (query.waitMs !== undefined) params.set("waitMs", String(query.waitMs))
+                return client.get(`/diagnostics/events/next${params.size ? `?${params.toString()}` : ""}`)
+              }),
+            ),
+          ),
+        )
+      },
+    )
+    .post(
+      "/session/temporary/cleanup",
+      describeRoute({
+        summary: "Clean up temporary sessions",
+        description: "Remove temporary desktop sessions and their associated data.",
+        operationId: "global.session.temporary.cleanup",
+        responses: {
+          200: {
+            description: "Temporary sessions removed",
+            content: {
+              "application/json": {
+                schema: resolver(z.object({ removed: z.number().int().nonnegative() })),
+              },
+            },
+          },
+          403: {
+            description: "Only the local desktop server may clean up temporary sessions",
+          },
+        },
+      }),
+      async (c) => {
+        if (Flag.LFCODE_CLIENT !== "desktop") return c.json({ error: "desktop only" }, 403)
+        const removed = await AppRuntime.runPromise(Session.Service.use((service) => service.cleanupTemporary()))
+        return c.json({ removed })
       },
     )
     .get(
@@ -168,14 +308,14 @@ export const GlobalRoutes = lazy(() =>
             description: "Get global config info",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.PublicInfo),
               },
             },
           },
         },
       }),
       async (c) => {
-        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal())))
+        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.getGlobal().pipe(Effect.map(Config.withoutWorkflow)))))
       },
     )
     .patch(
@@ -245,7 +385,8 @@ export const GlobalRoutes = lazy(() =>
       validator("json", Config.GlobalPersonalizationSave),
       async (c) => {
         const personalization = c.req.valid("json")
-        return c.json(await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.saveGlobalPersonalization(personalization))))
+        const saved = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.saveGlobalPersonalization(personalization)))
+        return c.json(saved)
       },
     )
     .get(
@@ -342,7 +483,8 @@ export const GlobalRoutes = lazy(() =>
       "/runtime/update",
       describeRoute({
         summary: "Update a managed runtime",
-        description: "Check the official release and atomically update a managed runtime when a verified version is available.",
+        description:
+          "Check the official release and atomically update a managed runtime when a verified version is available.",
         operationId: "global.runtime.update",
         responses: {
           200: {
@@ -439,24 +581,15 @@ export const GlobalRoutes = lazy(() =>
       "/app-control/events",
       describeRoute({
         summary: "Get recent desktop app-control events",
-        description: "Proxy recent desktop automation events from the running local desktop app for settings diagnostics.",
+        description:
+          "Proxy recent desktop automation events from the running local desktop app for settings diagnostics.",
         operationId: "global.appControl.events",
         responses: {
           200: {
             description: "Recent desktop automation events",
             content: {
               "application/json": {
-                schema: resolver(
-                  z.array(
-                    z.object({
-                      id: z.number(),
-                      scope: z.string(),
-                      type: z.string(),
-                      timestamp: z.number(),
-                      data: z.record(z.string(), z.unknown()).optional(),
-                    }),
-                  ),
-                ),
+                schema: resolver(z.array(AppControlEvent)),
               },
             },
           },
@@ -529,7 +662,9 @@ export const GlobalRoutes = lazy(() =>
             Config.Service.use(() =>
               Effect.promise(async () => {
                 const client = await createAppControlClient()
-                const state = await client.get(`/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`)
+                const state = await client.get(
+                  `/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`,
+                )
                 const params = new URLSearchParams()
                 if (input.eventLimit) params.set("limit", String(input.eventLimit))
                 const events = await client.get(`/diagnostics/events${params.size ? `?${params.toString()}` : ""}`)
@@ -588,7 +723,9 @@ export const GlobalRoutes = lazy(() =>
             Config.Service.use(() =>
               Effect.promise(async () => {
                 const client = await createAppControlClient()
-                const state = await client.get(`/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`)
+                const state = await client.get(
+                  `/diagnostics/ui-state${input.windowID ? `?windowID=${input.windowID}` : ""}`,
+                )
                 const params = new URLSearchParams()
                 if (input.eventLimit) params.set("limit", String(input.eventLimit))
                 const events = await client.get(`/diagnostics/events${params.size ? `?${params.toString()}` : ""}`)
@@ -613,7 +750,9 @@ export const GlobalRoutes = lazy(() =>
                 return {
                   path: input.path,
                   capturePath:
-                    typeof capture === "object" && capture && "path" in capture ? (capture as { path?: string }).path : undefined,
+                    typeof capture === "object" && capture && "path" in capture
+                      ? (capture as { path?: string }).path
+                      : undefined,
                 }
               }),
             ),
@@ -677,7 +816,7 @@ export const GlobalRoutes = lazy(() =>
             description: "Successfully removed custom provider",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.PublicInfo),
               },
             },
           },
@@ -693,17 +832,18 @@ export const GlobalRoutes = lazy(() =>
       async (c) => {
         const providerID = c.req.valid("param").providerID
         return AppRuntime.runPromise(Config.Service.use((cfg) => cfg.removeGlobalCustomProvider(providerID)))
-          .then((next) => c.json(next))
+          .then((next) => c.json(Config.withoutWorkflow(next)))
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err)
             if (
               message === `Provider ${providerID} is not configured in global config files` ||
-              message === `Provider ${providerID} is not a custom provider`
+              message === `Provider ${providerID} is not a custom provider` ||
+              message.startsWith("A6API configuration")
             ) {
               return c.json(new NamedError.Unknown({ message }).toObject(), 400)
             }
-          throw err
-        })
+            throw err
+          })
       },
     )
     .put(
@@ -717,7 +857,7 @@ export const GlobalRoutes = lazy(() =>
             description: "Successfully saved custom provider",
             content: {
               "application/json": {
-                schema: resolver(Config.Info),
+                schema: resolver(Config.PublicInfo),
               },
             },
           },
@@ -743,7 +883,7 @@ export const GlobalRoutes = lazy(() =>
         return AppRuntime.runPromise(
           Config.Service.use((cfg) => cfg.upsertGlobalCustomProvider(providerID, provider, key)),
         )
-          .then((next) => c.json(next))
+          .then((next) => c.json(Config.withoutWorkflow(next)))
           .catch((err) => {
             const message = err instanceof Error ? err.message : String(err)
             if (
@@ -859,3 +999,8 @@ export const GlobalRoutes = lazy(() =>
       },
     ),
 )
+
+const desktopAutomationOnly: MiddlewareHandler = async (c, next) => {
+  if (Flag.LFCODE_CLIENT !== "desktop" || Flag.LFCODE_WORKSPACE_ID) return c.json({ error: "desktop only" }, 403)
+  return await next()
+}

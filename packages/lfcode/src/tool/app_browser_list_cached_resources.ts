@@ -18,7 +18,7 @@ export const AppBrowserListCachedResourcesTool = Tool.define(
       "List recently observed resources from the shared Lfcode side-browser cache/index without triggering new network requests.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("read_only")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/list-cached-resources", {

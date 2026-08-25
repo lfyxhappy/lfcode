@@ -6,6 +6,7 @@ import { Icon } from "./icon"
 import { IconButton } from "./icon-button"
 import { Tooltip } from "./tooltip"
 import { useI18n } from "../context/i18n"
+import { normalizeToolError } from "./tool-error-normalize"
 
 export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "children" | "variant"> {
   tool: string
@@ -44,7 +45,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     if (!key.includes(".")) return key
     return i18n.t(key)
   })
-  const cleaned = createMemo(() => split.error.replace(/^Error:\s*/, "").trim())
+  const cleaned = createMemo(() => normalizeToolError(split.tool, split.error).replace(/^Error:\s*/, "").trim())
   const tail = createMemo(() => {
     const value = cleaned()
     const prefix = `${split.tool} `

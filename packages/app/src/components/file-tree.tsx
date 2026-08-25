@@ -32,6 +32,15 @@ type Filter = {
   dirs: Set<string>
 }
 
+export type FileTreeSource = {
+  list: (input: string) => Promise<void>
+  refresh: (input: string) => Promise<void>
+  state: (input: string) => { expanded?: boolean; loaded?: boolean; loading?: boolean } | undefined
+  children: (input: string) => FileNode[]
+  expand: (input: string) => void
+  collapse: (input: string) => void
+}
+
 export function shouldListRoot(input: { level: number; dir?: { loaded?: boolean; loading?: boolean } }) {
   if (input.level !== 0) return false
   if (input.dir?.loaded) return false
@@ -201,6 +210,8 @@ export default function FileTree(props: {
   kinds?: ReadonlyMap<string, Kind>
   draggable?: boolean
   onFileClick?: (file: FileNode) => void
+  tree?: FileTreeSource
+  normalizePath?: (path: string) => string
 
   _filter?: Filter
   _marks?: Set<string>
@@ -209,12 +220,12 @@ export default function FileTree(props: {
   _chain?: readonly string[]
 }) {
   const file = useFile()
+  const tree = () => props.tree ?? file.tree
   const level = props.level ?? 0
   const draggable = () => props.draggable ?? true
 
   const key = (p: string) =>
-    file
-      .normalize(p)
+    (props.normalizePath ?? file.normalize)(p)
       .replace(/[\\/]+$/, "")
       .replaceAll("\\", "/")
   const chain = props._chain ? [...props._chain, key(props.path)] : [key(props.path)]
@@ -261,7 +272,7 @@ export default function FileTree(props: {
     const out = new Map<string, number>()
 
     const root = props.path
-    if (!(file.tree.state(root)?.expanded ?? false)) return out
+    if (!(tree().state(root)?.expanded ?? false)) return out
 
     const seen = new Set<string>()
     const stack: { dir: string; lvl: number; i: number; kids: string[]; max: number }[] = []
@@ -271,9 +282,9 @@ export default function FileTree(props: {
       if (seen.has(id)) return
       seen.add(id)
 
-      const kids = file.tree
+      const kids = tree()
         .children(dir)
-        .filter((node) => node.type === "directory" && (file.tree.state(node.path)?.expanded ?? false))
+        .filter((node) => node.type === "directory" && (tree().state(node.path)?.expanded ?? false))
         .map((node) => node.path)
 
       stack.push({ dir, lvl, i: 0, kids, max: lvl })
@@ -307,25 +318,25 @@ export default function FileTree(props: {
     const dirs = dirsToExpand({
       level,
       filter: current,
-      expanded: (dir) => untrack(() => file.tree.state(dir)?.expanded) ?? false,
+      expanded: (dir) => untrack(() => tree().state(dir)?.expanded) ?? false,
     })
-    for (const dir of dirs) file.tree.expand(dir)
+    for (const dir of dirs) tree().expand(dir)
   })
 
   createEffect(
     on(
       () => props.path,
       (path) => {
-        const dir = untrack(() => file.tree.state(path))
+        const dir = untrack(() => tree().state(path))
         if (!shouldListRoot({ level, dir })) return
-        void file.tree.list(path)
+        void tree().list(path)
       },
       { defer: false },
     ),
   )
 
   const nodes = createMemo(() => {
-    const nodes = file.tree.children(props.path)
+    const nodes = tree().children(props.path)
     const current = filter()
     if (!current) return nodes
 
@@ -387,7 +398,7 @@ export default function FileTree(props: {
     <div data-component="filetree" class={`flex flex-col gap-0.5 ${props.class ?? ""}`}>
       <For each={nodes()}>
         {(node) => {
-          const expanded = () => file.tree.state(node.path)?.expanded ?? false
+          const expanded = () => tree().state(node.path)?.expanded ?? false
           const deep = () => deeps().get(node.path) ?? -1
           const kind = () => visibleKind(node, kinds(), marks())
           const active = () => !!kind() && !node.ignored
@@ -401,7 +412,7 @@ export default function FileTree(props: {
                   data-scope="filetree"
                   forceMount={false}
                   open={expanded()}
-                  onOpenChange={(open) => (open ? file.tree.expand(node.path) : file.tree.collapse(node.path))}
+                  onOpenChange={(open) => (open ? tree().expand(node.path) : tree().collapse(node.path))}
                 >
                   <Collapsible.Trigger>
                     <FileTreeNode
@@ -440,6 +451,8 @@ export default function FileTree(props: {
                         active={props.active}
                         draggable={props.draggable}
                         onFileClick={props.onFileClick}
+                        tree={props.tree}
+                        normalizePath={props.normalizePath}
                         _filter={filter()}
                         _marks={marks()}
                         _deeps={deeps()}

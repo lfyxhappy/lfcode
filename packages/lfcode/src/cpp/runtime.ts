@@ -1,6 +1,6 @@
 import path from "path"
 import { existsSync } from "node:fs"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { getRuntimeActivationTarget } from "@/runtime-registry/config"
 import { Filesystem } from "@/util"
 import { which } from "@/util/which"
@@ -13,7 +13,7 @@ export type CppCommand = {
 }
 
 export function managedCppRoot() {
-  return path.join(Global.Path.data, "runtime", "cpp", "mingw")
+  return PluginPath.data("runtime-cpp")
 }
 
 export function managedCppExecutable(root = managedCppRoot()) {

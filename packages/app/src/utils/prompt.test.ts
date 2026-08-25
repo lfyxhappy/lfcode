@@ -52,6 +52,7 @@ describe("extractPromptFromParts", () => {
           lfcodeSelectedText: [
             {
               text: "quoted selection",
+              comment: "Explain this part",
               messageID: "msg_1",
             },
           ],
@@ -67,10 +68,12 @@ describe("extractPromptFromParts", () => {
       {
         type: "selected-text",
         text: "quoted selection",
-        content: "quoted selection",
+        comment: "Explain this part",
+        content: "",
         start: 0,
-        end: "quoted selection".length,
+        end: 0,
         messageID: "msg_1",
+        selection: undefined,
       },
     ])
   })

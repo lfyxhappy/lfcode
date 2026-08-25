@@ -2,14 +2,17 @@ import path from "path"
 import z from "zod"
 import { ProjectTable } from "@/project/project.sql"
 import { Database, and, desc, eq, gte, like, lt, or, sql, type SQL } from "@/storage"
+import { userVisibleActorClause } from "@/actor/visibility"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 
 export const UsageRange = z.enum(["today", "7d", "30d", "all"])
+export const UsageHeatmapGranularity = z.enum(["month", "week", "day"])
 export const UsageStatus = z.enum(["completed", "error", "aborted"])
 export const UsageAgentKind = z.enum(["main", "subagent"])
 
 export const UsageQuery = z.object({
   range: UsageRange.optional(),
+  heatmap_granularity: UsageHeatmapGranularity.optional(),
   provider: z.string().optional(),
   model: z.string().optional(),
   project: z.string().optional(),
@@ -48,6 +51,17 @@ const UsageTrendPoint = z.object({
   cacheCreate: z.number(),
   cacheHit: z.number(),
   cost: z.number(),
+})
+
+const UsageHeatmapPoint = z.object({
+  time: z.number(),
+  totalTokens: z.number(),
+})
+
+const UsageHeatmapSummary = z.object({
+  totalTokens: z.number(),
+  peakDailyTokens: z.number(),
+  activeDays: z.number(),
 })
 
 const UsageLog = z.object({
@@ -114,6 +128,8 @@ const UsageSessionStat = z.object({
 export const UsageResponse = z.object({
   summary: UsageSummary,
   trend: z.array(UsageTrendPoint),
+  heatmap: z.array(UsageHeatmapPoint),
+  heatmapSummary: UsageHeatmapSummary,
   logs: z.array(UsageLog),
   projectStats: z.array(UsageProjectStat),
   sessionStats: z.array(UsageSessionStat),
@@ -121,6 +137,7 @@ export const UsageResponse = z.object({
   modelStats: z.array(UsageBucketStat.extend({ model: z.string() })),
   filters: z.object({
     range: UsageRange,
+    heatmap_granularity: UsageHeatmapGranularity,
     provider: z.string().nullable(),
     model: z.string().nullable(),
     project: z.string().nullable(),
@@ -181,6 +198,23 @@ function bucketTime(time: number, range: z.infer<typeof UsageRange>) {
   return date.getTime()
 }
 
+function heatmapBucketTime(time: number, granularity: z.infer<typeof UsageHeatmapGranularity>) {
+  const date = new Date(time)
+  if (granularity === "month") {
+    date.setHours(0, 0, 0, 0)
+    return date.getTime()
+  }
+  if (granularity === "week") date.setHours(Math.floor(date.getHours() / 3) * 3, 0, 0, 0)
+  if (granularity === "day") date.setMinutes(0, 0, 0)
+  return date.getTime()
+}
+
+function heatmapStart(granularity: z.infer<typeof UsageHeatmapGranularity>, now: number) {
+  if (granularity === "month") return startOfDay(now) - (12 * 7 - 1) * DAY
+  if (granularity === "week") return startOfDay(now) - (2 * 7 - 1) * DAY
+  return startOfDay(now) - 4 * DAY
+}
+
 function usageStatus(data: unknown): z.infer<typeof UsageStatus> {
   const status = jsonString(data, ["status"])
   if (status === "error" || status === "aborted") return status
@@ -223,7 +257,10 @@ function groupByKey<T>(
 }
 
 function usageConditions(query: z.infer<typeof UsageQuery>, start: number | undefined, cursor?: number) {
-  const conditions: SQL[] = [sql`json_extract(${PartTable.data}, '$.type') = 'step-finish'`]
+  const conditions: SQL[] = [
+    sql`json_extract(${PartTable.data}, '$.type') = 'step-finish'`,
+    userVisibleActorClause(MessageTable.agent_id),
+  ]
   if (start != null) conditions.push(gte(PartTable.time_created, start))
   if (cursor != null) conditions.push(lt(PartTable.time_created, cursor))
   if (query.provider) conditions.push(sql`json_extract(${MessageTable.data}, '$.providerID') = ${query.provider}`)
@@ -428,14 +465,202 @@ function summarize(logs: UsageLog[]) {
   }
 }
 
+type UsageFactRow = {
+  id: string
+  projectID: string
+  projectName: string | null
+  projectDirectory: string
+  sessionID: string
+  sessionParentID: string | null
+  time: number
+  sessionTitle: string
+  directory: string
+  agentID: string
+  provider: string
+  model: string
+  status: string
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  overheadTokens: number
+  overheadCost: number
+  totalCost: number
+  duration: number | null
+  ttft: number | null
+  submitToFirstDelta: number | null
+  preStream: number | null
+}
+
+function toFactLog(row: UsageFactRow) {
+  const totalTokens = row.input + row.output + row.reasoning + row.cacheRead + row.cacheWrite + row.overheadTokens
+  return {
+    id: row.id,
+    projectID: row.projectID,
+    projectName: projectLabel(row.projectName, row.projectDirectory, row.directory),
+    projectDirectory: row.projectDirectory,
+    sessionID: row.sessionID,
+    sessionParentID: row.sessionParentID,
+    sessionTitle: row.sessionTitle,
+    directory: row.directory,
+    agentID: row.agentID,
+    agentKind: usageAgentKind({ agentID: row.agentID, sessionParentID: row.sessionParentID }),
+    time: row.time,
+    provider: row.provider,
+    model: row.model,
+    input: row.input,
+    output: row.output,
+    reasoning: row.reasoning,
+    cacheRead: row.cacheRead,
+    cacheWrite: row.cacheWrite,
+    overheadTokens: row.overheadTokens,
+    overheadCost: row.overheadCost,
+    totalTokens,
+    cost: row.totalCost,
+    duration: row.duration,
+    ttft: row.ttft,
+    submitToFirstDelta: row.submitToFirstDelta,
+    preStream: row.preStream,
+    status: row.status === "error" || row.status === "aborted" ? row.status : "completed",
+    source: "lfcode",
+  } satisfies UsageLog
+}
+
+function factRows(query: z.infer<typeof UsageQuery>, start: number | undefined, cursor?: number, limit?: number) {
+  const where = ["m.agent_id <> 'context-reviewer'", "m.agent_id NOT LIKE 'context-reviewer-%'"]
+  const params: (string | number)[] = []
+  const add = (condition: string, value?: string | number) => {
+    where.push(condition)
+    if (value !== undefined) params.push(value)
+  }
+  if (start != null) add("f.time_created >= ?", start)
+  if (cursor != null) add("f.time_created < ?", cursor)
+  if (query.provider) add("f.provider_id = ?", query.provider)
+  if (query.model) add("f.model_id = ?", query.model)
+  if (query.project) add("s.project_id = ?", query.project)
+  if (query.session) add("s.id = ?", query.session)
+  if (query.status) add("f.status = ?", query.status)
+  if (query.agent_kind === "main") where.push("m.agent_id = 'main' AND s.parent_id IS NULL")
+  if (query.agent_kind === "subagent") where.push("(m.agent_id <> 'main' OR s.parent_id IS NOT NULL)")
+  if (query.search) {
+    const value = `%${query.search}%`
+    where.push("(s.title LIKE ? OR s.directory LIKE ? OR p.name LIKE ? OR p.worktree LIKE ? OR s.id LIKE ? OR f.provider_id LIKE ? OR f.model_id LIKE ?)")
+    params.push(value, value, value, value, value, value, value)
+  }
+  return Database.rawAll<UsageFactRow>(
+    `SELECT f.part_id AS id, s.project_id AS projectID, p.name AS projectName, p.worktree AS projectDirectory,
+      f.session_id AS sessionID, s.parent_id AS sessionParentID, f.time_created AS time, s.title AS sessionTitle,
+      s.directory, m.agent_id AS agentID, f.provider_id AS provider, f.model_id AS model, f.status,
+      f.input_tokens AS input, f.output_tokens AS output, f.reasoning_tokens AS reasoning,
+      f.cache_read_tokens AS cacheRead, f.cache_write_tokens AS cacheWrite, f.overhead_tokens AS overheadTokens,
+      f.overhead_cost AS overheadCost, f.cost + f.overhead_cost AS totalCost, f.duration, f.ttft,
+      f.submit_to_first_delta AS submitToFirstDelta, f.pre_stream AS preStream
+      FROM usage_fact f JOIN message m ON m.id = f.message_id JOIN session s ON s.id = f.session_id
+      JOIN project p ON p.id = s.project_id WHERE ${where.join(" AND ")}
+      ORDER BY f.time_created DESC, f.part_id DESC${limit == null ? "" : ` LIMIT ${Math.max(1, Math.floor(limit))}`}`,
+    ...params,
+  )
+}
+
+let backfillPromise: Promise<void> | undefined
+
+function hasUsageFactSchema() {
+  try {
+    return Database.rawAll<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'usage_fact_backfill'").length > 0
+  } catch {
+    return false
+  }
+}
+
+function writeUsageFact(
+  db: Database.TxOrDb,
+  row: { id: string; messageID: string; sessionID: string; projectID: string },
+  log: UsageLog,
+) {
+  db.run(sql`INSERT INTO usage_fact (part_id,message_id,session_id,project_id,time_created,agent_id,provider_id,model_id,status,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,overhead_tokens,cost,overhead_cost,duration,ttft,submit_to_first_delta,pre_stream)
+    VALUES (${row.id},${row.messageID},${row.sessionID},${row.projectID},${log.time},${log.agentID},${log.provider},${log.model},${log.status},${log.input},${log.output},${log.reasoning},${log.cacheRead},${log.cacheWrite},${log.overheadTokens},${log.cost - log.overheadCost},${log.overheadCost},${log.duration},${log.ttft},${log.submitToFirstDelta},${log.preStream})
+    ON CONFLICT(part_id) DO UPDATE SET message_id=excluded.message_id,session_id=excluded.session_id,project_id=excluded.project_id,time_created=excluded.time_created,agent_id=excluded.agent_id,provider_id=excluded.provider_id,model_id=excluded.model_id,status=excluded.status,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,reasoning_tokens=excluded.reasoning_tokens,cache_read_tokens=excluded.cache_read_tokens,cache_write_tokens=excluded.cache_write_tokens,overhead_tokens=excluded.overhead_tokens,cost=excluded.cost,overhead_cost=excluded.overhead_cost,duration=excluded.duration,ttft=excluded.ttft,submit_to_first_delta=excluded.submit_to_first_delta,pre_stream=excluded.pre_stream`)
+}
+
+function startUsageBackfill() {
+  if (!hasUsageFactSchema()) return
+  if (backfillPromise) return
+  backfillPromise = Promise.resolve().then(async () => {
+    while (true) {
+      const state = Database.rawAll<{ completed: number; cursor_time: number | null; cursor_part_id: string | null }>(
+        "SELECT completed, cursor_time, cursor_part_id FROM usage_fact_backfill WHERE id = 1",
+      )[0]
+      if (!state || state.completed) return
+      const rows = Database.rawAll<{
+        id: string
+        messageID: string
+        sessionID: string
+        projectID: string
+        time: number
+        agentID: string
+        messageData: string
+        partData: string
+      }>(
+        `SELECT p.id, p.message_id AS messageID, p.session_id AS sessionID, s.project_id AS projectID,
+          p.time_created AS time, m.agent_id AS agentID, m.data AS messageData, p.data AS partData
+          FROM part p JOIN message m ON m.id = p.message_id JOIN session s ON s.id = p.session_id
+          WHERE json_extract(p.data, '$.type') = 'step-finish'
+            AND (p.time_created > ? OR (p.time_created = ? AND p.id > ?))
+          ORDER BY p.time_created ASC, p.id ASC LIMIT 500`,
+        state.cursor_time ?? 0,
+        state.cursor_time ?? 0,
+        state.cursor_part_id ?? "",
+      )
+      if (rows.length === 0) {
+        Database.Client().$client.prepare("UPDATE usage_fact_backfill SET completed = 1, updated_at = ? WHERE id = 1").run(Date.now())
+        return
+      }
+      Database.transaction((db) => {
+        for (const row of rows) {
+          const log = toUsageLog({
+            id: row.id,
+            projectID: row.projectID,
+            projectName: null,
+            projectDirectory: "",
+            sessionID: row.sessionID,
+            sessionParentID: null,
+            time: row.time,
+            sessionTitle: "",
+            directory: "",
+            agentID: row.agentID,
+            messageData: JSON.parse(row.messageData),
+            partData: JSON.parse(row.partData),
+          })
+          writeUsageFact(db, row, log)
+        }
+        const last = rows.at(-1)!
+        db.run(sql`UPDATE usage_fact_backfill SET cursor_time = ${last.time}, cursor_part_id = ${last.id}, updated_at = ${Date.now()} WHERE id = 1`)
+      })
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    }
+  }).finally(() => {
+    backfillPromise = undefined
+  })
+}
+
 export function getUsage(input: z.input<typeof UsageQuery>) {
   const query = UsageQuery.parse(input)
   const range = query.range ?? "all"
+  const heatmapGranularity = query.heatmap_granularity ?? "month"
   const limit = query.limit ?? 100
   const start = rangeStart(range, Date.now())
-  const allLogs = selectUsageRows(usageConditions(query, start)).map(toUsageLog)
-  const rows = selectUsageRows(usageConditions(query, start, query.cursor), limit + 1)
-  const logs = rows.slice(0, limit).map(toUsageLog)
+  const factSchema = hasUsageFactSchema()
+  if (factSchema) startUsageBackfill()
+  const completed = factSchema && Database.rawAll<{ completed: number }>("SELECT completed FROM usage_fact_backfill WHERE id = 1")[0]?.completed === 1
+  const allLogs: UsageLog[] = completed
+    ? factRows(query, start).map((row) => toFactLog(row))
+    : selectUsageRows(usageConditions(query, start)).map((row) => toUsageLog(row))
+  const factPage = completed ? factRows(query, start, query.cursor, limit + 1) : undefined
+  const legacyPage = completed ? undefined : selectUsageRows(usageConditions(query, start, query.cursor), limit + 1)
+  const logs: UsageLog[] = completed
+    ? factPage!.slice(0, limit).map((row) => toFactLog(row))
+    : legacyPage!.slice(0, limit).map((row) => toUsageLog(row))
   const summary = summarize(allLogs)
 
   const trendMap = new Map<number, z.infer<typeof UsageTrendPoint>>()
@@ -458,12 +683,31 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
   }
   const trend = [...trendMap.values()].sort((a, b) => a.time - b.time)
 
+  const heatmapMap = new Map<number, z.infer<typeof UsageHeatmapPoint>>()
+  const heatmapSince = heatmapStart(heatmapGranularity, Date.now())
+  for (const row of allLogs) {
+    if (row.time < heatmapSince) continue
+    const time = heatmapBucketTime(row.time, heatmapGranularity)
+    const current = heatmapMap.get(time) ?? { time, totalTokens: 0 }
+    current.totalTokens += row.totalTokens
+    heatmapMap.set(time, current)
+  }
+  const heatmap = [...heatmapMap.values()].sort((a, b) => a.time - b.time)
+  const dailyUsage = new Map<number, number>()
+  for (const row of allLogs) {
+    const day = startOfDay(row.time)
+    dailyUsage.set(day, (dailyUsage.get(day) ?? 0) + row.totalTokens)
+  }
+
+  const projectMeta = new Map(allLogs.map((row) => [row.projectID, row] as const))
+  const sessionMeta = new Map(allLogs.map((row) => [row.sessionID, row] as const))
+
   const projectStats = groupByKey(
     allLogs,
     (row) => row.projectID,
     (row) => ({ tokens: row.totalTokens, cost: row.cost }),
   ).map((item) => {
-    const match = allLogs.find((row) => row.projectID === item.key)
+    const match = projectMeta.get(item.key)
     return {
       projectID: item.key,
       projectName: match?.projectName ?? "Unknown project",
@@ -480,7 +724,7 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
     (row) => row.sessionID,
     (row) => ({ tokens: row.totalTokens, cost: row.cost }),
   ).map((item) => {
-    const match = allLogs.find((row) => row.sessionID === item.key)
+    const match = sessionMeta.get(item.key)
     return {
       sessionID: item.key,
       sessionTitle: match?.sessionTitle ?? "",
@@ -524,6 +768,12 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
   return UsageResponse.parse({
     summary,
     trend,
+    heatmap,
+    heatmapSummary: {
+      totalTokens: summary.totalTokens,
+      peakDailyTokens: Math.max(0, ...dailyUsage.values()),
+      activeDays: dailyUsage.size,
+    },
     logs,
     projectStats,
     sessionStats,
@@ -531,6 +781,7 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
     modelStats,
     filters: {
       range,
+      heatmap_granularity: heatmapGranularity,
       provider: query.provider ?? null,
       model: query.model ?? null,
       project: query.project ?? null,
@@ -541,7 +792,9 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
       limit,
       cursor: query.cursor ?? null,
     },
-    nextCursor: rows.length > limit ? rows[limit]?.time ?? null : null,
+    nextCursor: (completed ? factPage?.length : legacyPage?.length)! > limit
+      ? (completed ? factPage?.[limit]?.time : legacyPage?.[limit]?.time) ?? null
+      : null,
   })
 }
 

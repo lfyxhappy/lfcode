@@ -10,19 +10,54 @@ export type PersonalizationMaintenanceDraft = {
   distillEnabled: boolean
 }
 
-export type PersonalizationDraft = {
-  customInstructions: string
-  memory: PersonalizationMemoryDraft
-  maintenance: PersonalizationMaintenanceDraft
+export type PersonalizationContextReviewDraft = {
+  enabled: boolean
 }
 
-export type PersonalizationState = PersonalizationDraft & {
+export type PersonalizationTone = "friendly" | "professional"
+
+export type PersonalizationDraft = {
+  customInstructions: string
+  tone: PersonalizationTone
+  memory: PersonalizationMemoryDraft
+  maintenance: PersonalizationMaintenanceDraft
+  contextReview: PersonalizationContextReviewDraft
+}
+
+export type PersonalizationState = Omit<PersonalizationDraft, "tone"> & {
   instructionFile: string
+}
+
+const toneBlock = /<!-- lfcode:personalization-tone:(friendly|professional) -->[\s\S]*?<!-- lfcode:personalization-tone:end -->\s*/m
+
+const tonePrompt: Record<PersonalizationTone, string> = {
+  friendly: "Use a warm, approachable, and collaborative tone while staying clear and actionable.",
+  professional: "Use a professional, precise, and concise tone with direct, actionable guidance.",
+}
+
+export function extractPersonalizationTone(input: string): PersonalizationTone {
+  if (input.match(toneBlock)?.[1] === "professional") return "professional"
+  return "friendly"
+}
+
+export function stripPersonalizationTone(input: string) {
+  return input.replace(toneBlock, "").trim()
+}
+
+export function serializePersonalizationInstructions(input: string, tone: PersonalizationTone) {
+  const body = stripPersonalizationTone(input)
+  const block = [
+    `<!-- lfcode:personalization-tone:${tone} -->`,
+    tonePrompt[tone],
+    "<!-- lfcode:personalization-tone:end -->",
+  ].join("\n")
+  return body ? `${block}\n\n${body}` : block
 }
 
 export function createPersonalizationDraft(input: PersonalizationState): PersonalizationDraft {
   return {
-    customInstructions: input.customInstructions,
+    customInstructions: stripPersonalizationTone(input.customInstructions),
+    tone: extractPersonalizationTone(input.customInstructions),
     memory: {
       ccIndex: input.memory.ccIndex,
       autoConsolidation: input.memory.autoConsolidation,
@@ -33,6 +68,9 @@ export function createPersonalizationDraft(input: PersonalizationState): Persona
       dreamEnabled: input.maintenance.dreamEnabled,
       distillEnabled: input.maintenance.distillEnabled,
     },
+    contextReview: {
+      enabled: input.contextReview.enabled,
+    },
   }
 }
 
@@ -40,12 +78,14 @@ export function personalizationDirty(saved: PersonalizationDraft | undefined, dr
   if (!saved) return false
   return (
     saved.customInstructions !== draft.customInstructions ||
+    saved.tone !== draft.tone ||
     saved.memory.ccIndex !== draft.memory.ccIndex ||
     saved.memory.autoConsolidation !== draft.memory.autoConsolidation ||
     saved.maintenance.enabled !== draft.maintenance.enabled ||
     saved.maintenance.schedulerEnabled !== draft.maintenance.schedulerEnabled ||
     saved.maintenance.dreamEnabled !== draft.maintenance.dreamEnabled ||
-    saved.maintenance.distillEnabled !== draft.maintenance.distillEnabled
+    saved.maintenance.distillEnabled !== draft.maintenance.distillEnabled ||
+    saved.contextReview.enabled !== draft.contextReview.enabled
   )
 }
 

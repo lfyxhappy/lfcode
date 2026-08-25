@@ -99,7 +99,7 @@ export function SettingsAgentOS() {
 
   return (
     <SettingsPageShell title="Agent OS">
-      <div class="flex flex-wrap items-start justify-between gap-4 rounded-[20px] bg-surface-base p-4">
+      <div class="flex flex-wrap items-start justify-between gap-4 rounded-lg bg-surface-base p-4">
         <div>
           <div class="text-14-medium text-text-strong">统一能力与分级自治</div>
           <p class="mt-1 text-12-regular text-text-weak">
@@ -122,7 +122,7 @@ export function SettingsAgentOS() {
         {(value) => (
           <>
             <SettingsSection title={`能力目录（${value().capabilities.length}）`} description="工具、Skill、插件、MCP 与受管运行时均以统一能力形式登记。">
-              <div class="overflow-hidden rounded-[18px] bg-surface-base">
+              <div class="overflow-hidden rounded-lg bg-surface-base">
                 <For each={value().capabilities} fallback={<div class="px-4 py-5 text-13-regular text-text-weak">暂无已发现能力。</div>}>
                   {(capability) => (
                     <div class="border-b border-border-weak-base px-4 py-3 last:border-none">
@@ -144,7 +144,7 @@ export function SettingsAgentOS() {
             </SettingsSection>
 
             <SettingsSection title="授权范围" description="Grant 可以限制自动化能力的有效期和预算；撤销后下一次策略判断立即拒绝。">
-              <div class="overflow-hidden rounded-[18px] bg-surface-base">
+              <div class="overflow-hidden rounded-lg bg-surface-base">
                 <For each={value().grants} fallback={<div class="px-4 py-5 text-13-regular text-text-weak">尚未设置额外授权范围。</div>}>
                   {(grant) => (
                     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border-weak-base px-4 py-3 last:border-none">
@@ -162,7 +162,7 @@ export function SettingsAgentOS() {
             </SettingsSection>
 
             <SettingsSection title="最近审计" description="审计内容会脱敏处理，不保存 API Key、Token、Cookie 或凭据原文。">
-              <div class="overflow-hidden rounded-[18px] bg-surface-base">
+              <div class="overflow-hidden rounded-lg bg-surface-base">
                 <For each={value().audit} fallback={<div class="px-4 py-5 text-13-regular text-text-weak">尚无能力操作记录。</div>}>
                   {(audit) => (
                     <div class="border-b border-border-weak-base px-4 py-3 last:border-none">

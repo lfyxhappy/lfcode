@@ -17,6 +17,7 @@ type PromptRequestPart = (TextPartInput | FilePartInput | AgentPartInput) & { id
 
 type SelectedTextMetadata = {
   text: string
+  comment?: string
   messageID?: string
   selection?: FileSelection
   start: number
@@ -175,6 +176,7 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
     .map(
       (attachment): SelectedTextMetadata => ({
         text: attachment.text,
+        comment: attachment.comment?.trim() || undefined,
         messageID: attachment.messageID,
         selection: attachment.selection,
         start: attachment.start,

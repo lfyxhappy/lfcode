@@ -1,15 +1,19 @@
 import path from "path"
 import { pathToFileURL } from "url"
+import { Buffer } from "buffer"
 import z from "zod"
 import { Effect } from "effect"
 import * as Stream from "effect/Stream"
 import { Ripgrep } from "../file/ripgrep"
 import { Skill } from "../skill"
+import { Permission } from "../permission"
 import * as Tool from "./tool"
 import DESCRIPTION from "./skill.txt"
 
 const Parameters = z.object({
-  name: z.string().describe("Exact skill name to load, or keywords to search installed skills"),
+  name: z
+    .string()
+    .describe("Exact skill name to load, keywords to search installed skills, or `可用技能` to list them. Never use search_tool for Skills."),
 })
 
 type SkillMetadata =
@@ -39,11 +43,18 @@ export const SkillTool = Tool.define(
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
-          const available = yield* skill.available()
+          // The request runner supplies the exact merged ruleset used by
+          // ctx.ask(). Do not list/search a Skill which an exact load would be
+          // denied by session or temporary permission overrides.
+          const effectivePermission = ctx.extra?.skillPermission
+          const available = yield* skill.available(
+            undefined,
+            Array.isArray(effectivePermission) ? (effectivePermission as Permission.Ruleset) : undefined,
+          )
           if (shouldListAvailableSkills(params.name)) {
             return {
               title: "Available skills",
-              output: Skill.fmt(available, { verbose: true }),
+              output: Skill.fmt(available, { verbose: false, max: 60, descriptionLimit: 180 }),
               metadata: {
                 query: params.name,
                 count: available.length,
@@ -53,7 +64,7 @@ export const SkillTool = Tool.define(
           }
 
           const name = params.name.trim()
-          const info = yield* skill.get(name)
+          const info = available.find((item) => item.name === name)
           if (!info) {
             const matches = findMatches(available, name)
             if (matches.length === 0) {
@@ -63,11 +74,14 @@ export const SkillTool = Tool.define(
               title: `Skill search: ${name}`,
               output: [
                 `<skill_search_results>`,
-                `Query: ${name}`,
-                "",
-                ...matches.map((item) => `- ${item.name}: ${item.description}`),
-                "",
-                "Call the skill tool again with one of the exact names above to load its full instructions.",
+                `  <query>${Skill.escapeXmlText(name)}</query>`,
+                ...matches.flatMap((item) => [
+                  "  <skill>",
+                  `    <name>${Skill.escapeXmlText(item.name)}</name>`,
+                  `    <description>${Skill.escapeXmlText(item.description)}</description>`,
+                  "  </skill>",
+                ]),
+                "  <next_step>Call the skill tool again with one exact name above to load its full instructions.</next_step>",
                 "</skill_search_results>",
               ].join("\n"),
               metadata: {
@@ -76,6 +90,14 @@ export const SkillTool = Tool.define(
                 mode: "search" as const,
               },
             }
+          }
+
+          const bodyBytes = Buffer.byteLength(info.content, "utf8")
+          if (bodyBytes > Skill.MAX_BODY_BYTES) {
+            throw new Error(
+              `Skill \"${info.name}\" is ${bodyBytes} bytes, above the ${Skill.MAX_BODY_BYTES}-byte load limit. ` +
+                "Keep the core workflow in SKILL.md and move detailed material into references that the Skill can load on demand.",
+            )
           }
 
           yield* ctx.ask({
@@ -93,18 +115,18 @@ export const SkillTool = Tool.define(
             Stream.map((file) => path.resolve(dir, file)),
             Stream.take(limit),
             Stream.runCollect,
-            Effect.map((chunk) => [...chunk].map((file) => `<file>${file}</file>`).join("\n")),
+            Effect.map((chunk) => [...chunk].map((file) => `<file>${Skill.escapeXmlText(file)}</file>`).join("\n")),
           )
 
           return {
             title: `Loaded skill: ${info.name}`,
             output: [
-              `<skill_content name="${info.name}">`,
-              `# Skill: ${info.name}`,
+              `<skill_content name="${Skill.escapeXmlAttribute(info.name)}">`,
+              `<skill_name>${Skill.escapeXmlText(info.name)}</skill_name>`,
               "",
               info.content.trim(),
               "",
-              `Base directory for this skill: ${base}`,
+              `<base_directory>${Skill.escapeXmlText(base)}</base_directory>`,
               "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
               "Note: file list is sampled.",
               "",

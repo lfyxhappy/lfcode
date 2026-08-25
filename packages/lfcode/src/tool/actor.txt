@@ -3,7 +3,7 @@ Launch a new actor (subagent) to handle complex, multi-step tasks autonomously.
 JSON calls wrap the action payload inside an `operation` object; `action` is the discriminator field.
 
 Examples:
-{"operation":{"action":"run","subagent_type":"explore","description":"Find error recovery","prompt":"<full task>"}}
+{"operation":{"action":"run","subagent_type":"explore","description":"Find error recovery","identity":"Researcher","purpose":"Find error recovery","prompt":"<full task>"}}
 {"operation":{"action":"run","subagent_type":"explore","description":"Investigate T4","prompt":"<full task>","task_id":"T4"}}
 {"operation":{"action":"spawn","subagent_type":"general","description":"Long-running search","prompt":"<full task>"}}
 {"operation":{"action":"status","actor_id":"<existing>"}}
@@ -13,12 +13,14 @@ Examples:
 
 ## Operations (the `operation.action` field selects one)
 
-- run:    spawn a subagent and BLOCK until completion; result returned inline.
+- run:    spawn a NEW subagent and BLOCK until completion; result returned inline.
           required: subagent_type, description, prompt
-          optional: actor_id, timeout_ms, command, context
-- spawn:  spawn a subagent and return actor_id IMMEDIATELY (background).
+          recommended: identity, purpose (displayed as identity：purpose)
+          optional: actor_id, timeout_ms, command, context, context_refs, declared_files
+- spawn:  spawn a NEW subagent and return actor_id IMMEDIATELY (background).
           required: subagent_type, description, prompt
-          optional: actor_id, command, context
+          recommended: identity, purpose (displayed as identity：purpose)
+          optional: actor_id, command, context, context_refs, declared_files
 - status: poll actor state without blocking. required: actor_id.
           Returns: { status: "pending"|"running"|"idle"|"unknown", actor_id, turnCount, ... }
 - wait:   block until actor completes (success/failure/cancelled) or timeout (default 10 min).
@@ -50,13 +52,26 @@ You are the subagent's only briefing — it hasn't seen this conversation.
 
 ## Context inheritance
 
-- `context="full"`: subagent sees your full conversation history (for state writers, evaluators).
 - `context="state"`: subagent gets checkpoint summaries injected (background knowledge, no full detail).
 - `context="none"` (default): clean context, only the prompt.
+- `context="full"` is reserved for internal frozen-fork actors and is not available through this tool. For ordinary delegation, use `state` plus explicit `context_refs`.
+- `context_refs`: up to 128 parent-supplied file, URL, task, or evidence pointers. They are injected as a bounded scope package and retained on background dispatches.
+- `declared_files`: up to 128 files the child is expected to inspect or modify. They help scope work and conflict reporting; colliding durable write tasks are serialized while independent or read-only work can still run. They do not grant write permission.
+
+`action="status"` and `action="wait"` return the actor's context mode. For durable background work they also return dispatch ID/status, queue position, context references, declared/actual files, write access, conflicts, unread state, recovery requirement, attempt, and lifecycle timestamps.
 
 ## Actor ID vs Task ID
 
 `actor_id` identifies a subagent session (resumable across turns). Task IDs (T1, T2, ...) come from the `task` tool — only pass a `task_id` you got from a `task` tool call this session. If the `task_id` is malformed or unknown, the binding is dropped: the subagent's findings won't be captured to any task, and the tool result tells you so.
+
+## Follow up an existing subagent
+
+- For a follow-up, clarification, or extra request to an existing subagent, use `send` with its exact `to_actor_id`. Do NOT use `run` or `spawn` without `actor_id`: those create a new independent actor.
+- `run` or `spawn` with `actor_id` is treated as a follow-up delivery to that actor; it does not create another actor and waits for this follow-up turn to finish before returning its result. Use `send` directly only for fire-and-forget coordination.
+- Clear phrases such as “追问”, “第一轮后补充”, and “follow-up” also reuse the most recent same-type subagent in this session. This is a safety net, not a replacement for the actor ID.
+
+Example follow-up:
+{"operation":{"action":"send","to_actor_id":"explore-1","content":"请补充重启后子 agent 视图恢复涉及的文件，并给出文件行号。"}}
 
 ## Binding a subagent to a task
 
@@ -75,11 +90,11 @@ postStop check then becomes a no-op.
 
 ## Usage notes
 
-- **Resume the same subagent**: pass `actor_id` to `run`/`spawn` and the call resumes that subagent's session (continues with its prior messages and tool outputs). Without `actor_id`, a fresh subagent is created.
+- **Resume the same subagent**: use `run` or `spawn` with its `actor_id` when the parent needs the follow-up result in the current conversation. The child sees it as a normal user message; the parent waits for that turn and then continues with the result. Use `send` only for fire-and-forget coordination. Without `actor_id`, `run`/`spawn` create a fresh actor.
 - **`run` vs `spawn` result delivery**: `run` blocks and returns the result inline. `spawn` returns the actor_id immediately; when the background actor finishes, its result appears as a notification in this conversation — your turn does NOT auto-wake to process it; you'll see it the next time you respond to the user. Use `wait` to block on the actor_id explicitly.
 - **`wait` on persistent peers caveat**: `wait` is designed for ephemeral subagents you spawned via `run`/`spawn`. Persistent peers idle between turns and never produce a "done" outcome on success — `wait` on a peer will block until that peer fails or is cancelled. Use `send` + `status` to coordinate with peers instead.
 - **`send` semantics**: fire-and-forget; returns within ~5 ms regardless of receiver load. The receiver picks the message up at the head of its next runLoop iteration. On unknown `to_actor_id`, `send` returns `{inboxID: null, error: "receiver not found"}` rather than throwing — handle the error path.
-- Trust the subagent's outputs generally, but the subagent doesn't see your full context (unless you pass `context="full"`); brief it accordingly.
+- Trust the subagent's outputs generally, but the subagent doesn't see your full context; brief it with `state` and `context_refs` when it needs parent evidence.
 
 
 ## Examples

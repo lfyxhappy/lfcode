@@ -160,8 +160,8 @@ function tmpConfig(providerID: string, baseURL: string) {
   })
 }
 
-describe("session.llm system prompt — memory-instructions guard", () => {
-  test("main agent (no agentID) — '# Memory system' IS appended", async () => {
+describe("session.llm system prompt — saved-context policy", () => {
+  test("main agent receives the opt-in saved-context policy", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -214,12 +214,15 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const messages = capture.body.messages as Array<{ role: string; content: string }>
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
-        expect(allSys).toContain("# Memory system")
+        expect(allSys).toContain("# Saved context")
+        expect(allSys).toContain("The memory tool is opt-in.")
+        expect(allSys).toContain("unless the current user explicitly asks")
+        expect(allSys).not.toContain("Active recall protocol")
       },
     })
   })
 
-  test("system-spawned actor — '# Memory system' is NOT appended", async () => {
+  test("system-spawned actor does not receive main-session saved-context policy", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -299,12 +302,12 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const messages = capture.body.messages as Array<{ role: string; content: string }>
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
-        expect(allSys).not.toContain("# Memory system")
+        expect(allSys).not.toContain("# Saved context")
       },
     })
   })
 
-  test("main agent (no agentID) — Active recall protocol IS in system prompt (F4a)", async () => {
+  test("main agent system prompt does not prescribe automatic memory recovery", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -357,14 +360,15 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const messages = capture.body.messages as Array<{ role: string; content: string }>
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
-        expect(allSys).toContain("Active recall protocol")
-        expect(allSys).toContain("targeted `read(offset)`")
-        expect(allSys).toContain("do not Read them again as whole files")
+        expect(allSys).toContain("The memory tool is opt-in.")
+        expect(allSys).not.toContain("Active recall protocol")
+        expect(allSys).not.toContain("targeted `read(offset)`")
+        expect(allSys).not.toContain("do not Read them again as whole files")
       },
     })
   })
 
-  test("buildMemoryInstructions keeps compact ownership rules (F22)", async () => {
+  test("saved-context policy stays limited to explicit user requests", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -418,18 +422,15 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
 
-        expect(allSys).toContain("Active recall protocol")
-        expect(allSys).toContain("only scratchpad")
-        expect(allSys).toContain("MEMORY.md")
-        expect(allSys).toContain("Do not create other ad-hoc memory files")
-        expect(allSys).toContain("higher-priority instruction explicitly requires it")
-        expect(allSys).toContain("relevant topic memory")
+        expect(allSys).toContain("Do not use memory to start, resume, plan, debug, or verify ordinary work")
+        expect(allSys).not.toContain("MEMORY.md")
+        expect(allSys).not.toContain("relevant topic memory")
         expect(allSys).not.toContain("Subagent return format")
       },
     })
   })
 
-  test("memory instructions degrade when memory is not initialized", async () => {
+  test("saved-context policy does not describe memory initialization state", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -481,13 +482,14 @@ describe("session.llm system prompt — memory-instructions guard", () => {
         const messages = capture.body.messages as Array<{ role: string; content: string }>
         const sysMsgs = messages.filter((m) => m.role === "system")
         const allSys = sysMsgs.map((m) => m.content).join("\n")
-        expect(allSys).toContain("Memory is currently not initialized as a reliable searchable corpus")
+        expect(allSys).toContain("The memory tool is opt-in.")
+        expect(allSys).not.toContain("Memory is currently not initialized as a reliable searchable corpus")
         expect(allSys).not.toContain("You have a persistent file-based memory system")
       },
     })
   })
 
-  test("main agent memory instructions use absolute memory paths", async () => {
+  test("saved-context policy does not inject archive paths", async () => {
     const server = queueState.server!
     const providerID = "alibaba"
     const modelID = "qwen-plus"
@@ -541,11 +543,8 @@ describe("session.llm system prompt — memory-instructions guard", () => {
           .filter((m) => m.role === "system")
           .map((m) => m.content)
           .join("\n")
-        expect(allSys).toContain(path.join(Global.Path.data, "memory", "projects", Instance.current.project.id, "MEMORY.md"))
-        expect(allSys).toContain(path.join(Global.Path.data, "memory", "sessions", sessionID, "checkpoint.md"))
-        expect(allSys).toContain(path.join(Global.Path.data, "memory", "sessions", sessionID, "notes.md"))
-        expect(allSys).toContain("Global memory")
-        expect(allSys).toContain(path.join(Global.Path.data, "memory", "global", "MEMORY.md"))
+        expect(allSys).toContain("The memory tool is opt-in.")
+        expect(allSys).not.toContain(path.join(Global.Path.data, "memory"))
         expect(allSys).not.toContain("<data>/memory/projects")
         expect(allSys).not.toContain("<data>/memory/sessions")
       },

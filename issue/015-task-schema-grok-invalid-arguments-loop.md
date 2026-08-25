@@ -105,3 +105,4 @@
 - 同 Session 其他工具：`question` 4 次 completed、`read` 3 次 completed、`search` 2 次 completed、`shell` 2 次 completed，另有 `skill`、`tree`、`compose_enter` 成功记录。
 - 调查只读取 SQLite、当前源码、已安装 `app.asar` 和脱敏后的 provider 配置；未修改 Session 数据或业务代码。
 - 2026-07-14 修复验证：实际 `TaskTool` 转换后的 `operation` 无 `anyOf/oneOf`，`required=["action"]`，action enum 包含 create/done；TaskTool 18/18、重复失败 helper 4/4、schema 定向 11/11 通过，`packages/lfcode` 与根 typecheck 通过。
+- 2026-07-24 回归修复：`repeatedToolValidationFailure` 现在以当前真实用户消息为边界，历史轮次的三次失败不会拦截新消息；补充跨用户轮次回归测试，避免出现新消息落库但没有新的模型调用。

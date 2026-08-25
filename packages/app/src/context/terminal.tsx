@@ -435,7 +435,10 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       return entry.value
     }
 
-    const workspace = createMemo(() => loadWorkspace(params.dir!, params.id))
+    // Most sessions never open a terminal. Keep its persisted-state read and
+    // PTY event subscription out of the initial route work until a terminal
+    // command or panel actually needs the workspace state.
+    const workspace = () => loadWorkspace(params.dir!, params.id)
 
     createEffect(
       on(
@@ -444,7 +447,7 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
           if (!prev?.dir) return
           if (next.dir === prev.dir && next.id === prev.id) return
           if (next.dir === prev.dir && next.id) return
-          loadWorkspace(prev.dir, prev.id).trimAll()
+          cache.get(getWorkspaceTerminalCacheKey(prev.dir))?.value.trimAll()
         },
         { defer: true },
       ),

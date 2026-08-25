@@ -11,10 +11,15 @@ export const Path = {
   // HOME/USERPROFILE read directly because Bun caches os.homedir() at startup.
   // Tests set these env vars to isolate from the developer's real home.
   get home() {
-    return process.env.HOME || process.env.USERPROFILE || os.homedir()
+    return process.env.LFCODE_HOME || process.env.HOME || process.env.USERPROFILE || os.homedir()
+  },
+  // Profile roots are intentionally separate from the OS account root. External
+  // Skill imports must keep reading the account-level Codex/Claude/Agents folders.
+  get osHome() {
+    return process.env.LFCODE_OS_HOME || os.homedir()
   },
   data: paths.data,
-  bin: path.join(paths.cache, "bin"),
+  bin: path.join(paths.config, "plugins", "editor-tools", "data"),
   log: path.join(paths.data, "log"),
   cache: paths.cache,
   config: paths.config,

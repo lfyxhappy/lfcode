@@ -119,6 +119,7 @@ describe("buildRequestParts", () => {
       {
         type: "selected-text",
         text: "quoted selection",
+        comment: "Explain this part",
         content: "quoted selection",
         start: 0,
         end: 16,
@@ -143,6 +144,7 @@ describe("buildRequestParts", () => {
         lfcodeSelectedText: [
           {
             text: "quoted selection",
+            comment: "Explain this part",
             messageID: undefined,
           },
         ],

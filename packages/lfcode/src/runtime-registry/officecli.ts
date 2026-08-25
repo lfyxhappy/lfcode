@@ -1,7 +1,7 @@
 import { createHash } from "crypto"
 import fs from "fs/promises"
 import path from "path"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { Filesystem, Log, Process } from "@/util"
 import { which } from "@/util/which"
 import { getRuntimeActivationTarget } from "./config"
@@ -44,7 +44,7 @@ export type OfficeCliCommand = {
 }
 
 export function managedOfficeCliRoot() {
-  return path.join(Global.Path.data, "runtime", "officecli")
+  return PluginPath.data("runtime-officecli")
 }
 
 export function managedOfficeCliVersionsRoot() {
@@ -149,7 +149,7 @@ async function installOfficeCliRelease() {
     }
   }
 
-  const temporary = path.join(Global.Path.cache, "runtime", "officecli", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const temporary = path.join(managedOfficeCliRoot(), "cache", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
   const download = path.join(temporary, release.asset.name)
   const staging = path.join(temporary, "version")
   const target = path.join(managedOfficeCliVersionsRoot(), release.version)

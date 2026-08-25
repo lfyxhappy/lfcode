@@ -100,4 +100,27 @@ describe("tool.webfetch", () => {
       },
     )
   })
+
+  test("extracts visible text from HTML without Bun-only globals", async () => {
+    await withFetch(
+      () =>
+        new Response("<html><head><style>.hidden { display: none }</style><script>throw new Error('ignore')</script></head><body><h1>Hello</h1><p>Visible text</p><iframe>hidden frame</iframe></body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      async (url) => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            const result = await exec({ url: new URL("/page.html", url).toString(), format: "text" })
+            expect(result.output).toContain("Hello")
+            expect(result.output).toContain("Visible text")
+            expect(result.output).not.toContain("display: none")
+            expect(result.output).not.toContain("throw new Error")
+            expect(result.output).not.toContain("hidden frame")
+          },
+        })
+      },
+    )
+  })
 })

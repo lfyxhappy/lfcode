@@ -238,6 +238,7 @@ describe("Session", () => {
         expect(await fs.readFile(blobPath, "utf8")).toBe(url)
 
         await remove(info.id)
+        await expect(fs.access(blobPath)).rejects.toThrow()
       },
     })
   })

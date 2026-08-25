@@ -17,6 +17,8 @@ type ReviewDiff = SnapshotFileDiff | VcsFileDiff | LegacyDiff
 export type ViewDiff = {
   file: string
   patch: string
+  before: string
+  after: string
   additions: number
   deletions: number
   status?: "added" | "deleted" | "modified"
@@ -27,26 +29,8 @@ const cache = new Map<string, FileDiffMetadata>()
 
 function patch(diff: ReviewDiff) {
   if (typeof diff.patch === "string") {
-    const [patch] = parsePatch(diff.patch)
-
-    const beforeLines = []
-    const afterLines = []
-
-    for (const hunk of patch.hunks) {
-      for (const line of hunk.lines) {
-        if (line.startsWith("-")) {
-          beforeLines.push(line.slice(1))
-        } else if (line.startsWith("+")) {
-          afterLines.push(line.slice(1))
-        } else {
-          // context line (starts with ' ')
-          beforeLines.push(line.slice(1))
-          afterLines.push(line.slice(1))
-        }
-      }
-    }
-
-    return { before: beforeLines.join("\n"), after: afterLines.join("\n"), patch: diff.patch }
+    const content = patchContent(diff.patch)
+    return { ...content, patch: diff.patch }
   }
   return {
     before: "before" in diff && typeof diff.before === "string" ? diff.before : "",
@@ -65,6 +49,48 @@ function patch(diff: ReviewDiff) {
   }
 }
 
+function patchContent(value: string) {
+  try {
+    const parsed = parsePatch(value)[0]
+    if (parsed?.hunks.length) return hunkContent(parsed.hunks.flatMap((hunk) => hunk.lines), value)
+  } catch {
+    // Some persisted tool records contain incomplete unified-diff headers. Recover their hunk body below.
+  }
+
+  const lines = value.split(/\r?\n/)
+  const start = lines.findIndex((line) => line.startsWith("@@"))
+  if (start === -1) return { before: "", after: "" }
+  return hunkContent(lines.slice(start + 1), value)
+}
+
+function hunkContent(lines: string[], source: string) {
+  const before = [] as string[]
+  const after = [] as string[]
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) continue
+    if (line.startsWith("\\ No newline at end of file")) continue
+    if (line.startsWith("-")) {
+      before.push(line.slice(1))
+      continue
+    }
+    if (line.startsWith("+")) {
+      after.push(line.slice(1))
+      continue
+    }
+    if (line.startsWith(" ")) {
+      before.push(line.slice(1))
+      after.push(line.slice(1))
+    }
+  }
+
+  const trailingNewline = source.endsWith("\n") && !source.includes("\\ No newline at end of file") ? "\n" : ""
+  return {
+    before: before.length ? before.join("\n") + trailingNewline : "",
+    after: after.length ? after.join("\n") + trailingNewline : "",
+  }
+}
+
 function file(file: string, patch: string, before: string, after: string) {
   const hit = cache.get(patch)
   if (hit) return hit
@@ -79,6 +105,8 @@ export function normalize(diff: ReviewDiff): ViewDiff {
   return {
     file: diff.file,
     patch: next.patch,
+    before: next.before,
+    after: next.after,
     additions: diff.additions,
     deletions: diff.deletions,
     status: diff.status,
@@ -87,6 +115,6 @@ export function normalize(diff: ReviewDiff): ViewDiff {
 }
 
 export function text(diff: ViewDiff, side: "deletions" | "additions") {
-  if (side === "deletions") return diff.fileDiff.deletionLines.join("")
-  return diff.fileDiff.additionLines.join("")
+  if (side === "deletions") return diff.before
+  return diff.after
 }

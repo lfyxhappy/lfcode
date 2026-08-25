@@ -13,7 +13,7 @@ export const AppBrowserSnapshotTool = Tool.define(
     description: "Capture a structured DOM snapshot of the current side-browser page for stable follow-up actions.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
-        const client = yield* app.client("browser_control")
+        const client = yield* app.browserClient("read_only")
         const sessionKey = yield* app.sessionKey(ctx, args.session_key)
         const result = yield* Effect.promise(() =>
           client.post("/browser/snapshot", {

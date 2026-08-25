@@ -191,7 +191,7 @@ const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5
 // LLM still sees what action was taken), but for tools in this whitelist
 // the tool_result content is replaced with a placeholder. Result is either
 // large-and-regeneratable (read/bash/grep/glob/webfetch/websearch) or
-// essentially a "done" confirmation (edit/write/multiedit). Tools NOT here
+// essentially a "done" confirmation (edit). Tools NOT here
 // carry state the LLM references later (actor/task/question/skill/memory).
 const COMPACTABLE_TOOL_NAMES = new Set<string>([
   "read",
@@ -201,9 +201,6 @@ const COMPACTABLE_TOOL_NAMES = new Set<string>([
   "webfetch",
   "websearch",
   "edit",
-  "write",
-  "multiedit",
-  "apply_patch",
   "codesearch",
 ])
 
@@ -341,7 +338,7 @@ function composeWriterPrompt(input: {
 }): string {
   return [
     "<system-reminder>",
-    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The available tools are read, file_info, tree, search, archive_inspect, replace_range, symbol_edit, edit_history, apply_patch, and task; do not invoke others.",
+    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The available tools are read, file_info, tree, search, archive_inspect, edit, edit_history, and task; do not invoke others.",
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",
@@ -370,7 +367,7 @@ function composeWriterPrompt(input: {
     "",
     input.rangeDesc,
     "",
-    "Use the `task` tool for ALL task state ops (create / start / progress / done / abandon / approve / rename / block / unblock / batch_create). Use patch-first file editing only for the checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above: prefer `replace_range` for small targeted edits, `symbol_edit` when a whole section boundary is clear, and `apply_patch` for broader rewrites or file creation. After all writes and tool calls, stop immediately.",
+    "Use the `task` tool for ALL task state ops (create / start / progress / done / abandon / approve / rename / block / unblock / batch_create). Use `edit` only for checkpoint, memory, and task narrative files at the CHECKPOINT_PATH / MEMORY_PATH / TASK_MEM_DIR locations declared above: operation=replace for one exact current block, operation=patch for broader rewrites or file creation. After all writes and tool calls, stop immediately.",
   ].join("\n")
 }
 
@@ -895,10 +892,8 @@ export const layer: Layer.Layer<
           "tree",
           "search",
           "archive_inspect",
-          "replace_range",
-          "symbol_edit",
+          "edit",
           "edit_history",
-          "apply_patch",
           "task",
         ],
         model: {
@@ -930,14 +925,21 @@ export const layer: Layer.Layer<
       // to the layer's lifetime — no orphan fiber on shutdown.
       yield* Effect.gen(function* () {
         const outcome = yield* Deferred.await(result.outcome)
-        yield* Effect.sync(() =>
-          Database.use((d) =>
-            d.update(SessionTable)
-              .set({ last_checkpoint_message_id: endMessageID as MessageID })
-              .where(eq(SessionTable.id, input.sessionID))
-              .run(),
-          ),
-        )
+        if (outcome.status === "success") {
+          yield* Effect.sync(() =>
+            Database.use((d) =>
+              d.update(SessionTable)
+                .set({ last_checkpoint_message_id: endMessageID as MessageID })
+                .where(eq(SessionTable.id, input.sessionID))
+                .run(),
+            ),
+          )
+        } else {
+          log.warn("checkpoint writer failed; retaining previous watermark", {
+            sessionID: input.sessionID,
+            endMessageID,
+          })
+        }
 
         // F40: capture pending before deleting the slot so a queued writer
         // (held while writer1 was running) can fire as a fresh writer.
@@ -1100,13 +1102,14 @@ export const layer: Layer.Layer<
       const inFlight = writers.get(sessionID)
       if (inFlight) {
         log.info("rebuild waiting for in-flight writer", { sessionID })
-        yield* Effect.race(
+        const waitResult = yield* Effect.race(
           Deferred.await(inFlight.writing).pipe(Effect.as("done" as const)),
           Effect.sleep("60 seconds").pipe(
             Effect.tap(() => Effect.sync(() => log.warn("writer wait timeout — using on-disk checkpoint", { sessionID }))),
             Effect.as("timeout" as const),
           ),
         ).pipe(Effect.catch(() => Effect.succeed("error" as const)))
+        if (waitResult !== "done") return ""
       }
 
       const cfg = yield* config.get()
@@ -1398,6 +1401,28 @@ export const layer: Layer.Layer<
       model: { providerID: string; modelID: string }
       boundaryCreatedAt?: number
     }) {
+      const allMsgs = yield* session.messages({ sessionID: input.sessionID, agentID: "*" })
+      const boundaryTime =
+        input.boundaryCreatedAt ??
+        allMsgs.find((m) => m.info.id === input.boundary)?.info.time.created
+      if (boundaryTime === undefined) {
+        log.warn("rebuild boundary skipped: no boundary timestamp available", {
+          sessionID: input.sessionID,
+          boundary: input.boundary,
+        })
+        return false
+      }
+      if (
+        allMsgs.some(
+          (message) =>
+            message.parts.some(
+              (part) => part.type === "checkpoint" && part.coveredUpTo === input.boundary,
+            ),
+        )
+      ) {
+        return false
+      }
+
       const rebuildContext = yield* renderRebuildContext(input.sessionID, {
         lastMessageInfo: input.lastMessageInfo,
         agentID: input.agentID,
@@ -1406,7 +1431,7 @@ export const layer: Layer.Layer<
 
       const indexText = yield* renderIndex(input.sessionID).pipe(Effect.catch(() => Effect.succeed("")))
 
-      const syntheticTime = (input.boundaryCreatedAt ?? Date.now()) + 1
+      const syntheticTime = boundaryTime + 1
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
         role: "user" as const,
@@ -1477,17 +1502,6 @@ export const layer: Layer.Layer<
       // 3. Else SKIP — the previous fallback of 0 would clear EVERY
       //    completed compactable tool result in the entire session,
       //    corrupting future checkpoint writer input. Log a warning.
-      const allMsgs = yield* session.messages({ sessionID: input.sessionID, agentID: "*" })
-      const boundaryTime =
-        input.boundaryCreatedAt ??
-        allMsgs.find((m) => m.info.id === input.boundary)?.info.time.created
-      if (boundaryTime === undefined) {
-        log.warn("microcompact skipped: no boundary timestamp available", {
-          sessionID: input.sessionID,
-          boundary: input.boundary,
-        })
-        return true
-      }
       let cleared = 0
       for (const m of allMsgs) {
         if (m.info.id === msg.id) continue

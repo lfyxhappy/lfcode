@@ -12,7 +12,7 @@ import {
 import { Flock } from "@lfcode-ai/shared/util/flock"
 
 import { Flag } from "@/flag/flag"
-import { Global } from "@/global"
+import { PluginPath } from "@/plugin/path"
 import { InstallationVersion } from "@/installation/version"
 import { Npm } from "@/npm"
 import { Filesystem } from "@/util"
@@ -66,7 +66,7 @@ const FORBIDDEN_ARCHIVE_EXTENSIONS = new Set([
 const GENERATED_CATEGORIES = new Set(["tool", "integration"])
 
 export function root() {
-  return Flag.LFCODE_PLUGIN_LIBRARY_DIR ?? path.join(Global.Path.data, "plugins")
+  return Flag.LFCODE_PLUGIN_LIBRARY_DIR ?? PluginPath.data("managed-library")
 }
 
 export function registryFile() {

@@ -3,7 +3,6 @@ import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Select } from "@lfcode-ai/ui/select"
-import { Switch } from "@lfcode-ai/ui/switch"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { Tag } from "@lfcode-ai/ui/tag"
@@ -20,7 +19,6 @@ import {
   localSkillDirectory,
   localSkillKey,
   removeLocalSkill,
-  replaceLocalSkill,
   skillImportSources,
   type LocalSkillItem,
   type SkillImportSource,
@@ -180,7 +178,7 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
     const skills = localSkills()
     if (!term) return skills
     return skills.filter((skill) =>
-      [skill.name, skill.description, skill.location, skill.directory]
+      [skill.name, skill.displayName, skill.description, skill.shortDescription, skill.location, skill.directory]
         .filter((value): value is string => typeof value === "string" && value.length > 0)
         .some((value) => value.toLowerCase().includes(term)),
     )
@@ -317,41 +315,6 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
     }
   }
 
-  const toggleLocalSkill = async (item: LocalSkillItem, nextHidden: boolean) => {
-    if (busy()) return
-    setBusy("manage")
-    const original = manageItems()
-    try {
-      const url = apiUrl(server.current?.http.url, directory(), "/skills/manage/update")
-      if (!url) return
-      const res = await request(url, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ directory: localSkillDirectory(item), hidden: nextHidden }),
-      })
-      if (!res.ok) throw new Error(`Update failed: ${res.status}`)
-      const updated = (await res.json()) as LocalSkillItem
-      manageActions.mutate((items) => replaceLocalSkill(items ?? original, updated))
-      setRefreshTick((v) => v + 1)
-      showToast({
-        variant: "success",
-        icon: "circle-check",
-        title: nextHidden ? language.t("settings.skills.manage.toast.hidden.title") : language.t("settings.skills.manage.toast.shown.title"),
-        description: language.t(
-          nextHidden ? "settings.skills.manage.toast.hidden.description" : "settings.skills.manage.toast.shown.description",
-          { name: item.name },
-        ),
-      })
-    } catch (error) {
-      showToast({
-        title: language.t("common.requestFailed"),
-        description: formatServerError(error, language.t, language.t("common.requestFailed")),
-      })
-    } finally {
-      setBusy(undefined)
-    }
-  }
-
   const deleteLocalSkill = async (item: LocalSkillItem) => {
     if (busy()) return
     setBusy("manage")
@@ -385,7 +348,7 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
 
   return (
     <div class="flex h-full flex-col overflow-y-auto no-scrollbar px-4 pb-10 sm:px-6 sm:pb-10">
-      <div class="sticky top-0 z-10 bg-[linear-gradient(to_bottom,var(--surface-stronger-non-alpha)_calc(100%_-_24px),transparent)]">
+      <div class="sticky top-0 z-10 border-b border-border-weaker-base bg-background-base">
         <div class="flex max-w-[1120px] flex-col gap-4 pb-6 pt-6">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
@@ -437,8 +400,12 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
           </div>
 
           <Show when={mode() === "browse"}>
-            <Tabs value={section()} onChange={(value) => setSection((value as (typeof sections)[number]["value"]) ?? "repository")}>
-              <Tabs.List class="gap-2">
+            <Tabs
+              variant="pill"
+              value={section()}
+              onChange={(value) => setSection((value as (typeof sections)[number]["value"]) ?? "repository")}
+            >
+              <Tabs.List class="gap-1">
                 <Tabs.Trigger value="repository">{language.t("settings.skills.section.repository")}</Tabs.Trigger>
                 <Tabs.Trigger value="skills-sh">{language.t("settings.skills.section.skillsSh")}</Tabs.Trigger>
               </Tabs.List>
@@ -570,13 +537,8 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                     <div class="flex flex-col gap-3 border-b border-border-weak-base py-4 last:border-none">
                       <div class="flex flex-wrap items-start justify-between gap-4">
                         <div class="min-w-0">
-                          <div class="flex items-center gap-2">
-                            <span class="truncate text-14-medium text-text-strong">{skill.name}</span>
-                            <Show when={skill.hidden}>
-                              <Tag>{language.t("settings.skills.hidden")}</Tag>
-                            </Show>
-                          </div>
-                          <div class="truncate text-12-regular text-text-weak">{skill.description}</div>
+                           <span class="truncate text-14-medium text-text-strong">{skill.displayName ?? skill.name}</span>
+                           <div class="truncate text-12-regular text-text-weak">{skill.shortDescription ?? skill.description}</div>
                           <div class="truncate text-11-regular text-text-weaker">{dirLabel(directory(), skill.location)}</div>
                         </div>
                         <div class="flex flex-shrink-0 items-center gap-2">
@@ -594,9 +556,6 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                           >
                             {language.t("settings.skills.action.copy")}
                           </Button>
-                          <Switch checked={!skill.hidden} onChange={(checked) => void toggleLocalSkill(skill, !checked)} hideLabel>
-                            {language.t("settings.skills.manage.action.enabled")}
-                          </Switch>
                           <IconButton
                             icon="trash"
                             variant="ghost"
@@ -631,13 +590,8 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                   {(skill) => (
                     <div class="flex min-h-16 flex-wrap items-center justify-between gap-4 border-b border-border-weak-base py-3 last:border-none">
                       <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <span class="truncate text-14-medium text-text-strong">{skill.name}</span>
-                          <Show when={skill.hidden}>
-                            <span class="text-11-regular text-text-weak">{language.t("settings.skills.hidden")}</span>
-                          </Show>
-                        </div>
-                        <div class="truncate text-12-regular text-text-weak">{skill.description}</div>
+                         <span class="truncate text-14-medium text-text-strong">{skill.displayName ?? skill.name}</span>
+                         <div class="truncate text-12-regular text-text-weak">{skill.shortDescription ?? skill.description}</div>
                         <div class="truncate text-11-regular text-text-weaker">{skill.location}</div>
                       </div>
                       <Button
@@ -724,7 +678,7 @@ export const SettingsSkills: Component<{ mode?: SkillMode; onModeChange?: (mode:
                             </Button>
                           </div>
                         </div>
-                        <div class="rounded-md border border-border-weak-base bg-background-base/50 px-3 py-2 text-12-regular text-text-weak">
+                        <div class="rounded-md border border-border-weak-base bg-background-base px-3 py-2 text-12-regular text-text-weak">
                           {skill.install}
                         </div>
                       </div>

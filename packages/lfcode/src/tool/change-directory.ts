@@ -7,6 +7,7 @@ import { Bus } from "@/bus"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { SessionCwd } from "./session-cwd"
 import * as Tool from "./tool"
+import { dispatchHooks } from "@/hook/runtime"
 
 const DESCRIPTION = [
   "Switch the working directory for the current session (like cd in a terminal).",
@@ -42,6 +43,17 @@ export const ChangeDirectoryTool = Tool.define(
           const currentCwd = SessionCwd.get(ctx.sessionID)
 
           if (params.path === "~" || params.path === "") {
+            const hook = yield* Effect.promise(() =>
+              dispatchHooks({
+                event: "CwdChanged",
+                sessionID: ctx.sessionID,
+                projectID: String(ins.project.id),
+                cwd: ins.directory,
+                tool: ins.directory,
+                payload: { from: currentCwd, to: ins.directory },
+              }),
+            )
+            if (hook.blocked) throw new Error("Working directory change was blocked by a Hook")
             SessionCwd.clear(ctx.sessionID)
             yield* bus.publish(SessionCwd.Event.Changed, {
               sessionID: ctx.sessionID,
@@ -73,6 +85,17 @@ export const ChangeDirectoryTool = Tool.define(
           }
 
           yield* assertExternalDirectoryEffect(ctx, normalized, { kind: "directory" })
+          const hook = yield* Effect.promise(() =>
+            dispatchHooks({
+              event: "CwdChanged",
+              sessionID: ctx.sessionID,
+              projectID: String(ins.project.id),
+              cwd: normalized,
+              tool: normalized,
+              payload: { from: currentCwd, to: normalized },
+            }),
+          )
+          if (hook.blocked) throw new Error("Working directory change was blocked by a Hook")
 
           SessionCwd.set(ctx.sessionID, normalized)
           yield* bus.publish(SessionCwd.Event.Changed, {

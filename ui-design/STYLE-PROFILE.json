@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profile_id": "lfcode-ai-workspace",
+  "profile": "ai-workspace",
+  "inherits": "base",
+  "register": "product",
+  "scene": "A developer supervises local AI coding sessions in a quiet, high-signal workspace.",
+  "dials": {
+    "density": 8,
+    "variance": 2,
+    "motion": 3
+  },
+  "tokens": {
+    "color": {"light_background":"#F7F8FA","dark_background":"#111315","light_surface":"#FFFFFF","dark_surface":"#171A1D","accent_light":"#2563EB","accent_dark":"#6EA8FE"},
+    "type": {"ui":"existing sans family","scale":"12/13/14/16/20px","code":"user-configurable mono"},
+    "space": {"base":4,"scale":[4,8,12,16,24]},
+    "radius": {"control":6,"panel":8,"pill":"reserved for status only"},
+    "shadow": {"default":"semantic token only","emphasis":"restrained"},
+    "motion": {"micro_ms":120,"content_ms":180,"surface_ms":220,"reduced_motion":"disable transforms and animations"}
+  },
+  "breakpoints": {
+    "mobile": 500,
+    "tablet": 1024
+  },
+  "recipes": [
+    "button",
+    "card",
+    "field"
+  ],
+  "token_roles": [
+    "background",
+    "surface",
+    "text",
+    "muted",
+    "border",
+    "accent",
+    "success",
+    "warning",
+    "danger"
+  ],
+  "anti_references": ["purple-blue gradients","glassmorphism","nested cards","oversized radii","heavy shadows","hover-only primary actions"],
+  "page_overrides": {},
+  "source": "manual",
+  "evidence": [".codex/design-html/lfcode-light-dark-ui.html","packages/ui/src/theme/themes/lfcode.json","ui-design/BASELINE.json"]
+}

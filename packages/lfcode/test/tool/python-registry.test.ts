@@ -10,9 +10,9 @@ import { ProviderID, ModelID } from "../../src/provider/schema"
 const node = CrossSpawnSpawner.defaultLayer
 const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, node))
 
-describe("tool.registry python", () => {
+describe("tool.registry runtime tools", () => {
   it.live(
-    "includes python and pip in builtins",
+    "keeps direct runtime tools out of the default model toolset",
     () =>
       provideTmpdirInstance(() =>
         Effect.gen(function* () {
@@ -26,8 +26,11 @@ describe("tool.registry python", () => {
             agent: general,
             capabilities: { patch_editing: false },
           })
-          expect(tools.some((tool) => tool.id === "python")).toBe(true)
-          expect(tools.some((tool) => tool.id === "pip")).toBe(true)
+          expect(tools.some((tool) => tool.id === "python")).toBe(false)
+          expect(tools.some((tool) => tool.id === "pip")).toBe(false)
+          expect(tools.some((tool) => tool.id === "cpp")).toBe(false)
+          expect(tools.some((tool) => tool.id === "runtime_manage")).toBe(false)
+          expect(tools.some((tool) => tool.id === "office")).toBe(false)
         }),
       ),
     30000,

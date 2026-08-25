@@ -44,7 +44,7 @@ export const dict = {
   "tui.tips.shell_prefix":
     "メッセージを {highlight}!{/highlight} で始めるとシェルコマンドを直接実行できます（例：{highlight}!ls -la{/highlight}）",
   "tui.tips.tab_agent":
-    "{highlight}Tab{/highlight} または {highlight}Shift+Tab{/highlight} で Build / Plan / Compose エージェントを切り替えます",
+    "{highlight}Tab{/highlight} または {highlight}Shift+Tab{/highlight} で Build / Plan エージェントを切り替えます",
   "tui.tips.theme_mode":
     "{highlight}/dark{/highlight} でダークモード、{highlight}/light{/highlight} でライトモードに切り替えます",
   "tui.tips.doc": "{highlight}/doc{/highlight} を実行してユーザードキュメントを開きます",
@@ -204,7 +204,6 @@ export const dict = {
   // App-level commands
   "tui.command.session.list.title": "セッションを切り替え",
   "tui.command.session.new.title": "新規セッション",
-  "tui.command.workflow.list.title": "ワークフロー",
   "tui.command.model.list.title": "モデルを切り替え",
   "tui.command.model.cycle_recent.title": "モデルを循環",
   "tui.command.model.cycle_recent_reverse.title": "モデルを逆循環",

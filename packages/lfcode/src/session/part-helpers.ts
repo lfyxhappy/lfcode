@@ -25,15 +25,19 @@ export function stepSignature(parts: MessageV2.Part[]): string | undefined {
 export function repeatedToolValidationFailure(input: {
   messages: MessageV2.WithParts[]
   threshold: number
+  userID?: string
 }) {
   const signatures: string[] = []
   for (let i = input.messages.length - 1; i >= 0 && signatures.length < input.threshold; i--) {
     const message = input.messages[i]
+    // Validation retries are local to one user turn. Older assistant tool errors
+    // must never prevent a newly admitted user message from reaching the model.
+    if (input.userID && message.info.role === "user") break
     if (message.info.role !== "assistant" || !message.info.finish) continue
     const tools = message.parts.filter((part): part is MessageV2.ToolPart => part.type === "tool")
     if (tools.length !== 1) return false
     const tool = tools[0]
-    if (tool.state.status !== "error" || !isSchemaFailure(tool.state.error)) return false
+    if (tool.state.status !== "error" || !isRetryableToolValidationFailure(tool.state.error)) return false
     signatures.push(toolFailureSignature(tool.tool, tool.state.error))
   }
   return signatures.length === input.threshold && signatures.every((signature) => signature === signatures[0])
@@ -60,8 +64,12 @@ export function sameToolFailureCount(input: {
   )
 }
 
-function isSchemaFailure(error: string) {
-  return structuredToolError(error)?.category === "schema" || /tool was called with invalid arguments/i.test(error)
+export function isRetryableToolValidationFailure(error: string) {
+  return (
+    structuredToolError(error)?.category === "schema" ||
+    /tool was called with invalid arguments/i.test(error) ||
+    error.startsWith("This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.")
+  )
 }
 
 function toolFailureSignature(tool: string, error: string) {

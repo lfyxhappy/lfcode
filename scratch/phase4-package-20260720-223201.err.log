@@ -1,0 +1,56 @@
+$ bun ./scripts/package-win-fast.ts
+$ bun ./scripts/clean-dist.ts
+$ bun ./scripts/sync-local-config.ts
+$ bun ./scripts/prebuild.ts
+$ electron-vite build
+[33m../lfcode/dist/node/node.js (123455:15): Use of eval in "../lfcode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+[33m../lfcode/dist/node/node.js (239006:34): Use of eval in "../lfcode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+[33m../lfcode/dist/node/node.js (239029:36): Use of eval in "../lfcode/dist/node/node.js" is strongly discouraged as it poses security risks and may cause issues with minification.[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/zh.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/zht.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/ko.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/de.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/es.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/fr.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/da.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/ja.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/pl.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/ru.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/ar.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/no.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/br.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/i18n/bs.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/context/language.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/desktop/src/renderer/i18n/index.ts, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/dialog-select-model.tsx is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/pages/session/use-session-commands.tsx but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/prompt-input/control-strip.tsx, dynamic import will not move module into another chunk.
+[39m
+[33m[plugin vite:reporter] 
+(!) C:/算法/小应用/知识库/10_Projects/Lfcode/packages/ui/src/components/monaco-kernel.ts is dynamically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/code-editor/core/runtime.ts but also statically imported by C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/code-editor/core/instance-controller.ts, C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/code-editor/core/navigation.ts, C:/算法/小应用/知识库/10_Projects/Lfcode/packages/app/src/components/code-editor/core/runtime-core.ts, C:/算法/小应用/知识库/10_Projects/Lfcode/packages/ui/src/components/code-diff-runtime.ts, dynamic import will not move module into another chunk.
+[39m
