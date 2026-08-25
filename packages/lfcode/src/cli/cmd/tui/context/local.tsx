@@ -380,6 +380,10 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             }
             const index = variants.indexOf(current)
             if (index === -1 || index === variants.length - 1) {
+              if (!this.selected()) {
+                this.set(variants[0])
+                return
+              }
               this.set(undefined)
               return
             }
