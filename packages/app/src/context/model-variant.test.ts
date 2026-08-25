@@ -64,14 +64,34 @@ describe("model variant", () => {
     expect(value).toBe("xhigh")
   })
 
-  test("displays first detected variant when no explicit or configured variant exists", () => {
+  test("defaults to the highest detected variant when no explicit or configured variant exists", () => {
     const value = displayModelVariant({
       variants: ["low", "high", "xhigh"],
       selected: undefined,
       configured: undefined,
     })
 
-    expect(value).toBe("low")
+    expect(value).toBe("xhigh")
+  })
+
+  test("uses the highest variant for requests when no explicit or configured variant exists", () => {
+    const value = resolveModelVariant({
+      variants: ["low", "high", "max"],
+      selected: undefined,
+      configured: undefined,
+    })
+
+    expect(value).toBe("max")
+  })
+
+  test("uses the highest available variant without requiring max", () => {
+    const value = resolveModelVariant({
+      variants: ["low", "high"],
+      selected: undefined,
+      configured: undefined,
+    })
+
+    expect(value).toBe("high")
   })
 
   test("keeps explicit default visible as default", () => {

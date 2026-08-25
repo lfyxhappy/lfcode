@@ -21,6 +21,15 @@ export function parseModel(model: string) {
   }
 }
 
+function highestVariant(variants: string[]) {
+  const priority = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  return variants.reduce((highest, variant) => {
+    const highestRank = priority.indexOf(highest.toLowerCase())
+    const variantRank = priority.indexOf(variant.toLowerCase())
+    return variantRank >= highestRank ? variant : highest
+  }, variants[0])
+}
+
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
   init: () => {
@@ -342,7 +351,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           },
           current() {
             const v = this.selected()
-            if (!v) return undefined
+            if (!v) return highestVariant(this.list())
             if (!this.list().includes(v)) return undefined
             return v
           },

@@ -18,6 +18,8 @@ type VariantInput = {
   configured: string | undefined
 }
 
+const VARIANT_PRIORITY = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
 export function getConfiguredAgentVariant(input: { agent: Agent | undefined; model: Model | undefined }) {
   if (!input.agent?.variant) return undefined
   if (!input.agent.model) return undefined
@@ -32,14 +34,14 @@ export function resolveModelVariant(input: VariantInput) {
   if (input.selected === null) return undefined
   if (input.selected && input.variants.includes(input.selected)) return input.selected
   if (input.configured && input.variants.includes(input.configured)) return input.configured
-  return undefined
+  return highestVariant(input.variants)
 }
 
 export function displayModelVariant(input: VariantInput) {
   if (input.selected === null) return undefined
   if (input.selected && input.variants.includes(input.selected)) return input.selected
   if (input.configured && input.variants.includes(input.configured)) return input.configured
-  return input.variants[0]
+  return highestVariant(input.variants)
 }
 
 export function cycleModelVariant(input: VariantInput) {
@@ -56,4 +58,12 @@ export function cycleModelVariant(input: VariantInput) {
     return input.variants[index + 1]
   }
   return input.variants[0]
+}
+
+function highestVariant(variants: string[]) {
+  return variants.reduce((highest, variant) => {
+    const highestRank = VARIANT_PRIORITY.indexOf(highest.toLowerCase())
+    const variantRank = VARIANT_PRIORITY.indexOf(variant.toLowerCase())
+    return variantRank >= highestRank ? variant : highest
+  }, variants[0])
 }
