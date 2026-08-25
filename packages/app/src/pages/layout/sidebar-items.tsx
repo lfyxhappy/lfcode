@@ -1,7 +1,6 @@
 import type { Session } from "@lfcode-ai/sdk/v2/client"
 import { Avatar } from "@lfcode-ai/ui/avatar"
 import { ContextMenu } from "@lfcode-ai/ui/context-menu"
-import { DropdownMenu } from "@lfcode-ai/ui/dropdown-menu"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Spinner } from "@lfcode-ai/ui/spinner"
@@ -218,12 +217,13 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
   const selected = createMemo(() => isSidebarSessionSelected(props.session.id, params.id))
   const editorID = createMemo(() => `session:${props.session.id}`)
   const pinned = createMemo(() => layout.sessions.isPinned(props.session.directory, props.session.id))
-  const canOpenInExplorer = createMemo(() => platform.platform === "desktop" && !!platform.openPath && server.isLocal() === true)
+  const canOpenInExplorer = createMemo(
+    () => platform.platform === "desktop" && !!platform.openPath && server.isLocal() === true,
+  )
   const canCopyDeeplink = createMemo(() => server.isLocal() === true)
   const titleValue = createMemo(() => sessionTitle(props.session.title) ?? "")
   const temporary = createMemo(() => "temporary" in props.session && props.session.temporary === true)
   const [menu, setMenu] = createStore({
-    open: false,
     context: false,
     pendingRename: false,
   })
@@ -259,7 +259,6 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       onTogglePinned: () => layout.sessions.togglePinned(props.session.directory, props.session.id),
       onRename: () => {
         setMenu("pendingRename", true)
-        setMenu("open", false)
       },
       onArchive: () => void props.archiveSession(props.session),
       onMarkUnread: () => notification.session.markUnread(props.session.id, props.session.directory),
@@ -328,7 +327,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             class="group/session relative w-full min-w-0 rounded-lg cursor-default pr-3 transition-colors duration-[var(--motion-micro-ms)] ease-[var(--motion-ease-out)] has-[.active]:bg-surface-base-active"
             classList={{
               "bg-surface-base-active shadow-xs-border-base": selected(),
-              "bg-surface-raised-base-hover": !selected() && (menu.open || menu.context),
+              "bg-surface-raised-base-hover": !selected() && menu.context,
               "hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover":
                 !selected(),
             }}
@@ -356,46 +355,28 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
               <div
                 class="shrink-0 overflow-hidden transition-[width,opacity] duration-[var(--motion-micro-ms)] ease-[var(--motion-ease-out)]"
                 classList={{
-                  "w-6 opacity-100 pointer-events-auto": !!props.mobile || selected() || menu.open || menu.context,
-                  "w-0 opacity-0 pointer-events-none": !props.mobile && !selected() && !menu.open && !menu.context,
+                  "w-6 opacity-100 pointer-events-auto": !!props.mobile || selected() || menu.context,
+                  "w-0 opacity-0 pointer-events-none": !props.mobile && !selected() && !menu.context,
                   "group-hover/session:w-6 group-hover/session:opacity-100 group-hover/session:pointer-events-auto": true,
                   "group-focus-within/session:w-6 group-focus-within/session:opacity-100 group-focus-within/session:pointer-events-auto": true,
                 }}
               >
-                <DropdownMenu modal={!props.sidebarHovering()} open={menu.open} onOpenChange={(open) => setMenu("open", open)}>
-                  <Tooltip value={language.t("common.moreOptions")} placement="top">
-                    <DropdownMenu.Trigger
-                      as={IconButton}
-                      icon="dot-grid"
-                      variant="ghost"
-                      class="size-6 rounded-md"
-                      classList={{ "bg-surface-base-active": menu.open }}
-                      aria-label={language.t("common.moreOptions")}
-                    />
-                  </Tooltip>
-                  <DropdownMenu.Portal>
-                    <DropdownMenu.Content
-                      onCloseAutoFocus={(event) => {
-                        if (!menu.pendingRename) return
-                        event.preventDefault()
-                        setMenu("pendingRename", false)
-                        props.openEditor(editorID(), titleValue(), (next) => props.renameSession(props.session, next))
-                      }}
-                    >
-                      <For each={menuActions()}>
-                        {(action) =>
-                          action.kind === "separator" ? (
-                            <DropdownMenu.Separator />
-                          ) : (
-                            <DropdownMenu.Item disabled={action.disabled} onSelect={action.onSelect}>
-                              <DropdownMenu.ItemLabel>{action.label}</DropdownMenu.ItemLabel>
-                            </DropdownMenu.Item>
-                          )
-                        }
-                      </For>
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Portal>
-                </DropdownMenu>
+                <Tooltip value={language.t("common.archive")} placement="top">
+                  <IconButton
+                    icon="archive"
+                    variant="ghost"
+                    class="size-6 rounded-md"
+                    data-action="session-archive"
+                    data-session-id={props.session.id}
+                    aria-label={language.t("common.archive")}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void props.archiveSession(props.session)
+                    }}
+                  />
+                </Tooltip>
               </div>
             </div>
           </div>
