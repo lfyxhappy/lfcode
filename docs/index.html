@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light" />
     <link rel="icon" href="data:," />
     <title>Lfcode — 本地优先的 AI 编程工作台</title>
     <style>
@@ -1069,6 +1069,132 @@
 
       @media (prefers-reduced-motion: reduce) {
         .wb-session, .wb-mobile-action, .wb-compact-action, .wb-control, .wb-divider::after, .wb-terminal-handle::after { transition: none; }
+      }
+
+      /* Bright dopamine release-page theme. Product workspaces stay dark by design. */
+      :root {
+        --ink: #20234f;
+        --muted: #5e6383;
+        --quiet: #878ba7;
+        --page: #fff8ec;
+        --surface: #fffdf8;
+        --surface-2: #f6f0ff;
+        --line: #20234f;
+        --line-strong: #20234f;
+        --amber: #ffd34e;
+        --amber-soft: #e8b83e;
+        --green: #37ba92;
+        --red: #ff6480;
+      }
+      body {
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 92% 5%, #ffd34e 0 12rem, transparent 12.15rem),
+          radial-gradient(circle at -5% 76%, #b8efd8 0 13rem, transparent 13.1rem),
+          var(--page);
+      }
+      body::before { display: none; }
+      a:focus-visible, button:focus-visible { outline: 3px solid #ff6480; outline-offset: 3px; }
+      .top {
+        border-bottom: 3px solid var(--ink);
+        background: color-mix(in srgb, var(--page) 92%, transparent);
+        box-shadow: 0 4px 0 rgba(32, 35, 79, .08);
+      }
+      .nav { height: 82px; }
+      .brand { color: var(--ink); font-weight: 800; }
+      .brand-mark i { border-color: var(--ink); }
+      .brand-mark i:nth-child(2), .brand-mark i:nth-child(4) { border-color: var(--red); background: var(--red); }
+      .brand-mark i:nth-child(3) { background: var(--green); border-color: var(--green); }
+      .nav-links { color: var(--ink); font-weight: 700; }
+      .nav-links a:hover { color: #6355e7; }
+      .pill {
+        border: 3px solid var(--ink);
+        border-radius: 7px;
+        background: #fffdf8;
+        box-shadow: 4px 4px 0 var(--ink);
+        transition: transform var(--ease), box-shadow var(--ease), background var(--ease);
+      }
+      .pill:hover { background: #b8efd8; transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+      .hero { min-height: 720px; padding: 105px 0 90px; border-bottom: 3px solid var(--ink); }
+      .hero::before { content: ""; position: absolute; left: auto; right: -82px; top: -100px; width: 330px; height: 330px; border: 4px solid var(--ink); border-radius: 50%; background: var(--amber); }
+      .hero::after { color: var(--ink); opacity: .55; font-weight: 800; }
+      .hero-grid::before { color: #ffe6ae; }
+      .eyebrow { color: var(--red); font-weight: 800; letter-spacing: .11em; }
+      .eyebrow::before { width: 30px; height: 3px; background: var(--red); }
+      h1, h2, h3 { color: var(--ink); font-weight: 800; letter-spacing: 0; }
+      h1 { max-width: 680px; line-height: .96; }
+      .hero-line:last-child { color: #6355e7; text-shadow: none; }
+      .lead, .section-head p, .h-scroll-head p, .plugin-lane-head p, .closing p { color: var(--muted); }
+      .cta { border: 3px solid var(--ink); border-radius: 8px; color: var(--ink); background: #fffdf8; box-shadow: 5px 5px 0 var(--ink); }
+      .cta:hover { border-color: var(--ink); background: #b8efd8; transform: translate(2px, 2px); box-shadow: 3px 3px 0 var(--ink); }
+      .cta.primary { color: #fffdf8; background: #6355e7; border-color: var(--ink); }
+      .cta.primary:hover { background: #5142d4; }
+      .microproof { color: var(--muted); font-weight: 700; }
+      .microproof span::before { color: var(--green); }
+      .workbench { border: 3px solid var(--ink); border-top-color: var(--ink); border-radius: 15px; box-shadow: 10px 10px 0 #ff6480; }
+      .signal-strip { border-bottom: 3px solid var(--ink); background: var(--amber); color: var(--ink); }
+      .signal-group span { border-right-color: rgba(32, 35, 79, .45); font-weight: 800; }
+      .section { border-bottom: 3px solid var(--ink); background: var(--page); }
+      .section::after { color: #9c90f0; font-weight: 800; }
+      .steps { border: 3px solid var(--ink); border-right: 0; border-bottom: 0; background: var(--ink); gap: 3px; }
+      .step { min-height: 260px; border: 0; background: #fffdf8; }
+      .step:nth-child(2) { background: #fff0b9; }
+      .step:nth-child(3) { background: #b8efd8; }
+      .step:nth-child(4) { background: #ffd2dd; }
+      .step::after { height: 5px; background: #6355e7; }
+      .step:hover { background: #f3edff; transform: translateY(-5px); }
+      .step-no { color: #6355e7; font-weight: 800; }
+      .step p, .trust p { color: var(--muted); }
+      .h-scroll, .plugin-lane { border-bottom: 3px solid var(--ink); background: #f0ebff; }
+      .h-scroll::before, .plugin-lane::before { content: ""; position: absolute; z-index: 0; width: 150px; height: 150px; border: 3px solid var(--ink); border-radius: 50%; background: var(--amber); opacity: .9; }
+      .h-scroll::before { right: -54px; top: 36px; }
+      .plugin-lane::before { left: -52px; bottom: 48px; background: #b8efd8; }
+      .h-scroll-shell, .plugin-lane-shell { position: relative; z-index: 1; }
+      .h-scroll-head h2, .plugin-lane-head h2 { color: var(--ink); }
+      .flow-control-head, .plugin-control-head { color: var(--muted); }
+      .flow-visible-status, .plugin-visible-status { color: #6355e7; font-weight: 800; }
+      .flow-nav li, .plugin-nav li { border-color: rgba(32, 35, 79, .28); }
+      .flow-nav-control, .plugin-nav-control { color: var(--ink); }
+      .flow-nav li.is-active, .plugin-nav li.is-active { background: #fffdf8; }
+      .flow-nav li.is-active::after, .plugin-nav li.is-active::after { background: var(--red); }
+      .h-scroll-card, .plugin-card { border: 3px solid var(--ink); border-radius: 12px; box-shadow: 8px 8px 0 #ff6480; background: #fffdf8; }
+      .h-scroll-card::before, .plugin-card::before { color: #6355e7; }
+      .workflow-caption, .plugin-caption { border-color: rgba(32, 35, 79, .22); }
+      .workflow-copy p, .plugin-copy p { color: var(--muted); }
+      .workflow-proof span, .plugin-proof span { border-color: var(--ink); color: var(--ink); background: #b8efd8; }
+      .flow-screen, .plugin-screen, .terminal-card { border-color: var(--ink); box-shadow: 5px 5px 0 var(--ink); }
+      .split-feature { border-top: 3px solid var(--ink); border-bottom: 3px solid var(--ink); }
+      .feature-copy { background: #ffd34e; }
+      .feature-copy p { color: var(--ink); }
+      .feature-art { background: #b8efd8; border-left-color: var(--ink); }
+      .trust { gap: 14px; }
+      .trust article { border: 3px solid var(--ink); border-radius: 10px; box-shadow: 5px 5px 0 var(--ink); background: #fffdf8; }
+      .trust article:nth-child(2) { background: #b8efd8; }
+      .trust article:nth-child(3) { background: #ffd2dd; }
+      .trust article > b { color: #6355e7; }
+      .closing { position: relative; overflow: hidden; border-bottom: 3px solid var(--ink); background: #ffd34e; }
+      .closing::after { content: ""; position: absolute; right: 7vw; bottom: -105px; width: 260px; height: 260px; border: 4px solid var(--ink); border-radius: 50%; background: #ff6480; }
+      .closing .shell { position: relative; z-index: 1; }
+      .closing h2, .closing p { color: var(--ink); }
+      footer { background: #20234f; color: #fffdf8; }
+      .brand-stage { background: #6355e7; border-top: 3px solid var(--ink); }
+      .brand-stage::before { border-color: #fffdf8; }
+      .brand-stage-meta, .brand-stage-logo { color: #fffdf8; }
+      .brand-letter-f { color: #ffd34e; }
+      @media (max-width: 800px) {
+        body { background: radial-gradient(circle at 100% 0, #ffd34e 0 7rem, transparent 7.1rem), var(--page); }
+        .nav { min-height: 74px; }
+        .hero { min-height: 0; padding: 76px 0 74px; }
+        .hero::before { left: auto; right: -69px; top: -68px; width: 184px; height: 184px; }
+        .workbench { border-radius: 11px; box-shadow: 7px 7px 0 #ff6480; }
+        .steps { border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); }
+        .step { border-bottom: 3px solid var(--ink); }
+        .step:last-child { border-bottom: 0; }
+        .h-scroll, .plugin-lane { overflow: hidden; }
+        .h-scroll::before, .plugin-lane::before { width: 92px; height: 92px; }
+        .h-scroll-card, .plugin-card { box-shadow: 5px 5px 0 #ff6480; }
+        .trust article { box-shadow: 4px 4px 0 var(--ink); }
+        .closing::after { right: -95px; bottom: -80px; width: 190px; height: 190px; }
       }
     </style>
   </head>
