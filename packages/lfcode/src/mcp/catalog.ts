@@ -8,7 +8,6 @@ import { ConfigMCP } from "@/config/mcp"
 import { Global } from "@/global"
 import { InstanceState } from "@/effect"
 import { MCP } from "./index"
-import { Flag } from "@/flag/flag"
 import {
   MINIMAX_TOKEN_PLAN_MCP_DESCRIPTION,
   MINIMAX_TOKEN_PLAN_MCP_HOST,
@@ -26,15 +25,6 @@ const REGISTRY_CACHE_FILE = path.join(REGISTRY_CACHE_DIR, "servers.json")
 const REGISTRY_CACHE_TTL_MS = 60 * 60 * 1000
 const MANAGED_DIR_NAME = "mcps"
 const MANIFEST_FILE = "manifest.json"
-const PLAYWRIGHT_DESKTOP_REMOTE_CONFIG = {
-  type: "remote",
-  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
-  headers: {
-    authorization: "{env:LFCODE_SERVER_AUTH}",
-  },
-  enabled: true,
-} as const
-const PLAYWRIGHT_EXTERNAL_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73", "--browser", "chrome"] as const
 const WINDOWS_COMPUTER_USE_COMMAND = [
   "{env:LFCODE_BUNDLED_NODE}",
   "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
@@ -44,7 +34,6 @@ const WINDOWS_COMPUTER_USE_ENVIRONMENT = {
 } as const
 const McpSource = z.enum(["official-registry", "builtin", "user"])
 const InstallAdapterSchema = z.enum([
-  "bundled-playwright",
   "bundled-windows-computer-use",
   "bundled-codegraph",
   "minimax-token-plan",
@@ -205,21 +194,6 @@ function bundledInfo(name: string): { title: string; adapter: InstallAdapter; co
       title: MINIMAX_TOKEN_PLAN_MCP_TITLE,
       adapter: "minimax-token-plan",
       config: minimaxTokenPlanConfig(),
-    }
-  }
-
-  if (name === "playwright") {
-    return {
-      title: "Playwright",
-      adapter: "bundled-playwright",
-      config:
-        Flag.LFCODE_CLIENT === "desktop"
-          ? PLAYWRIGHT_DESKTOP_REMOTE_CONFIG
-          : {
-              type: "local",
-              command: [...PLAYWRIGHT_EXTERNAL_COMMAND],
-              enabled: true,
-            },
     }
   }
 

@@ -49,6 +49,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
 
   const ownerInputSchema = z.object({
     _lfcodeSessionID: z.string().optional(),
+    tab_id: z.string().optional().describe("Stable tab ID returned by browser_navigate; omit to use the active tab."),
   })
 
   server.registerTool(
@@ -60,7 +61,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const target = requireBridge().getTarget({ sessionKey })
+      const target = requireBridge().getTarget(browserTarget(sessionKey, input.tab_id))
       if (!target) {
         return result(
           "No Lfcode side browser tab exists yet for this session. browser_confirmation_required: ask the user to allow opening the side browser, then retry browser_navigate with confirm=true.",
@@ -84,9 +85,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
           .describe("Required on the first navigation when this session has no browser target."),
       }),
     },
-    async ({ url, confirm, _lfcodeSessionID }) => {
+    async ({ url, confirm, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const hasTarget = !!requireBridge().getTarget({ sessionKey })
+      const hasTarget = !!requireBridge().getTarget(browserTarget(sessionKey, tab_id))
       if (!allowBrowserNavigation({ sessionKey, hasTarget, confirm })) {
         const confirmation = browserConfirmationRequired({
           sessionKey,
@@ -95,7 +96,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         })
         return result(JSON.stringify(confirmation))
       }
-      const target = await requireBridge().navigate({ sessionKey, sessionID: _lfcodeSessionID, url })
+      const target = await requireBridge().navigate({ ...browserTarget(sessionKey, tab_id), sessionID: _lfcodeSessionID, url })
       return result(`Navigated side browser to ${target.url}`, target)
     },
   )
@@ -108,7 +109,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const snapshot = await requireBridge().snapshot({ sessionKey })
+      const snapshot = await requireBridge().snapshot(browserTarget(sessionKey, input.tab_id))
       return result(snapshot.text, snapshot)
     },
   )
@@ -121,7 +122,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const screenshot = await requireBridge().screenshot({ sessionKey })
+      const screenshot = await requireBridge().screenshot(browserTarget(sessionKey, input.tab_id))
       return result(`Saved side browser screenshot to ${screenshot.path}`, screenshot)
     },
   )
@@ -135,7 +136,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const page = await requireBridge().readPage({ sessionKey })
+      const page = await requireBridge().readPage(browserTarget(sessionKey, input.tab_id))
       return result(formatPageSummary(page), page)
     },
   )
@@ -150,10 +151,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string().optional(),
       }),
     },
-    async ({ ref, selector, _lfcodeSessionID }) => {
+    async ({ ref, selector, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const resources = await requireBridge().extractResource({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         ref,
         selector,
       })
@@ -171,10 +172,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string().optional(),
       }),
     },
-    async ({ ref, selector, _lfcodeSessionID }) => {
+    async ({ ref, selector, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const capture = await requireBridge().captureElement({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         ref,
         selector,
       })
@@ -190,10 +191,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         limit: z.number().int().positive().optional(),
       }),
     },
-    async ({ limit, _lfcodeSessionID }) => {
+    async ({ limit, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const consoleLog = await requireBridge().getConsole({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         limit,
       })
       return result(formatConsoleSummary(consoleLog), consoleLog)
@@ -208,13 +209,68 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         limit: z.number().int().positive().optional(),
       }),
     },
-    async ({ limit, _lfcodeSessionID }) => {
+    async ({ limit, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const networkLog = await requireBridge().getNetwork({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         limit,
       })
       return result(formatNetworkSummary(networkLog), networkLog)
+    },
+  )
+
+  server.registerTool(
+    "browser_assert",
+    {
+      description:
+        "Run deterministic browser checks without JavaScript: URL, title, visible text, selector presence/visibility, console errors, and failed network requests. Returns structured check results and reports failures as tool errors.",
+      inputSchema: ownerInputSchema.extend({
+        check: browserAssertCheck.optional(),
+        checks: z.array(browserAssertCheck).min(1).optional(),
+        limit: z.number().int().positive().max(500).optional(),
+        sinceMs: z.number().int().nonnegative().optional(),
+      }),
+    },
+    async ({ check, checks, limit, sinceMs, tab_id, _lfcodeSessionID }) => {
+      const allChecks = [...(check ? [check] : []), ...(checks ?? [])]
+      if (allChecks.length === 0) throw new Error("browser_assert requires check or checks")
+      const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
+      const target = browserTarget(sessionKey, tab_id)
+      const [page, consoleLog, networkLog] = await Promise.all([
+        requireBridge().readPage(target),
+        allChecks.some((item) => item.kind === "console") ? requireBridge().getConsole({ ...target, limit: limit ?? 100 }) : Promise.resolve(undefined),
+        allChecks.some((item) => item.kind === "network") ? requireBridge().getNetwork({ ...target, limit: limit ?? 100 }) : Promise.resolve(undefined),
+      ])
+      const cutoff = sinceMs === undefined ? undefined : Date.now() - sinceMs
+      const selectorChecks = await Promise.all(
+        allChecks.filter((item): item is Extract<BrowserAssertCheck, { kind: "selector" }> => item.kind === "selector").map(async (item) => [
+          item.selector,
+          await requireBridge().waitForSelector({ ...target, selector: item.selector, visible: item.visible === true, timeoutMs: 1 }),
+        ] as const),
+      )
+      const selectorMatches = new Map(selectorChecks.map(([selector, value]) => [selector, value.matched]))
+      const results = allChecks.map((item) => {
+        if (item.kind === "url") return { kind: item.kind, expected: item.expected, actual: page.url, passed: matchAssert(page.url, item.expected, item.match) }
+        if (item.kind === "title") return { kind: item.kind, expected: item.expected, actual: page.title, passed: matchAssert(page.title, item.expected, item.match) }
+        if (item.kind === "text") {
+          const contains = page.text.includes(item.expected)
+          return { kind: item.kind, expected: item.expected, actual: page.text, passed: item.match === "not_contains" ? !contains : contains }
+        }
+        if (item.kind === "selector") return { kind: item.kind, selector: item.selector, visible: item.visible === true, passed: selectorMatches.get(item.selector) === true }
+        if (item.kind === "console") {
+          const entries = (consoleLog?.entries ?? []).filter((entry) => cutoff === undefined || entry.time >= cutoff)
+          const errors = entries.filter((entry) => entry.level === "error" || entry.kind === "pageerror" || entry.kind === "unhandledrejection")
+          return { kind: item.kind, mode: item.mode, errorCount: errors.length, passed: errors.length === 0 }
+        }
+        const entries = (networkLog?.entries ?? []).filter((entry) => cutoff === undefined || entry.time >= cutoff)
+        const failed = entries.filter((entry) => (entry.statusCode ?? 0) >= 400 || !!entry.error)
+        return { kind: item.kind, mode: item.mode, failedCount: failed.length, passed: failed.length === 0 }
+      })
+      const assertionResult = { passed: results.every((item) => item.passed), checks: results, target: page.target }
+      if (!assertionResult.passed) {
+        return { ...result(JSON.stringify(assertionResult), assertionResult), isError: true as const }
+      }
+      return result("Browser assertions passed.", assertionResult)
     },
   )
 
@@ -230,10 +286,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         resourceTypes: z.array(z.string()).optional(),
       }),
     },
-    async ({ query, url, limit, resourceTypes, _lfcodeSessionID }) => {
+    async ({ query, url, limit, resourceTypes, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const cached = await requireBridge().listCachedResources({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         query,
         url,
         limit,
@@ -257,10 +313,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         cachePolicy: z.enum(["prefer-cache", "cache-only", "bypass-cache"]).optional(),
       }),
     },
-    async ({ url, filename, resourceID, ref, selector, cachePolicy, _lfcodeSessionID }) => {
+    async ({ url, filename, resourceID, ref, selector, cachePolicy, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const download = await requireBridge().downloadResource({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         url,
         filename,
         resourceID,
@@ -289,10 +345,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         amount: z.number().int().positive().optional(),
       }),
     },
-    async ({ ref, selector, direction, amount, _lfcodeSessionID }) => {
+    async ({ ref, selector, direction, amount, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const target = await requireBridge().scroll({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         ref,
         selector,
         direction,
@@ -311,9 +367,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string().optional(),
       }),
     },
-    async ({ ref, selector, _lfcodeSessionID }) => {
+    async ({ ref, selector, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().hover({ sessionKey, ref, selector })
+      const target = await requireBridge().hover({ ...browserTarget(sessionKey, tab_id), ref, selector })
       return result(`Hovered browser element on ${target.url}`, target)
     },
   )
@@ -327,9 +383,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string().optional(),
       }),
     },
-    async ({ ref, selector, _lfcodeSessionID }) => {
+    async ({ ref, selector, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().focus({ sessionKey, ref, selector })
+      const target = await requireBridge().focus({ ...browserTarget(sessionKey, tab_id), ref, selector })
       return result(`Focused browser element on ${target.url}`, target)
     },
   )
@@ -343,9 +399,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string().optional(),
       }),
     },
-    async ({ ref, selector, _lfcodeSessionID }) => {
+    async ({ ref, selector, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().clear({ sessionKey, ref, selector })
+      const target = await requireBridge().clear({ ...browserTarget(sessionKey, tab_id), ref, selector })
       return result(`Cleared browser element on ${target.url}`, target)
     },
   )
@@ -363,10 +419,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         text: z.string().optional(),
       }),
     },
-    async ({ ref, selector, value, label, text, _lfcodeSessionID }) => {
+    async ({ ref, selector, value, label, text, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const target = await requireBridge().selectOption({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         ref,
         selector,
         value,
@@ -388,10 +444,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         files: z.array(z.string()).min(1),
       }),
     },
-    async ({ ref, selector, files, _lfcodeSessionID }) => {
+    async ({ ref, selector, files, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const target = await requireBridge().uploadFile({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         ref,
         selector,
         files,
@@ -408,9 +464,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         ref: z.string(),
       }),
     },
-    async ({ ref, _lfcodeSessionID }) => {
+    async ({ ref, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().click({ sessionKey, ref })
+      const target = await requireBridge().click({ ...browserTarget(sessionKey, tab_id), ref })
       return result(`Clicked ${ref} on ${target.url}`, target)
     },
   )
@@ -425,9 +481,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         submit: z.boolean().optional(),
       }),
     },
-    async ({ ref, text, submit, _lfcodeSessionID }) => {
+    async ({ ref, text, submit, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().type({ sessionKey, ref, text, submit })
+      const target = await requireBridge().type({ ...browserTarget(sessionKey, tab_id), ref, text, submit })
       return result(`Typed into ${ref}${submit ? " and submitted" : ""} on ${target.url}`, target)
     },
   )
@@ -440,9 +496,9 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         key: z.string(),
       }),
     },
-    async ({ key, _lfcodeSessionID }) => {
+    async ({ key, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
-      const target = await requireBridge().pressKey({ sessionKey, key })
+      const target = await requireBridge().pressKey({ ...browserTarget(sessionKey, tab_id), key })
       return result(`Pressed ${key} on ${target.url}`, target)
     },
   )
@@ -455,7 +511,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const target = await requireBridge().back({ sessionKey })
+      const target = await requireBridge().back(browserTarget(sessionKey, input.tab_id))
       return result(`Navigated back on ${target.url}`, target)
     },
   )
@@ -468,7 +524,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const target = await requireBridge().forward({ sessionKey })
+      const target = await requireBridge().forward(browserTarget(sessionKey, input.tab_id))
       return result(`Navigated forward on ${target.url}`, target)
     },
   )
@@ -481,7 +537,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const target = await requireBridge().reload({ sessionKey })
+      const target = await requireBridge().reload(browserTarget(sessionKey, input.tab_id))
       return result(`Reloaded ${target.url}`, target)
     },
   )
@@ -494,7 +550,7 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
     },
     async (input) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, input._lfcodeSessionID)
-      const target = await requireBridge().close({ sessionKey })
+      const target = await requireBridge().close(browserTarget(sessionKey, input.tab_id))
       clearBrowserNavigationAuthorization(sessionKey)
       return result(target ? `Closed browser tab. Active browser is now ${target.url}` : "Closed the current side browser tab.", target)
     },
@@ -508,15 +564,17 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         selector: z.string(),
         visible: z.boolean().optional(),
         timeoutMs: z.number().int().positive().optional(),
+        stableMs: z.number().int().positive().optional(),
       }),
     },
-    async ({ selector, visible, timeoutMs, _lfcodeSessionID }) => {
+    async ({ selector, visible, timeoutMs, stableMs, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const wait = await requireBridge().waitForSelector({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         selector,
         visible,
         timeoutMs,
+        stableMs,
       })
       return result(wait.matched ? `Selector matched: ${selector}` : `Timed out waiting for selector: ${selector}`, wait)
     },
@@ -530,15 +588,17 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         url: z.string(),
         match: z.enum(["equals", "includes"]).optional(),
         timeoutMs: z.number().int().positive().optional(),
+        stableMs: z.number().int().positive().optional(),
       }),
     },
-    async ({ url, match, timeoutMs, _lfcodeSessionID }) => {
+    async ({ url, match, timeoutMs, stableMs, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const wait = await requireBridge().waitForUrl({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         url,
         match,
         timeoutMs,
+        stableMs,
       })
       return result(wait.matched ? `URL matched: ${url}` : `Timed out waiting for URL: ${url}`, wait)
     },
@@ -554,10 +614,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         stableMs: z.number().int().positive().optional(),
       }),
     },
-    async ({ state, timeoutMs, stableMs, _lfcodeSessionID }) => {
+    async ({ state, timeoutMs, stableMs, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const wait = await requireBridge().waitForLoadState({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         state,
         timeoutMs,
         stableMs,
@@ -578,10 +638,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         stableMs: z.number().int().positive().optional(),
       }),
     },
-    async ({ url, match, timeoutMs, stableMs, _lfcodeSessionID }) => {
+    async ({ url, match, timeoutMs, stableMs, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const wait = await requireBridge().waitForNavigation({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         url,
         match,
         timeoutMs,
@@ -602,10 +662,10 @@ function createPlaywrightMcpServer(owner: { directory?: string }) {
         timeoutMs: z.number().int().positive().optional(),
       }),
     },
-    async ({ text, textGone, time, timeoutMs, _lfcodeSessionID }) => {
+    async ({ text, textGone, time, timeoutMs, tab_id, _lfcodeSessionID }) => {
       const sessionKey = requireOwnerSessionKey(owner.directory, _lfcodeSessionID)
       const target = await requireBridge().waitFor({
-        sessionKey,
+        ...browserTarget(sessionKey, tab_id),
         text,
         textGone,
         timeMs: time ? time * 1000 : undefined,
@@ -628,6 +688,25 @@ function decodeOwnerDirectory(value: string | undefined) {
   } catch {
     return value
   }
+}
+
+const browserAssertCheck = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("url"), expected: z.string(), match: z.enum(["equals", "includes"]).optional() }),
+  z.object({ kind: z.literal("title"), expected: z.string(), match: z.enum(["equals", "includes"]).optional() }),
+  z.object({ kind: z.literal("text"), expected: z.string(), match: z.enum(["contains", "not_contains"]).optional() }),
+  z.object({ kind: z.literal("selector"), selector: z.string(), visible: z.boolean().optional() }),
+  z.object({ kind: z.literal("console"), mode: z.literal("has_no_error") }),
+  z.object({ kind: z.literal("network"), mode: z.literal("has_no_failed_request") }),
+])
+
+type BrowserAssertCheck = z.infer<typeof browserAssertCheck>
+
+function browserTarget(sessionKey: string, tabID?: string) {
+  return { sessionKey, ...(tabID ? { tabID } : {}) }
+}
+
+function matchAssert(actual: string, expected: string, mode?: "equals" | "includes") {
+  return mode === "includes" ? actual.includes(expected) : actual === expected
 }
 
 function requireOwnerSessionKey(directory: string | undefined, sessionID: string | undefined) {
@@ -660,7 +739,8 @@ function result(
     | DesktopBrowserAutomationConsoleLog
     | DesktopBrowserAutomationNetworkLog
     | DesktopBrowserAutomationDownload
-    | DesktopBrowserAutomationWaitResult,
+    | DesktopBrowserAutomationWaitResult
+    | BrowserAssertionResult,
 ) {
   return {
     content: [
@@ -671,6 +751,12 @@ function result(
     ],
     ...(structuredContent ? { structuredContent } : {}),
   }
+}
+
+type BrowserAssertionResult = {
+  passed: boolean
+  checks: Array<Record<string, unknown>>
+  target: DesktopBrowserAutomationTarget
 }
 
 function formatPageSummary(page: DesktopBrowserAutomationPage) {

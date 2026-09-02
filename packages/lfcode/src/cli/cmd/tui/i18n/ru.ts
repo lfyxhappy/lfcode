@@ -132,12 +132,12 @@ export const dict = {
   "tui.tips.custom_agent":
     "Добавляйте файлы {highlight}.md{/highlight} в {highlight}.lfcode/agent/{/highlight} для специализированных AI-персон",
   "tui.tips.agent_perms":
-    "Настройте для каждого агента отдельные права на инструменты {highlight}edit{/highlight}, {highlight}bash{/highlight} и {highlight}webfetch{/highlight}",
-  "tui.tips.bash_allow":
+    "Настройте для каждого агента отдельные права на инструменты {highlight}edit{/highlight}, {highlight}shell{/highlight} и {highlight}webfetch{/highlight}",
+  "tui.tips.shell_allow":
     'Используйте шаблоны вроде {highlight}"git *": "allow"{/highlight} для тонких bash-разрешений',
-  "tui.tips.bash_deny":
+  "tui.tips.shell_deny":
     'Установите {highlight}"rm -rf *": "deny"{/highlight}, чтобы блокировать разрушительные команды',
-  "tui.tips.bash_ask":
+  "tui.tips.shell_ask":
     'Настройте {highlight}"git push": "ask"{/highlight}, чтобы запрашивать подтверждение перед push',
   "tui.tips.formatter":
     "Lfcode автоматически форматирует файлы с помощью prettier, gofmt, ruff и других инструментов",
@@ -198,7 +198,7 @@ export const dict = {
   "tui.tips.steps":
     "Настройте {highlight}steps{/highlight}, чтобы ограничить число агентских итераций на запрос",
   "tui.tips.disable_tool":
-    'Установите {highlight}"tools": {"bash": false}{/highlight}, чтобы отключить отдельные инструменты',
+    'Установите {highlight}"tool_allowlist": ["read", "search"]{/highlight}, чтобы отключить отдельные инструменты',
   "tui.tips.disable_mcp_tools":
     'Установите {highlight}"mcp_*": false{/highlight}, чтобы отключить все инструменты конкретного MCP-сервера',
   "tui.tips.tool_override":

@@ -8,6 +8,7 @@ import { SessionTable } from "../../session/session.sql"
 import { Project } from "../../project"
 import { Instance } from "../../project/instance"
 import { AppRuntime } from "@/effect/app-runtime"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 
 interface SessionStats {
   totalSessions: number
@@ -367,14 +368,14 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
   const tokensPerSession = isNaN(stats.tokensPerSession) ? 0 : stats.tokensPerSession
   console.log(renderRow("Total Cost", `$${cost.toFixed(2)}`))
   console.log(renderRow("Avg Cost/Day", `$${costPerDay.toFixed(2)}`))
-  console.log(renderRow("Avg Tokens/Session", formatNumber(Math.round(tokensPerSession))))
+  console.log(renderRow("Avg Tokens/Session", formatTokenCount(Math.round(tokensPerSession))))
   const medianTokensPerSession = isNaN(stats.medianTokensPerSession) ? 0 : stats.medianTokensPerSession
-  console.log(renderRow("Median Tokens/Session", formatNumber(Math.round(medianTokensPerSession))))
-  console.log(renderRow("Input", formatNumber(stats.totalTokens.input)))
-  console.log(renderRow("Output", formatNumber(stats.totalTokens.output)))
-  console.log(renderRow("Cache Read", formatNumber(stats.totalTokens.cache.read)))
-  console.log(renderRow("Cache Write", formatNumber(stats.totalTokens.cache.write)))
-  console.log(renderRow("Overhead Tokens", formatNumber(stats.totalTokens.overhead)))
+  console.log(renderRow("Median Tokens/Session", formatTokenCount(Math.round(medianTokensPerSession))))
+  console.log(renderRow("Input", formatTokenCount(stats.totalTokens.input)))
+  console.log(renderRow("Output", formatTokenCount(stats.totalTokens.output)))
+  console.log(renderRow("Cache Read", formatTokenCount(stats.totalTokens.cache.read)))
+  console.log(renderRow("Cache Write", formatTokenCount(stats.totalTokens.cache.write)))
+  console.log(renderRow("Overhead Tokens", formatTokenCount(stats.totalTokens.overhead)))
   console.log(renderRow("Overhead Cost", `$${stats.overheadCost.toFixed(4)}`))
   console.log("└────────────────────────────────────────────────────────┘")
   console.log()
@@ -391,11 +392,11 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
     for (const [model, usage] of modelsToDisplay) {
       console.log(`│ ${model.padEnd(54)} │`)
       console.log(renderRow("  Messages", usage.messages.toLocaleString()))
-      console.log(renderRow("  Input Tokens", formatNumber(usage.tokens.input)))
-      console.log(renderRow("  Output Tokens", formatNumber(usage.tokens.output)))
-      console.log(renderRow("  Cache Read", formatNumber(usage.tokens.cache.read)))
-      console.log(renderRow("  Cache Write", formatNumber(usage.tokens.cache.write)))
-      console.log(renderRow("  Overhead Tokens", formatNumber(usage.tokens.overhead)))
+      console.log(renderRow("  Input Tokens", formatTokenCount(usage.tokens.input)))
+      console.log(renderRow("  Output Tokens", formatTokenCount(usage.tokens.output)))
+      console.log(renderRow("  Cache Read", formatTokenCount(usage.tokens.cache.read)))
+      console.log(renderRow("  Cache Write", formatTokenCount(usage.tokens.cache.write)))
+      console.log(renderRow("  Overhead Tokens", formatTokenCount(usage.tokens.overhead)))
       console.log(renderRow("  Overhead Cost", `$${usage.overheadCost.toFixed(4)}`))
       console.log(renderRow("  Cost", `$${usage.cost.toFixed(4)}`))
       console.log("├────────────────────────────────────────────────────────┤")
@@ -434,13 +435,4 @@ export function displayStats(stats: SessionStats, toolLimit?: number, modelLimit
     console.log("└────────────────────────────────────────────────────────┘")
   }
   console.log()
-}
-
-function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + "M"
-  } else if (num >= 1000) {
-    return (num / 1000).toFixed(1) + "K"
-  }
-  return num.toString()
 }

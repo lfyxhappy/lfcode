@@ -12,6 +12,8 @@ import { startVisiblePolling } from "@/utils/visible-poll"
 import { DeepResearchRail } from "./deep-research-rail"
 import { SessionPerformanceCard } from "./session-performance-card"
 import { SubagentDispatchRail } from "./subagent-dispatch-rail"
+import { actorDispatchesFromActivities, type ActorDispatch } from "../subagent-api"
+import type { HookRunActivity } from "@/context/global-sync/types"
 
 const pollMs = 10_000
 
@@ -84,7 +86,9 @@ function reconcileBackgroundJobs(current: BackgroundJob[], next: BackgroundJob[]
     const existing = previous.get(job.id)
     return existing && sameBackgroundJob(existing, job) ? existing : job
   })
-  return reconciled.length === current.length && reconciled.every((job, index) => job === current[index]) ? current : reconciled
+  return reconciled.length === current.length && reconciled.every((job, index) => job === current[index])
+    ? current
+    : reconciled
 }
 
 export function SessionJobsRail(props: {
@@ -122,6 +126,11 @@ export function SessionJobsRail(props: {
       description: formatServerError(error, language.t, language.t("common.requestFailed")),
     })
   }
+
+  const dispatches = createMemo<ActorDispatch[]>(() =>
+    actorDispatchesFromActivities(sync.data.activity?.[props.sessionID] ?? []),
+  )
+  const refreshDispatches = async () => undefined
 
   const refresh = async () => {
     const jobResult = await sdk.client.backgroundJob.list({ sessionID: props.sessionID })
@@ -243,7 +252,21 @@ export function SessionJobsRail(props: {
     }),
   )
   const jobCount = createMemo(() => jobItems().length)
-  const hookRuns = createMemo(() => sync.data.hook_run?.[props.sessionID] ?? [])
+  const hookRuns = createMemo<HookRunActivity[]>(() => {
+    const activities = sync.data.activity?.[props.sessionID] ?? []
+    const hooks = activities
+      .filter((item) => item.kind === "hook" && item.hookID && item.hookName && item.event)
+      .map((item) => ({
+        hookID: item.hookID!,
+        hookName: item.hookName!,
+        event: item.event!,
+        status: (item.status ?? "started") as HookRunActivity["status"],
+        durationMs: item.durationMs ?? 0,
+        summary: item.summary ?? item.title ?? "",
+        timeCreated: item.createdAt,
+      }))
+    return hooks.length > 0 ? hooks : (sync.data.hook_run?.[props.sessionID] ?? [])
+  })
   const openDirectory = () => {
     if (!platform.openPath) return
     void platform.openPath(props.directory)
@@ -281,302 +304,314 @@ export function SessionJobsRail(props: {
         class="min-h-0 flex-1 overflow-y-auto no-scrollbar rounded-[24px] bg-surface-raised-base p-4"
         style={{ "background-color": "var(--surface-raised-base)" }}
       >
-      <header class="flex items-center justify-between px-1 pb-2 text-14-regular text-text-weak">
-        <span>Environment</span>
-        <div class="relative" data-session-source-menu>
-          <button
-            type="button"
-            class="flex size-7 items-center justify-center rounded-lg text-icon-weak-base transition-colors hover:bg-surface-raised-base-hover hover:text-icon-base"
-            aria-label="Add sources"
-            aria-haspopup="menu"
-            aria-expanded={sourceMenuOpen()}
-            onClick={() => setSourceMenuOpen((value) => !value)}
-          >
-            <Icon name="plus" size="small" />
-          </button>
-          <Show when={sourceMenuOpen()}>
-            <div
-              class="absolute right-0 top-8 z-50 w-64 rounded-lg border border-border-weak-base bg-surface-raised-stronger-non-alpha p-1 shadow-[var(--shadow-lg-border-base)]"
-              role="menu"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-                onClick={openConnectAppsPlaceholder}
-              >
-                <Icon name="link" size="small" class="shrink-0 text-icon-weak-base" />
-                <span class="min-w-0 flex-1">Connect your favorite apps</span>
-                <Icon name="chevron-right" size="small" class="shrink-0 text-icon-weak-base" />
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-                onClick={() => void chooseSources()}
-              >
-                <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
-                <span class="min-w-0 flex-1">Attach files or folders</span>
-              </button>
-            </div>
-          </Show>
-        </div>
-      </header>
-
-      <section class="space-y-1 rounded-xl bg-surface-raised-base p-2">
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-          onClick={props.onOpenChanges}
-        >
-          <Icon name="checklist" size="small" class="shrink-0 text-icon-weak-base" />
-          <span>Changes</span>
-          <span class="ml-auto text-12-regular text-text-weak">{props.changes()}</span>
-        </button>
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-          onClick={openDirectory}
-        >
-          <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
-          <span>Local</span>
-          <Icon name="chevron-right" size="small" class="ml-auto text-icon-weak-base" />
-        </button>
-        <button
-          type="button"
-          class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-          onClick={props.onOpenFiles}
-        >
-          <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
-          <span>Files</span>
-          <Icon name="chevron-right" size="small" class="ml-auto text-icon-weak-base" />
-        </button>
-      </section>
-
-      <DeepResearchRail
-        sessionID={props.sessionID}
-        directory={props.directory}
-        onOpenSubagent={props.onOpenSubagent}
-      />
-
-      <SubagentDispatchRail
-        sessionID={props.sessionID}
-        directory={props.directory}
-        actors={props.actors}
-        onOpenSubagent={props.onOpenSubagent}
-      />
-
-      <Show when={hookRuns().length > 0}>
-        <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
-          <div class="flex items-center gap-2 px-1 py-1.5 text-13-regular text-text-weak">
-            <Icon name="status" size="small" class="text-icon-weak-base" />
-            <span>Hook 活动</span>
-            <span class="ml-auto text-12-regular">{hookRuns().length}</span>
-          </div>
-          <div class="mt-1 space-y-1">
-            <For each={hookRuns()}>
-              {(run) => (
-                <div class="rounded-lg bg-surface-base px-2 py-1.5">
-                  <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
-                    <span
-                      class={`size-1.5 shrink-0 rounded-full ${run.status === "blocked" ? "bg-icon-critical-base" : run.status === "completed" ? "bg-icon-interactive-base" : "bg-icon-warning-base"}`}
-                    />
-                    <span class="truncate">
-                      {run.event} · {run.hookName}
-                    </span>
-                    <span class="ml-auto shrink-0 text-11-regular text-text-weak">{run.durationMs}ms</span>
-                  </div>
-                  <div class="mt-0.5 truncate text-11-regular text-text-weak">{run.summary}</div>
-                </div>
-              )}
-            </For>
-          </div>
-        </section>
-      </Show>
-
-      <Show when={jobItems().length > 0}>
-        <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
-          <button
-            type="button"
-            class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-weak hover:bg-surface-raised-base-hover"
-            aria-expanded={!processesCollapsed()}
-            aria-controls="session-background-processes"
-            onClick={() => setProcessesCollapsed((value) => !value)}
-          >
-            <Icon name="terminal" size="small" class="text-icon-weak-base" />
-            <span>Shell processes</span>
-            <span class="ml-auto text-12-regular text-text-weak">{jobCount()}</span>
-            <Icon name="chevron-down" size="small" class={processesCollapsed() ? "-rotate-90" : ""} />
-          </button>
-          <Show when={!processesCollapsed()}>
-            <div id="session-background-processes" class="mt-1 px-1 pb-1">
-              <Show when={!loading()} fallback={<div class="px-2 py-3 text-12-regular text-text-weak">Loading...</div>}>
-                <Show
-                  when={jobItems().length > 0}
-                  fallback={
-                    <div class="px-2 py-3 text-12-regular text-text-weak">
-                      {language.t("status.popover.jobs.empty")}
-                    </div>
-                  }
-                >
-                  <div class="max-h-64 space-y-1 overflow-y-auto no-scrollbar">
-                    <For each={jobItems()}>
-                      {(job) => (
-                        <div class="relative rounded-lg px-2 py-2 hover:bg-surface-raised-base-hover">
-                          <div class="flex min-w-0 items-start gap-2">
-                            <span class={`mt-1.5 size-1.5 shrink-0 rounded-full ${jobTone(job.status)}`} />
-                            <button
-                              type="button"
-                              class="min-w-0 flex-1 text-left"
-                              onClick={() => setExpandedJobID(expandedJobID() === job.id ? undefined : job.id)}
-                            >
-                              <div class="truncate text-12-medium text-text-base">{job.title}</div>
-                              <div class="mt-1 flex flex-wrap gap-x-1.5 text-11-regular text-text-weak">
-                                <span>{job.status}</span>
-                                <span>{formatJobTime(job.createdAt)}</span>
-                                <Show when={job.pid !== undefined}>{(pid) => <span>pid {pid()}</span>}</Show>
-                              </div>
-                            </button>
-                            <div class="relative shrink-0" data-session-job-menu>
-                              <button
-                                type="button"
-                                class="flex size-6 items-center justify-center rounded-md text-text-weak hover:bg-surface-base hover:text-text-base"
-                                aria-label={`Actions for ${job.title}`}
-                                aria-expanded={openJobMenuID() === job.id}
-                                aria-haspopup="menu"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  setOpenJobMenuID(openJobMenuID() === job.id ? undefined : job.id)
-                                }}
-                              >
-                                <span class="flex gap-0.5" aria-hidden="true">
-                                  <span class="size-1 rounded-full bg-current" />
-                                  <span class="size-1 rounded-full bg-current" />
-                                  <span class="size-1 rounded-full bg-current" />
-                                </span>
-                              </button>
-                              <Show when={openJobMenuID() === job.id}>
-                                <div
-                                  class="absolute right-0 top-7 z-50 w-40 rounded-lg border border-border-weak-base bg-background-base p-1 shadow-[var(--shadow-lg-border-base)]"
-                                  role="menu"
-                                >
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover"
-                                    onClick={() => {
-                                      setOpenJobMenuID()
-                                      setExpandedJobID(job.id)
-                                      void refreshDetails(job.id, false)
-                                    }}
-                                  >
-                                    Open output
-                                  </button>
-                                  <Show when={job.status === "running"}>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      disabled={actionJobID() === job.id}
-                                      class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover disabled:text-text-weak"
-                                      onClick={() => {
-                                        setOpenJobMenuID()
-                                        void cancel(job.id)
-                                      }}
-                                    >
-                                      {language.t("common.cancel")}
-                                    </button>
-                                  </Show>
-                                  <Show when={job.status !== "running"}>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      disabled={actionJobID() === job.id}
-                                      class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover disabled:text-text-weak"
-                                      onClick={() => {
-                                        setOpenJobMenuID()
-                                        void reconcile(job.id)
-                                      }}
-                                    >
-                                      {language.t("status.popover.jobs.reconcile")}
-                                    </button>
-                                  </Show>
-                                </div>
-                              </Show>
-                            </div>
-                          </div>
-                          <Show when={job.error}>
-                            {(error) => <div class="mt-1 line-clamp-2 text-11-regular text-text-danger">{error()}</div>}
-                          </Show>
-                          <Show when={expandedJobID() === job.id}>
-                            <div class="mt-2 rounded-lg border border-border-weak-base bg-background-base px-2 py-2">
-                              <Show
-                                when={!detailsLoading[job.id]}
-                                fallback={<div class="text-11-regular text-text-weak">Loading...</div>}
-                              >
-                                <Show when={details[job.id]}>
-                                  {(detail) => (
-                                    <div class="text-11-regular text-text-weak">
-                                      {detail()?.kind} - {detail()?.source}
-                                      <Show when={detail()?.exitCode !== undefined}> - exit {detail()?.exitCode}</Show>
-                                    </div>
-                                  )}
-                                </Show>
-                                <Show when={(logs[job.id] ?? []).length > 0}>
-                                  <pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-text-base">
-                                    <For each={logs[job.id] ?? []}>{(entry) => <div>{entry.text}</div>}</For>
-                                  </pre>
-                                </Show>
-                              </Show>
-                            </div>
-                          </Show>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </Show>
-            </div>
-          </Show>
-        </section>
-      </Show>
-
-      <Show when={props.sources().length > 0}>
-        <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
-          <div class="flex items-center justify-between px-1 py-1.5 text-13-regular text-text-weak">
+        <header class="flex items-center justify-between px-1 pb-2 text-14-regular text-text-weak">
+          <span>Environment</span>
+          <div class="relative" data-session-source-menu>
             <button
               type="button"
-              class="rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-surface-raised-base-hover hover:text-text-base"
+              class="flex size-7 items-center justify-center rounded-lg text-icon-weak-base transition-colors hover:bg-surface-raised-base-hover hover:text-icon-base"
               aria-label="Add sources"
-              onClick={() => setSourceMenuOpen((value) => !value)}
-            >
-              Sources
-            </button>
-            <button
-              type="button"
-              class="flex size-6 items-center justify-center rounded-md text-icon-weak-base transition-colors hover:bg-surface-raised-base-hover hover:text-icon-base"
-              aria-label="Add sources"
+              aria-haspopup="menu"
+              aria-expanded={sourceMenuOpen()}
               onClick={() => setSourceMenuOpen((value) => !value)}
             >
               <Icon name="plus" size="small" />
             </button>
-          </div>
-          <div class="max-h-40 space-y-1 overflow-y-auto no-scrollbar px-1 py-1">
-            <For each={props.sources()}>
-              {(source) => (
+            <Show when={sourceMenuOpen()}>
+              <div
+                class="absolute right-0 top-8 z-50 w-64 rounded-lg border border-border-weak-base bg-surface-raised-stronger-non-alpha p-1 shadow-[var(--shadow-lg-border-base)]"
+                role="menu"
+              >
                 <button
                   type="button"
-                  class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-12-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
-                  title={source.path}
-                  onClick={() => openSource(source)}
+                  role="menuitem"
+                  class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+                  onClick={openConnectAppsPlaceholder}
+                >
+                  <Icon name="link" size="small" class="shrink-0 text-icon-weak-base" />
+                  <span class="min-w-0 flex-1">Connect your favorite apps</span>
+                  <Icon name="chevron-right" size="small" class="shrink-0 text-icon-weak-base" />
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+                  onClick={() => void chooseSources()}
                 >
                   <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
-                  <span class="min-w-0 flex-1 truncate">{source.title}</span>
+                  <span class="min-w-0 flex-1">Attach files or folders</span>
                 </button>
-              )}
-            </For>
+              </div>
+            </Show>
           </div>
+        </header>
+
+        <section class="space-y-1 rounded-xl bg-surface-raised-base p-2">
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+            onClick={props.onOpenChanges}
+          >
+            <Icon name="checklist" size="small" class="shrink-0 text-icon-weak-base" />
+            <span>Changes</span>
+            <span class="ml-auto text-12-regular text-text-weak">{props.changes()}</span>
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+            onClick={openDirectory}
+          >
+            <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
+            <span>Local</span>
+            <Icon name="chevron-right" size="small" class="ml-auto text-icon-weak-base" />
+          </button>
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+            onClick={props.onOpenFiles}
+          >
+            <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
+            <span>Files</span>
+            <Icon name="chevron-right" size="small" class="ml-auto text-icon-weak-base" />
+          </button>
         </section>
-      </Show>
+
+        <DeepResearchRail
+          sessionID={props.sessionID}
+          directory={props.directory}
+          dispatches={dispatches}
+          onRefresh={refreshDispatches}
+          onOpenSubagent={props.onOpenSubagent}
+        />
+
+        <SubagentDispatchRail
+          sessionID={props.sessionID}
+          directory={props.directory}
+          dispatches={dispatches}
+          onRefresh={refreshDispatches}
+          actors={props.actors}
+          onOpenSubagent={props.onOpenSubagent}
+        />
+
+        <Show when={hookRuns().length > 0}>
+          <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
+            <div class="flex items-center gap-2 px-1 py-1.5 text-13-regular text-text-weak">
+              <Icon name="status" size="small" class="text-icon-weak-base" />
+              <span>Hook 活动</span>
+              <span class="ml-auto text-12-regular">{hookRuns().length}</span>
+            </div>
+            <div class="mt-1 space-y-1">
+              <For each={hookRuns()}>
+                {(run) => (
+                  <div class="rounded-lg bg-surface-base px-2 py-1.5">
+                    <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
+                      <span
+                        class={`size-1.5 shrink-0 rounded-full ${run.status === "blocked" ? "bg-icon-critical-base" : run.status === "completed" ? "bg-icon-interactive-base" : "bg-icon-warning-base"}`}
+                      />
+                      <span class="truncate">
+                        {run.event} · {run.hookName}
+                      </span>
+                      <span class="ml-auto shrink-0 text-11-regular text-text-weak">{run.durationMs}ms</span>
+                    </div>
+                    <div class="mt-0.5 truncate text-11-regular text-text-weak">{run.summary}</div>
+                  </div>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
+
+        <Show when={jobItems().length > 0}>
+          <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-13-regular text-text-weak hover:bg-surface-raised-base-hover"
+              aria-expanded={!processesCollapsed()}
+              aria-controls="session-background-processes"
+              onClick={() => setProcessesCollapsed((value) => !value)}
+            >
+              <Icon name="terminal" size="small" class="text-icon-weak-base" />
+              <span>Shell processes</span>
+              <span class="ml-auto text-12-regular text-text-weak">{jobCount()}</span>
+              <Icon name="chevron-down" size="small" class={processesCollapsed() ? "-rotate-90" : ""} />
+            </button>
+            <Show when={!processesCollapsed()}>
+              <div id="session-background-processes" class="mt-1 px-1 pb-1">
+                <Show
+                  when={!loading()}
+                  fallback={<div class="px-2 py-3 text-12-regular text-text-weak">Loading...</div>}
+                >
+                  <Show
+                    when={jobItems().length > 0}
+                    fallback={
+                      <div class="px-2 py-3 text-12-regular text-text-weak">
+                        {language.t("status.popover.jobs.empty")}
+                      </div>
+                    }
+                  >
+                    <div class="max-h-64 space-y-1 overflow-y-auto no-scrollbar">
+                      <For each={jobItems()}>
+                        {(job) => (
+                          <div class="relative rounded-lg px-2 py-2 hover:bg-surface-raised-base-hover">
+                            <div class="flex min-w-0 items-start gap-2">
+                              <span class={`mt-1.5 size-1.5 shrink-0 rounded-full ${jobTone(job.status)}`} />
+                              <button
+                                type="button"
+                                class="min-w-0 flex-1 text-left"
+                                onClick={() => setExpandedJobID(expandedJobID() === job.id ? undefined : job.id)}
+                              >
+                                <div class="truncate text-12-medium text-text-base">{job.title}</div>
+                                <div class="mt-1 flex flex-wrap gap-x-1.5 text-11-regular text-text-weak">
+                                  <span>{job.status}</span>
+                                  <span>{formatJobTime(job.createdAt)}</span>
+                                  <Show when={job.pid !== undefined}>{(pid) => <span>pid {pid()}</span>}</Show>
+                                </div>
+                              </button>
+                              <div class="relative shrink-0" data-session-job-menu>
+                                <button
+                                  type="button"
+                                  class="flex size-6 items-center justify-center rounded-md text-text-weak hover:bg-surface-base hover:text-text-base"
+                                  aria-label={`Actions for ${job.title}`}
+                                  aria-expanded={openJobMenuID() === job.id}
+                                  aria-haspopup="menu"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    setOpenJobMenuID(openJobMenuID() === job.id ? undefined : job.id)
+                                  }}
+                                >
+                                  <span class="flex gap-0.5" aria-hidden="true">
+                                    <span class="size-1 rounded-full bg-current" />
+                                    <span class="size-1 rounded-full bg-current" />
+                                    <span class="size-1 rounded-full bg-current" />
+                                  </span>
+                                </button>
+                                <Show when={openJobMenuID() === job.id}>
+                                  <div
+                                    class="absolute right-0 top-7 z-50 w-40 rounded-lg border border-border-weak-base bg-background-base p-1 shadow-[var(--shadow-lg-border-base)]"
+                                    role="menu"
+                                  >
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover"
+                                      onClick={() => {
+                                        setOpenJobMenuID()
+                                        setExpandedJobID(job.id)
+                                        void refreshDetails(job.id, false)
+                                      }}
+                                    >
+                                      Open output
+                                    </button>
+                                    <Show when={job.status === "running"}>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        disabled={actionJobID() === job.id}
+                                        class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover disabled:text-text-weak"
+                                        onClick={() => {
+                                          setOpenJobMenuID()
+                                          void cancel(job.id)
+                                        }}
+                                      >
+                                        {language.t("common.cancel")}
+                                      </button>
+                                    </Show>
+                                    <Show when={job.status !== "running"}>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        disabled={actionJobID() === job.id}
+                                        class="w-full rounded-lg px-2 py-1.5 text-left text-12-regular text-text-base hover:bg-surface-raised-base-hover disabled:text-text-weak"
+                                        onClick={() => {
+                                          setOpenJobMenuID()
+                                          void reconcile(job.id)
+                                        }}
+                                      >
+                                        {language.t("status.popover.jobs.reconcile")}
+                                      </button>
+                                    </Show>
+                                  </div>
+                                </Show>
+                              </div>
+                            </div>
+                            <Show when={job.error}>
+                              {(error) => (
+                                <div class="mt-1 line-clamp-2 text-11-regular text-text-danger">{error()}</div>
+                              )}
+                            </Show>
+                            <Show when={expandedJobID() === job.id}>
+                              <div class="mt-2 rounded-lg border border-border-weak-base bg-background-base px-2 py-2">
+                                <Show
+                                  when={!detailsLoading[job.id]}
+                                  fallback={<div class="text-11-regular text-text-weak">Loading...</div>}
+                                >
+                                  <Show when={details[job.id]}>
+                                    {(detail) => (
+                                      <div class="text-11-regular text-text-weak">
+                                        {detail()?.kind} - {detail()?.source}
+                                        <Show when={detail()?.exitCode !== undefined}>
+                                          {" "}
+                                          - exit {detail()?.exitCode}
+                                        </Show>
+                                      </div>
+                                    )}
+                                  </Show>
+                                  <Show when={(logs[job.id] ?? []).length > 0}>
+                                    <pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-4 text-text-base">
+                                      <For each={logs[job.id] ?? []}>{(entry) => <div>{entry.text}</div>}</For>
+                                    </pre>
+                                  </Show>
+                                </Show>
+                              </div>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </Show>
+          </section>
+        </Show>
+
+        <Show when={props.sources().length > 0}>
+          <section class="mt-3 rounded-xl bg-surface-raised-base p-2">
+            <div class="flex items-center justify-between px-1 py-1.5 text-13-regular text-text-weak">
+              <button
+                type="button"
+                class="rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-surface-raised-base-hover hover:text-text-base"
+                aria-label="Add sources"
+                onClick={() => setSourceMenuOpen((value) => !value)}
+              >
+                Sources
+              </button>
+              <button
+                type="button"
+                class="flex size-6 items-center justify-center rounded-md text-icon-weak-base transition-colors hover:bg-surface-raised-base-hover hover:text-icon-base"
+                aria-label="Add sources"
+                onClick={() => setSourceMenuOpen((value) => !value)}
+              >
+                <Icon name="plus" size="small" />
+              </button>
+            </div>
+            <div class="max-h-40 space-y-1 overflow-y-auto no-scrollbar px-1 py-1">
+              <For each={props.sources()}>
+                {(source) => (
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-12-regular text-text-base transition-colors hover:bg-surface-raised-base-hover"
+                    title={source.path}
+                    onClick={() => openSource(source)}
+                  >
+                    <Icon name="folder" size="small" class="shrink-0 text-icon-weak-base" />
+                    <span class="min-w-0 flex-1 truncate">{source.title}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
       </aside>
       <SessionPerformanceCard sessionID={props.sessionID} messages={props.messages} parts={props.parts} />
     </div>

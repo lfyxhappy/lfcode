@@ -1,5 +1,4 @@
 import { MessageV2 } from "./message-v2"
-import { isRetryableToolValidationFailure } from "./part-helpers"
 
 /**
  * Outcome of classifying a single assistant step. Pure data — `runLoop` decides
@@ -39,32 +38,39 @@ export function classifyAssistantStep(input: {
 }): StepClassification {
   const assistant = input.assistant
 
-  // 1. Core guarantee — beats everything: a pending client tool call must
-  // re-loop so its observation is fed back to the model. EXCLUDE error-state
-  // tool parts: cleanup after SSE timeout / abort marks pending tool parts
-  // as state.status === "error". Those are NOT pending observation — they're
-  // terminal failures. Without this guard, classify mis-routes errored steps
-  // to "continue", runLoop re-enters and gets stranded on permission.ask
-  // from the in-flight tool that won't ever resolve. See Spec ③.
+  // Safety filtering is terminal even when a provider also emitted a tool
+  // fragment. Never send a content-filtered step back to the model as if it
+  // were a recoverable local tool observation.
+  if (assistant.finish === "content-filter") return { type: "filtered" }
+
+  // 1. Core guarantee — beats normal finish reasons: a pending client tool call
+  // must re-loop so its observation is fed back to the model. If the assistant
+  // already carries a stream/API error, however, the processor has no reliable
+  // tool result; route to the interruption retry path instead of re-looping a
+  // permanently pending call.
   if (
     input.parts.some(
       (part) =>
         part.type === "tool" &&
         !part.metadata?.providerExecuted &&
         part.state.status !== "error",
-    )
+    ) && !input.assistant.error
   )
     return { type: "continue" }
 
-  // A terminal syntax guard is a completed observation, not an interrupted
-  // execution. Feed it back to the model so it can rewrite the command.
+  // Any completed local tool error is an observation for the model, not a
+  // reason to terminate the turn. This includes runtime errors and legacy
+  // validation text. The exception is an assistant-level stream/API error:
+  // that means the execution itself was interrupted and there is no reliable
+  // tool observation to feed back.
   if (
     input.parts.some(
       (part) =>
         part.type === "tool" &&
         !part.metadata?.providerExecuted &&
         part.state.status === "error" &&
-        isRetryableToolValidationFailure(part.state.error),
+        !(part.state.metadata && "blocked" in part.state.metadata && part.state.metadata.blocked === true) &&
+        !input.assistant.error,
     )
   )
     return { type: "continue" }
@@ -87,7 +93,6 @@ export function classifyAssistantStep(input: {
   if (assistant.summary) return { type: "final" }
 
   // 6. Safety / error finish reasons.
-  if (assistant.finish === "content-filter") return { type: "filtered" }
   if (assistant.finish === "error") return { type: "failed", reason: "model error finish" }
 
   // 7. Inspect completed provider-side tools like any other finished step. A

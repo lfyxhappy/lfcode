@@ -4,7 +4,7 @@ import { tool, type ModelMessage } from "ai"
 import { Cause, Effect, Exit, Stream } from "effect"
 import z from "zod"
 import { makeRuntime } from "../../src/effect/run-service"
-import { gateProviderStreamChunks, LLM, normalizeTextLifecycle, repairToolInputJSON } from "../../src/session/llm"
+import { gateProviderStreamChunks, LLM, normalizeTextLifecycle } from "../../src/session/llm"
 import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider"
 import { ProviderTransform } from "../../src/provider"
@@ -59,20 +59,6 @@ describe("session.llm.normalizeTextLifecycle", () => {
   })
 })
 
-describe("session.llm.repairToolInputJSON", () => {
-  test("repairs valid JSON without changing its shape", () => {
-    expect(repairToolInputJSON('{"code":"return 1"}')).toBe('{"code":"return 1"}')
-  })
-
-  test("returns undefined for truncated run_code JSON instead of inventing a tool payload", () => {
-    expect(repairToolInputJSON('{"code":"for (var g = 1')).toBeUndefined()
-  })
-
-  test("repairs JSON wrapped in a markdown fence", () => {
-    expect(repairToolInputJSON('```json\n{"code":"return 1"}\n```')).toBe('{"code":"return 1"}')
-  })
-})
-
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
     expect(LLM.hasToolCalls([])).toBe(false)
@@ -104,7 +90,7 @@ describe("session.llm.hasToolCalls", () => {
           {
             type: "tool-call",
             toolCallId: "call-123",
-            toolName: "bash",
+            toolName: "shell",
           },
         ],
       },

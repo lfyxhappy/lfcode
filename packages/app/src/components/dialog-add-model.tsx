@@ -190,7 +190,7 @@ export function DialogAddModel(props: Props) {
       description={language.t("settings.models.addModel.description", { provider: props.provider.name })}
       size="large"
     >
-      <form onSubmit={inspect} class="flex flex-col gap-5 px-2.5 pb-3">
+      <form onSubmit={inspect} class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2.5 pb-3">
         <div class="flex flex-col gap-4">
           <div class="flex items-end gap-2">
             <div class="min-w-0 flex-1">
@@ -286,6 +286,13 @@ export function DialogAddModel(props: Props) {
                 {language.t(`settings.models.addModel.source.${suggestion()!.source}`)}
               </span>
             </div>
+            <Show when={suggestion()!.sourceUpdatedAt}>
+              {(updatedAt) => (
+                <p class="text-12-regular text-text-weak">
+                  {language.t("settings.models.addModel.suggestion.updated", { date: updatedAt() })}
+                </p>
+              )}
+            </Show>
             <Show when={suggestion()!.warning}>
               {(warning) => <p class="text-12-regular text-text-warning">{warning()}</p>}
             </Show>
@@ -328,7 +335,7 @@ export function DialogAddModel(props: Props) {
               </SuggestionValue>
             </div>
           </div>
-          <div class="flex flex-wrap justify-end gap-2 pt-1">
+          <div class="sticky bottom-0 -mx-1 flex flex-wrap justify-end gap-2 bg-surface-raised-stronger-non-alpha px-1 py-2">
             <Button type="button" variant="secondary" disabled={saving()} onClick={() => void save(false)}>
               {language.t("settings.models.addModel.reject")}
             </Button>

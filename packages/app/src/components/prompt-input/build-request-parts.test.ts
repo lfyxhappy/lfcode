@@ -152,7 +152,7 @@ describe("buildRequestParts", () => {
     })
   })
 
-  test("expands web references into synthetic text parts with source metadata", () => {
+  test("does not inject historical web references into new requests", () => {
     const prompt: Prompt = [
       {
         type: "web-reference",
@@ -178,22 +178,9 @@ describe("buildRequestParts", () => {
       sessionDirectory: "/repo",
     })
 
-    expect(result.requestParts).toHaveLength(2)
-    expect(result.requestParts[1]).toMatchObject({
-      type: "text",
-      synthetic: true,
-      metadata: {
-        lfcodeWebReference: {
-          label: "Example page",
-          url: "https://example.com/post",
-          selector: "main article",
-          mode: "selection",
-        },
-      },
-    })
-    if (result.requestParts[1]?.type !== "text") throw new Error("expected text part")
-    expect(result.requestParts[1].text).toContain("Captured excerpt")
-    expect(result.requestParts[1].text).toContain("https://example.com/post")
+    expect(result.requestParts).toHaveLength(1)
+    expect(result.requestParts[0]).toMatchObject({ type: "text", text: "[web:Example page]" })
+    expect(result.requestParts.some((part) => part.type === "text" && part.metadata?.lfcodeWebReference)).toBe(false)
   })
 
   test("deduplicates context files when prompt already includes same path", () => {

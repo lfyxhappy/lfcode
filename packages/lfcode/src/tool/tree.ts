@@ -97,7 +97,7 @@ export const TreeTool = Tool.define(
 
           yield* assertExternalDirectoryEffect(ctx, normalized, { kind: "directory" })
           yield* ctx.ask({
-            permission: "glob",
+            permission: "search",
             patterns: [normalized],
             always: ["*"],
             metadata: {

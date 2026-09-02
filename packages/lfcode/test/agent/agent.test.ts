@@ -56,7 +56,7 @@ test("build agent has correct default properties", async () => {
       expect(build?.mode).toBe("primary")
       expect(build?.native).toBe(true)
       expect(evalPerm(build, "edit")).toBe("allow")
-      expect(evalPerm(build, "bash")).toBe("allow")
+      expect(evalPerm(build, "shell")).toBe("allow")
     },
   })
 })
@@ -85,9 +85,7 @@ test("explore agent uses a read-only tool policy", async () => {
       expect(explore).toBeDefined()
       expect(explore?.mode).toBe("subagent")
       expect(evalPerm(explore, "edit")).toBe("deny")
-      expect(evalPerm(explore, "write")).toBe("deny")
-      expect(evalPerm(explore, "todowrite")).toBe("deny")
-      expect(evalPerm(explore, "glob")).toBe("allow")
+      expect(evalPerm(explore, "search")).toBe("allow")
     },
   })
 })
@@ -106,7 +104,7 @@ test("explore agent denies external directories and still allows Truncate.GLOB",
   })
 })
 
-test("general agent inherits the default todo tool permission", async () => {
+test("general agent exposes only canonical implementation tools", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
@@ -115,7 +113,30 @@ test("general agent inherits the default todo tool permission", async () => {
       expect(general).toBeDefined()
       expect(general?.mode).toBe("subagent")
       expect(general?.hidden).toBeUndefined()
-      expect(evalPerm(general, "todowrite")).toBe("allow")
+      expect(general?.toolAllowlist).toEqual(["read", "search", "webfetch", "websearch", "skill", "shell", "shell_process", "edit", "task"])
+    },
+  })
+})
+
+test("tester agent can author scoped test and review artifacts", async () => {
+  await using tmp = await tmpdir()
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const tester = await load(tmp.path, (svc) => svc.get("tester"))
+      expect(tester?.toolAllowlist).toEqual([
+        "read",
+        "search",
+        "webfetch",
+        "websearch",
+        "skill",
+        "shell",
+        "shell_process",
+        "edit",
+      ])
+      expect(Permission.evaluate("edit", "test/example.test.ts", tester!.permission).action).toBe("ask")
+      expect(tester?.prompt).toContain("operation=write")
+      expect(tester?.prompt).toContain("不要修改业务功能文件")
     },
   })
 })
@@ -196,7 +217,7 @@ test("system-spawned agent config cannot disable or override context reviewer", 
       expect(reviewer?.hidden).toBe(true)
       expect(reviewer?.description).not.toBe("user-visible override")
       expect(evalPerm(reviewer, "memory")).toBe("allow")
-      expect(evalPerm(reviewer, "bash")).toBe("deny")
+      expect(evalPerm(reviewer, "shell")).toBe("deny")
     },
   })
 })
@@ -227,7 +248,7 @@ test("agent permission config merges with defaults", async () => {
       agent: {
         build: {
           permission: {
-            bash: {
+            shell: {
               "rm -rf *": "deny",
             },
           },
@@ -241,7 +262,7 @@ test("agent permission config merges with defaults", async () => {
       const build = await load(tmp.path, (svc) => svc.get("build"))
       expect(build).toBeDefined()
       // Specific pattern is denied
-      expect(Permission.evaluate("bash", "rm -rf *", build!.permission).action).toBe("deny")
+      expect(Permission.evaluate("shell", "rm -rf *", build!.permission).action).toBe("deny")
       // Edit still allowed
       expect(evalPerm(build, "edit")).toBe("allow")
     },
@@ -252,7 +273,7 @@ test("global permission config applies to all agents", async () => {
   await using tmp = await tmpdir({
     config: {
       permission: {
-        bash: "deny",
+        shell: "deny",
       },
     },
   })
@@ -261,7 +282,7 @@ test("global permission config applies to all agents", async () => {
     fn: async () => {
       const build = await load(tmp.path, (svc) => svc.get("build"))
       expect(build).toBeDefined()
-      expect(evalPerm(build, "bash")).toBe("deny")
+      expect(evalPerm(build, "shell")).toBe("deny")
     },
   })
 })
@@ -471,7 +492,7 @@ test("webfetch is allowed by default", async () => {
   })
 })
 
-test("legacy tools config converts to permissions", async () => {
+test("removed tools config is rejected", async () => {
   await using tmp = await tmpdir({
     config: {
       agent: {
@@ -484,35 +505,30 @@ test("legacy tools config converts to permissions", async () => {
       },
     },
   })
-  await Instance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const build = await load(tmp.path, (svc) => svc.get("build"))
-      expect(evalPerm(build, "bash")).toBe("deny")
-      expect(evalPerm(build, "read")).toBe("deny")
-    },
-  })
+  await expect(
+    Instance.provide({
+      directory: tmp.path,
+      fn: async () => load(tmp.path, (svc) => svc.get("build")),
+    }),
+  ).rejects.toThrow("agent.tools is removed")
 })
 
-test("legacy tools config maps write/edit/patch/multiedit to edit permission", async () => {
+test("removed write tool cannot be used in an allowlist", async () => {
   await using tmp = await tmpdir({
     config: {
       agent: {
         build: {
-          tools: {
-            write: false,
-          },
+          tool_allowlist: ["write"],
         },
       },
     },
   })
-  await Instance.provide({
-    directory: tmp.path,
-    fn: async () => {
-      const build = await load(tmp.path, (svc) => svc.get("build"))
-      expect(evalPerm(build, "edit")).toBe("deny")
-    },
-  })
+  await expect(
+    Instance.provide({
+      directory: tmp.path,
+      fn: async () => load(tmp.path, (svc) => svc.get("build")),
+    }),
+  ).rejects.toThrow("Unknown or removed tool 'write'")
 })
 
 test("Truncate.GLOB is allowed even when user denies external_directory globally", async () => {
@@ -813,14 +829,13 @@ test("checkpoint-writer inherits default permission (no bespoke block); memory w
       // the PARENT's permission to handle.process (see prompt.ts fork branch),
       // and memory writes are governed by memory-path-guard (askEditUnlessMemory),
       // so an inherited edit:deny never blocks the writer's own checkpoint files.
-      // Under default config, edit/write/read resolve to "allow".
+      // Under default config, edit/read resolve to "allow".
       expect(Permission.evaluate("edit", "any/path", cp!.permission).action).toBe("allow")
-      expect(Permission.evaluate("write", "any/path", cp!.permission).action).toBe("allow")
       expect(Permission.evaluate("read", "any/path", cp!.permission).action).toBe("allow")
-      // bash is no longer force-disabled by a "*":"deny" block — it inherits the
+      // shell is no longer force-disabled by a "*":"deny" block — it inherits the
       // default allow, matching the parent's visible tool schema (prompt-cache parity).
-      const disabled = Permission.disabled(["read", "write", "edit", "bash", "webfetch"], cp!.permission)
-      expect(disabled.has("bash")).toBe(false)
+      const disabled = Permission.disabled(["read", "edit", "shell", "webfetch"], cp!.permission)
+      expect(disabled.has("shell")).toBe(false)
       expect(disabled.has("webfetch")).toBe(false)
     },
   })
@@ -834,9 +849,7 @@ test("checkpoint-writer agent has no toolAllowlist (fork agents must mirror pare
       const cp = await load(tmp.path, (svc) => svc.get("checkpoint-writer"))
       expect(cp).toBeDefined()
       expect(cp?.toolAllowlist).toBeUndefined()
-      // apply_patch is now permission-allowed (for GPT-5+ models where it
-      // replaces edit/write at the registry patch-swap step)
-      expect(Permission.evaluate("apply_patch", "any/path", cp!.permission).action).toBe("allow")
+      expect(Permission.evaluate("edit", "any/path", cp!.permission).action).toBe("allow")
     },
   })
 })

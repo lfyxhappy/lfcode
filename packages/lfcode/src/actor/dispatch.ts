@@ -8,10 +8,12 @@ import { ContextMode, ToolWhitelist } from "./schema"
 import { ActorDispatchSettingsTable, ActorDispatchTable, type ActorDispatchStatus } from "./dispatch.sql"
 import { dispatchRef } from "./dispatch-ref"
 import { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
+import { Activity } from "@/activity"
 
 const DEFAULT_BACKGROUND_CONCURRENCY = 4
 const SETTINGS_ID = "global"
 const TERMINAL = new Set<ActorDispatchStatus>(["completed", "failed", "cancelled"])
+const ACTIVITY_TERMINAL = new Set<Activity.Info["status"]>(["completed", "failed", "cancelled"])
 const NONTERMINAL = new Set<ActorDispatchStatus>(["queued", "running", "interrupted"])
 
 const Model = z.object({
@@ -246,9 +248,26 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@lfcode/ActorDispatch") {}
 
-export const layer: Layer.Layer<Service, never, never> = Layer.effect(
+export const layer: Layer.Layer<Service, never, Activity.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const activity = yield* Activity.Service
+    const syncActivity = <A>(effect: Effect.Effect<A, Error>): Effect.Effect<A | undefined, never, never> =>
+      effect.pipe(Effect.catch(() => Effect.succeed(undefined as A | undefined)))
+    const activityStatus = (status: Activity.Info["status"]): ActorDispatchStatus =>
+      status === "waiting" ? "running" : status as ActorDispatchStatus
+    const parentActivity = (input: { sessionID: SessionID; parentActorID?: string }) =>
+      Effect.gen(function* () {
+        if (input.parentActorID) {
+          const parent = yield* activity.getBySource("actor", input.parentActorID)
+          if (parent) return parent.id
+        }
+        return (yield* activity.getBySource("session", input.sessionID))?.id
+      })
+    const activityForDispatch = (id: string) =>
+      Effect.gen(function* () {
+        return (yield* activity.getBySource("actor", id)) ?? (yield* activity.getBySource("checkpoint", id))
+      })
     const recover = Effect.sync(() => {
       const now = Date.now()
       Database.transaction((db) => {
@@ -360,6 +379,16 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
       )
       const row = yield* get(id)
       if (!row) return yield* Effect.die(new Error(`Actor dispatch ${id} missing after enqueue`))
+      yield* syncActivity(activity.create({
+        sessionID: input.sessionID,
+        parentActivityID: yield* parentActivity(input),
+        kind: input.agent === "checkpoint-writer" ? "checkpoint" : "subagent",
+        status: "queued",
+        currentStep: "queued",
+        sourceType: input.agent === "checkpoint-writer" ? "checkpoint" : "actor",
+        sourceID: id,
+        metadata: { dispatch: row, actorID: input.actorID, parentActorID: input.parentActorID },
+      }))
       return row
     })
 
@@ -420,7 +449,13 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           return db.select().from(ActorDispatchTable).where(eq(ActorDispatchTable.id, next.id)).get()
         }),
       )
-      return claimed ? fromRow(claimed) : undefined
+      if (!claimed) return undefined
+      const result = fromRow(claimed)
+      const current = yield* activityForDispatch(result.id)
+      if (current) {
+        yield* syncActivity(activity.transition({ id: current.id, status: "running", currentStep: "running", metadata: { dispatch: result } }))
+      }
+      return result
     })
 
     const complete = Effect.fn("ActorDispatch.complete")(function* (input: {
@@ -457,7 +492,11 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           return db.select().from(ActorDispatchTable).where(eq(ActorDispatchTable.id, input.id)).get()
         }),
       )
-      return row ? fromRow(row) : undefined
+      if (!row) return undefined
+      const result = fromRow(row)
+      const current = yield* activityForDispatch(result.id)
+      if (current) yield* syncActivity(activity.complete({ id: current.id, status: input.status, error: input.error }))
+      return result
     })
 
     const updateResearch = Effect.fn("ActorDispatch.updateResearch")(function* (input: {
@@ -486,7 +525,13 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           return db.select().from(ActorDispatchTable).where(eq(ActorDispatchTable.id, input.id)).get()
         }),
       )
-      return row ? fromRow(row) : undefined
+      if (!row) return undefined
+      const result = fromRow(row)
+      const current = yield* activityForDispatch(result.id)
+      if (current && !ACTIVITY_TERMINAL.has(current.status)) {
+        yield* syncActivity(activity.transition({ id: current.id, status: activityStatus(current.status), currentStep: input.phase, metadata: { dispatch: result } }))
+      }
+      return result
     })
 
     const cancel = Effect.fn("ActorDispatch.cancel")(function* (input: {
@@ -535,7 +580,11 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           return db.select().from(ActorDispatchTable).where(eq(ActorDispatchTable.id, current.id)).get()
         }),
       )
-      return row ? fromRow(row) : undefined
+      if (!row) return undefined
+      const result = fromRow(row)
+      const current = yield* activityForDispatch(result.id)
+      if (current && !ACTIVITY_TERMINAL.has(current.status)) yield* syncActivity(activity.complete({ id: current.id, status: "cancelled", error: input.reason }))
+      return result
     })
 
     const receive = Effect.fn("ActorDispatch.receive")(function* (sessionID: SessionID, id: string) {
@@ -556,7 +605,11 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           return db.select().from(ActorDispatchTable).where(eq(ActorDispatchTable.id, id)).get()
         }),
       )
-      return row ? fromRow(row) : undefined
+      if (!row) return undefined
+      const result = fromRow(row)
+      const current = yield* activityForDispatch(result.id)
+      if (current && !ACTIVITY_TERMINAL.has(current.status)) yield* syncActivity(activity.transition({ id: current.id, status: activityStatus(current.status), metadata: { dispatch: result } }))
+      return result
     })
 
     const resume = Effect.fn("ActorDispatch.resume")(function* (sessionID: SessionID, id: string) {
@@ -663,6 +716,6 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
   }),
 )
 
-export const defaultLayer = Layer.suspend(() => layer)
+export const defaultLayer = Layer.suspend(() => layer.pipe(Layer.provide(Activity.defaultLayer)))
 
 export * as ActorDispatch from "./dispatch"

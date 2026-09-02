@@ -43,6 +43,19 @@ describe("automation request security", () => {
       code: "browser_bridge_unavailable",
       retryable: true,
     })
+    expect(automationErrorResponse(browserAutomationError("browser_navigation_failed"))).toEqual({
+      status: 502,
+      error: "The side browser could not navigate to the requested page.",
+      logCode: "browser_navigation_failed",
+      code: "browser_navigation_failed",
+      retryable: true,
+      recovery: "Retry the browser request. If it keeps failing, reopen the side browser tab.",
+    })
+    expect(automationErrorResponse(browserAutomationError("navigation_timeout"))).toMatchObject({
+      status: 504,
+      code: "navigation_timeout",
+      retryable: true,
+    })
   })
   test("generates cryptographically sized unique tokens", () => {
     const tokens = Array.from({ length: 64 }, () => createAutomationToken())

@@ -278,7 +278,7 @@ export const SettingsView: Component<{
           <div class="flex h-full w-full flex-col justify-between" data-component="settings-nav">
             <div class="flex flex-col gap-3 w-full pt-0">
               <Show when={props.onClose}>
-                <div class="flex items-center px-1 pb-2">
+                <div class="sticky top-0 z-10 -mx-1 flex items-center bg-background-base px-1 pb-2">
                   <IconButton
                     icon="arrow-left"
                     variant="ghost"

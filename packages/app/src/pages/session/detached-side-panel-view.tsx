@@ -80,12 +80,16 @@ function DetachedSidePanelViewContent(props: {
         </div>
       </div>
       <div data-slot="detached-side-panel-body" class="flex-1 min-h-0">
-        <Show when={record()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("session.detached.missing")}</div>}>
-          <Show when={props.context.kind === "review"}>{props.reviewPanel()}</Show>
-          <Show when={props.context.kind === "browser"}>
-            <BrowserPanel sessionKey={props.context.sessionKey} tab={props.context.tab} visible />
+        <Show when={props.context.kind === "browser"}>
+          <BrowserPanel sessionKey={props.context.sessionKey} tab={props.context.tab} visible />
+        </Show>
+        <Show when={props.context.kind === "review"}>
+          <Show when={record()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("session.detached.missing")}</div>}>
+            {props.reviewPanel()}
           </Show>
-          <Show when={props.context.kind === "file"}>
+        </Show>
+        <Show when={props.context.kind === "file"}>
+          <Show when={record()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("session.detached.missing")}</div>}>
             <Show when={readyFile()} fallback={<div class="size-full flex items-center justify-center text-12-regular text-text-weak">{language.t("common.loading")}</div>}>
               <Tabs value={props.context.tab} onChange={() => undefined}>
                 <FileTabContent tab={props.context.tab} />

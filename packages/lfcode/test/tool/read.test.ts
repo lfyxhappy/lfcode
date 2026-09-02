@@ -322,7 +322,9 @@ describe("tool.read truncation", () => {
       yield* put(path.join(dir, "short.txt"), lines)
 
       const err = yield* fail(dir, { filePath: path.join(dir, "short.txt"), offset: 4, limit: 5 })
-      expect(err.message).toContain("Offset 4 is out of range for this file (3 lines)")
+      expect(err.message).toContain("Offset 4 is out of range for this file. total_lines=3")
+      expect(err.message).toContain("valid_offset_range=1-3")
+      expect(err.message).toContain("use offset=3 to read the final available line")
     }),
   )
 
@@ -343,7 +345,9 @@ describe("tool.read truncation", () => {
       yield* put(path.join(dir, "empty.txt"), "")
 
       const err = yield* fail(dir, { filePath: path.join(dir, "empty.txt"), offset: 2 })
-      expect(err.message).toContain("Offset 2 is out of range for this file (0 lines)")
+      expect(err.message).toContain("Offset 2 is out of range for this file. total_lines=0")
+      expect(err.message).toContain("valid_offset_range=1 (the file is empty)")
+      expect(err.message).toContain("Retry with offset=1")
     }),
   )
 

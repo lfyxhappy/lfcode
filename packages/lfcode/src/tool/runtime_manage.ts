@@ -54,7 +54,7 @@ export const RuntimeManageTool = Tool.define<typeof Parameters, Tool.Metadata, n
           requireCapabilityDecision(gate!.decision)
           if (gate!.decision === "confirm") {
             yield* ctx.ask({
-              permission: "bash",
+              permission: "shell",
               patterns: [`runtime:${params.action}:${params.id}`],
               always: ["*"],
               metadata: {

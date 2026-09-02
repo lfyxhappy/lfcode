@@ -40,6 +40,7 @@ import { HookRoutes } from "./hooks"
 import { AgentManageRoutes } from "./agents"
 import { ActorDispatchRoutes } from "./actor-dispatch"
 import { ClaudeCodeRoutes } from "./claude-code"
+import { ActivityRoutes } from "./activity"
 
 export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
   const app = new Hono()
@@ -84,6 +85,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
     .route("/skills", SkillsRoutes())
     .route("/agent/manage", AgentManageRoutes())
     .route("/actor-dispatch", ActorDispatchRoutes())
+    .route("/activity", ActivityRoutes())
     .route("/background-job", BackgroundJobRoutes())
     .route("/plugin", PluginRoutes())
     .route("/capability", CapabilityRoutes())

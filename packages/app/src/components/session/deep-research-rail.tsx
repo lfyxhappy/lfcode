@@ -1,13 +1,11 @@
 import { Icon } from "@lfcode-ai/ui/icon"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServer } from "@/context/server"
 import { formatServerError } from "@/utils/server-errors"
-import { startVisiblePolling } from "@/utils/visible-poll"
-import { actorDispatches, requestSubagentApi, type ActorDispatch, type ResearchSnapshot } from "../subagent-api"
+import { requestSubagentApi, type ActorDispatch, type ResearchSnapshot } from "../subagent-api"
 
-const pollMs = 5_000
 const terminal = new Set(["completed", "failed", "cancelled"])
 
 function isTerminal(dispatch: ActorDispatch) {
@@ -50,12 +48,13 @@ function researchTitle(item: ActorDispatch, research: ResearchSnapshot) {
 export function DeepResearchRail(props: {
   sessionID: string
   directory: string
+  dispatches: () => ActorDispatch[]
+  onRefresh: () => Promise<void>
   onOpenSubagent: (actorID: string) => void
   showEmpty?: boolean
 }) {
   const language = useLanguage()
   const server = useServer()
-  const [dispatches, setDispatches] = createSignal<ActorDispatch[]>([])
   const [loaded, setLoaded] = createSignal(false)
   const [actionID, setActionID] = createSignal<string>()
   const connection = () => ({
@@ -63,36 +62,6 @@ export function DeepResearchRail(props: {
     directory: props.directory,
     username: server.current?.http.username,
     password: server.current?.http.password,
-  })
-
-  const refresh = async () => {
-    try {
-      const next = actorDispatches(
-        await requestSubagentApi<unknown>({
-          connection: connection(),
-          path: "/actor-dispatch",
-          query: { sessionID: props.sessionID },
-        }),
-      )
-      setDispatches(next.filter((item) => item.research?.kind === "deep-research"))
-    } catch (error) {
-      if (!loaded()) {
-        showToast({
-          variant: "error",
-          title: language.t("common.requestFailed"),
-          description: formatServerError(error, language.t, language.t("common.requestFailed")),
-        })
-      }
-    } finally {
-      setLoaded(true)
-    }
-  }
-
-  createEffect(() => {
-    props.sessionID
-    setLoaded(false)
-    const stopPolling = startVisiblePolling(refresh, pollMs)
-    onCleanup(stopPolling)
   })
 
   const runAction = async (id: string, action: "cancel" | "resume" | "receive") => {
@@ -105,7 +74,7 @@ export function DeepResearchRail(props: {
         method: "POST",
         query: { sessionID: props.sessionID },
       })
-      await refresh()
+      await props.onRefresh()
     } catch (error) {
       showToast({
         variant: "error",
@@ -117,17 +86,35 @@ export function DeepResearchRail(props: {
     }
   }
 
-  const items = createMemo(() => dispatches().toSorted((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)))
+  const items = createMemo(() =>
+    props
+      .dispatches()
+      .filter((item) => item.research?.kind === "deep-research")
+      .toSorted((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
+  )
+  createEffect(() => {
+    props.dispatches()
+    setLoaded(true)
+  })
   const running = createMemo(() => items().filter((item) => item.status === "running"))
-  const queued = createMemo(() => items().filter((item) => item.status === "queued" || item.status === "interrupted" || item.manualResume))
+  const queued = createMemo(() =>
+    items().filter((item) => item.status === "queued" || item.status === "interrupted" || item.manualResume),
+  )
   const failed = createMemo(() => items().filter((item) => item.status === "failed" || item.status === "cancelled"))
-  const awaiting = createMemo(() => items().filter((item) => isTerminal(item) && item.unread && item.status !== "failed" && item.status !== "cancelled"))
+  const awaiting = createMemo(() =>
+    items().filter(
+      (item) => isTerminal(item) && item.unread && item.status !== "failed" && item.status !== "cancelled",
+    ),
+  )
   const visibleCount = createMemo(() => running().length + queued().length + failed().length + awaiting().length)
 
   const card = (item: ActorDispatch) => {
     const research = item.research!
     return (
-      <div class="rounded-lg px-1 py-1 transition-colors hover:bg-surface-raised-base-hover" data-component="deep-research-card">
+      <div
+        class="rounded-lg px-1 py-1 transition-colors hover:bg-surface-raised-base-hover"
+        data-component="deep-research-card"
+      >
         <div class="flex min-w-0 items-start gap-2">
           <span class={`mt-1.5 size-2 shrink-0 rounded-full ${statusTone(item.status)}`} title={item.status} />
           <button
@@ -161,23 +148,46 @@ export function DeepResearchRail(props: {
         <div class="ml-4 mt-1 flex flex-wrap gap-1">
           <Show when={item.actorID}>
             {(actorID) => (
-              <button type="button" data-action="deep-research-open-slice" class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base" onClick={() => props.onOpenSubagent(actorID())}>
+              <button
+                type="button"
+                data-action="deep-research-open-slice"
+                class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base"
+                onClick={() => props.onOpenSubagent(actorID())}
+              >
                 {language.t("research.rail.openSlice")}
               </button>
             )}
           </Show>
           <Show when={item.status === "running" || item.status === "queued" || item.status === "interrupted"}>
-            <button type="button" data-action="deep-research-cancel" class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50" disabled={actionID() === item.id} onClick={() => void runAction(item.id, "cancel")}>
+            <button
+              type="button"
+              data-action="deep-research-cancel"
+              class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50"
+              disabled={actionID() === item.id}
+              onClick={() => void runAction(item.id, "cancel")}
+            >
               {language.t("common.cancel")}
             </button>
           </Show>
           <Show when={item.status === "interrupted" || item.manualResume}>
-            <button type="button" data-action="deep-research-resume" class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50" disabled={actionID() === item.id} onClick={() => void runAction(item.id, "resume")}>
+            <button
+              type="button"
+              data-action="deep-research-resume"
+              class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50"
+              disabled={actionID() === item.id}
+              onClick={() => void runAction(item.id, "resume")}
+            >
               {language.t("subagent.settings.restore")}
             </button>
           </Show>
           <Show when={isTerminal(item) && item.unread}>
-            <button type="button" data-action="deep-research-receive" class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50" disabled={actionID() === item.id} onClick={() => void runAction(item.id, "receive")}>
+            <button
+              type="button"
+              data-action="deep-research-receive"
+              class="rounded-md px-1.5 py-1 text-11-medium text-text-weak hover:bg-surface-base hover:text-text-base disabled:opacity-50"
+              disabled={actionID() === item.id}
+              onClick={() => void runAction(item.id, "receive")}
+            >
               {language.t("research.rail.receive")}
             </button>
           </Show>
@@ -188,7 +198,11 @@ export function DeepResearchRail(props: {
 
   return (
     <Show when={props.showEmpty || visibleCount() > 0 || !loaded()}>
-      <section data-component="deep-research-rail" class="mt-3 rounded-xl bg-surface-raised-base p-2" aria-live="polite">
+      <section
+        data-component="deep-research-rail"
+        class="mt-3 rounded-xl bg-surface-raised-base p-2"
+        aria-live="polite"
+      >
         <div class="flex items-center gap-2 px-1 py-1.5 text-13-regular text-text-weak">
           <Icon name="brain" size="small" class="text-icon-weak-base" />
           <span>{language.t("research.rail.title")}</span>

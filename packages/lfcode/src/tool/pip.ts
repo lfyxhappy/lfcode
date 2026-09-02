@@ -71,7 +71,7 @@ export const PipTool = Tool.define(
 
           const args = buildPipArgs(params)
           yield* ctx.ask({
-            permission: "bash",
+            permission: "shell",
             patterns: [python.command],
             always: ["*"],
             metadata: {

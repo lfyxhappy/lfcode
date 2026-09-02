@@ -42,20 +42,6 @@ import { getStore } from "./store"
 import { setTitlebar } from "./windows"
 import { browserAutofillOriginMatches } from "./browser-management-core"
 
-type BrowserReferenceCandidate = {
-  label?: string
-  text?: string
-  url?: string
-  title?: string
-  selector?: string
-  mode?: "selection" | "element"
-}
-
-type BrowserReferenceState = {
-  selection?: BrowserReferenceCandidate
-  element?: BrowserReferenceCandidate
-}
-
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
   return [{ name: "Files", extensions: ext }]
@@ -122,7 +108,6 @@ type Deps = {
   unregisterBrowserGuest: (target: BrowserGuestTarget & { guestID?: number }) => Promise<void> | void
   openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void> | void
   clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult> | BrowserSiteDataResult
-  getBrowserReferenceState: (target: BrowserGuestTarget) => Promise<BrowserReferenceState | null> | BrowserReferenceState | null
   getBrowserCacheOverview: () => Promise<BrowserCacheOverview> | BrowserCacheOverview
   clearBrowserCache: () => Promise<BrowserCacheOverview> | BrowserCacheOverview
   listBrowserCookies: () => Promise<any[]> | any[]
@@ -351,9 +336,6 @@ export function registerIpcHandlers(deps: Deps) {
   })
   ipcMain.handle("clear-browser-site-data", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
     return deps.clearBrowserSiteData(target)
-  })
-  ipcMain.handle("get-browser-reference-state", (_event: IpcMainInvokeEvent, target: BrowserGuestTarget) => {
-    return deps.getBrowserReferenceState(target)
   })
   ipcMain.handle("get-browser-cache-overview", () => deps.getBrowserCacheOverview())
   ipcMain.handle("clear-browser-cache", () => deps.clearBrowserCache())

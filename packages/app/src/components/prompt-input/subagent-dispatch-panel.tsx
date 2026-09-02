@@ -48,7 +48,7 @@ type DispatchAgent = {
   toolAllowlist: string[]
 }
 
-const writeTools = new Set(["edit", "apply_patch", "bash", "write"])
+const writeTools = new Set(["edit", "shell"])
 
 function nativeAgent(preset: (typeof SUBAGENT_PRESETS)[number]): DispatchAgent {
   return {
@@ -88,7 +88,7 @@ function dispatchAgents(entries: AgentManageItem[], customDescription = "Custom 
         description: item.config.description ?? item.description ?? customDescription,
         execution: item.config.default_execution ?? "background",
         context: subagentContextFromAgentPreset(item.config.default_context),
-        toolAllowlist: item.config.tool_allowlist ?? ["read", "glob", "grep"],
+        toolAllowlist: item.config.tool_allowlist ?? ["read", "search"],
       },
     ]
   })

@@ -51,7 +51,7 @@ function buildFeedback(args: {
       "",
       TEMPLATE.replace("<TID>", args.taskId),
       "",
-      "Write the file now using the Write tool, then terminate normally.",
+      'Write the file now with the `edit` tool using `operation:"write"`, then terminate normally.',
     ].join("\n")
   }
 
@@ -63,7 +63,7 @@ function buildFeedback(args: {
     "",
     TEMPLATE.replace("<TID>", args.taskId),
     "",
-    "Re-write the file using Write tool, then terminate normally.",
+    'Re-write the file with the `edit` tool using `operation:"write"`, then terminate normally.',
   ].join("\n")
 }
 

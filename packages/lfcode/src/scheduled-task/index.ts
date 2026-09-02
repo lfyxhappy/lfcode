@@ -63,6 +63,7 @@ export const ScheduledTask = {
   resume: Persistence.resume,
   runNow: Persistence.runNow,
   listRuns: Persistence.listRuns,
+  listLatestRuns: Persistence.listLatestRuns,
   cancelRun: Persistence.cancelRun,
   getSettings: Persistence.getSettings,
   updateSettings: Persistence.updateSettings,

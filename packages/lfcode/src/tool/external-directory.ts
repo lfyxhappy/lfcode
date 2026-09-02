@@ -59,8 +59,8 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
 }
 
 /**
- * The single write-permission gate for file-mutating tools (edit, write,
- * apply_patch). Runs the two checks every write must pass, in order:
+ * The single write-permission gate for file-mutating edit operations. Runs the
+ * two checks every mutation must pass, in order:
  *   1. external_directory — asks before touching paths outside the worktree
  *      (defers the memory subtree to the memory guard; see the early return above).
  *   2. memory-path-guard — finer authority over the memory tree: a task-bound
@@ -70,7 +70,7 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
  * Collapsing both into one call removes the per-tool duplication and, more
  * importantly, makes "call external_directory but forget the memory guard"
  * unrepresentable — a new write tool that calls this one gate cannot drift into
- * leaving the memory tree unguarded. Read-only tools (read/grep/glob/lsp) keep
+ * leaving the memory tree unguarded. Read-only tools (read/search/lsp) keep
  * calling assertExternalDirectoryEffect directly; the memory guard is write-only.
  */
 export const assertWriteAllowed = Effect.fn("Tool.assertWriteAllowed")(function* (
@@ -107,11 +107,11 @@ export const assertWriteAllowed = Effect.fn("Tool.assertWriteAllowed")(function*
 /**
  * Perform the per-write `edit` permission ask, EXCEPT for targets under
  * <data>/memory/. The memory tree's authority is memory-path-guard (invoked by
- * assertWriteAllowed, which every write tool calls first): it already allows the
+ * assertWriteAllowed, which every edit operation calls first): it already allows the
  * checkpoint-writer / task-bound subagent their canonical paths and rejects
  * everything else. Asking `edit` there is redundant and — for a background fork
  * inheriting a parent's `edit:ask`/`deny` — would deny/skip the checkpoint write.
- * Outside the memory tree, ask exactly as the write tools did inline before.
+ * Outside the memory tree, ask exactly as edit operations did inline before.
  *
  * Mirrors the external_directory memory-region deferral added in the 2026-06-04
  * poststop-progress-permission-deadlock fix (see assertExternalDirectoryEffect).

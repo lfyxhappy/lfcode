@@ -161,6 +161,11 @@ export type DesktopBrowserAutomationElementCapture = {
   path: string
   width: number
   height: number
+  viewport: {
+    width: number
+    height: number
+  }
+  deviceScaleFactor: number
 }
 
 export type DesktopBrowserAutomationConsoleEntry = {
@@ -253,27 +258,35 @@ export type DesktopBrowserAutomationWaitResult = {
   detail?: string
 }
 
+export type DesktopBrowserAutomationSessionInput = {
+  sessionKey: string
+  tabID?: string
+}
+
 export interface DesktopBrowserAutomationBridge {
-  getTarget(input: { sessionKey: string }): DesktopBrowserAutomationTarget | undefined
+  getTarget(input: DesktopBrowserAutomationSessionInput): DesktopBrowserAutomationTarget | undefined
   navigate(
     input: {
       sessionKey: string
+      tabID?: string
       sessionID?: string
       url: string
       title?: string
       presentation?: "headless" | "detached" | "sidebar"
+      newTab?: boolean
     },
   ): Promise<DesktopBrowserAutomationTarget>
-  snapshot(input: { sessionKey: string }): Promise<DesktopBrowserAutomationSnapshot>
-  screenshot(input: { sessionKey: string }): Promise<DesktopBrowserAutomationScreenshot>
-  readPage(input: { sessionKey: string }): Promise<DesktopBrowserAutomationPage>
-  extractResource(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationResourceSnapshot>
-  captureElement(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationElementCapture>
-  getConsole(input: { sessionKey: string; limit?: number }): Promise<DesktopBrowserAutomationConsoleLog>
-  getNetwork(input: { sessionKey: string; limit?: number }): Promise<DesktopBrowserAutomationNetworkLog>
+  snapshot(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationSnapshot>
+  screenshot(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationScreenshot>
+  readPage(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationPage>
+  extractResource(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationResourceSnapshot>
+  captureElement(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationElementCapture>
+  getConsole(input: DesktopBrowserAutomationSessionInput & { limit?: number }): Promise<DesktopBrowserAutomationConsoleLog>
+  getNetwork(input: DesktopBrowserAutomationSessionInput & { limit?: number }): Promise<DesktopBrowserAutomationNetworkLog>
   listCachedResources(
     input: {
       sessionKey: string
+      tabID?: string
       query?: string
       url?: string
       limit?: number
@@ -283,6 +296,7 @@ export interface DesktopBrowserAutomationBridge {
   downloadResource(
     input: {
       sessionKey: string
+      tabID?: string
       url?: string
       filename?: string
       resourceID?: string
@@ -291,11 +305,12 @@ export interface DesktopBrowserAutomationBridge {
       cachePolicy?: DesktopBrowserAutomationCachePolicy
     },
   ): Promise<DesktopBrowserAutomationDownload>
-  click(input: { sessionKey: string; ref: string }): Promise<DesktopBrowserAutomationTarget>
-  type(input: { sessionKey: string; ref: string; text: string; submit?: boolean }): Promise<DesktopBrowserAutomationTarget>
+  click(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
+  type(input: DesktopBrowserAutomationSessionInput & { ref: string; text: string; submit?: boolean }): Promise<DesktopBrowserAutomationTarget>
   scroll(
     input: {
       sessionKey: string
+      tabID?: string
       ref?: string
       selector?: string
       direction?: "up" | "down" | "left" | "right"
@@ -305,32 +320,33 @@ export interface DesktopBrowserAutomationBridge {
   /**
    * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than simulating pointer input.
    */
-  hover(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
+  hover(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
   /**
    * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than moving focus.
    */
-  focus(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
-  clear(input: { sessionKey: string; ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
+  focus(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
+  clear(input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string }): Promise<DesktopBrowserAutomationTarget>
   selectOption(
-    input: { sessionKey: string; ref?: string; selector?: string; value?: string; label?: string; text?: string },
+    input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string; value?: string; label?: string; text?: string },
   ): Promise<DesktopBrowserAutomationTarget>
   uploadFile(
-    input: { sessionKey: string; ref?: string; selector?: string; files: string[] },
+    input: DesktopBrowserAutomationSessionInput & { ref?: string; selector?: string; files: string[] },
   ): Promise<DesktopBrowserAutomationTarget>
   /**
    * @deprecated Browser automation is non-preemptive. This compatibility method rejects rather than injecting key events.
    */
-  pressKey(input: { sessionKey: string; key: string }): Promise<DesktopBrowserAutomationTarget>
-  back(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget>
-  forward(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget>
-  reload(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget>
-  close(input: { sessionKey: string }): Promise<DesktopBrowserAutomationTarget | undefined>
-  waitFor(input: { sessionKey: string; text?: string; textGone?: string; timeMs?: number; timeoutMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
-  waitForSelector(input: { sessionKey: string; selector: string; visible?: boolean; timeoutMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
-  waitForUrl(input: { sessionKey: string; url: string; match?: "equals" | "includes"; timeoutMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
+  pressKey(input: DesktopBrowserAutomationSessionInput & { key: string }): Promise<DesktopBrowserAutomationTarget>
+  back(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationTarget>
+  forward(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationTarget>
+  reload(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationTarget>
+  close(input: DesktopBrowserAutomationSessionInput): Promise<DesktopBrowserAutomationTarget | undefined>
+  waitFor(input: DesktopBrowserAutomationSessionInput & { text?: string; textGone?: string; timeMs?: number; timeoutMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
+  waitForSelector(input: DesktopBrowserAutomationSessionInput & { selector: string; visible?: boolean; timeoutMs?: number; stableMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
+  waitForUrl(input: DesktopBrowserAutomationSessionInput & { url: string; match?: "equals" | "includes"; timeoutMs?: number; stableMs?: number }): Promise<DesktopBrowserAutomationWaitResult>
   waitForLoadState(
     input: {
       sessionKey: string
+      tabID?: string
       state: "domcontentloaded" | "load" | "networkidle"
       timeoutMs?: number
       stableMs?: number
@@ -339,6 +355,7 @@ export interface DesktopBrowserAutomationBridge {
   waitForNavigation(
     input: {
       sessionKey: string
+      tabID?: string
       url?: string
       match?: "equals" | "includes"
       timeoutMs?: number

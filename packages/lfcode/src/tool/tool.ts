@@ -5,6 +5,7 @@ import type { Permission } from "../permission"
 import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { Agent } from "@/agent/agent"
+import { parseToolInput } from "@/session/tool-input"
 
 export interface Metadata {
   [key: string]: any
@@ -56,7 +57,7 @@ export function defaultMetadata(id: string): DefinitionMetadata {
       latencyClass: "io",
     }
   }
-  if (["search", "websearch", "codesearch", "grep", "glob"].includes(id)) {
+  if (["search", "websearch"].includes(id)) {
     return {
       kind: "search",
       namespace: id === "websearch" ? "web" : "file",
@@ -65,10 +66,10 @@ export function defaultMetadata(id: string): DefinitionMetadata {
       latencyClass: id === "websearch" ? "network" : "io",
     }
   }
-  if (["apply_patch", "replace_range", "symbol_edit", "write", "edit"].includes(id)) {
+  if (["edit"].includes(id)) {
     return { kind: "file", namespace: "file", readOnly: false, recovery: "reread", latencyClass: "io" }
   }
-  if (["shell", "bash", "python", "pip", "cpp", "runtime_manage", "shell_process"].includes(id)) {
+  if (["shell", "python", "pip", "cpp", "runtime_manage", "shell_process"].includes(id)) {
     return {
       kind: "execution",
       namespace: "runtime",
@@ -157,7 +158,7 @@ export type Context<M extends Metadata = Metadata> = {
   extra?: { [key: string]: unknown }
   messages: MessageV2.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
-  ask(input: Omit<Permission.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
+  ask(input: Omit<Permission.Request, "id" | "sessionID" | "tool">): Effect.Effect<void, Permission.Error>
 }
 
 export interface ExecuteResult<M extends Metadata = Metadata> {
@@ -185,8 +186,8 @@ export type ToolPreExecuteHook = (input: ToolExecutionContext & { args: unknown 
 export type ToolExecutionGuard = (input: ToolExecutionContext & { args: unknown }) => string | undefined
 export type ToolExecuteWrapper = (
   input: ToolExecutionContext & { args: unknown; signal: AbortSignal },
-  next: () => Effect.Effect<ExecuteResult>,
-) => Effect.Effect<ExecuteResult>
+  next: () => Effect.Effect<ExecuteResult, unknown>,
+) => Effect.Effect<ExecuteResult, unknown>
 export type ToolPostExecuteHook = (input: ToolExecutionContext & { args: unknown; result: ExecuteResult }) => void | ExecuteResult
 export type ToolResultObserver = (input: ToolExecutionContext & { outcome: ToolExecutionOutcome }) => void
 
@@ -238,7 +239,7 @@ export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadat
   metadata?: DefinitionMetadata
   /** Skill that must be loaded in the active session before this extension tool is exposed. */
   activationSkill?: string
-  execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
+  execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>, unknown>
   finalizeContent?(result: ExecuteResult<M>, execution: ToolExecutionContext): ExecuteResult<M>
   formatValidationError?(error: z.ZodError): string
   shell?: {
@@ -308,7 +309,22 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
             ctx.extra?.internalSubtask === true
               ? (args as z.infer<typeof toolInfo.parameters>)
               : yield* Effect.try({
-                  try: () => toolInfo.parameters.parse(args),
+                  try: () => {
+                    const normalizedArgs = parseToolInput(args)
+                    try {
+                      return toolInfo.parameters.parse(normalizedArgs)
+                    } catch (error) {
+                      // Some tools expose a recovery adapter for legacy or
+                      // provider-specific argument envelopes. Apply it after
+                      // the strict schema rejects the raw payload, while
+                      // keeping the published schema canonical.
+                      if (error instanceof z.ZodError) {
+                        const recovered = toolInfo.shell?.recover?.(normalizedArgs)
+                        if (recovered !== undefined) return toolInfo.parameters.parse(recovered)
+                      }
+                      throw error
+                    }
+                  },
                   catch: (error) => {
                     if (error instanceof z.ZodError && toolInfo.formatValidationError) {
                       return new Error(toolInfo.formatValidationError(error), { cause: error })
@@ -339,9 +355,9 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
           }
           const invoke = [...executeWrappers]
             .toReversed()
-            .reduce<() => Effect.Effect<ExecuteResult>>(
+            .reduce<() => Effect.Effect<ExecuteResult, unknown>>(
               (next, wrapper) => () => wrapper({ ...execution, args: nextArgs, signal: ctx.abort }, next),
-              () => execute(nextArgs as z.infer<typeof toolInfo.parameters>, ctx) as Effect.Effect<ExecuteResult>,
+              () => execute(nextArgs as z.infer<typeof toolInfo.parameters>, ctx) as Effect.Effect<ExecuteResult, unknown>,
             )
           const result = yield* invoke()
           const post = [...postExecuteHooks].reduce(
@@ -390,7 +406,6 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
               }),
             ),
           ),
-          Effect.orDie,
           Effect.withSpan("Tool.execute", { attributes: attrs }),
         )
       }

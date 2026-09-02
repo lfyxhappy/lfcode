@@ -16,6 +16,8 @@ import { useLanguage } from "@/context/language"
 import { formatServerError } from "@/utils/server-errors"
 import { SettingsPageShell, SettingsSection } from "./settings-page-shell"
 
+type AutomationTaskListItem = AutomationTask & { latestRun?: AutomationRun }
+
 export function SettingsAutomation() {
   const globalSDK = useGlobalSDK()
   const language = useLanguage()
@@ -27,16 +29,8 @@ export function SettingsAutomation() {
   })
   const [tasks, taskActions] = createResource(async () => {
     const response = await globalSDK.client.global.automation.list()
-    const items = response.data?.items ?? []
-    return Promise.all(
-      items.map(async (task) => ({
-        task,
-        latestRun: await globalSDK.client.global.automation
-          .runs({ id: task.id, limit: 1 })
-          .then((result) => result.data?.items?.[0])
-          .catch(() => undefined),
-      })),
-    )
+    const items = (response.data?.items ?? []) as AutomationTaskListItem[]
+    return items.map((task) => ({ task, latestRun: task.latestRun }))
   })
   const [history, historyActions] = createResource(selectedTaskID, async (taskID) => {
     if (!taskID) return []

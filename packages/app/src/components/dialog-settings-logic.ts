@@ -18,6 +18,8 @@ export type SettingsTab =
   | "usage"
   | "agentOS"
 
+const unmountOnTabChange = new Set<SettingsTab>(["models", "plugins", "skills", "automation", "usage"])
+
 export function nextVisitedSettingsTabs(current: Set<SettingsTab>, tab: SettingsTab) {
   if (current.has(tab)) return current
   const next = new Set(current)
@@ -30,5 +32,6 @@ export function shouldMountSettingsPanel(input: {
   selected: SettingsTab
   visited: Set<SettingsTab>
 }) {
+  if (unmountOnTabChange.has(input.tab)) return input.selected === input.tab
   return input.visited.has(input.tab) || input.selected === input.tab
 }

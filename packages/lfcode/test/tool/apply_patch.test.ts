@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import * as fs from "fs/promises"
 import { Effect, ManagedRuntime, Layer } from "effect"
-import { ApplyPatchTool } from "../../src/tool/apply_patch"
+import { EditTool } from "../../src/tool/edit"
 import { Instance } from "../../src/project/instance"
 import { LSP } from "../../src/lsp"
 import { AppFileSystem } from "@/filesystem"
@@ -59,9 +59,9 @@ type ToolCtx = typeof baseCtx & {
 }
 
 const execute = async (params: { patchText: string }, ctx: ToolCtx) => {
-  const info = await runtime.runPromise(ApplyPatchTool)
+  const info = await runtime.runPromise(EditTool)
   const tool = await runtime.runPromise(info.init())
-  return Effect.runPromise(tool.execute(params, ctx))
+  return Effect.runPromise(tool.execute({ operation: "patch", ...params }, ctx))
 }
 
 const makeCtx = () => {
@@ -77,7 +77,7 @@ const makeCtx = () => {
   return { ctx, calls }
 }
 
-describe("tool.apply_patch freeform", () => {
+describe("tool.edit patch", () => {
   test("requires patchText", async () => {
     const { ctx } = makeCtx()
     await expect(execute({ patchText: "" }, ctx)).rejects.toThrow("patchText is required")
@@ -85,7 +85,7 @@ describe("tool.apply_patch freeform", () => {
 
   test("rejects invalid patch format", async () => {
     const { ctx } = makeCtx()
-    await expect(execute({ patchText: "invalid patch" }, ctx)).rejects.toThrow("apply_patch verification failed")
+    await expect(execute({ patchText: "invalid patch" }, ctx)).rejects.toThrow("edit patch failed: invalid patch format")
   })
 
   test("rejects missing patch markers with repair guidance", async () => {
@@ -320,7 +320,7 @@ describe("tool.apply_patch freeform", () => {
         const patchText = "*** Begin Patch\n*** Update File: missing.txt\n@@\n-nope\n+better\n*** End Patch"
 
         await expect(execute({ patchText }, ctx)).rejects.toThrow(
-          "apply_patch verification failed: Failed to read file to update",
+          "edit patch failed: Failed to read file to update",
         )
       },
     })
@@ -366,7 +366,7 @@ describe("tool.apply_patch freeform", () => {
       fn: async () => {
         const patchText = "*** Begin Patch\n*** Frobnicate File: foo\n*** End Patch"
 
-        await expect(execute({ patchText }, ctx)).rejects.toThrow("apply_patch verification failed")
+        await expect(execute({ patchText }, ctx)).rejects.toThrow("edit patch failed: no hunks found")
       },
     })
   })
@@ -383,7 +383,7 @@ describe("tool.apply_patch freeform", () => {
 
         const patchText = "*** Begin Patch\n*** Update File: modify.txt\n@@\n-missing\n+changed\n*** End Patch"
 
-        await expect(execute({ patchText }, ctx)).rejects.toThrow("apply_patch verification failed")
+        await expect(execute({ patchText }, ctx)).rejects.toThrow("edit patch failed: Failed to find expected lines")
         expect(await fs.readFile(target, "utf-8")).toBe("line1\nline2\n")
       },
     })
@@ -592,7 +592,7 @@ EOF`
   })
 })
 
-describe("tool.apply_patch memory-path-guard", () => {
+describe("tool.edit patch memory-path-guard", () => {
   test("rejects writing another task's memory (taskId=T3 → tasks/T5)", async () => {
     await using fixture = await tmpdir({ git: true })
     const { ctx: base } = makeCtx()

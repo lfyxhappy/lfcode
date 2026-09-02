@@ -20,7 +20,7 @@ import { SessionCwd } from "./session-cwd"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import { AppFileSystem } from "@/filesystem"
 import * as PatchRecovery from "./patch-recovery"
-import { ApplyPatchTool } from "./apply_patch"
+import { applyEditPatch } from "./edit-patch-engine"
 import { trimDiff } from "./diff"
 
 function normalizeLineEndings(text: string): string {
@@ -55,7 +55,7 @@ const Parameters = z.object({
     .describe(
       "replace changes one verified text block; patch applies structured multi-file edits; write intentionally replaces a whole file.",
     ),
-  filePath: z
+  path: z
     .string()
     .optional()
     .describe("The absolute or relative target path. On Windows, prefer forward slashes like C:/repo/file.ts."),
@@ -77,7 +77,7 @@ function toolError(code: string, message: string, recovery: string[]) {
 }
 
 function replaceExample() {
-  return '{"operation":"replace","filePath":"path/to/file.ts","oldString":"exact current text","newString":"replacement text"}'
+  return '{"operation":"replace","path":"path/to/file.ts","oldString":"exact current text","newString":"replacement text"}'
 }
 
 export const EditTool = Tool.define(
@@ -87,9 +87,6 @@ export const EditTool = Tool.define(
     const afs = yield* AppFileSystem.Service
     const format = yield* Format.Service
     const bus = yield* Bus.Service
-    const patch = yield* ApplyPatchTool
-    const applyPatch = yield* Tool.init(patch)
-
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -103,7 +100,12 @@ export const EditTool = Tool.define(
                   'Retry with {"operation":"patch","patchText":"*** Begin Patch\\n...\\n*** End Patch"}.',
                 ]),
               )
-            const result = yield* applyPatch.execute({ patchText: params.patchText }, ctx)
+            const result = yield* applyEditPatch({ patchText: params.patchText }, ctx).pipe(
+              Effect.provideService(LSP.Service, lsp),
+              Effect.provideService(AppFileSystem.Service, afs),
+              Effect.provideService(Format.Service, format),
+              Effect.provideService(Bus.Service, bus),
+            )
             const first = result.metadata.files[0]
             return {
               title: result.title,
@@ -122,42 +124,57 @@ export const EditTool = Tool.define(
             }
           }
 
-          if (!params.filePath) {
+          if (!params.path) {
             throw new Error(
-              toolError("edit_path_missing", "filePath is required for replace and write.", [
+              toolError("edit_path_missing", "path is required for replace and write.", [
                 `For an exact edit, use ${replaceExample()}.`,
               ]),
             )
           }
 
+          const filePath = path.isAbsolute(params.path)
+            ? params.path
+            : path.join(SessionCwd.get(ctx.sessionID), params.path)
+          yield* assertWriteAllowed(ctx, filePath)
+          const targetExists = yield* afs.existsSafe(filePath)
+          const implicitCreate =
+            params.operation === undefined &&
+            params.content !== undefined &&
+            params.oldString === undefined &&
+            params.newString === undefined &&
+            !targetExists
+
           if (operation === "write" && params.content === undefined) {
             throw new Error(
               toolError("edit_content_missing", "content is required when operation is write.", [
-                'Retry with {"operation":"write","filePath":"path/to/file.ts","content":"complete file contents"}.',
+                'Retry with {"operation":"write","path":"path/to/file.ts","content":"complete file contents"}.',
               ]),
             )
           }
 
-          if (operation === "replace" && (params.oldString === undefined || params.newString === undefined)) {
+          if (operation === "replace" && !implicitCreate && (params.oldString === undefined || params.newString === undefined)) {
             throw new Error(
               toolError(
                 "edit_replace_fields_missing",
-                "oldString and newString are required when operation is replace.",
-                [`Read the target file, then retry with ${replaceExample()}.`],
+                params.content !== undefined && params.operation === undefined
+                  ? "operation is required when content is provided for an existing file; implicit whole-file replacement is not allowed."
+                  : "oldString and newString are required when operation is replace.",
+                params.content !== undefined && params.operation === undefined
+                  ? [
+                      'For an intentional whole-file replacement, use {"operation":"write","path":"...","content":"..."}.',
+                      `For an exact edit, read the target and retry with ${replaceExample()}.`,
+                    ]
+                  : [`Read the target file, then retry with ${replaceExample()}.`],
               ),
             )
           }
           const oldString = params.oldString ?? ""
           const newString = params.newString ?? ""
 
-          if (operation === "replace" && oldString === newString) {
+          if (operation === "replace" && !implicitCreate && oldString === newString) {
             throw new Error("No changes to apply: oldString and newString are identical.")
           }
 
-          const filePath = path.isAbsolute(params.filePath)
-            ? params.filePath
-            : path.join(SessionCwd.get(ctx.sessionID), params.filePath)
-          yield* assertWriteAllowed(ctx, filePath)
           const recoveryContent = yield* afs.readFile(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (recoveryContent) {
             const recoveryError = PatchRecovery.requireFreshRead(
@@ -181,14 +198,14 @@ export const EditTool = Tool.define(
                 contentOld = yield* afs.readFileString(filePath)
               }
 
-              if (operation === "write") {
+              if (operation === "write" || implicitCreate) {
                 contentNew = params.content!
               } else if (oldString === "") {
                 if (existed)
                   throw new Error(
                     toolError("edit_create_target_exists", "oldString may be empty only when creating a new file.", [
                       "Read the current file, then use replace with its exact oldString.",
-                      'For an intentional whole-file replacement, use {"operation":"write","filePath":"...","content":"..."}.',
+                      'For an intentional whole-file replacement, use {"operation":"write","path":"...","content":"..."}.',
                     ]),
                   )
                 contentNew = newString

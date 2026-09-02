@@ -59,7 +59,7 @@ If applicable, also include below the deliverable:
 This format lets the spawning agent and the checkpoint writer extract your progress without parsing free-form prose. Do NOT precede the header with an introduction — your final message must start with "**Status**:".
 `
 
-const WRITE_TOOLS = new Set(["apply_patch", "edit", "replace_range", "write"])
+const WRITE_TOOLS = new Set(["edit"])
 
 function requiredResearcherCount(research: ResearchDispatchSnapshot | undefined) {
   if (!research) return 0
@@ -440,7 +440,7 @@ export const layer = Layer.effect(
         const actorMode: "peer" | "subagent" = input.parentSessionID === input.sessionID ? "subagent" : "peer"
 
         // Writability of THIS agent, derived from the same predicate the runtime uses to
-        // strip the Write tool (llm.ts resolveTools → Permission.disabled). Read-only agents
+        // strip the edit tool (llm.ts resolveTools → Permission.disabled). Read-only agents
         // (e.g. explore: "*":deny) → canWrite=false → postStop progress check is skipped for
         // them (they cannot satisfy a "write the journal" nudge; their findings return via
         // finalText). Agent-static: uses agentInfo.permission ONLY, not the session-merged
@@ -451,7 +451,7 @@ export const layer = Layer.effect(
         // ignored: not reachable in normal usage (the CLI sets no such rule, spawn doesn't
         // rewrite session.permission). See spec §Decision. Unknown agent → fail-open (true).
         const forkAgentInfo = yield* agents.get(input.agentType)
-        const canWrite = forkAgentInfo ? !Permission.disabled(["write"], forkAgentInfo.permission).has("write") : true
+        const canWrite = forkAgentInfo ? !Permission.disabled(["edit"], forkAgentInfo.permission).has("edit") : true
 
         const work = Effect.gen(function* () {
           let finalText: string | undefined
@@ -1054,7 +1054,7 @@ export const layer = Layer.effect(
           ...(input.contextRefs ? { contextRefs: input.contextRefs } : {}),
           ...(input.declaredFiles ? { declaredFiles: input.declaredFiles } : {}),
           ...(input.research ? { research: input.research } : {}),
-          writeAccess: agentInfo ? !Permission.disabled(["write"], agentInfo.permission).has("write") : true,
+          writeAccess: agentInfo ? !Permission.disabled(["edit"], agentInfo.permission).has("edit") : true,
           payload,
           ...(input.resumedFrom ? { resumedFrom: input.resumedFrom } : {}),
           ...(input.attempt ? { attempt: input.attempt } : {}),

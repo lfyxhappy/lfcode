@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, ErrorBoundary, onCleanup, Show } from "solid-js"
 import { type DiffLineAnnotation, type SelectedLineRange } from "@pierre/diffs"
 import { useI18n } from "../context/i18n"
 import { useTheme } from "../theme"
@@ -11,7 +11,7 @@ import "./code-diff-view.css"
 
 type MonacoApi = typeof import("monaco-editor/esm/vs/editor/editor.api.js")
 
-export function CodeDiffView(props: {
+type CodeDiffViewProps = {
   path?: string
   before: string
   after: string
@@ -29,7 +29,26 @@ export function CodeDiffView(props: {
   onLineNumberSelectionEnd?: (range: SelectedLineRange | null) => void
   onReady?: VoidFunction
   onUnavailable?: VoidFunction
-}) {
+}
+
+export function CodeDiffView(props: CodeDiffViewProps) {
+  return (
+    <ErrorBoundary
+      fallback={() => {
+        try {
+          props.onUnavailable?.()
+        } catch (error) {
+          console.warn("[CodeDiffView] unavailable callback failed", error)
+        }
+        return null
+      }}
+    >
+      <CodeDiffViewImpl {...props} />
+    </ErrorBoundary>
+  )
+}
+
+function CodeDiffViewImpl(props: CodeDiffViewProps) {
   const i18n = useI18n()
   const theme = useTheme()
   const [ready, setReady] = createSignal(false)
@@ -51,26 +70,73 @@ export function CodeDiffView(props: {
   let activeLanguage: string | undefined
   const instanceID = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
 
+  const reportCleanupFailure = (resource: string, error: unknown) => {
+    console.warn("[CodeDiffView] non-fatal cleanup failure", { resource, error })
+  }
+
+  const safeCleanup = (resource: string, cleanup: VoidFunction) => {
+    try {
+      cleanup()
+    } catch (error) {
+      reportCleanupFailure(resource, error)
+    }
+  }
+
   const disposeModels = () => {
-    disposeHoverUtilities?.()
+    const activeEditor = editor
+    const currentOriginalModel = originalModel
+    const currentModifiedModel = modifiedModel
+    const currentOriginalZones = originalCommentZones
+    const currentModifiedZones = modifiedCommentZones
+    const currentOriginalDecorationIds = originalDecorationIds
+    const currentModifiedDecorationIds = modifiedDecorationIds
+    const disposeHover = disposeHoverUtilities
     disposeHoverUtilities = undefined
-    clearCommentZones()
-    clearHighlightDecorations()
-    editor?.setModel(null)
-    originalModel?.dispose()
     originalModel = undefined
-    modifiedModel?.dispose()
     modifiedModel = undefined
+    originalCommentZones = []
+    modifiedCommentZones = []
+    originalDecorationIds = []
+    modifiedDecorationIds = []
     activePath = undefined
     activeLanguage = undefined
+
+    safeCleanup("hover utilities", () => disposeHover?.())
+    safeCleanup("original comment zones", () => {
+      try {
+        disposeCommentZones(activeEditor?.getOriginalEditor(), currentOriginalZones)
+      } catch (error) {
+        reportCleanupFailure("original comment zones", error)
+        disposeCommentZones(undefined, currentOriginalZones)
+      }
+    })
+    safeCleanup("modified comment zones", () => {
+      try {
+        disposeCommentZones(activeEditor?.getModifiedEditor(), currentModifiedZones)
+      } catch (error) {
+        reportCleanupFailure("modified comment zones", error)
+        disposeCommentZones(undefined, currentModifiedZones)
+      }
+    })
+    safeCleanup("original decorations", () => {
+      activeEditor?.getOriginalEditor().deltaDecorations(currentOriginalDecorationIds, [])
+    })
+    safeCleanup("modified decorations", () => {
+      activeEditor?.getModifiedEditor().deltaDecorations(currentModifiedDecorationIds, [])
+    })
+    safeCleanup("diff editor model", () => activeEditor?.setModel(null))
+    safeCleanup("original model", () => currentOriginalModel?.dispose())
+    safeCleanup("modified model", () => currentModifiedModel?.dispose())
   }
 
   const disposeEditor = () => {
-    disposeModels()
-    disposeSelectionInteractions?.()
+    const activeEditor = editor
+    const disposeSelection = disposeSelectionInteractions
     disposeSelectionInteractions = undefined
-    editor?.dispose()
+    disposeModels()
     editor = undefined
+    safeCleanup("selection interactions", () => disposeSelection?.())
+    safeCleanup("diff editor", () => activeEditor?.dispose())
   }
 
   const clearHighlightDecorations = () => {
@@ -79,13 +145,41 @@ export function CodeDiffView(props: {
       modifiedDecorationIds = []
       return
     }
-    originalDecorationIds = editor.getOriginalEditor().deltaDecorations(originalDecorationIds, [])
-    modifiedDecorationIds = editor.getModifiedEditor().deltaDecorations(modifiedDecorationIds, [])
+    const currentEditor = editor
+    const original = originalDecorationIds
+    const modified = modifiedDecorationIds
+    originalDecorationIds = []
+    modifiedDecorationIds = []
+    safeCleanup("original decorations", () => {
+      currentEditor.getOriginalEditor().deltaDecorations(original, [])
+    })
+    safeCleanup("modified decorations", () => {
+      currentEditor.getModifiedEditor().deltaDecorations(modified, [])
+    })
   }
 
   const clearCommentZones = () => {
-    originalCommentZones = disposeCommentZones(editor?.getOriginalEditor(), originalCommentZones)
-    modifiedCommentZones = disposeCommentZones(editor?.getModifiedEditor(), modifiedCommentZones)
+    const currentEditor = editor
+    const original = originalCommentZones
+    const modified = modifiedCommentZones
+    originalCommentZones = []
+    modifiedCommentZones = []
+    safeCleanup("original comment zones", () => {
+      try {
+        disposeCommentZones(currentEditor?.getOriginalEditor(), original)
+      } catch (error) {
+        reportCleanupFailure("original comment zones", error)
+        disposeCommentZones(undefined, original)
+      }
+    })
+    safeCleanup("modified comment zones", () => {
+      try {
+        disposeCommentZones(currentEditor?.getModifiedEditor(), modified)
+      } catch (error) {
+        reportCleanupFailure("modified comment zones", error)
+        disposeCommentZones(undefined, modified)
+      }
+    })
   }
 
   const syncRuntimeConfiguration = async () => {
@@ -105,7 +199,7 @@ export function CodeDiffView(props: {
     setReady(false)
     disposeEditor()
     setFailed(true)
-    props.onUnavailable?.()
+    safeCleanup("unavailable callback", () => props.onUnavailable?.())
   }
 
   const setupEditor = async () => {
@@ -182,6 +276,7 @@ export function CodeDiffView(props: {
     }
   }
 
+
   createEffect(() => {
     const nextLanguage = language()
     props.path
@@ -215,7 +310,11 @@ export function CodeDiffView(props: {
   createEffect(() => {
     const mode = props.diffStyle !== "unified"
     if (!editor) return
-    editor.updateOptions({ renderSideBySide: mode })
+    try {
+      editor.updateOptions({ renderSideBySide: mode })
+    } catch {
+      markUnavailable()
+    }
   })
 
   createEffect(() => {
@@ -246,7 +345,11 @@ export function CodeDiffView(props: {
   createEffect(() => {
     const selected = props.selectedLines ?? null
     if (!ready() || !editor || !selected) return
-    revealSelectedRange(editor, selected)
+    try {
+      revealSelectedRange(editor, selected)
+    } catch {
+      markUnavailable()
+    }
   })
 
   createEffect(() => {
@@ -257,24 +360,28 @@ export function CodeDiffView(props: {
       return
     }
 
-    originalCommentZones = syncCommentZones(
-      editor.getOriginalEditor(),
-      originalCommentZones,
-      annotations.filter((annotation) => annotation.side === "deletions"),
-      renderAnnotation,
-    )
-    modifiedCommentZones = syncCommentZones(
-      editor.getModifiedEditor(),
-      modifiedCommentZones,
-      annotations.filter((annotation) => (annotation.side ?? "additions") === "additions"),
-      renderAnnotation,
-    )
+    try {
+      originalCommentZones = syncCommentZones(
+        editor.getOriginalEditor(),
+        originalCommentZones,
+        annotations.filter((annotation) => annotation.side === "deletions"),
+        renderAnnotation,
+      )
+      modifiedCommentZones = syncCommentZones(
+        editor.getModifiedEditor(),
+        modifiedCommentZones,
+        annotations.filter((annotation) => (annotation.side ?? "additions") === "additions"),
+        renderAnnotation,
+      )
+    } catch {
+      markUnavailable()
+    }
   })
 
   createEffect(() => {
     const renderHoverUtility = props.renderHoverUtility
     if (!ready() || !editor || !renderHoverUtility) {
-      disposeHoverUtilities?.()
+      safeCleanup("hover utilities", () => disposeHoverUtilities?.())
       disposeHoverUtilities = undefined
       return
     }
@@ -283,7 +390,7 @@ export function CodeDiffView(props: {
     const token = setupToken
     void initializeCodeDiffRuntime().then((runtime) => {
       if (token !== setupToken || activeEditor !== editor) return
-      disposeHoverUtilities?.()
+      safeCleanup("hover utilities", () => disposeHoverUtilities?.())
       disposeHoverUtilities = bindDiffHoverUtilities(runtime.monaco, activeEditor, renderHoverUtility)
     }).catch(() => {
       if (token !== setupToken || activeEditor !== editor) return
@@ -401,6 +508,7 @@ type DiffCommentZone = {
   host: HTMLElement
   zone: import("monaco-editor").editor.IViewZone & { heightInPx: number }
   observer: ResizeObserver
+  disposed: boolean
   frame?: number
 }
 
@@ -432,7 +540,15 @@ function bindDiffSelectionInteractions(
     bindSideSelectionInteractions(monaco, diffEditor.getOriginalEditor(), "deletions", props),
     bindSideSelectionInteractions(monaco, diffEditor.getModifiedEditor(), "additions", props),
   ]
-  return () => disposables.forEach((dispose) => dispose())
+  return () => {
+    for (const dispose of disposables) {
+      try {
+        dispose()
+      } catch (error) {
+        console.warn("[CodeDiffView] selection listener cleanup failed", error)
+      }
+    }
+  }
 }
 
 function bindDiffHoverUtilities(
@@ -445,7 +561,13 @@ function bindDiffHoverUtilities(
     bindSideHoverUtility(monaco, diffEditor.getModifiedEditor(), "additions", renderHoverUtility),
   ]
   return () => {
-    for (const cleanup of cleanups) cleanup()
+    for (const cleanup of cleanups) {
+      try {
+        cleanup()
+      } catch (error) {
+        console.warn("[CodeDiffView] hover cleanup failed", error)
+      }
+    }
   }
 }
 
@@ -683,6 +805,7 @@ function createCommentZone(
     host,
     zone,
     observer,
+    disposed: false,
   } satisfies DiffCommentZone
   return entry
 }
@@ -691,6 +814,8 @@ function disposeSingleCommentZone(
   accessor: import("monaco-editor").editor.IViewZoneChangeAccessor | undefined,
   zone: DiffCommentZone,
 ) {
+  if (zone.disposed) return
+  zone.disposed = true
   if (zone.frame !== undefined) cancelAnimationFrame(zone.frame)
   zone.observer.disconnect()
   accessor?.removeZone(zone.id)

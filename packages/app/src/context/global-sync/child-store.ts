@@ -190,6 +190,7 @@ export function createChildStoreManager(input: {
             session_status: {},
             session_goal: {},
             hook_run: {},
+            activity: {},
             session_diff: {},
             todo: {},
             permission: {},

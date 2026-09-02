@@ -1,4 +1,15 @@
 import type { SessionContextStatus } from "@lfcode-ai/sdk/v2/client"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
+
+export type ContextStatusRequest = {
+  sessionID: string
+  directory?: string
+  generation: number
+}
+
+export function isCurrentContextStatusRequest(request: ContextStatusRequest, generation: number) {
+  return request.generation === generation
+}
 
 export function contextStatusTone(pressure: SessionContextStatus["pressure"]) {
   if (pressure === "rebuild") return "bg-status-error"
@@ -8,5 +19,6 @@ export function contextStatusTone(pressure: SessionContextStatus["pressure"]) {
 }
 
 export function formatContextStatusTokens(value: number, locale: string) {
-  return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(value)
+  void locale
+  return formatTokenCount(value)
 }

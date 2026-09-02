@@ -18,8 +18,8 @@ describe("dialog settings loading logic", () => {
     expect(next).toBe(current)
   })
 
-  test("mounts the current tab and visited tabs only", () => {
-    const visited = new Set<SettingsTab>(["browser", "mcp", "personalization", "appControl", "research"])
+  test("mounts the current tab and visited lightweight tabs only", () => {
+    const visited = new Set<SettingsTab>(["browser", "mcp", "personalization", "appControl", "research", "models", "usage"])
 
     expect(shouldMountSettingsPanel({ tab: "general", selected: "models", visited })).toBe(false)
     expect(shouldMountSettingsPanel({ tab: "shortcuts", selected: "models", visited })).toBe(false)
@@ -29,6 +29,8 @@ describe("dialog settings loading logic", () => {
     expect(shouldMountSettingsPanel({ tab: "research", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "mcp", selected: "models", visited })).toBe(true)
     expect(shouldMountSettingsPanel({ tab: "models", selected: "models", visited })).toBe(true)
+    expect(shouldMountSettingsPanel({ tab: "models", selected: "usage", visited })).toBe(false)
     expect(shouldMountSettingsPanel({ tab: "usage", selected: "models", visited })).toBe(false)
+    expect(shouldMountSettingsPanel({ tab: "usage", selected: "usage", visited })).toBe(true)
   })
 })

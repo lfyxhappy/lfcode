@@ -95,6 +95,9 @@ describe("SubagentProgressCheckerPlugin postStop", () => {
       expect(output.reason).toContain(progressPath(sid, "T4"))
       expect(output.reason).toContain("## §1 Task identity")
       expect(output.reason).toContain("## §5 Outcome and discoveries")
+      expect(output.reason).toContain("edit` tool")
+      expect(output.reason).toContain('operation:"write"')
+      expect(output.reason).not.toContain("Write tool")
     })
   })
 
@@ -146,6 +149,9 @@ describe("SubagentProgressCheckerPlugin postStop", () => {
       expect(output.continue).toBe(true)
       expect(output.reason).toContain("missing required sections")
       expect(output.reason).toContain("## §3 Files and code sections")
+      expect(output.reason).toContain("edit` tool")
+      expect(output.reason).toContain('operation:"write"')
+      expect(output.reason).not.toContain("Write tool")
     })
   })
 

@@ -8,6 +8,12 @@ export type UsageAgentKind = NonNullable<UsageData["filters"]["agent_kind"]>
 export type UsageHeatmapGranularity = NonNullable<UsageData["filters"]["heatmap_granularity"]>
 export type UsageOption = { value: string; label: string }
 export const USAGE_ALL = "__all__"
+export const USAGE_CACHE_TIME = 60 * 1000
+export const USAGE_REFRESH_INTERVAL = 60 * 1000
+
+export function usagePollingEnabled(input: { documentVisible: boolean; nativeVisible: boolean }) {
+  return input.documentVisible && input.nativeVisible
+}
 
 export type UsageHeatmapCell = {
   time: number

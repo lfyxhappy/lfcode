@@ -1,10 +1,10 @@
 import { createInfiniteQuery, createQuery } from "@tanstack/solid-query"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import { Button } from "@lfcode-ai/ui/button"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { Select } from "@lfcode-ai/ui/select"
-import { Tabs } from "@lfcode-ai/ui/tabs"
 import { TextField } from "@lfcode-ai/ui/text-field"
-import { type Component, type JSX, For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { type Component, type JSX, For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { SettingsList } from "./settings-list"
@@ -16,7 +16,10 @@ import {
   hasMoreUsageLogs,
   selectedUsageOption,
   usageHeatmapIntensity,
+  usagePollingEnabled,
+  USAGE_CACHE_TIME,
   USAGE_ALL,
+  USAGE_REFRESH_INTERVAL,
   type UsageAgentKind,
   type UsageData,
   type UsageHeatmapCell,
@@ -27,7 +30,6 @@ import {
 } from "./settings-usage-helpers"
 
 const PAGE_SIZE = 50
-const USAGE_CACHE_TIME = 5 * 60 * 1000
 
 const ranges: Array<{ value: UsageRange; label: string }> = [
   { value: "today", label: "settings.usage.range.today" },
@@ -46,10 +48,8 @@ const statuses: UsageStatus[] = ["completed", "error", "aborted"]
 const agentKinds: UsageAgentKind[] = ["main", "subagent"]
 
 function compactNumber(value: number, locale: string) {
-  return new Intl.NumberFormat(locale, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value)
+  void locale
+  return formatTokenCount(value)
 }
 
 function decimal(value: number, locale: string, digits = 2) {
@@ -85,6 +85,10 @@ function statusTone(status: UsageLog["status"]) {
   if (status === "completed") return "bg-status-success/10 text-status-success"
   if (status === "error") return "bg-status-error/10 text-status-error"
   return "bg-status-warning/10 text-status-warning"
+}
+
+function usageModelLabel(item: UsageLog) {
+  return item.variant && item.variant !== "default" ? `${item.model} (${item.variant})` : item.model
 }
 
 const MiniMetric: Component<{ title: string; value: string; hint?: string }> = (props) => (
@@ -190,8 +194,8 @@ const UsageHeatmap: Component<{
       type="button"
       class={`${className} rounded-[3px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#60a5fa]`}
       style={{ background: point ? `rgb(37 99 235 / ${usageHeatmapIntensity(point.totalTokens, max())})` : "var(--surface-raised-base)" }}
-      aria-label={point ? `${label}: ${point.totalTokens} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
-      title={point ? `${label}: ${point.totalTokens} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
+      aria-label={point ? `${label}: ${formatTokenCount(point.totalTokens)} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
+      title={point ? `${label}: ${formatTokenCount(point.totalTokens)} ${props.labels.tokens}` : `${label}: ${props.labels.noData}`}
     />
   )
 
@@ -303,6 +307,26 @@ export const SettingsUsage: Component = () => {
   const [heatmapGranularity, setHeatmapGranularity] = createSignal<UsageHeatmapGranularity>("month")
   const [search, setSearch] = createSignal("")
   const [tab, setTab] = createSignal<(typeof detailTabs)[number]["value"]>("logs")
+  const [documentVisible, setDocumentVisible] = createSignal(
+    typeof document === "undefined" || document.visibilityState === "visible",
+  )
+  const [nativeWindowVisible, setNativeWindowVisible] = createSignal(true)
+  const windowVisible = createMemo(() => usagePollingEnabled({ documentVisible: documentVisible(), nativeVisible: nativeWindowVisible() }))
+
+  onMount(() => {
+    const updateDocumentVisibility = () => setDocumentVisible(document.visibilityState === "visible")
+    updateDocumentVisibility()
+    document.addEventListener("visibilitychange", updateDocumentVisibility)
+
+    const getNativeVisibility = window.api?.getWindowVisibility
+    const removeNativeVisibilityListener = window.api?.onWindowVisibility?.(setNativeWindowVisible)
+    if (getNativeVisibility) void getNativeVisibility().then(setNativeWindowVisible).catch(() => undefined)
+
+    onCleanup(() => {
+      document.removeEventListener("visibilitychange", updateDocumentVisibility)
+      removeNativeVisibilityListener?.()
+    })
+  })
 
   const filters = createMemo(() =>
     buildUsageFilters({
@@ -320,7 +344,9 @@ export const SettingsUsage: Component = () => {
 
   const heatmapFilters = createMemo(() =>
     buildUsageFilters({
-      range: range(),
+      // The heatmap owns its time window. The top-level range only filters
+      // summary, trend, and log data and must not hide historical heatmap cells.
+      range: "all",
       heatmapGranularity: heatmapGranularity(),
       provider: provider(),
       model: model(),
@@ -353,7 +379,10 @@ export const SettingsUsage: Component = () => {
       }),
     staleTime: USAGE_CACHE_TIME,
     gcTime: 30 * 60 * 1000,
-    refetchOnMount: false,
+    enabled: () => windowVisible(),
+    refetchInterval: USAGE_REFRESH_INTERVAL,
+    refetchIntervalInBackground: false,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
   }))
 
@@ -392,7 +421,6 @@ export const SettingsUsage: Component = () => {
       "settings-usage",
       "heatmap",
       globalSDK.url,
-      range(),
       heatmapGranularity(),
       provider(),
       model(),
@@ -402,7 +430,7 @@ export const SettingsUsage: Component = () => {
       search(),
     ],
     queryFn: () => globalSDK.client.usage.get({ ...heatmapFilters(), limit: 1 }),
-    enabled: () => heatmapGranularity() !== "month",
+    enabled: () => windowVisible(),
     placeholderData: (previous) => previous,
     staleTime: USAGE_CACHE_TIME,
     gcTime: 30 * 60 * 1000,
@@ -410,9 +438,7 @@ export const SettingsUsage: Component = () => {
     refetchOnWindowFocus: false,
   }))
 
-  const heatmapData = createMemo(() =>
-    heatmapGranularity() === "month" ? data() : heatmapQuery.data?.data ?? data(),
-  )
+  const heatmapData = createMemo(() => heatmapQuery.data?.data)
   const locale = createMemo(() => language.intl())
   const logs = createMemo(() => [
     ...(data()?.logs ?? []),
@@ -594,7 +620,7 @@ export const SettingsUsage: Component = () => {
               />
               <UsageHeatmap
                 points={heatmapData()?.heatmap ?? []}
-                summary={data()!.heatmapSummary}
+                summary={heatmapData()?.heatmapSummary ?? { totalTokens: 0, peakDailyTokens: 0, activeDays: 0 }}
                 granularity={heatmapGranularity()}
                 locale={locale()}
                 labels={heatmapLabels()}
@@ -604,13 +630,32 @@ export const SettingsUsage: Component = () => {
             <SettingsList>
               <div class="flex flex-col gap-4">
                 <div class="flex flex-col gap-3 rounded-[6px] border border-border-weak-base bg-surface-base p-2 xl:flex-row xl:items-center xl:justify-between">
-                  <Tabs value={tab()} onChange={(value) => setTab((value as (typeof detailTabs)[number]["value"]) ?? "logs")} variant="pill">
-                    <Tabs.List class="flex-row items-center gap-1">
-                      <For each={detailTabs}>
-                        {(item) => <Tabs.Trigger value={item.value}>{language.t(item.label as never)}</Tabs.Trigger>}
-                      </For>
-                    </Tabs.List>
-                  </Tabs>
+                  <div
+                    class="flex min-w-0 shrink-0 items-center gap-1 rounded-md bg-surface-raised-base p-1"
+                    role="group"
+                    aria-label={language.t("settings.usage.section.logs")}
+                    data-ui-control-group="usage-detail-tabs"
+                    data-ui-control-intent="content-switch"
+                    data-ui-control-presentation="segmented"
+                    data-ui-option-count={detailTabs.length}
+                  >
+                    <For each={detailTabs}>
+                      {(item) => (
+                        <button
+                          type="button"
+                          aria-pressed={tab() === item.value}
+                          class={
+                            tab() === item.value
+                              ? "rounded px-3 py-1.5 text-12-medium text-text-strong shadow-sm bg-surface-base"
+                              : "rounded px-3 py-1.5 text-12-medium text-text-weak hover:bg-surface-base-hover hover:text-text-strong"
+                          }
+                          onClick={() => setTab(item.value)}
+                        >
+                          {language.t(item.label as never)}
+                        </button>
+                      )}
+                    </For>
+                  </div>
                   <div class="grid min-w-0 gap-2 sm:grid-cols-2 xl:w-[440px] xl:flex-shrink-0">
                     <Select
                       options={providerOptions()}
@@ -726,8 +771,8 @@ export const SettingsUsage: Component = () => {
                                   <tr class="border-t border-border-weak-base align-top">
                                     <td class="whitespace-nowrap px-3 py-3">{dateTime(item.time, locale())}</td>
                                     <td class="min-w-0 px-3 py-3">
-                                      <div class="truncate text-text-strong" title={`${item.provider} / ${item.model}`}>{item.provider}</div>
-                                      <div class="truncate pt-1" title={item.model}>{item.model}</div>
+                                      <div class="truncate text-text-strong" title={`${item.provider} / ${usageModelLabel(item)}`}>{item.provider}</div>
+                                      <div class="truncate pt-1" title={usageModelLabel(item)}>{usageModelLabel(item)}</div>
                                     </td>
                                     <td class="whitespace-nowrap px-3 py-3">
                                       <div class="text-text-strong">{compactNumber(item.input, locale())} / {compactNumber(item.output, locale())}</div>

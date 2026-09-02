@@ -23,6 +23,12 @@ describe("prompt-input goal helpers", () => {
         },
       } as never),
     ).toBe("60")
+    expect(
+      formatGoalTokens({
+        status: "active",
+        stats: { tokens: { input: 1_000, output: 500, reasoning: 0 } },
+      } as never),
+    ).toBe("1.5K")
   })
 
   test("derives active elapsed from activeSince locally", () => {

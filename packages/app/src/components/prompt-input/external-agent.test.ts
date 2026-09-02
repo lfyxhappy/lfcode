@@ -36,4 +36,25 @@ describe("formatExternalAgentPrompt", () => {
       }),
     ).toBe("描述截图")
   })
+
+  test("does not inject legacy web references into new external-agent requests", () => {
+    expect(
+      formatExternalAgentPrompt({
+        prompt: [
+          { type: "text", content: "继续处理", start: 0, end: 4 },
+          {
+            type: "web-reference",
+            label: "旧网页引用",
+            text: "legacy excerpt",
+            url: "https://example.com/legacy",
+            mode: "selection",
+            content: "[web:旧网页引用]",
+            start: 4,
+            end: 14,
+          },
+        ],
+        context: [],
+      }),
+    ).toBe("继续处理")
+  })
 })

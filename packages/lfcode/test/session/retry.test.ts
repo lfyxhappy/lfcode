@@ -219,6 +219,17 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
 
+  test("does not retry APIError quota limits even when provider marks them retryable", () => {
+    const error = new MessageV2.APIError({
+      message: "Quota exceeded",
+      isRetryable: true,
+      statusCode: 429,
+      responseBody: JSON.stringify({ error: { code: "insufficient_quota" } }),
+    }).toObject() as MessageV2.APIError
+
+    expect(SessionRetry.retryable(error)).toBeUndefined()
+  })
+
   test("retries ZlibError decompression failures", () => {
     const error = new MessageV2.APIError({
       message: "Response decompression failed",
@@ -279,6 +290,24 @@ describe("session.message-v2.fromError", () => {
     const retryable = SessionRetry.retryable(error)
     expect(retryable).toBeDefined()
     expect(retryable).toBe("Connection reset by server")
+  })
+
+  test("normalizes transient network and SSE timeout errors for processor retry", () => {
+    const errors = [
+      Object.assign(new Error("broken pipe"), { code: "EPIPE" }),
+      Object.assign(new Error("request timed out"), { code: "ETIMEDOUT" }),
+      Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }),
+      Object.assign(new Error("host lookup failed"), { code: "ENOTFOUND" }),
+      Object.assign(new Error("temporary DNS failure"), { code: "EAI_AGAIN" }),
+      new Error("SSE read timed out"),
+    ]
+
+    for (const error of errors) {
+      const result = MessageV2.fromError(error, { providerID })
+      expect(MessageV2.APIError.isInstance(result)).toBe(true)
+      expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
+      expect(SessionRetry.retryable(result as ReturnType<NamedError["toObject"]>)).toBeTruthy()
+    }
   })
 
   test("marks OpenAI 404 status codes as retryable", () => {

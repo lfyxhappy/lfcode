@@ -32,21 +32,29 @@ export function stream(text: string, live: boolean) {
   if (refs(text)) return [{ raw: text, src, mode: "live" }] satisfies Block[]
   // Lexer work is only needed to split an unfinished fenced code block.
   // Plain prose has the same render result as one live block.
-  if (!/[`~]{3,}/.test(text)) return [{ raw: text, src, mode: "live" }] satisfies Block[]
+  if (!/[`~]{3,}/.test(text) && text.length < 4_096) return [{ raw: text, src, mode: "live" }] satisfies Block[]
   const tokens = marked.lexer(text)
   const tail = tokens.findLastIndex((token) => token.type !== "space")
   if (tail < 0) return [{ raw: text, src, mode: "live" }] satisfies Block[]
   const last = tokens[tail]
-  if (!last || last.type !== "code") return [{ raw: text, src, mode: "live" }] satisfies Block[]
-  const code = last as Tokens.Code
-  if (!open(code.raw)) return [{ raw: text, src, mode: "live" }] satisfies Block[]
-  const head = tokens
-    .slice(0, tail)
-    .map((token) => token.raw)
-    .join("")
-  if (!head) return [{ raw: code.raw, src: code.raw, mode: "live" }] satisfies Block[]
+  if (last?.type === "code") {
+    const code = last as Tokens.Code
+    if (open(code.raw)) {
+      const head = tokens.slice(0, tail).map((token) => token.raw).join("")
+      if (!head) return [{ raw: code.raw, src: code.raw, mode: "live" }] satisfies Block[]
+      return [
+        { raw: head, src: heal(head), mode: "live" },
+        { raw: code.raw, src: code.raw, mode: "live" },
+      ] satisfies Block[]
+    }
+  }
+
+  if (tokens.length <= 1) return [{ raw: text, src, mode: "live" }] satisfies Block[]
   return [
-    { raw: head, src: heal(head), mode: "live" },
-    { raw: code.raw, src: code.raw, mode: "live" },
+    ...tokens
+      .slice(0, tail)
+      .filter((token) => token.type !== "space")
+      .map((token) => ({ raw: token.raw, src: token.raw, mode: "full" as const })),
+    { raw: last!.raw, src: heal(last!.raw), mode: "live" },
   ] satisfies Block[]
 }

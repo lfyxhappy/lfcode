@@ -1,11 +1,10 @@
 import { Provider } from "@/provider"
 import { Log } from "@/util"
-import { Context, Duration, Effect, Layer, Record, Schedule, Ref } from "effect"
+import { Cause, Context, Duration, Effect, Layer, Queue, Record, Schedule, Ref } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
-import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import * as ProviderTransform from "@/provider/transform"
 import { Config } from "@/config"
 import { Instance } from "@/project/instance"
@@ -28,7 +27,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { ActorRegistry } from "@/actor/registry"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
-import { describeUnavailableTool, findAvailableToolByNormalizedName, repairToolCallAlias } from "./tool-call-repair"
+import { describeUnavailableTool } from "./tool-call-validation"
 import { isUserHiddenSystemActorID } from "@/actor/visibility"
 
 const log = Log.create({ service: "llm" })
@@ -36,9 +35,35 @@ export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 type Result = Awaited<ReturnType<typeof streamText>>
 
 export async function* gateProviderStreamChunks<A>(stream: AsyncIterable<A>, abortSignal: AbortSignal) {
-  for await (const chunk of stream) {
-    if (abortSignal.aborted) return
-    yield chunk
+  const iterator = stream[Symbol.asyncIterator]()
+  let onAbort: (() => void) | undefined
+  let aborted = abortSignal.aborted
+  const abort = new Promise<void>((resolve) => {
+    if (aborted) {
+      resolve()
+      return
+    }
+    onAbort = () => {
+      aborted = true
+      resolve()
+    }
+    abortSignal.addEventListener("abort", onAbort, { once: true })
+  })
+
+  try {
+    while (!aborted) {
+      const next = await Promise.race([iterator.next(), abort.then(() => ({ done: true as const, value: undefined as A }))])
+      if (next.done) return
+      yield next.value
+    }
+  } finally {
+    if (onAbort) abortSignal.removeEventListener("abort", onAbort)
+    // Do not await iterator.return(): broken providers are exactly the case
+    // this gate protects against, and their cleanup must not block cancellation.
+    // Iterator cleanup is best-effort. A rejected return must never become a
+    // second stream failure that masks the original provider/cancellation
+    // outcome or produces an unhandled rejection in the desktop renderer.
+    void Promise.resolve(iterator.return?.()).catch(() => {})
   }
 }
 
@@ -119,161 +144,6 @@ function buildMemoryInstructions(): string {
 The memory tool is opt-in. Do not search, read, or mention saved memory unless the current user explicitly asks to search, recall, or inspect it. Do not use memory to start, resume, plan, debug, or verify ordinary work; use the active conversation, repository, runtime state, and direct evidence instead.`
 }
 
-export function repairToolInputJSON(input: string) {
-  const candidates = [input, unwrapJsonFence(input)]
-    .flatMap((text) => {
-      const trimmed = text.trim()
-      const balanced = extractBalancedJson(trimmed)
-      return balanced && balanced !== trimmed ? [trimmed, balanced] : [trimmed]
-    })
-    .filter((text, index, list) => text.length > 0 && list.indexOf(text) === index)
-
-  for (const candidate of candidates) {
-    const parsed = parseToolInputCandidate(candidate)
-    if (parsed === undefined) continue
-    return JSON.stringify(parsed)
-  }
-
-  return undefined
-}
-
-function parseToolInputCandidate(input: string) {
-  const direct = parseStrictJSON(input)
-  if (direct !== undefined) return normalizeNestedJSON(direct)
-
-  const jsonc = parseLooseJSON(input)
-  if (jsonc !== undefined) return normalizeNestedJSON(jsonc)
-
-  const escaped = escapeInvalidJsonStringContent(input)
-  if (escaped === input) return undefined
-
-  const escapedDirect = parseStrictJSON(escaped)
-  if (escapedDirect !== undefined) return normalizeNestedJSON(escapedDirect)
-
-  const escapedJsonc = parseLooseJSON(escaped)
-  if (escapedJsonc !== undefined) return normalizeNestedJSON(escapedJsonc)
-
-  return undefined
-}
-
-function parseStrictJSON(input: string) {
-  try {
-    return JSON.parse(input) as unknown
-  } catch {
-    return undefined
-  }
-}
-
-function parseLooseJSON(input: string) {
-  try {
-    const errors: ParseError[] = []
-    const parsed = parseJsonc(input, errors, { allowTrailingComma: true, disallowComments: false })
-    return errors.length === 0 ? parsed : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function normalizeNestedJSON(input: unknown): unknown {
-  if (typeof input !== "string") return input
-  const trimmed = input.trim()
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return input
-  return parseToolInputCandidate(trimmed) ?? input
-}
-
-function unwrapJsonFence(input: string) {
-  const trimmed = input.trim()
-  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  return match?.[1] ?? input
-}
-
-function extractBalancedJson(input: string) {
-  const start = input[0]
-  if (start !== "{" && start !== "[") return undefined
-
-  const stack = [start === "{" ? "}" : "]"]
-  let inString = false
-
-  for (let i = 0; i < input.length; i++) {
-    const char = input[i]
-    const prev = i > 0 ? input[i - 1] : undefined
-    if (char === '"' && prev !== "\\") {
-      inString = !inString
-      continue
-    }
-    if (inString) continue
-    if (char === "{") stack.push("}")
-    if (char === "[") stack.push("]")
-    if (char === "}" || char === "]") {
-      if (stack.at(-1) !== char) return undefined
-      stack.pop()
-      if (stack.length === 0) return input.slice(0, i + 1)
-    }
-  }
-
-  return undefined
-}
-
-function escapeInvalidJsonStringContent(input: string) {
-  let out = ""
-  let inString = false
-
-  for (let i = 0; i < input.length; i++) {
-    const char = input[i]!
-    const prev = i > 0 ? input[i - 1] : undefined
-    if (char === '"' && prev !== "\\") {
-      inString = !inString
-      out += char
-      continue
-    }
-
-    if (!inString) {
-      out += char
-      continue
-    }
-
-    if (char === "\n") {
-      out += "\\n"
-      continue
-    }
-    if (char === "\r") {
-      out += "\\r"
-      continue
-    }
-    if (char === "\t") {
-      out += "\\t"
-      continue
-    }
-
-    if (char !== "\\") {
-      out += char
-      continue
-    }
-
-    const next = input[i + 1]
-    if (!next) {
-      out += "\\\\"
-      continue
-    }
-
-    if ('"\\/bfnrt'.includes(next)) {
-      out += char + next
-      i++
-      continue
-    }
-
-    if (next === "u" && /^[0-9a-fA-F]{4}$/.test(input.slice(i + 2, i + 6))) {
-      out += input.slice(i, i + 6)
-      i += 5
-      continue
-    }
-
-    out += "\\\\"
-  }
-
-  return out
-}
-
 export type StreamInput = {
   user: MessageV2.User
   sessionID: string
@@ -291,6 +161,8 @@ export type StreamInput = {
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
+  /** Token estimate for the exact request envelope assembled before streaming. */
+  requestEnvelopeTokens?: number
 }
 
 export type StreamRequest = StreamInput & {
@@ -377,7 +249,7 @@ const live: Layer.Layer<
       return system
     })
 
-    const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
+      const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       const userExtensionsEnabled = !isUserHiddenSystemActorID(input.agentID)
       const l = log
         .clone()
@@ -545,24 +417,12 @@ const live: Layer.Layer<
         workflowModel.sessionID = input.sessionID
         workflowModel.systemPrompt = system.join("\n")
         workflowModel.toolExecutor = async (toolName, argsJson, _requestID) => {
-          const normalizedTool = findAvailableToolByNormalizedName(activeToolNames, toolName)
-          const aliasRepair = repairToolCallAlias({
-            requestedToolName: toolName,
-            toolInput: argsJson,
-            activeTools: activeToolNames,
-          })
-          const resolvedToolName =
-            aliasRepair?.type === "repair" ? aliasRepair.toolName : normalizedTool ?? toolName
-          const resolvedInput = aliasRepair?.type === "repair" ? aliasRepair.input : argsJson
-          const t = tools[resolvedToolName]
-          if (aliasRepair?.type === "unavailable") {
-            return { result: "", error: aliasRepair.error }
-          }
+          const t = tools[toolName]
           if (!t || !t.execute) {
             return { result: "", error: describeUnavailableTool(toolName, activeToolNames) }
           }
           try {
-            const result = await t.execute!(JSON.parse(resolvedInput), {
+            const result = await t.execute!(JSON.parse(argsJson), {
               toolCallId: _requestID,
               messages: input.messages,
               abortSignal: input.abort,
@@ -666,74 +526,6 @@ const live: Layer.Layer<
           l.error("stream error", {
             error,
           })
-        },
-        async experimental_repairToolCall(failed) {
-          const repairedTool = findAvailableToolByNormalizedName(activeToolNames, failed.toolCall.toolName)
-          const repairedInput =
-            typeof failed.toolCall.input === "string" ? repairToolInputJSON(failed.toolCall.input) : undefined
-
-          if (repairedInput && repairedTool) {
-            l.info("repairing tool call input", {
-              tool: failed.toolCall.toolName,
-              repaired: repairedTool,
-            })
-            return {
-              ...failed.toolCall,
-              toolName: repairedTool,
-              input: repairedInput,
-            }
-          }
-
-          const aliasRepair = repairToolCallAlias({
-            requestedToolName: failed.toolCall.toolName,
-            toolInput: repairedInput ?? failed.toolCall.input,
-            activeTools: activeToolNames,
-          })
-          if (aliasRepair?.type === "repair") {
-            l.info("repairing tool call", {
-              tool: failed.toolCall.toolName,
-              repaired: aliasRepair.toolName,
-              reason: aliasRepair.reason,
-            })
-            return {
-              ...failed.toolCall,
-              toolName: aliasRepair.toolName,
-              input: aliasRepair.input,
-            }
-          }
-          if (aliasRepair?.type === "unavailable") {
-            l.warn("tool alias target unavailable", {
-              tool: failed.toolCall.toolName,
-              repaired: aliasRepair.toolName,
-              reason: aliasRepair.reason,
-              availableTools: activeToolNames,
-            })
-            // Returning null preserves the original tool call and lets the AI SDK
-            // emit its native invalid/no-such-tool error with the requested name.
-            // Never route an unrecoverable call through the internal `invalid`
-            // placeholder: it is intentionally excluded from activeTools.
-            return null
-          }
-          if (repairedTool && repairedTool !== failed.toolCall.toolName) {
-            l.info("repairing tool call", {
-              tool: failed.toolCall.toolName,
-              repaired: repairedTool,
-              reason: "normalized available tool name",
-            })
-            return {
-              ...failed.toolCall,
-              toolName: repairedTool,
-            }
-          }
-          l.warn("tool call unavailable", {
-            tool: failed.toolCall.toolName,
-            availableTools: activeToolNames,
-            error: failed.error.message,
-          })
-          // The call is not safely repairable. Returning null is important here:
-          // the SDK then keeps the original tool name and surfaces the real parse
-          // or availability error instead of producing "unavailable tool invalid".
-          return null
         },
         temperature: params.temperature,
         topP: params.topP,
@@ -842,7 +634,24 @@ const live: Layer.Layer<
                     nextDelayMs: delayMs,
                   })
                 )
-              })
+              }).pipe(
+                // Retry telemetry is observational. A closed bus or a failing
+                // subscriber must never replace the provider error that drives
+                // the retry policy. Preserve real cancellation, but fail open
+                // for all other publication failures.
+                Effect.catchCauseIf(
+                  (cause) => !Cause.hasInterruptsOnly(cause),
+                  (cause) =>
+                    Effect.sync(() =>
+                      log.warn("retry event publish failed; preserving provider error", {
+                        sessionID: input.sessionID,
+                        messageID: input.user.id,
+                        attempt: nextAttempt,
+                        error: String(cause),
+                      }),
+                    ),
+                ),
+              )
 
             const streamWithTelemetry = run({ ...input, abort: ctrl.signal }).pipe(
               Effect.tapError((error) => {
@@ -887,58 +696,83 @@ const live: Layer.Layer<
 
             const consumeStartTs = Date.now()
             let sawFirstChunk = false
-            const fullStream = (async function* () {
-              try {
-                yield { type: "start" } as Event
-                yield {
-                  type: "start-step",
-                  request: {},
-                  warnings: [],
-                } as Event
-                for await (const chunk of normalizeTextLifecycle(gateProviderStreamChunks(result.fullStream, ctrl.signal))) {
-                  if (!sawFirstChunk) {
-                    sawFirstChunk = true
-                    const elapsedMs = Date.now() - consumeStartTs
-                    const sinceSubmitMs = input.submitAt ? Date.now() - input.submitAt : undefined
-                    log.debug("streamText first chunk", {
+            const providerStream = Stream.fromAsyncIterable(
+              gateProviderStreamChunks(normalizeTextLifecycle(result.fullStream), ctrl.signal),
+              (e) => (e instanceof Error ? e : new Error(String(e))),
+            ).pipe(
+              Stream.tap((chunk) =>
+                Effect.sync(() => {
+                  if (sawFirstChunk) return
+                  sawFirstChunk = true
+                  const elapsedMs = Date.now() - consumeStartTs
+                  const sinceSubmitMs = input.submitAt ? Date.now() - input.submitAt : undefined
+                  log.debug("streamText first chunk", {
+                    sessionID: input.sessionID,
+                    messageID: input.user.id,
+                    elapsedMs,
+                    sinceSubmitMs,
+                    chunkType:
+                      chunk && typeof chunk === "object" && "type" in chunk
+                        ? String((chunk as { type: unknown }).type)
+                        : typeof chunk,
+                  })
+                  if (sinceSubmitMs && sinceSubmitMs >= 5000) {
+                    log.info("streamText delayed first chunk", {
                       sessionID: input.sessionID,
                       messageID: input.user.id,
-                      elapsedMs,
                       sinceSubmitMs,
-                      chunkType:
-                        chunk && typeof chunk === "object" && "type" in chunk
-                          ? String((chunk as { type: unknown }).type)
-                          : typeof chunk,
+                      elapsedMs,
                     })
-                    if (sinceSubmitMs && sinceSubmitMs >= 5000) {
-                      log.info("streamText delayed first chunk", {
-                        sessionID: input.sessionID,
-                        messageID: input.user.id,
-                        sinceSubmitMs,
-                        elapsedMs,
-                      })
-                    }
                   }
-                  yield chunk
-                }
-              } finally {
-                if (abortDrain) {
-                  await Promise.race([
-                    Promise.resolve(abortDrain).catch(() => {}),
-                    new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-                  ])
-                }
-                log.debug("streamText finished", {
-                  sessionID: input.sessionID,
-                  messageID: input.user.id,
-                  elapsedMs: Date.now() - consumeStartTs,
-                  sinceSubmitMs: input.submitAt ? Date.now() - input.submitAt : undefined,
-                  sawFirstChunk,
-                })
-              }
-            })()
-
-            return Stream.fromAsyncIterable(fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
+                }),
+              ),
+              Stream.ensuring(
+                Effect.sync(() => {
+                  log.debug("streamText finished", {
+                    sessionID: input.sessionID,
+                    messageID: input.user.id,
+                    elapsedMs: Date.now() - consumeStartTs,
+                    sinceSubmitMs: input.submitAt ? Date.now() - input.submitAt : undefined,
+                    sawFirstChunk,
+                    abortDrain: !!abortDrain,
+                  })
+                }),
+              ),
+            )
+            // Keep the consumer interruptible even when the provider's async
+            // iterator is waiting on a half-complete tool frame. The AI SDK
+            // parser can hold its next() promise open; pump it through a
+            // daemon queue so processor cancellation is decided by Queue.take,
+            // then abort the provider in the stream finalizer without waiting
+            // for parser cleanup.
+            const queue = yield* Queue.unbounded<Event, Cause.Done>()
+            const pump = Stream.concat(
+              Stream.fromIterable([
+                { type: "start" } as Event,
+                { type: "start-step", request: {}, warnings: [] } as Event,
+              ]),
+              providerStream,
+            ).pipe(
+              Stream.runForEach((event) => Queue.offer(queue, event).pipe(Effect.asVoid)),
+              Effect.catchCause((cause) =>
+                Effect.sync(() =>
+                  log.debug("streamText pump stopped", {
+                    sessionID: input.sessionID,
+                    messageID: input.user.id,
+                    cause: String(cause),
+                  }),
+                ),
+              ),
+              Effect.ensuring(Queue.end(queue).pipe(Effect.ignore)),
+            )
+            yield* pump.pipe(Effect.forkDetach)
+            return Stream.fromQueue(queue).pipe(
+              Stream.ensuring(
+                Effect.sync(() => {
+                  ctrl.abort()
+                }),
+              ),
+            )
           }),
         ),
       )

@@ -36,8 +36,8 @@ export type State<A, E> =
 export const make = <A, E = never>(
   scope: Scope.Scope,
   opts?: {
-    onIdle?: Effect.Effect<void>
-    onBusy?: Effect.Effect<void>
+    onIdle?: Effect.Effect<void, unknown>
+    onBusy?: Effect.Effect<void, unknown>
     onInterrupt?: Effect.Effect<A, E>
     busy?: () => never
     label?: string
@@ -67,7 +67,11 @@ export const make = <A, E = never>(
       (st) =>
         [
           Effect.gen(function* () {
-            if (st._tag === "Running" && st.run.id === id) yield* idle
+            // Idle bookkeeping is a side effect. It must never prevent the
+            // caller's Deferred from receiving the provider result or error;
+            // a failed status/database observer is logged by its owner and
+            // ignored at this boundary.
+            if (st._tag === "Running" && st.run.id === id) yield* idle.pipe(Effect.ignore)
             yield* complete(done, exit)
           }),
           st._tag === "Running" && st.run.id === id ? ({ _tag: "Idle" } as const) : st,
@@ -84,11 +88,11 @@ export const make = <A, E = never>(
       return { id, done, fiber } satisfies RunHandle<A, E>
     })
 
-  const finishShell = (id: number) =>
+  const finishShell = (id: number): Effect.Effect<void, never> =>
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
-        if (st._tag === "Shell" && st.shell.id === id) return [idle, { _tag: "Idle" }] as const
+        if (st._tag === "Shell" && st.shell.id === id) return [idle.pipe(Effect.ignore), { _tag: "Idle" }] as const
         if (st._tag === "ShellThenRun" && st.shell.id === id) {
           const run = yield* startRun(st.run.work, st.run.done)
           return [Effect.void, { _tag: "Running", run }] as const
@@ -107,7 +111,9 @@ export const make = <A, E = never>(
           case "Running":
           case "ShellThenRun":
             if (opts?.onReentryWarn)
-              yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+              yield* opts
+                .onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+                .pipe(Effect.ignore)
             return [Deferred.await(st.run.done), st] as const
           case "Shell": {
             const run = {
@@ -118,7 +124,7 @@ export const make = <A, E = never>(
             return [Deferred.await(run.done), { _tag: "ShellThenRun", shell: st.shell, run }] as const
           }
           case "Idle": {
-            yield* busy
+            yield* busy.pipe(Effect.ignore)
             const done = yield* Deferred.make<A, E | Cancelled>()
             const run = yield* startRun(work, done)
             return [Deferred.await(done), { _tag: "Running", run }] as const
@@ -132,7 +138,7 @@ export const make = <A, E = never>(
       ),
     )
 
-  const startShell = (work: Effect.Effect<A, E>) =>
+  const startShell: Runner<A, E>["startShell"] = (work) =>
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
@@ -145,9 +151,9 @@ export const make = <A, E = never>(
             st,
           ] as const
         }
-        yield* busy
+        yield* busy.pipe(Effect.ignore)
         const id = next()
-        const fiber = yield* work.pipe(Effect.ensuring(finishShell(id)), Effect.forkChild)
+        const fiber = yield* work.pipe(Effect.ensuring(finishShell(id).pipe(Effect.ignore)), Effect.forkChild)
         const shell = { id, fiber } satisfies ShellHandle<A, E>
         return [
           Effect.gen(function* () {
@@ -159,23 +165,35 @@ export const make = <A, E = never>(
           { _tag: "Shell", shell },
         ] as const
       }),
-    ).pipe(Effect.flatten)
+    ).pipe(
+      Effect.flatten,
+      Effect.mapError((error) => error as E),
+    )
 
   const cancel = SynchronizedRef.modify(ref, (st) => {
+    const generation = ids
+    const settleIdleAfterCancel = Effect.gen(function* () {
+      // The slot is released before the interrupted Fiber has completed its
+      // cleanup. A replacement run must not be overwritten by this stale
+      // cancellation callback.
+      if (ids !== generation || state()._tag !== "Idle") return
+      yield* idle.pipe(Effect.ignore)
+    })
     switch (st._tag) {
       case "Idle":
         return [Effect.void, st] as const
       case "Running":
-        return [Fiber.interrupt(st.run.fiber).pipe(Effect.asVoid), st] as const
+        return [Fiber.interrupt(st.run.fiber).pipe(Effect.asVoid, Effect.andThen(settleIdleAfterCancel)), { _tag: "Idle" }] as const
       case "Shell":
-        return [stopShell(st.shell).pipe(Effect.asVoid), st] as const
+        return [stopShell(st.shell).pipe(Effect.asVoid, Effect.andThen(settleIdleAfterCancel)), { _tag: "Idle" }] as const
       case "ShellThenRun":
         return [
           Effect.gen(function* () {
             yield* stopShell(st.shell)
             yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
+            yield* settleIdleAfterCancel
           }),
-          { _tag: "Shell", shell: st.shell } as const,
+          { _tag: "Idle" } as const,
         ] as const
     }
   }).pipe(Effect.flatten)

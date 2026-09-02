@@ -1,4 +1,5 @@
 import type { SubagentContext, SubagentExecution } from "./subagent-presets"
+import type { SessionActivity } from "@/context/global-sync/types"
 
 export type AgentPresetContext = "minimal" | "full" | "task"
 
@@ -256,6 +257,46 @@ export function actorDispatches(input: unknown): ActorDispatch[] {
               : typeof item?.created_at === "number"
                 ? item.created_at
                 : undefined,
+      },
+    ]
+  })
+}
+
+export function actorDispatchesFromActivities(activities: SessionActivity[]): ActorDispatch[] {
+  return activities.flatMap((activity) => {
+    const metadata = activity.metadata?.dispatch
+    const mapped = metadata ? actorDispatches([metadata])[0] : undefined
+    if (mapped) {
+      return [{ ...mapped, id: activity.id, sessionID: activity.sessionID, status: activity.status ?? mapped.status }]
+    }
+    if (!/(actor|subagent|research|dispatch)/i.test(activity.kind)) return []
+    const research = activity.kind.toLowerCase().includes("research")
+      ? {
+          kind: "deep-research",
+          title: activity.title,
+          summary: activity.summary,
+          phase: activity.status,
+          startedAt: activity.createdAt,
+          completedAt: activity.updatedAt,
+          citations: [],
+        }
+      : undefined
+    return [
+      {
+        id: activity.id,
+        sessionID: activity.sessionID,
+        actorID: typeof activity.metadata?.actorID === "string" ? activity.metadata.actorID : undefined,
+        agent: typeof activity.metadata?.agent === "string" ? activity.metadata.agent : activity.kind,
+        description: activity.title ?? activity.summary ?? activity.kind,
+        status: activity.status ?? "queued",
+        execution: "background",
+        context: "state",
+        unread: false,
+        declaredFiles: [],
+        actualFiles: [],
+        conflicts: [],
+        createdAt: activity.createdAt,
+        ...(research ? { research } : {}),
       },
     ]
   })

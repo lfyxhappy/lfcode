@@ -20,7 +20,6 @@ import { ConfigProvider } from "../../config"
 import { ProviderID } from "@/provider/schema"
 import { errors } from "../error"
 import { NamedError } from "@lfcode-ai/shared/util/error"
-import { PlaywrightMcpRoutes } from "./global-playwright"
 import { MaintenanceRoutes } from "./global-maintenance"
 import { GlobalAutomationRoutes } from "./global-automation"
 import { createAppControlClient } from "@/app-control/client"
@@ -123,7 +122,6 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
 
 export const GlobalRoutes = lazy(() =>
   new Hono()
-    .route("/", PlaywrightMcpRoutes())
     .route("/maintenance", MaintenanceRoutes())
     .use("/automation", desktopAutomationOnly)
     .use("/automation/*", desktopAutomationOnly)
@@ -888,7 +886,11 @@ export const GlobalRoutes = lazy(() =>
             const message = err instanceof Error ? err.message : String(err)
             if (
               message === `Provider ${providerID} is not configured in global config files` ||
-              message === `Provider ${providerID} is not a custom provider`
+              message === `Provider ${providerID} is not a custom provider` ||
+              message.startsWith("A6API configuration") ||
+              message.startsWith("LFAPI configuration") ||
+              message.startsWith("OpenCode configuration") ||
+              message.startsWith("OpenCode Go configuration")
             ) {
               return c.json(new NamedError.Unknown({ message }).toObject(), 400)
             }

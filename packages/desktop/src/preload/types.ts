@@ -84,20 +84,6 @@ export type BrowserSiteDataResult = {
   clearedCookies: number
 }
 
-export type BrowserReferenceCandidate = {
-  label?: string
-  text?: string
-  url?: string
-  title?: string
-  selector?: string
-  mode?: "selection" | "element"
-}
-
-export type BrowserReferenceState = {
-  selection?: BrowserReferenceCandidate
-  element?: BrowserReferenceCandidate
-}
-
 export type BrowserWindowOpenRequest = {
   sessionKey?: string
   sessionID?: string
@@ -242,7 +228,6 @@ export type ElectronAPI = {
   openExternalLink: (url: string) => void
   openBrowserDevTools: (target: BrowserGuestTarget) => Promise<void>
   clearBrowserSiteData: (target: BrowserGuestTarget) => Promise<BrowserSiteDataResult>
-  getBrowserReferenceState: (target: BrowserGuestTarget) => Promise<BrowserReferenceState | null>
   getBrowserCacheOverview: () => Promise<BrowserCacheOverview>
   clearBrowserCache: () => Promise<BrowserCacheOverview>
   listBrowserCookies: () => Promise<BrowserCookieRecord[]>

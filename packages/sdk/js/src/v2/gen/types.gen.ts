@@ -141,49 +141,6 @@ export type AutomationTimeZone = string
 
 export type AutomationNotification = "all" | "failures" | "none"
 
-export type AutomationTask = {
-  id: string
-  name: string
-  schedule: AutomationSchedule
-  target: AutomationTarget
-  message: string
-  agent: string
-  model?: AutomationModel
-  permissionMode: AutomationPermissionMode
-  timezone: AutomationTimeZone
-  enabled: boolean
-  status: "active" | "paused" | "completed" | "deleted"
-  notifications: AutomationNotification
-  sourceSessionID?: string
-  nextRunAt?: number
-  lastRunAt?: number
-  deletedAt?: number
-  createdAt: number
-  updatedAt: number
-}
-
-export type AutomationTaskList = {
-  items: Array<AutomationTask>
-}
-
-export type AutomationSettings = {
-  concurrency: number
-}
-
-export type AutomationTaskCreate = {
-  name?: string
-  schedule: AutomationSchedule
-  target: AutomationTarget
-  message: string
-  agent?: string
-  model?: AutomationModel
-  permissionMode?: AutomationPermissionMode
-  timezone?: AutomationTimeZone
-  enabled?: boolean
-  notifications?: AutomationNotification
-  sourceSessionID?: string
-}
-
 export type AutomationRunStatus =
   | "queued"
   | "running"
@@ -210,6 +167,72 @@ export type AutomationRun = {
   finishedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+export type AutomationTaskListItem = {
+  id: string
+  name: string
+  schedule: AutomationSchedule
+  target: AutomationTarget
+  message: string
+  agent: string
+  model?: AutomationModel
+  permissionMode: AutomationPermissionMode
+  timezone: AutomationTimeZone
+  enabled: boolean
+  status: "active" | "paused" | "completed" | "deleted"
+  notifications: AutomationNotification
+  sourceSessionID?: string
+  nextRunAt?: number
+  lastRunAt?: number
+  deletedAt?: number
+  latestRun?: AutomationRun
+  createdAt: number
+  updatedAt: number
+}
+
+export type AutomationTaskList = {
+  items: Array<AutomationTaskListItem>
+}
+
+export type AutomationSettings = {
+  concurrency: number
+}
+
+export type AutomationTask = {
+  id: string
+  name: string
+  schedule: AutomationSchedule
+  target: AutomationTarget
+  message: string
+  agent: string
+  model?: AutomationModel
+  permissionMode: AutomationPermissionMode
+  timezone: AutomationTimeZone
+  enabled: boolean
+  status: "active" | "paused" | "completed" | "deleted"
+  notifications: AutomationNotification
+  sourceSessionID?: string
+  nextRunAt?: number
+  lastRunAt?: number
+  deletedAt?: number
+  latestRun?: AutomationRun
+  createdAt: number
+  updatedAt: number
+}
+
+export type AutomationTaskCreate = {
+  name?: string
+  schedule: AutomationSchedule
+  target: AutomationTarget
+  message: string
+  agent?: string
+  model?: AutomationModel
+  permissionMode?: AutomationPermissionMode
+  timezone?: AutomationTimeZone
+  enabled?: boolean
+  notifications?: AutomationNotification
+  sourceSessionID?: string
 }
 
 export type AutomationSessionResolution = {
@@ -693,6 +716,118 @@ export type EventPermissionReplied = {
   }
 }
 
+export type EventActivityCreated = {
+  type: "activity.created"
+  properties: {
+    activity: {
+      id: string
+      sessionID: string
+      parentActivityID?: string
+      kind: "main" | "subagent" | "checkpoint" | "background"
+      status: "queued" | "running" | "waiting" | "interrupted" | "recoverable" | "completed" | "failed" | "cancelled"
+      recoverable: boolean
+      currentStep?: string
+      sourceType: "session" | "actor" | "checkpoint" | "background-job"
+      sourceID: string
+      metadata: {
+        [key: string]: unknown
+      }
+      revision: number
+      error?: string
+      time: {
+        created: number
+        updated: number
+        started?: number
+        completed?: number
+      }
+    }
+  }
+}
+
+export type EventActivityUpdated = {
+  type: "activity.updated"
+  properties: {
+    activity: {
+      id: string
+      sessionID: string
+      parentActivityID?: string
+      kind: "main" | "subagent" | "checkpoint" | "background"
+      status: "queued" | "running" | "waiting" | "interrupted" | "recoverable" | "completed" | "failed" | "cancelled"
+      recoverable: boolean
+      currentStep?: string
+      sourceType: "session" | "actor" | "checkpoint" | "background-job"
+      sourceID: string
+      metadata: {
+        [key: string]: unknown
+      }
+      revision: number
+      error?: string
+      time: {
+        created: number
+        updated: number
+        started?: number
+        completed?: number
+      }
+    }
+  }
+}
+
+export type EventActivityCompleted = {
+  type: "activity.completed"
+  properties: {
+    activity: {
+      id: string
+      sessionID: string
+      parentActivityID?: string
+      kind: "main" | "subagent" | "checkpoint" | "background"
+      status: "queued" | "running" | "waiting" | "interrupted" | "recoverable" | "completed" | "failed" | "cancelled"
+      recoverable: boolean
+      currentStep?: string
+      sourceType: "session" | "actor" | "checkpoint" | "background-job"
+      sourceID: string
+      metadata: {
+        [key: string]: unknown
+      }
+      revision: number
+      error?: string
+      time: {
+        created: number
+        updated: number
+        started?: number
+        completed?: number
+      }
+    }
+  }
+}
+
+export type EventActivityRemoved = {
+  type: "activity.removed"
+  properties: {
+    activity: {
+      id: string
+      sessionID: string
+      parentActivityID?: string
+      kind: "main" | "subagent" | "checkpoint" | "background"
+      status: "queued" | "running" | "waiting" | "interrupted" | "recoverable" | "completed" | "failed" | "cancelled"
+      recoverable: boolean
+      currentStep?: string
+      sourceType: "session" | "actor" | "checkpoint" | "background-job"
+      sourceID: string
+      metadata: {
+        [key: string]: unknown
+      }
+      revision: number
+      error?: string
+      time: {
+        created: number
+        updated: number
+        started?: number
+        completed?: number
+      }
+    }
+  }
+}
+
 export type VcsFileDiff = {
   file: string
   patch: string
@@ -1044,6 +1179,12 @@ export type SessionStatus =
       type: "waiting"
       mode: "interactive-html"
       message?: string
+    }
+  | {
+      type: "recoverable"
+      message: string
+      reason?: string
+      at: number
     }
 
 export type EventSessionStatus = {
@@ -1925,6 +2066,10 @@ export type GlobalEvent = {
     | EventMessagePartDelta
     | EventPermissionAsked
     | EventPermissionReplied
+    | EventActivityCreated
+    | EventActivityUpdated
+    | EventActivityCompleted
+    | EventActivityRemoved
     | EventSessionDiff
     | EventSessionError
     | EventSessionRetryAttempt
@@ -2015,11 +2160,8 @@ export type PermissionConfig =
       __originalKeys?: Array<string>
       read?: PermissionRuleConfig
       edit?: PermissionRuleConfig
-      glob?: PermissionRuleConfig
-      grep?: PermissionRuleConfig
       list?: PermissionRuleConfig
       shell?: PermissionRuleConfig
-      bash?: PermissionRuleConfig
       task?: PermissionRuleConfig
       actor?: PermissionRuleConfig
       external_directory?: PermissionRuleConfig
@@ -2047,7 +2189,7 @@ export type AgentConfig = {
   top_p?: number
   prompt?: string
   /**
-   * @deprecated Use 'permission' field instead
+   * Removed. Configure canonical tool IDs through permission or tool_allowlist.
    */
   tools?: {
     [key: string]: boolean
@@ -2540,6 +2682,9 @@ export type ConfigPublic = {
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
+  /**
+   * Removed. Use permission with canonical tool IDs.
+   */
   tools?: {
     [key: string]: boolean
   }
@@ -2987,6 +3132,9 @@ export type Config = {
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
+  /**
+   * Removed. Use permission with canonical tool IDs.
+   */
   tools?: {
     [key: string]: boolean
   }
@@ -3513,6 +3661,10 @@ export type Model = {
   }
   cacheTTL?: number
   cachePromptTTL?: "5m" | "1h"
+  metadata?: {
+    source: string
+    updatedAt?: string
+  }
 }
 
 export type Provider = {
@@ -3634,6 +3786,16 @@ export type SnapshotFileDiff = {
 }
 
 export type SessionContextStatus = {
+  active_context_tokens: number
+  context_window_tokens: number | null
+  context_percentage: number | null
+  remaining_context_tokens: number | null
+  provider_id: string | null
+  model_id: string | null
+  measured_at: number | null
+  measurement_source: string
+  snapshot_stale: boolean
+  snapshot_age_ms: number | null
   usable_tokens: number | null
   used_tokens: number
   pressure: "idle" | "monitoring" | "checkpoint" | "rebuild"
@@ -3648,7 +3810,13 @@ export type SessionContextStatus = {
     media: number
     reasoning: number
     tool_results: number
+    media_tokens: number
+    reasoning_tokens: number
+    tool_result_tokens: number
+    message_tokens: number
+    other_tokens: number
   }
+  cache_hit_rate: number | null
   checkpoint: {
     exists: boolean
     writer_running: boolean
@@ -3859,6 +4027,10 @@ export type Event =
   | EventMessagePartDelta
   | EventPermissionAsked
   | EventPermissionReplied
+  | EventActivityCreated
+  | EventActivityUpdated
+  | EventActivityCompleted
+  | EventActivityRemoved
   | EventSessionDiff
   | EventSessionError
   | EventSessionRetryAttempt
@@ -4000,6 +4172,31 @@ export type ActorDispatchList = {
 
 export type ActorDispatchConfig = {
   backgroundConcurrency: number
+}
+
+export type ActivityList = {
+  items: Array<{
+    id: string
+    sessionID: string
+    parentActivityID?: string
+    kind: "main" | "subagent" | "checkpoint" | "background"
+    status: "queued" | "running" | "waiting" | "interrupted" | "recoverable" | "completed" | "failed" | "cancelled"
+    recoverable: boolean
+    currentStep?: string
+    sourceType: "session" | "actor" | "checkpoint" | "background-job"
+    sourceID: string
+    metadata: {
+      [key: string]: unknown
+    }
+    revision: number
+    error?: string
+    time: {
+      created: number
+      updated: number
+      started?: number
+      completed?: number
+    }
+  }>
 }
 
 export type BackgroundJobSummary = {
@@ -8815,6 +9012,15 @@ export type ProviderModelsDiscoverData = {
   url: "/provider/models/discover"
 }
 
+export type ProviderModelsDiscoverErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProviderModelsDiscoverError = ProviderModelsDiscoverErrors[keyof ProviderModelsDiscoverErrors]
+
 export type ProviderModelsDiscoverResponses = {
   /**
    * Provider model discovery result
@@ -8899,6 +9105,8 @@ export type ProviderModelsSuggestResponses = {
       [key: string]: unknown
     }
     warning?: string
+    sourceUpdatedAt?: string
+    sourceUrl?: string
     matchedProviderID?: string
     candidates?: Array<{
       providerID: string
@@ -8913,6 +9121,86 @@ export type ProviderModelsSuggestResponses = {
 }
 
 export type ProviderModelsSuggestResponse = ProviderModelsSuggestResponses[keyof ProviderModelsSuggestResponses]
+
+export type ProviderLfapiModelsListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/lfapi/models/discover"
+}
+
+export type ProviderLfapiModelsListResponses = {
+  /**
+   * LFAPI model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses"
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses"
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderLfapiModelsListResponse = ProviderLfapiModelsListResponses[keyof ProviderLfapiModelsListResponses]
+
+export type ProviderLfapiModelsDiscoverData = {
+  body?: {
+    /**
+     * Temporary LFAPI key. It is used only for this request and is never stored.
+     */
+    apiKey?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/lfapi/models/discover"
+}
+
+export type ProviderLfapiModelsDiscoverResponses = {
+  /**
+   * LFAPI model catalog or a safe discovery error category
+   */
+  200:
+    | {
+        ok: true
+        source: "temporary" | "stored"
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses"
+        }>
+      }
+    | {
+        ok: false
+        models: Array<{
+          id: string
+          name: string
+          protocol: "openai-chat" | "openai-responses"
+        }>
+        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderLfapiModelsDiscoverResponse =
+  ProviderLfapiModelsDiscoverResponses[keyof ProviderLfapiModelsDiscoverResponses]
 
 export type ProviderA6ApiModelsListData = {
   body?: never
@@ -9137,47 +9425,39 @@ export type ProviderOpencodeUsageResponses = {
     | {
         ok: true
         usage: {
-          rolling: {
-            status: "ok" | "rate-limited"
-            percent: number
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
             usedPercent?: number
             remainingPercent?: number
-            resetsAt: string
+            resetsAt?: string
             resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
             remaining?: number
             total?: number
             used?: number
+            currency?: string
             unit?: "requests" | "tokens" | "unknown"
-          }
-          weekly: {
-            status: "ok" | "rate-limited"
-            percent: number
-            usedPercent?: number
-            remainingPercent?: number
-            resetsAt: string
-            resetInSeconds?: number
-            remaining?: number
-            total?: number
-            used?: number
-            unit?: "requests" | "tokens" | "unknown"
-          }
-          monthly: {
-            status: "ok" | "rate-limited"
-            percent: number
-            usedPercent?: number
-            remainingPercent?: number
-            resetsAt: string
-            resetInSeconds?: number
-            remaining?: number
-            total?: number
-            used?: number
-            unit?: "requests" | "tokens" | "unknown"
-          }
+          }>
+          fetchedAt?: string
+          source?: string
         }
       }
     | {
         ok: false
-        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
       }
 }
 
@@ -9216,6 +9496,22 @@ export type ProviderOpencodeGoModelsListResponses = {
             temperature?: boolean
             tool_call?: boolean
           }
+          limit?: {
+            context: number
+            input?: number
+            output: number
+          }
+          modalities?: {
+            input: Array<string>
+            output: Array<string>
+          }
+          cost?: {
+            input?: number
+            output?: number
+            cache_read?: number
+            cache_write?: number
+          }
+          source_updated_at?: string
         }>
       }
     | {
@@ -9235,6 +9531,22 @@ export type ProviderOpencodeGoModelsListResponses = {
             temperature?: boolean
             tool_call?: boolean
           }
+          limit?: {
+            context: number
+            input?: number
+            output: number
+          }
+          modalities?: {
+            input: Array<string>
+            output: Array<string>
+          }
+          cost?: {
+            input?: number
+            output?: number
+            cache_read?: number
+            cache_write?: number
+          }
+          source_updated_at?: string
         }>
         error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
       }
@@ -9281,6 +9593,22 @@ export type ProviderOpencodeGoModelsDiscoverResponses = {
             temperature?: boolean
             tool_call?: boolean
           }
+          limit?: {
+            context: number
+            input?: number
+            output: number
+          }
+          modalities?: {
+            input: Array<string>
+            output: Array<string>
+          }
+          cost?: {
+            input?: number
+            output?: number
+            cache_read?: number
+            cache_write?: number
+          }
+          source_updated_at?: string
         }>
       }
     | {
@@ -9300,6 +9628,22 @@ export type ProviderOpencodeGoModelsDiscoverResponses = {
             temperature?: boolean
             tool_call?: boolean
           }
+          limit?: {
+            context: number
+            input?: number
+            output: number
+          }
+          modalities?: {
+            input: Array<string>
+            output: Array<string>
+          }
+          cost?: {
+            input?: number
+            output?: number
+            cache_read?: number
+            cache_write?: number
+          }
+          source_updated_at?: string
         }>
         error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
       }
@@ -9326,47 +9670,39 @@ export type ProviderOpencodeGoUsageResponses = {
     | {
         ok: true
         usage: {
-          rolling: {
-            status: "ok" | "rate-limited"
-            percent: number
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
             usedPercent?: number
             remainingPercent?: number
-            resetsAt: string
+            resetsAt?: string
             resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
             remaining?: number
             total?: number
             used?: number
+            currency?: string
             unit?: "requests" | "tokens" | "unknown"
-          }
-          weekly: {
-            status: "ok" | "rate-limited"
-            percent: number
-            usedPercent?: number
-            remainingPercent?: number
-            resetsAt: string
-            resetInSeconds?: number
-            remaining?: number
-            total?: number
-            used?: number
-            unit?: "requests" | "tokens" | "unknown"
-          }
-          monthly: {
-            status: "ok" | "rate-limited"
-            percent: number
-            usedPercent?: number
-            remainingPercent?: number
-            resetsAt: string
-            resetInSeconds?: number
-            remaining?: number
-            total?: number
-            used?: number
-            unit?: "requests" | "tokens" | "unknown"
-          }
+          }>
+          fetchedAt?: string
+          source?: string
         }
       }
     | {
         ok: false
-        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
       }
 }
 
@@ -9390,30 +9726,268 @@ export type ProviderMinimaxUsageResponses = {
     | {
         ok: true
         usage: {
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
           windows: Array<{
             id: string
-            percent: number
+            percent?: number
             usedPercent?: number
             remainingPercent?: number
-            resetsAt: string
+            resetsAt?: string
             resetInSeconds?: number
+            resetPeriod?: string
             status?: "ok" | "rate-limited"
             scope?: "account" | "model"
             modelName?: string
             remaining?: number
             total?: number
             used?: number
+            currency?: string
             unit?: "requests" | "tokens" | "unknown"
           }>
+          fetchedAt?: string
+          source?: string
         }
       }
     | {
         ok: false
-        error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
       }
 }
 
 export type ProviderMinimaxUsageResponse = ProviderMinimaxUsageResponses[keyof ProviderMinimaxUsageResponses]
+
+export type ProviderDeepseekUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/deepseek/usage"
+}
+
+export type ProviderDeepseekUsageResponses = {
+  /**
+   * DeepSeek balance or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt?: string
+            resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
+            remaining?: number
+            total?: number
+            used?: number
+            currency?: string
+            unit?: "requests" | "tokens" | "unknown"
+          }>
+          fetchedAt?: string
+          source?: string
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderDeepseekUsageResponse = ProviderDeepseekUsageResponses[keyof ProviderDeepseekUsageResponses]
+
+export type ProviderMoonshotUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/moonshot/usage"
+}
+
+export type ProviderMoonshotUsageResponses = {
+  /**
+   * Moonshot balance or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt?: string
+            resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
+            remaining?: number
+            total?: number
+            used?: number
+            currency?: string
+            unit?: "requests" | "tokens" | "unknown"
+          }>
+          fetchedAt?: string
+          source?: string
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderMoonshotUsageResponse = ProviderMoonshotUsageResponses[keyof ProviderMoonshotUsageResponses]
+
+export type ProviderSiliconflowUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/siliconflow/usage"
+}
+
+export type ProviderSiliconflowUsageResponses = {
+  /**
+   * SiliconFlow balance or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt?: string
+            resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
+            remaining?: number
+            total?: number
+            used?: number
+            currency?: string
+            unit?: "requests" | "tokens" | "unknown"
+          }>
+          fetchedAt?: string
+          source?: string
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderSiliconflowUsageResponse =
+  ProviderSiliconflowUsageResponses[keyof ProviderSiliconflowUsageResponses]
+
+export type ProviderOpenrouterUsageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/openrouter/usage"
+}
+
+export type ProviderOpenrouterUsageResponses = {
+  /**
+   * OpenRouter key usage or a safe error category
+   */
+  200:
+    | {
+        ok: true
+        usage: {
+          balance?: {
+            available: number
+            currency: string
+            granted?: number
+            cash?: number
+            voucher?: number
+            isAvailable?: boolean
+            total?: number
+          }
+          windows: Array<{
+            id: string
+            percent?: number
+            usedPercent?: number
+            remainingPercent?: number
+            resetsAt?: string
+            resetInSeconds?: number
+            resetPeriod?: string
+            status?: "ok" | "rate-limited"
+            scope?: "account" | "model"
+            modelName?: string
+            remaining?: number
+            total?: number
+            used?: number
+            currency?: string
+            unit?: "requests" | "tokens" | "unknown"
+          }>
+          fetchedAt?: string
+          source?: string
+        }
+      }
+    | {
+        ok: false
+        error: "missing_api_key" | "unauthorized" | "rate_limited" | "invalid_response" | "network"
+      }
+}
+
+export type ProviderOpenrouterUsageResponse = ProviderOpenrouterUsageResponses[keyof ProviderOpenrouterUsageResponses]
 
 export type ProviderAuthData = {
   body?: never
@@ -10879,6 +11453,26 @@ export type ActorDispatchReceiveResponses = {
 }
 
 export type ActorDispatchReceiveResponse = ActorDispatchReceiveResponses[keyof ActorDispatchReceiveResponses]
+
+export type ActivityListData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/activity"
+}
+
+export type ActivityListResponses = {
+  /**
+   * Activity snapshot
+   */
+  200: ActivityList
+}
+
+export type ActivityListResponse = ActivityListResponses[keyof ActivityListResponses]
 
 export type BackgroundJobListData = {
   body?: never
@@ -13199,7 +13793,6 @@ export type McpManageListResponses = {
     managed: boolean
     installable: boolean
     installAdapter:
-      | "bundled-playwright"
       | "bundled-windows-computer-use"
       | "bundled-codegraph"
       | "minimax-token-plan"
@@ -13212,7 +13805,6 @@ export type McpManageListResponses = {
       title: string
       source: "official-registry" | "builtin" | "user"
       adapter:
-        | "bundled-playwright"
         | "bundled-windows-computer-use"
         | "bundled-codegraph"
         | "minimax-token-plan"
@@ -13261,7 +13853,6 @@ export type McpCatalogListResponses = {
     installable: boolean
     installed: boolean
     installAdapter:
-      | "bundled-playwright"
       | "bundled-windows-computer-use"
       | "bundled-codegraph"
       | "minimax-token-plan"
@@ -13316,7 +13907,6 @@ export type McpCatalogInstallResponses = {
     managed: boolean
     installable: boolean
     installAdapter:
-      | "bundled-playwright"
       | "bundled-windows-computer-use"
       | "bundled-codegraph"
       | "minimax-token-plan"
@@ -13329,7 +13919,6 @@ export type McpCatalogInstallResponses = {
       title: string
       source: "official-registry" | "builtin" | "user"
       adapter:
-        | "bundled-playwright"
         | "bundled-windows-computer-use"
         | "bundled-codegraph"
         | "minimax-token-plan"
@@ -13649,7 +14238,6 @@ export type McpManageUpdateResponses = {
     managed: boolean
     installable: boolean
     installAdapter:
-      | "bundled-playwright"
       | "bundled-windows-computer-use"
       | "bundled-codegraph"
       | "minimax-token-plan"
@@ -13662,7 +14250,6 @@ export type McpManageUpdateResponses = {
       title: string
       source: "official-registry" | "builtin" | "user"
       adapter:
-        | "bundled-playwright"
         | "bundled-windows-computer-use"
         | "bundled-codegraph"
         | "minimax-token-plan"
@@ -13793,6 +14380,7 @@ export type UsageGetResponses = {
       time: number
       provider: string
       model: string
+      variant?: string
       input: number
       output: number
       reasoning: number
@@ -13861,6 +14449,59 @@ export type UsageGetResponses = {
 }
 
 export type UsageGetResponse = UsageGetResponses[keyof UsageGetResponses]
+
+export type UsageSummaryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    range?: "today" | "7d" | "30d" | "all"
+    provider?: string
+    model?: string
+    project?: string
+    session?: string
+    status?: "completed" | "error" | "aborted"
+    agent_kind?: "main" | "subagent"
+    source?: "lfcode"
+  }
+  url: "/usage/summary"
+}
+
+export type UsageSummaryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type UsageSummaryError = UsageSummaryErrors[keyof UsageSummaryErrors]
+
+export type UsageSummaryResponses = {
+  /**
+   * Usage summary
+   */
+  200: {
+    totalTokens: number
+    inputTokens: number
+    outputTokens: number
+    cacheCreateTokens: number
+    cacheHitTokens: number
+    overheadTokens: number
+    cacheHitRatio: number | null
+    requestCount: number
+    totalCost: number
+    overheadCost: number
+    successCount: number
+    errorCount: number
+    abortedCount: number
+    successRate: number | null
+    avgDuration: number | null
+    avgTtft: number | null
+  }
+}
+
+export type UsageSummaryResponse = UsageSummaryResponses[keyof UsageSummaryResponses]
 
 export type TuiAppendPromptData = {
   body?: {

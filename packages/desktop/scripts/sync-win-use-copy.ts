@@ -30,14 +30,6 @@ const protectedResourceEntries = new Set(["app.asar", "app.asar.unpacked", "cli"
 const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
 const playwrightLegacyCommand = [...playwrightBaseCommand, "--browser", "chrome"] as const
 const playwrightCdpCommand = [...playwrightBaseCommand, "--cdp-endpoint=http://127.0.0.1:9222"] as const
-const playwrightRemoteConfig = {
-  type: "remote",
-  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
-  headers: {
-    authorization: "{env:LFCODE_SERVER_AUTH}",
-  },
-  enabled: true,
-} as const
 const windowsComputerUseLegacyCommand = [
   "cmd",
   "/c",
@@ -367,31 +359,11 @@ function upgradeBundledCommands(text: string) {
   if (!isRecord(parsed)) return text
   let updated = text
   const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined
-  if (!mcp) {
-    return applyEdits(
-      updated,
-      modify(
-        updated,
-        ["mcp"],
-        { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig },
-        {
-          formattingOptions: {
-            insertSpaces: true,
-            tabSize: 2,
-          },
-        },
-      ),
-    )
-  }
-  const playwright = mcp.playwright
-  if (
-    isLegacyPlaywrightConfig(playwright) ||
-    isPlaywrightCdpConfig(playwright) ||
-    isStaleBundledPlaywrightRemoteConfig(playwright)
-  ) {
+  if (!mcp) return updated
+  if (Object.hasOwn(mcp, "playwright")) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
+      modify(updated, ["mcp", "playwright"], undefined, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -399,11 +371,10 @@ function upgradeBundledCommands(text: string) {
       }),
     )
   }
-  const windowsComputerUse = mcp["windows-computer-use"]
-  if (windowsComputerUse === undefined || isLegacyWindowsComputerUseConfig(windowsComputerUse)) {
+  if (Object.hasOwn(mcp, "windows-computer-use")) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp", "windows-computer-use"], windowsComputerUseConfig, {
+      modify(updated, ["mcp", "windows-computer-use"], undefined, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,

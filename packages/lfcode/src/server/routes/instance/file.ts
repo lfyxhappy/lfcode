@@ -143,7 +143,7 @@ export const FileRoutes = lazy(() =>
       describeRoute({
         summary: "List reference directory",
         description:
-          "List the direct children of a directory previously granted by the desktop reference-tree view.",
+          "List the direct children of an authenticated absolute directory. The optional compatibility token is ignored.",
         operationId: "file.referenceTree",
         responses: {
           200: {
@@ -172,8 +172,9 @@ export const FileRoutes = lazy(() =>
     .post(
       "/file/reference-grant",
       describeRoute({
-        summary: "Grant desktop reference directory",
-        description: "Create a short-lived project-bound grant for a desktop user-selected reference directory.",
+        summary: "Grant desktop reference directory (compatibility)",
+        description:
+          "Create a short-lived compatibility grant for a desktop user-selected reference directory. File access no longer requires this grant.",
         operationId: "file.referenceGrant",
         responses: {
           200: {

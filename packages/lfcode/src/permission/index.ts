@@ -337,7 +337,7 @@ function expand(pattern: string): string {
 export function fromConfig(permission: ConfigPermission.Info) {
   const ruleset: Ruleset = []
   for (const [key, value] of Object.entries(permission)) {
-    const aliases = key === "shell" || key === "bash" ? ["shell", "bash"] : [key]
+    const aliases = [key]
     if (typeof value === "string") {
       for (const permissionName of aliases) {
         ruleset.push({ permission: permissionName, action: value, pattern: "*" })
@@ -361,17 +361,13 @@ export function merge(...rulesets: Ruleset[]): Ruleset {
   return rulesets.flat()
 }
 
-const EDIT_TOOLS = ["edit", "write", "apply_patch", "multiedit"]
+const EDIT_TOOLS = ["edit"]
 
 export function disabled(tools: string[], ruleset: Ruleset): Set<string> {
   const result = new Set<string>()
   for (const tool of tools) {
-    // Match rules by the tool's own name, AND — for EDIT_TOOLS — also by
-    // the "edit" group alias. findLast returns the last-merged matching
-    // rule, so a tool-specific rule placed after a group rule wins
-    // naturally. This preserves the convenience of `edit: "deny"` covering
-    // all edit-family tools while letting an explicit `write: "allow"` or
-    // `write: "deny"` take precedence when present.
+    // The canonical edit tool has one permission name. There are no legacy
+    // edit-family aliases to resolve or selectively re-enable.
     const rule = ruleset.findLast(
       (r) =>
         Wildcard.match(tool, r.permission) ||

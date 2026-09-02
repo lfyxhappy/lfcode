@@ -68,18 +68,6 @@ type BrowserSiteDataResult = {
   origin?: string
   clearedCookies: number
 }
-type BrowserReferenceCandidate = {
-  label?: string
-  text?: string
-  url?: string
-  title?: string
-  selector?: string
-  mode?: "selection" | "element"
-}
-type BrowserReferenceState = {
-  selection?: BrowserReferenceCandidate
-  element?: BrowserReferenceCandidate
-}
 type BrowserOpenRequestDetail = {
   sessionKey?: string
   sessionID?: string
@@ -130,7 +118,6 @@ export type Platform = {
 
   clearBrowserSiteData?(target: BrowserGuestTarget): Promise<BrowserSiteDataResult>
 
-  getBrowserReferenceState?(target: BrowserGuestTarget): Promise<BrowserReferenceState | null>
 
   getBrowserCacheOverview?(): Promise<BrowserCacheOverview>
 

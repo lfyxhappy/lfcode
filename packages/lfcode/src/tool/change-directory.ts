@@ -15,7 +15,7 @@ const DESCRIPTION = [
   "Use this when the user asks to switch, change, or cd into a directory,",
   "or when you need to work extensively within a subdirectory (e.g., a monorepo package).",
   "",
-  "After calling this tool, all subsequent file operations (read, edit, write, glob, grep, shell)",
+  "After calling this tool, all subsequent file operations (read, search, edit, shell)",
   "will resolve relative paths from the new directory. Subagents inherit the changed directory.",
   "",
   "Pass an absolute path, or a relative path (resolved from the current working directory).",

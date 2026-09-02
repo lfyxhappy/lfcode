@@ -25,7 +25,7 @@ export const UsageQuery = z.object({
   cursor: z.number().int().nonnegative().optional(),
 })
 
-const UsageSummary = z.object({
+export const UsageSummary = z.object({
   totalTokens: z.number(),
   inputTokens: z.number(),
   outputTokens: z.number(),
@@ -78,6 +78,7 @@ const UsageLog = z.object({
   time: z.number(),
   provider: z.string(),
   model: z.string(),
+  variant: z.string().optional(),
   input: z.number(),
   output: z.number(),
   reasoning: z.number(),
@@ -238,11 +239,7 @@ function projectLabel(projectName: string | null, projectDirectory: string, sess
   return "Unknown project"
 }
 
-function groupByKey<T>(
-  rows: T[],
-  getKey: (row: T) => string,
-  getValue: (row: T) => { tokens: number; cost: number },
-) {
+function groupByKey<T>(rows: T[], getKey: (row: T) => string, getValue: (row: T) => { tokens: number; cost: number }) {
   const map = new Map<string, { key: string; requestCount: number; totalTokens: number; totalCost: number }>()
   for (const row of rows) {
     const key = getKey(row)
@@ -267,8 +264,10 @@ function usageConditions(query: z.infer<typeof UsageQuery>, start: number | unde
   if (query.model) conditions.push(sql`json_extract(${MessageTable.data}, '$.modelID') = ${query.model}`)
   if (query.project) conditions.push(sql`${SessionTable.project_id} = ${query.project}`)
   if (query.session) conditions.push(sql`${SessionTable.id} = ${query.session}`)
-  if (query.status) conditions.push(sql`coalesce(json_extract(${PartTable.data}, '$.status'), 'completed') = ${query.status}`)
-  if (query.agent_kind === "main") conditions.push(sql`${MessageTable.agent_id} = 'main' and ${SessionTable.parent_id} is null`)
+  if (query.status)
+    conditions.push(sql`coalesce(json_extract(${PartTable.data}, '$.status'), 'completed') = ${query.status}`)
+  if (query.agent_kind === "main")
+    conditions.push(sql`${MessageTable.agent_id} = 'main' and ${SessionTable.parent_id} is null`)
   if (query.agent_kind === "subagent")
     conditions.push(sql`(${MessageTable.agent_id} <> 'main' or ${SessionTable.parent_id} is not null)`)
   if (query.search) {
@@ -332,6 +331,7 @@ function toUsageLog(row: {
 }) {
   const provider = jsonString(row.messageData, ["providerID"])
   const model = jsonString(row.messageData, ["modelID"])
+  const variant = jsonString(row.messageData, ["variant"])
   const input = jsonNumber(row.partData, ["tokens", "input"])
   const output = jsonNumber(row.partData, ["tokens", "output"])
   const reasoning = jsonNumber(row.partData, ["tokens", "reasoning"])
@@ -378,6 +378,7 @@ function toUsageLog(row: {
     time: row.time,
     provider,
     model,
+    ...(variant ? { variant } : {}),
     input,
     output,
     reasoning,
@@ -443,7 +444,11 @@ function summarize(logs: UsageLog[]) {
 
   return {
     totalTokens:
-      totals.inputTokens + totals.outputTokens + totals.cacheCreateTokens + totals.cacheHitTokens + totals.overheadTokens,
+      totals.inputTokens +
+      totals.outputTokens +
+      totals.cacheCreateTokens +
+      totals.cacheHitTokens +
+      totals.overheadTokens,
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
     cacheCreateTokens: totals.cacheCreateTokens,
@@ -478,6 +483,7 @@ type UsageFactRow = {
   agentID: string
   provider: string
   model: string
+  variant: string | null
   status: string
   input: number
   output: number
@@ -509,6 +515,7 @@ function toFactLog(row: UsageFactRow) {
     time: row.time,
     provider: row.provider,
     model: row.model,
+    ...(row.variant ? { variant: row.variant } : {}),
     input: row.input,
     output: row.output,
     reasoning: row.reasoning,
@@ -545,13 +552,15 @@ function factRows(query: z.infer<typeof UsageQuery>, start: number | undefined, 
   if (query.agent_kind === "subagent") where.push("(m.agent_id <> 'main' OR s.parent_id IS NOT NULL)")
   if (query.search) {
     const value = `%${query.search}%`
-    where.push("(s.title LIKE ? OR s.directory LIKE ? OR p.name LIKE ? OR p.worktree LIKE ? OR s.id LIKE ? OR f.provider_id LIKE ? OR f.model_id LIKE ?)")
+    where.push(
+      "(s.title LIKE ? OR s.directory LIKE ? OR p.name LIKE ? OR p.worktree LIKE ? OR s.id LIKE ? OR f.provider_id LIKE ? OR f.model_id LIKE ?)",
+    )
     params.push(value, value, value, value, value, value, value)
   }
   return Database.rawAll<UsageFactRow>(
     `SELECT f.part_id AS id, s.project_id AS projectID, p.name AS projectName, p.worktree AS projectDirectory,
       f.session_id AS sessionID, s.parent_id AS sessionParentID, f.time_created AS time, s.title AS sessionTitle,
-      s.directory, m.agent_id AS agentID, f.provider_id AS provider, f.model_id AS model, f.status,
+      s.directory, m.agent_id AS agentID, f.provider_id AS provider, f.model_id AS model, f.variant AS variant, f.status,
       f.input_tokens AS input, f.output_tokens AS output, f.reasoning_tokens AS reasoning,
       f.cache_read_tokens AS cacheRead, f.cache_write_tokens AS cacheWrite, f.overhead_tokens AS overheadTokens,
       f.overhead_cost AS overheadCost, f.cost + f.overhead_cost AS totalCost, f.duration, f.ttft,
@@ -563,11 +572,117 @@ function factRows(query: z.infer<typeof UsageQuery>, start: number | undefined, 
   )
 }
 
+function factSummary(query: z.infer<typeof UsageQuery>, start: number | undefined) {
+  const where = ["m.agent_id <> 'context-reviewer'", "m.agent_id NOT LIKE 'context-reviewer-%'"]
+  const params: (string | number)[] = []
+  const add = (condition: string, value?: string | number) => {
+    where.push(condition)
+    if (value !== undefined) params.push(value)
+  }
+  if (start != null) add("f.time_created >= ?", start)
+  if (query.provider) add("f.provider_id = ?", query.provider)
+  if (query.model) add("f.model_id = ?", query.model)
+  if (query.project) add("s.project_id = ?", query.project)
+  if (query.session) add("s.id = ?", query.session)
+  if (query.status) add("f.status = ?", query.status)
+  if (query.agent_kind === "main") where.push("m.agent_id = 'main' AND s.parent_id IS NULL")
+  if (query.agent_kind === "subagent") where.push("(m.agent_id <> 'main' OR s.parent_id IS NOT NULL)")
+
+  const row = Database.rawAll<{
+    inputTokens: number | null
+    outputTokens: number | null
+    reasoningTokens: number | null
+    cacheCreateTokens: number | null
+    cacheHitTokens: number | null
+    overheadTokens: number | null
+    totalCost: number | null
+    overheadCost: number | null
+    requestCount: number
+    successCount: number
+    errorCount: number
+    abortedCount: number
+    durationSum: number | null
+    durationCount: number
+    ttftSum: number | null
+    ttftCount: number
+  }>(
+    `SELECT
+      COALESCE(SUM(f.input_tokens), 0) AS inputTokens,
+      COALESCE(SUM(f.output_tokens), 0) AS outputTokens,
+      COALESCE(SUM(f.reasoning_tokens), 0) AS reasoningTokens,
+      COALESCE(SUM(f.cache_write_tokens), 0) AS cacheCreateTokens,
+      COALESCE(SUM(f.cache_read_tokens), 0) AS cacheHitTokens,
+      COALESCE(SUM(f.overhead_tokens), 0) AS overheadTokens,
+      COALESCE(SUM(f.cost + f.overhead_cost), 0) AS totalCost,
+      COALESCE(SUM(f.overhead_cost), 0) AS overheadCost,
+      COUNT(*) AS requestCount,
+      COALESCE(SUM(CASE WHEN f.status = 'completed' THEN 1 ELSE 0 END), 0) AS successCount,
+      COALESCE(SUM(CASE WHEN f.status = 'error' THEN 1 ELSE 0 END), 0) AS errorCount,
+      COALESCE(SUM(CASE WHEN f.status = 'aborted' THEN 1 ELSE 0 END), 0) AS abortedCount,
+      COALESCE(SUM(f.duration), 0) AS durationSum,
+      COUNT(f.duration) AS durationCount,
+      COALESCE(SUM(f.ttft), 0) AS ttftSum,
+      COUNT(f.ttft) AS ttftCount
+    FROM usage_fact f
+    JOIN message m ON m.id = f.message_id
+    JOIN session s ON s.id = f.session_id
+    WHERE ${where.join(" AND ")}`,
+    ...params,
+  )[0]
+
+  const totals = {
+    inputTokens: row?.inputTokens ?? 0,
+    outputTokens: (row?.outputTokens ?? 0) + (row?.reasoningTokens ?? 0),
+    cacheCreateTokens: row?.cacheCreateTokens ?? 0,
+    cacheHitTokens: row?.cacheHitTokens ?? 0,
+    overheadTokens: row?.overheadTokens ?? 0,
+    totalCost: row?.totalCost ?? 0,
+    overheadCost: row?.overheadCost ?? 0,
+    requestCount: row?.requestCount ?? 0,
+    successCount: row?.successCount ?? 0,
+    errorCount: row?.errorCount ?? 0,
+    abortedCount: row?.abortedCount ?? 0,
+    durationSum: row?.durationSum ?? 0,
+    durationCount: row?.durationCount ?? 0,
+    ttftSum: row?.ttftSum ?? 0,
+    ttftCount: row?.ttftCount ?? 0,
+  }
+  const totalTokens =
+    totals.inputTokens + totals.outputTokens + totals.cacheCreateTokens + totals.cacheHitTokens + totals.overheadTokens
+  return UsageSummary.parse({
+    totalTokens,
+    ...totals,
+    cacheHitRatio:
+      totals.inputTokens + totals.cacheCreateTokens + totals.cacheHitTokens > 0
+        ? (totals.cacheHitTokens / (totals.inputTokens + totals.cacheCreateTokens + totals.cacheHitTokens)) * 100
+        : null,
+    successRate: totals.requestCount > 0 ? (totals.successCount / totals.requestCount) * 100 : null,
+    avgDuration: average(totals.durationSum, totals.durationCount),
+    avgTtft: average(totals.ttftSum, totals.ttftCount),
+  })
+}
+
+export function getSummary(input: z.input<typeof UsageQuery>) {
+  const query = UsageQuery.parse(input)
+  const start = rangeStart(query.range ?? "all", Date.now())
+  const factSchema = hasUsageFactSchema()
+  if (factSchema) startUsageBackfill()
+  const completed =
+    factSchema &&
+    Database.rawAll<{ completed: number }>("SELECT completed FROM usage_fact_backfill WHERE id = 1")[0]?.completed === 1
+  if (completed) return factSummary(query, start)
+  return summarize(selectUsageRows(usageConditions(query, start)).map((row) => toUsageLog(row)))
+}
+
 let backfillPromise: Promise<void> | undefined
 
 function hasUsageFactSchema() {
   try {
-    return Database.rawAll<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'usage_fact_backfill'").length > 0
+    return (
+      Database.rawAll<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'usage_fact_backfill'",
+      ).length > 0
+    )
   } catch {
     return false
   }
@@ -577,71 +692,79 @@ function writeUsageFact(
   db: Database.TxOrDb,
   row: { id: string; messageID: string; sessionID: string; projectID: string },
   log: UsageLog,
+  options?: { includeVariant?: boolean },
 ) {
-  db.run(sql`INSERT INTO usage_fact (part_id,message_id,session_id,project_id,time_created,agent_id,provider_id,model_id,status,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,overhead_tokens,cost,overhead_cost,duration,ttft,submit_to_first_delta,pre_stream)
-    VALUES (${row.id},${row.messageID},${row.sessionID},${row.projectID},${log.time},${log.agentID},${log.provider},${log.model},${log.status},${log.input},${log.output},${log.reasoning},${log.cacheRead},${log.cacheWrite},${log.overheadTokens},${log.cost - log.overheadCost},${log.overheadCost},${log.duration},${log.ttft},${log.submitToFirstDelta},${log.preStream})
-    ON CONFLICT(part_id) DO UPDATE SET message_id=excluded.message_id,session_id=excluded.session_id,project_id=excluded.project_id,time_created=excluded.time_created,agent_id=excluded.agent_id,provider_id=excluded.provider_id,model_id=excluded.model_id,status=excluded.status,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,reasoning_tokens=excluded.reasoning_tokens,cache_read_tokens=excluded.cache_read_tokens,cache_write_tokens=excluded.cache_write_tokens,overhead_tokens=excluded.overhead_tokens,cost=excluded.cost,overhead_cost=excluded.overhead_cost,duration=excluded.duration,ttft=excluded.ttft,submit_to_first_delta=excluded.submit_to_first_delta,pre_stream=excluded.pre_stream`)
+  const variant = options?.includeVariant === false ? null : (log.variant ?? null)
+  db.run(sql`INSERT INTO usage_fact (part_id,message_id,session_id,project_id,time_created,agent_id,provider_id,model_id,variant,status,input_tokens,output_tokens,reasoning_tokens,cache_read_tokens,cache_write_tokens,overhead_tokens,cost,overhead_cost,duration,ttft,submit_to_first_delta,pre_stream)
+    VALUES (${row.id},${row.messageID},${row.sessionID},${row.projectID},${log.time},${log.agentID},${log.provider},${log.model},${variant},${log.status},${log.input},${log.output},${log.reasoning},${log.cacheRead},${log.cacheWrite},${log.overheadTokens},${log.cost - log.overheadCost},${log.overheadCost},${log.duration},${log.ttft},${log.submitToFirstDelta},${log.preStream})
+    ON CONFLICT(part_id) DO UPDATE SET message_id=excluded.message_id,session_id=excluded.session_id,project_id=excluded.project_id,time_created=excluded.time_created,agent_id=excluded.agent_id,provider_id=excluded.provider_id,model_id=excluded.model_id,variant=COALESCE(excluded.variant, usage_fact.variant),status=excluded.status,input_tokens=excluded.input_tokens,output_tokens=excluded.output_tokens,reasoning_tokens=excluded.reasoning_tokens,cache_read_tokens=excluded.cache_read_tokens,cache_write_tokens=excluded.cache_write_tokens,overhead_tokens=excluded.overhead_tokens,cost=excluded.cost,overhead_cost=excluded.overhead_cost,duration=excluded.duration,ttft=excluded.ttft,submit_to_first_delta=excluded.submit_to_first_delta,pre_stream=excluded.pre_stream`)
 }
 
 function startUsageBackfill() {
   if (!hasUsageFactSchema()) return
   if (backfillPromise) return
-  backfillPromise = Promise.resolve().then(async () => {
-    while (true) {
-      const state = Database.rawAll<{ completed: number; cursor_time: number | null; cursor_part_id: string | null }>(
-        "SELECT completed, cursor_time, cursor_part_id FROM usage_fact_backfill WHERE id = 1",
-      )[0]
-      if (!state || state.completed) return
-      const rows = Database.rawAll<{
-        id: string
-        messageID: string
-        sessionID: string
-        projectID: string
-        time: number
-        agentID: string
-        messageData: string
-        partData: string
-      }>(
-        `SELECT p.id, p.message_id AS messageID, p.session_id AS sessionID, s.project_id AS projectID,
+  backfillPromise = Promise.resolve()
+    .then(async () => {
+      while (true) {
+        const state = Database.rawAll<{ completed: number; cursor_time: number | null; cursor_part_id: string | null }>(
+          "SELECT completed, cursor_time, cursor_part_id FROM usage_fact_backfill WHERE id = 1",
+        )[0]
+        if (!state || state.completed) return
+        const rows = Database.rawAll<{
+          id: string
+          messageID: string
+          sessionID: string
+          projectID: string
+          time: number
+          agentID: string
+          messageData: string
+          partData: string
+        }>(
+          `SELECT p.id, p.message_id AS messageID, p.session_id AS sessionID, s.project_id AS projectID,
           p.time_created AS time, m.agent_id AS agentID, m.data AS messageData, p.data AS partData
           FROM part p JOIN message m ON m.id = p.message_id JOIN session s ON s.id = p.session_id
           WHERE json_extract(p.data, '$.type') = 'step-finish'
             AND (p.time_created > ? OR (p.time_created = ? AND p.id > ?))
           ORDER BY p.time_created ASC, p.id ASC LIMIT 500`,
-        state.cursor_time ?? 0,
-        state.cursor_time ?? 0,
-        state.cursor_part_id ?? "",
-      )
-      if (rows.length === 0) {
-        Database.Client().$client.prepare("UPDATE usage_fact_backfill SET completed = 1, updated_at = ? WHERE id = 1").run(Date.now())
-        return
-      }
-      Database.transaction((db) => {
-        for (const row of rows) {
-          const log = toUsageLog({
-            id: row.id,
-            projectID: row.projectID,
-            projectName: null,
-            projectDirectory: "",
-            sessionID: row.sessionID,
-            sessionParentID: null,
-            time: row.time,
-            sessionTitle: "",
-            directory: "",
-            agentID: row.agentID,
-            messageData: JSON.parse(row.messageData),
-            partData: JSON.parse(row.partData),
-          })
-          writeUsageFact(db, row, log)
+          state.cursor_time ?? 0,
+          state.cursor_time ?? 0,
+          state.cursor_part_id ?? "",
+        )
+        if (rows.length === 0) {
+          Database.Client()
+            .$client.prepare("UPDATE usage_fact_backfill SET completed = 1, updated_at = ? WHERE id = 1")
+            .run(Date.now())
+          return
         }
-        const last = rows.at(-1)!
-        db.run(sql`UPDATE usage_fact_backfill SET cursor_time = ${last.time}, cursor_part_id = ${last.id}, updated_at = ${Date.now()} WHERE id = 1`)
-      })
-      await new Promise<void>((resolve) => setTimeout(resolve, 0))
-    }
-  }).finally(() => {
-    backfillPromise = undefined
-  })
+        Database.transaction((db) => {
+          for (const row of rows) {
+            const log = toUsageLog({
+              id: row.id,
+              projectID: row.projectID,
+              projectName: null,
+              projectDirectory: "",
+              sessionID: row.sessionID,
+              sessionParentID: null,
+              time: row.time,
+              sessionTitle: "",
+              directory: "",
+              agentID: row.agentID,
+              messageData: JSON.parse(row.messageData),
+              partData: JSON.parse(row.partData),
+            })
+            writeUsageFact(db, row, log, { includeVariant: false })
+          }
+          const last = rows.at(-1)!
+          db.run(
+            sql`UPDATE usage_fact_backfill SET cursor_time = ${last.time}, cursor_part_id = ${last.id}, updated_at = ${Date.now()} WHERE id = 1`,
+          )
+        })
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+    })
+    .finally(() => {
+      backfillPromise = undefined
+    })
 }
 
 export function getUsage(input: z.input<typeof UsageQuery>) {
@@ -652,7 +775,9 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
   const start = rangeStart(range, Date.now())
   const factSchema = hasUsageFactSchema()
   if (factSchema) startUsageBackfill()
-  const completed = factSchema && Database.rawAll<{ completed: number }>("SELECT completed FROM usage_fact_backfill WHERE id = 1")[0]?.completed === 1
+  const completed =
+    factSchema &&
+    Database.rawAll<{ completed: number }>("SELECT completed FROM usage_fact_backfill WHERE id = 1")[0]?.completed === 1
   const allLogs: UsageLog[] = completed
     ? factRows(query, start).map((row) => toFactLog(row))
     : selectUsageRows(usageConditions(query, start)).map((row) => toUsageLog(row))
@@ -685,8 +810,8 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
 
   const heatmapMap = new Map<number, z.infer<typeof UsageHeatmapPoint>>()
   const heatmapSince = heatmapStart(heatmapGranularity, Date.now())
-  for (const row of allLogs) {
-    if (row.time < heatmapSince) continue
+  const heatmapLogs = allLogs.filter((row) => row.time >= heatmapSince)
+  for (const row of heatmapLogs) {
     const time = heatmapBucketTime(row.time, heatmapGranularity)
     const current = heatmapMap.get(time) ?? { time, totalTokens: 0 }
     current.totalTokens += row.totalTokens
@@ -694,7 +819,7 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
   }
   const heatmap = [...heatmapMap.values()].sort((a, b) => a.time - b.time)
   const dailyUsage = new Map<number, number>()
-  for (const row of allLogs) {
+  for (const row of heatmapLogs) {
     const day = startOfDay(row.time)
     dailyUsage.set(day, (dailyUsage.get(day) ?? 0) + row.totalTokens)
   }
@@ -770,7 +895,7 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
     trend,
     heatmap,
     heatmapSummary: {
-      totalTokens: summary.totalTokens,
+      totalTokens: heatmapLogs.reduce((total, row) => total + row.totalTokens, 0),
       peakDailyTokens: Math.max(0, ...dailyUsage.values()),
       activeDays: dailyUsage.size,
     },
@@ -792,14 +917,17 @@ export function getUsage(input: z.input<typeof UsageQuery>) {
       limit,
       cursor: query.cursor ?? null,
     },
-    nextCursor: (completed ? factPage?.length : legacyPage?.length)! > limit
-      ? (completed ? factPage?.[limit]?.time : legacyPage?.[limit]?.time) ?? null
-      : null,
+    nextCursor:
+      (completed ? factPage?.length : legacyPage?.length)! > limit
+        ? ((completed ? factPage?.[limit]?.time : legacyPage?.[limit]?.time) ?? null)
+        : null,
   })
 }
 
 export const SessionUsage = {
   Query: UsageQuery,
+  Summary: UsageSummary,
   Response: UsageResponse,
   get: getUsage,
+  summary: getSummary,
 }

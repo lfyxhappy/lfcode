@@ -76,6 +76,11 @@ if (command === "state") {
   process.exit(0)
 }
 
+if (command === "gpu") {
+  print(await client.get("/diagnostics/gpu"))
+  process.exit(0)
+}
+
 if (command === "window-manage") {
   const action = requiredArg(args[1], "action")
   const bounds = args[3] ? JSON.parse(args[3]) : undefined

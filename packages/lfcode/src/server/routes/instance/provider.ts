@@ -8,9 +8,15 @@ import { ModelsDev } from "@/provider"
 import { ProviderAuth } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import { A6Api } from "@/provider/a6api"
+import { LfApi } from "@/provider/lfapi"
+import { DeepSeekUsage } from "@/provider/deepseek-usage"
 import { MiniMaxUsage } from "@/provider/minimax-usage"
+import { MoonshotUsage } from "@/provider/moonshot-usage"
 import { OpenCodeGo } from "@/provider/opencode-go"
 import { OpenCode } from "@/provider/opencode"
+import { OpenRouterUsage } from "@/provider/openrouter-usage"
+import { ProviderQuota } from "@/provider/quota"
+import { SiliconFlowUsage } from "@/provider/siliconflow-usage"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Auth } from "@/auth"
 import { Flag } from "@/flag/flag"
@@ -48,6 +54,8 @@ const ModelSuggestionResult = z.object({
   source: z.enum(["catalog", "alias", "online", "inferred", "none"]),
   patch: z.record(z.string(), z.unknown()),
   warning: z.string().optional(),
+  sourceUpdatedAt: z.string().optional(),
+  sourceUrl: z.string().url().optional(),
   matchedProviderID: z.string().optional(),
   candidates: z.array(ModelSuggestionCandidate).optional(),
 })
@@ -77,6 +85,10 @@ const A6ApiDiscoverInput = z.object({
 })
 
 const A6ApiDiscoverResult = A6Api.DiscoverResult
+const LfApiDiscoverInput = z.object({
+  apiKey: z.string().min(1).optional().describe("Temporary LFAPI key. It is used only for this request and is never stored."),
+})
+const LfApiDiscoverResult = LfApi.DiscoverResult
 const OpenCodeGoDiscoverInput = z.object({
   apiKey: z
     .string()
@@ -85,7 +97,6 @@ const OpenCodeGoDiscoverInput = z.object({
     .describe("Temporary OpenCode Go key. It is used only for this request and is never stored."),
 })
 const OpenCodeGoDiscoverResult = OpenCodeGo.DiscoverResult
-const OpenCodeGoUsageResult = OpenCodeGo.UsageQueryResult
 const OpenCodeDiscoverInput = z.object({
   apiKey: z
     .string()
@@ -94,8 +105,7 @@ const OpenCodeDiscoverInput = z.object({
     .describe("Temporary OpenCode Zen key. It is used only for this request and is never stored."),
 })
 const OpenCodeDiscoverResult = OpenCode.DiscoverResult
-const OpenCodeUsageResult = OpenCode.UsageQueryResult
-const MiniMaxUsageResult = MiniMaxUsage.UsageQueryResult
+const QuotaUsageResult = ProviderQuota.UsageQueryResult
 
 function discoverA6ApiModels(input: z.infer<typeof A6ApiDiscoverInput>, signal: AbortSignal) {
   return Effect.gen(function* () {
@@ -103,6 +113,20 @@ function discoverA6ApiModels(input: z.infer<typeof A6ApiDiscoverInput>, signal: 
     const stored = input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get("a6api").pipe(Effect.orDie)
     return yield* Effect.promise(() =>
       A6Api.discover({
+        apiKey: input.apiKey,
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        signal,
+      }),
+    )
+  })
+}
+
+function discoverLfApiModels(input: z.infer<typeof LfApiDiscoverInput>, signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored = input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get(LfApi.PROVIDER_ID).pipe(Effect.orDie)
+    return yield* Effect.promise(() =>
+      LfApi.discover({
         apiKey: input.apiKey,
         storedApiKey: stored?.type === "api" ? stored.key : undefined,
         signal,
@@ -122,13 +146,40 @@ function discoverOpenCodeGoModels(input: z.infer<typeof OpenCodeGoDiscoverInput>
     const auth = yield* Auth.Service
     const stored =
       input.apiKey || !canUseStoredA6ApiKey() ? undefined : yield* auth.get(OpenCodeGo.PROVIDER_ID).pipe(Effect.orDie)
-    return yield* Effect.promise(() =>
-      OpenCodeGo.discover({
+    return yield* Effect.promise(async () => {
+      const result = await OpenCodeGo.discover({
         apiKey: input.apiKey,
         storedApiKey: stored?.type === "api" ? stored.key : undefined,
         signal,
-      }),
-    )
+      })
+      if (!result.ok) return result
+      const catalog = await ModelsDev.get()
+      const models = result.models.map((item) => {
+        const metadata = catalog[OpenCodeGo.PROVIDER_ID]?.models[item.id]
+        if (!metadata) return item
+        return {
+          ...item,
+          name: metadata.name,
+          capabilities: {
+            reasoning: metadata.reasoning,
+            temperature: metadata.temperature,
+            tool_call: metadata.tool_call,
+          },
+          limit: metadata.limit,
+          modalities: metadata.modalities,
+          cost: metadata.cost
+            ? {
+                input: metadata.cost.input,
+                output: metadata.cost.output,
+                cache_read: metadata.cost.cache_read,
+                cache_write: metadata.cost.cache_write,
+              }
+            : undefined,
+          source_updated_at: metadata.last_updated ?? metadata.release_date ?? undefined,
+        }
+      })
+      return { ...result, models }
+    })
   })
 }
 
@@ -136,12 +187,26 @@ function queryOpenCodeGoUsage(signal: AbortSignal) {
   return Effect.gen(function* () {
     const auth = yield* Auth.Service
     const stored = yield* auth.get(OpenCodeGo.PROVIDER_ID).pipe(Effect.orDie)
-    return yield* Effect.promise(() =>
-      OpenCodeGo.usage({
+    return yield* Effect.promise(async () => {
+      const result = await OpenCodeGo.usage({
         storedApiKey: stored?.type === "api" ? stored.key : undefined,
         signal,
-      }),
-    )
+      })
+      if (!result.ok) return result
+      return withQuotaMetadata(
+        {
+          ok: true,
+          usage: {
+            windows: [
+              { id: "rolling", ...result.usage.rolling },
+              { id: "weekly", ...result.usage.weekly },
+              { id: "monthly", ...result.usage.monthly },
+            ],
+          },
+        },
+        "opencode-go",
+      )
+    })
   })
 }
 
@@ -164,9 +229,23 @@ function queryOpenCodeUsage(signal: AbortSignal) {
   return Effect.gen(function* () {
     const auth = yield* Auth.Service
     const stored = yield* auth.get(OpenCode.PROVIDER_ID).pipe(Effect.orDie)
-    return yield* Effect.promise(() =>
-      OpenCode.usage({ storedApiKey: stored?.type === "api" ? stored.key : undefined, signal }),
-    )
+    return yield* Effect.promise(async () => {
+      const result = await OpenCode.usage({ storedApiKey: stored?.type === "api" ? stored.key : undefined, signal })
+      if (!result.ok) return result
+      return withQuotaMetadata(
+        {
+          ok: true,
+          usage: {
+            windows: [
+              { id: "rolling", ...result.usage.rolling },
+              { id: "weekly", ...result.usage.weekly },
+              { id: "monthly", ...result.usage.monthly },
+            ],
+          },
+        },
+        "opencode",
+      )
+    })
   })
 }
 
@@ -176,13 +255,78 @@ function queryMiniMaxUsage(signal: AbortSignal) {
     const primary = yield* auth.get(MiniMaxUsage.MINIMAX_PROVIDER_ID).pipe(Effect.orDie)
     const legacy = primary ? undefined : yield* auth.get("minimax-cn-coding-plan").pipe(Effect.orDie)
     const stored = primary ?? legacy
-    return yield* Effect.promise(() =>
-      MiniMaxUsage.usage({
+    return yield* Effect.promise(async () => {
+      const result = await MiniMaxUsage.usage({
         storedApiKey: stored?.type === "api" ? stored.key : undefined,
         signal,
-      }),
-    )
+      })
+      return result.ok ? withQuotaMetadata(result, "minimax") : result
+    })
   })
+}
+
+function queryDeepSeekUsage(signal: AbortSignal) {
+  return queryStoredQuotaUsage(DeepSeekUsage.PROVIDER_ID, signal, (storedApiKey) =>
+    DeepSeekUsage.usage({ storedApiKey, signal }),
+  )
+}
+
+function querySiliconFlowUsage(signal: AbortSignal) {
+  return queryStoredQuotaUsage(SiliconFlowUsage.PROVIDER_ID, signal, (storedApiKey) =>
+    SiliconFlowUsage.usage({ storedApiKey, signal }),
+  )
+}
+
+function queryOpenRouterUsage(signal: AbortSignal) {
+  return queryStoredQuotaUsage(OpenRouterUsage.PROVIDER_ID, signal, (storedApiKey) =>
+    OpenRouterUsage.usage({ storedApiKey, signal }),
+  )
+}
+
+function queryMoonshotUsage(signal: AbortSignal) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const provider = yield* Provider.Service
+    const stored = yield* auth.get(MoonshotUsage.PROVIDER_ID).pipe(Effect.orDie)
+    const configured = (yield* provider.list())[ProviderID.make(MoonshotUsage.PROVIDER_ID)]
+    const baseURL = typeof configured?.options.baseURL === "string"
+      ? configured.options.baseURL
+      : Object.values(configured?.models ?? {}).map((model) => model.api.url).find((url) => typeof url === "string")
+    return yield* Effect.promise(async () => {
+      const result = await MoonshotUsage.usage({
+        storedApiKey: stored?.type === "api" ? stored.key : undefined,
+        baseURL,
+        signal,
+      })
+      return result.ok ? withQuotaMetadata(result, "moonshotai") : result
+    })
+  })
+}
+
+function queryStoredQuotaUsage(
+  providerID: string,
+  signal: AbortSignal,
+  query: (storedApiKey: string | undefined) => Promise<ProviderQuota.UsageQueryResult>,
+) {
+  return Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    const stored = yield* auth.get(providerID).pipe(Effect.orDie)
+    return yield* Effect.promise(async () => {
+      const result = await query(stored?.type === "api" ? stored.key : undefined)
+      return result.ok ? withQuotaMetadata(result, providerID) : result
+    })
+  })
+}
+
+function withQuotaMetadata(result: Extract<ProviderQuota.UsageQueryResult, { ok: true }>, source: string) {
+  return {
+    ok: true as const,
+    usage: {
+      ...result.usage,
+      fetchedAt: new Date().toISOString(),
+      source,
+    },
+  }
 }
 
 type DetectedCapabilityOverrides = Partial<{
@@ -868,8 +1012,47 @@ export const ProviderRoutes = lazy(() =>
           return yield* Effect.promise(() =>
             suggestModelWithOnlineFallback({ ...input, catalog }, async () => {
               return ModelsDev.refresh(true)
-            }),
+            }, { preferOnline: true }),
           )
+        }),
+    )
+    .get(
+      "/lfapi/models/discover",
+      describeRoute({
+        summary: "Discover LFAPI models",
+        description:
+          "Read the LFAPI model catalog using the saved LFAPI credential. The response includes model IDs only and never includes credentials.",
+        operationId: "provider.lfapi.models.list",
+        responses: {
+          200: {
+            description: "LFAPI model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(LfApiDiscoverResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.lfapi.models.list", c, function* () {
+          return yield* discoverLfApiModels({}, c.req.raw.signal)
+        }),
+    )
+    .post(
+      "/lfapi/models/discover",
+      describeRoute({
+        summary: "Discover LFAPI models with an optional temporary key",
+        description:
+          "Read the LFAPI model catalog using a temporary key from this request, or the saved LFAPI credential when omitted. The key is neither stored nor returned.",
+        operationId: "provider.lfapi.models.discover",
+        responses: {
+          200: {
+            description: "LFAPI model catalog or a safe discovery error category",
+            content: { "application/json": { schema: resolver(LfApiDiscoverResult) } },
+          },
+        },
+      }),
+      validator("json", LfApiDiscoverInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.lfapi.models.discover", c, function* () {
+          return yield* discoverLfApiModels(c.req.valid("json"), c.req.raw.signal)
         }),
     )
     .get(
@@ -956,7 +1139,7 @@ export const ProviderRoutes = lazy(() =>
         responses: {
           200: {
             description: "OpenCode Zen quota usage",
-            content: { "application/json": { schema: resolver(OpenCodeUsageResult) } },
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
           },
         },
       }),
@@ -1014,7 +1197,7 @@ export const ProviderRoutes = lazy(() =>
         responses: {
           200: {
             description: "OpenCode Go quota usage or a safe error category",
-            content: { "application/json": { schema: resolver(OpenCodeGoUsageResult) } },
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
           },
         },
       }),
@@ -1033,13 +1216,87 @@ export const ProviderRoutes = lazy(() =>
         responses: {
           200: {
             description: "MiniMax quota usage or a safe error category",
-            content: { "application/json": { schema: resolver(MiniMaxUsageResult) } },
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
           },
         },
       }),
       async (c) =>
         jsonRequest("ProviderRoutes.minimax.usage", c, function* () {
           return yield* queryMiniMaxUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/deepseek/usage",
+      describeRoute({
+        summary: "Get DeepSeek account balance",
+        description: "Read DeepSeek account balance using the saved API key. Credentials are never returned.",
+        operationId: "provider.deepseek.usage",
+        responses: {
+          200: {
+            description: "DeepSeek balance or a safe error category",
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.deepseek.usage", c, function* () {
+          return yield* queryDeepSeekUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/moonshot/usage",
+      describeRoute({
+        summary: "Get Moonshot account balance",
+        description:
+          "Read Kimi/Moonshot account balance using the saved API key and the configured Moonshot regional endpoint. Credentials are never returned.",
+        operationId: "provider.moonshot.usage",
+        responses: {
+          200: {
+            description: "Moonshot balance or a safe error category",
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.moonshot.usage", c, function* () {
+          return yield* queryMoonshotUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/siliconflow/usage",
+      describeRoute({
+        summary: "Get SiliconFlow account balance",
+        description: "Read SiliconFlow account balance using the saved API key. Credentials are never returned.",
+        operationId: "provider.siliconflow.usage",
+        responses: {
+          200: {
+            description: "SiliconFlow balance or a safe error category",
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.siliconflow.usage", c, function* () {
+          return yield* querySiliconFlowUsage(c.req.raw.signal)
+        }),
+    )
+    .get(
+      "/openrouter/usage",
+      describeRoute({
+        summary: "Get OpenRouter key usage",
+        description:
+          "Read the OpenRouter key quota endpoint using the saved API key. This does not call Management-Key-only account credit endpoints.",
+        operationId: "provider.openrouter.usage",
+        responses: {
+          200: {
+            description: "OpenRouter key usage or a safe error category",
+            content: { "application/json": { schema: resolver(QuotaUsageResult) } },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.openrouter.usage", c, function* () {
+          return yield* queryOpenRouterUsage(c.req.raw.signal)
         }),
     )
     .get(

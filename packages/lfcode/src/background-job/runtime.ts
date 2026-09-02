@@ -16,6 +16,7 @@ import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import type { BackgroundJobCancelResult } from "./control"
+import { Activity } from "@/activity"
 
 const log = Log.create({ service: "background-job.runtime" })
 const POLL_MS = 800
@@ -394,9 +395,10 @@ function nextLogSeq(jobID: string) {
   return (BackgroundJobPersistence.listLogs({ jobID }).at(-1)?.seq ?? 0) + 1
 }
 
-export const layer: Layer.Layer<Service, never, never> = Layer.effect(
+export const layer: Layer.Layer<Service, never, Activity.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const activity = yield* Activity.Service
     const live = new Map<string, LiveJob>()
 
     const persistRecovery = async (jobID: string, recovery: ShellBackgroundRecovery, pid?: number | null) => {
@@ -454,6 +456,10 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           ...(input.completedAt !== undefined ? { completedAt: input.completedAt } : {}),
           pid: null,
         }) ?? job
+      const currentActivity = await Effect.runPromise(activity.getBySource("background-job", job.id))
+      if (currentActivity && !["completed", "failed", "cancelled"].includes(currentActivity.status)) {
+        await Effect.runPromise(activity.complete({ id: currentActivity.id, status: input.status, error: input.error }).pipe(Effect.ignore))
+      }
       await settleLive(job.id, next)
       const inbox = inboxServiceRef.current
       if (inbox?.sendCompletion) {
@@ -723,6 +729,15 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
           ...(budget.status === "reserved" ? { capabilityGrantID: budget.grant.id } : {}),
         },
       })
+      yield* activity.create({
+        sessionID: input.sessionID,
+        kind: "background",
+        status: "running",
+        currentStep: "spawn",
+        sourceType: "background-job",
+        sourceID: job.id,
+        metadata: { title: job.title, source: job.source },
+      }).pipe(Effect.ignore)
 
       const wrapper = yield* Effect.try({
         try: () =>
@@ -877,7 +892,7 @@ export const layer: Layer.Layer<Service, never, never> = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer
+export const defaultLayer = layer.pipe(Layer.provide(Activity.defaultLayer))
 export const ShellBackgroundRuntime = {
   Service,
   layer,

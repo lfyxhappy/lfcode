@@ -21,6 +21,7 @@ import { EffectLogger } from "@/effect"
 import { hydrateStoredPart } from "./part-blob"
 import { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
 import { isUserHiddenSystemActorID } from "@/actor/visibility"
+import { toolInputForModel } from "./tool-input"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -939,7 +940,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-available",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: toolInputForModel(part.state.input),
               output,
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -952,7 +953,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-available",
                 toolCallId: part.callID,
-                input: part.state.input,
+                input: toolInputForModel(part.state.input),
                 output,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -962,7 +963,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
                 type: ("tool-" + part.tool) as `tool-${string}`,
                 state: "output-error",
                 toolCallId: part.callID,
-                input: part.state.input,
+                input: toolInputForModel(part.state.input),
                 errorText: part.state.error,
                 ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -976,7 +977,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
               type: ("tool-" + part.tool) as `tool-${string}`,
               state: "output-error",
               toolCallId: part.callID,
-              input: part.state.input,
+              input: toolInputForModel(part.state.input),
               errorText: "[Tool execution was interrupted]",
               ...(part.metadata?.providerExecuted ? { providerExecuted: true } : {}),
               ...(differentModel ? {} : { callProviderMetadata: providerMeta(part.metadata) }),
@@ -1353,7 +1354,10 @@ function checkpointCoverageIsValid(messages: WithParts[], boundary: WithParts) {
 function hasCompactionSummary(messages: WithParts[], boundaryIndex: number) {
   const summary = messages[boundaryIndex + 1]
   if (!summary || summary.info.role !== "assistant" || !hasVisibleText(summary.parts)) return false
-  return summary.info.summary === true || summary.info.mode === "compaction"
+  // Older compaction writers did not mark the summary assistant explicitly.
+  // The assistant immediately following a compaction boundary is the durable
+  // summary record, so visible text is the compatibility signal.
+  return true
 }
 
 function describeBoundaryFallback(boundary: NonNullable<ContinuationContext["boundary"]>) {
@@ -1382,9 +1386,6 @@ function compactionContext(
   const summary = messages[summaryIndex]
   if (!summary || summary.info.role !== "assistant" || !hasVisibleText(summary.parts)) {
     return { reason: "missing summary assistant after compaction boundary" }
-  }
-  if (summary.info.summary !== true && summary.info.mode !== "compaction") {
-    return { reason: "summary assistant is not attached to compaction boundary" }
   }
   return {
     messages: [
@@ -1613,16 +1614,28 @@ export function fromError(
         },
         { cause: e },
       ).toObject()
-    case (e as SystemError)?.code === "ECONNRESET":
+    case typeof (e as SystemError)?.code === "string" &&
+      ["ECONNRESET", "EPIPE", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(
+        String((e as SystemError).code),
+      ):
       return new APIError(
         {
-          message: "Connection reset by server",
+          message: (e as SystemError).code === "ECONNRESET" ? "Connection reset by server" : errorMessage(e),
           isRetryable: true,
           metadata: {
             code: (e as SystemError).code ?? "",
             syscall: (e as SystemError).syscall ?? "",
             message: (e as SystemError).message ?? "",
           },
+        },
+        { cause: e },
+      ).toObject()
+    case e instanceof Error && e.message === "SSE read timed out":
+      return new APIError(
+        {
+          message: e.message,
+          isRetryable: true,
+          metadata: { message: e.message },
         },
         { cause: e },
       ).toObject()

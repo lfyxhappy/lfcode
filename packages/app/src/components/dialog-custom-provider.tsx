@@ -1,5 +1,5 @@
 import { Button } from "@lfcode-ai/ui/button"
-import type { ProviderA6ApiModelsDiscoverResponse, ProviderModelsSuggestResponse } from "@lfcode-ai/sdk/v2/client"
+import type { ProviderModelsSuggestResponse } from "@lfcode-ai/sdk/v2/client"
 import { RadioGroup } from "@lfcode-ai/ui/radio-group"
 import { Select } from "@lfcode-ai/ui/select"
 import { useDialog } from "@lfcode-ai/ui/context/dialog"
@@ -19,8 +19,10 @@ import { formatServerError } from "@/utils/server-errors"
 import {
   A6API_MODEL_PROTOCOLS,
   A6API_PROVIDER_ID,
+  LFAPI_MODEL_PROTOCOLS,
+  LFAPI_PRESET_ID,
+  LFAPI_PROVIDER_ID,
   apiKeyForPresetChange,
-  type A6ApiDiscoveredModel,
   CAPABILITY_KEYS,
   type CapabilityKey,
   CUSTOM_PROVIDER_PRESETS,
@@ -35,7 +37,7 @@ import {
   PROTOCOLS,
   validateCustomProvider,
 } from "./dialog-custom-provider-form"
-import { OPENCODE_GO_PRESET_ID, OPENCODE_GO_PROVIDER_ID } from "@lfcode-ai/shared/opencode-go"
+import { OPENCODE_GO_PRESET_ID } from "@lfcode-ai/shared/opencode-go"
 import { OPENCODE_PRESET_ID } from "@lfcode-ai/shared/opencode"
 import { DialogSelectProvider } from "./dialog-select-provider"
 import { Icon } from "@lfcode-ai/ui/icon"
@@ -48,8 +50,6 @@ type Props = {
 }
 
 type ValidatedCustomProvider = NonNullable<NonNullable<ReturnType<typeof validateCustomProvider>>["result"]>
-
-type A6ApiDiscoverResult = ProviderA6ApiModelsDiscoverResponse
 
 function initialFormState(presetID?: CustomProviderPresetID): FormState {
   const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.id === presetID)
@@ -91,9 +91,12 @@ export function DialogCustomProvider(props: Props) {
   const [discovering, setDiscovering] = createSignal(false)
   const [apiKeyError, setApiKeyError] = createSignal<string>()
   const standaloneA6Api = () => props.preset === A6API_PROVIDER_ID
+  const standaloneLfApi = () => props.preset === LFAPI_PRESET_ID
   const standaloneOpenCodeGo = () => props.preset === OPENCODE_GO_PRESET_ID
   const standaloneOpenCode = () => props.preset === OPENCODE_PRESET_ID
-  const standaloneCatalog = () => standaloneA6Api() || standaloneOpenCodeGo() || standaloneOpenCode()
+  const standaloneCatalog = () => standaloneA6Api() || standaloneLfApi() || standaloneOpenCodeGo() || standaloneOpenCode()
+  const isA6ApiProvider = () => standaloneA6Api() || form.providerID === A6API_PROVIDER_ID
+  const isLfApiProvider = () => standaloneLfApi() || form.providerID === LFAPI_PROVIDER_ID
 
   const goBack = () => {
     if (props.back === "close") {
@@ -116,7 +119,7 @@ export function DialogCustomProvider(props: Props) {
   }
 
   const addModel = () => {
-    if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+    if (!standaloneCatalog()) setForm("preset", "custom")
     setForm(
       "models",
       produce((rows) => {
@@ -127,7 +130,7 @@ export function DialogCustomProvider(props: Props) {
 
   const removeModel = (index: number) => {
     if (form.models.length <= 1) return
-    if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+    if (!standaloneCatalog()) setForm("preset", "custom")
     setForm(
       "models",
       produce((rows) => {
@@ -161,7 +164,7 @@ export function DialogCustomProvider(props: Props) {
       setApiKeyError()
       return
     }
-    if (form.providerID !== A6API_PROVIDER_ID || key === "providerID") setForm("preset", "custom")
+    if (!standaloneCatalog() || key === "providerID") setForm("preset", "custom")
     setForm("err", key, undefined)
   }
 
@@ -184,7 +187,7 @@ export function DialogCustomProvider(props: Props) {
 
   const setModel = (index: number, key: "id" | "name", value: string) => {
     batch(() => {
-      if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+      if (!standaloneCatalog()) setForm("preset", "custom")
       setForm("models", index, key, value)
       setForm("models", index, "err", key, undefined)
       applyCapabilityInference(index, { [key]: value })
@@ -193,7 +196,7 @@ export function DialogCustomProvider(props: Props) {
 
   const setModelLimit = (index: number, key: "context" | "output", value: string) => {
     batch(() => {
-      if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+      if (!standaloneCatalog()) setForm("preset", "custom")
       setForm("models", index, "limit", key, value)
       setForm("models", index, "err", key, undefined)
     })
@@ -201,7 +204,7 @@ export function DialogCustomProvider(props: Props) {
 
   const setModelProtocol = (index: number, protocol: FormState["protocol"]) => {
     batch(() => {
-      if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+      if (!standaloneCatalog()) setForm("preset", "custom")
       setForm("models", index, "protocol", protocol)
       applyCapabilityInference(index, { protocol })
     })
@@ -209,7 +212,7 @@ export function DialogCustomProvider(props: Props) {
 
   const toggleCapability = (index: number, key: CapabilityKey, checked: boolean) => {
     batch(() => {
-      if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+      if (!standaloneCatalog()) setForm("preset", "custom")
       setForm("models", index, "capabilities", key, checked)
       setForm("models", index, "manual", key, true)
     })
@@ -217,7 +220,7 @@ export function DialogCustomProvider(props: Props) {
 
   const setProtocol = (value: FormState["protocol"]) => {
     batch(() => {
-      if (form.providerID !== A6API_PROVIDER_ID) setForm("preset", "custom")
+      if (!standaloneCatalog()) setForm("preset", "custom")
       setForm("protocol", value)
       for (const [index, model] of form.models.entries()) {
         setForm("models", index, "protocol", value)
@@ -281,7 +284,20 @@ export function DialogCustomProvider(props: Props) {
         title: language.t("common.requestFailed"),
         description: language.t(`provider.custom.a6api.error.${response.data.error}`),
       })
-      return
+      return undefined
+    }
+    return response.data.models
+  }
+
+  const fetchLfApiModels = async () => {
+    const apiKey = form.apiKey.trim()
+    const response = apiKey
+      ? await globalSDK.client.provider.lfapi.models.discover({ apiKey }, { throwOnError: true })
+      : await globalSDK.client.provider.lfapi.models.list(undefined, { throwOnError: true })
+    if (!response.data) throw new Error("LFAPI discovery returned no data")
+    if (!response.data.ok) {
+      showToast({ title: language.t("common.requestFailed"), description: language.t(`provider.custom.lfapi.error.${response.data.error}`) })
+      return undefined
     }
     return response.data.models
   }
@@ -294,7 +310,7 @@ export function DialogCustomProvider(props: Props) {
     if (!response.data) throw new Error("OpenCode Go discovery returned no data")
     if (!response.data.ok) {
       showToast({ title: language.t("common.requestFailed"), description: language.t(`provider.custom.opencodeGo.error.${response.data.error}`) })
-      return
+      return undefined
     }
     return response.data.models
   }
@@ -307,7 +323,7 @@ export function DialogCustomProvider(props: Props) {
     if (!response.data) throw new Error("OpenCode discovery returned no data")
     if (!response.data.ok) {
       showToast({ title: language.t("common.requestFailed"), description: language.t(`provider.custom.opencode.error.${response.data.error}`) })
-      return
+      return undefined
     }
     return response.data.models
   }
@@ -323,6 +339,19 @@ export function DialogCustomProvider(props: Props) {
         title: language.t("common.requestFailed"),
         description: formatServerError(err, language.t, language.t("common.requestFailed")),
       })
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const discoverLfApiModels = async () => {
+    if (discovering()) return
+    setDiscovering(true)
+    try {
+      const models = await fetchLfApiModels()
+      if (models) setForm("models", mergeA6ApiModelRows({ current: form.models, discovered: models, providerID: form.providerID }))
+    } catch (err) {
+      showToast({ title: language.t("common.requestFailed"), description: formatServerError(err, language.t, language.t("common.requestFailed")) })
     } finally {
       setDiscovering(false)
     }
@@ -356,6 +385,7 @@ export function DialogCustomProvider(props: Props) {
 
   onMount(() => {
     if (standaloneA6Api()) void discoverA6ApiModels()
+    if (standaloneLfApi()) void discoverLfApiModels()
     if (standaloneOpenCodeGo()) void discoverOpenCodeGoModels()
     if (standaloneOpenCode()) void discoverOpenCodeModels()
   })
@@ -421,7 +451,13 @@ export function DialogCustomProvider(props: Props) {
       }
       setDiscovering(true)
       try {
-        const models = standaloneOpenCodeGo() ? await fetchOpenCodeGoModels() : standaloneOpenCode() ? await fetchOpenCodeModels() : await fetchA6ApiModels()
+        const models = standaloneLfApi()
+          ? await fetchLfApiModels()
+          : standaloneOpenCodeGo()
+            ? await fetchOpenCodeGoModels()
+            : standaloneOpenCode()
+              ? await fetchOpenCodeModels()
+              : await fetchA6ApiModels()
         if (!models) return
         const rows = mergeA6ApiModelRows({ current: form.models, discovered: models, providerID: form.providerID })
         setForm("models", rows)
@@ -509,7 +545,15 @@ export function DialogCustomProvider(props: Props) {
         <div class="px-2.5 flex gap-4 items-center">
           <ProviderIcon id={standaloneCatalog() ? form.providerID : "synthetic"} class="size-5 shrink-0 icon-strong-base" />
           <div class="text-16-medium text-text-strong">
-            {standaloneA6Api() ? language.t("provider.custom.a6api.title") : standaloneOpenCodeGo() ? language.t("provider.custom.opencodeGo.title") : standaloneOpenCode() ? language.t("provider.custom.opencode.title") : language.t("provider.custom.title")}
+            {standaloneA6Api()
+              ? language.t("provider.custom.a6api.title")
+              : standaloneLfApi()
+                ? language.t("provider.custom.lfapi.title")
+                : standaloneOpenCodeGo()
+                  ? language.t("provider.custom.opencodeGo.title")
+                  : standaloneOpenCode()
+                    ? language.t("provider.custom.opencode.title")
+                    : language.t("provider.custom.title")}
           </div>
         </div>
 
@@ -526,7 +570,17 @@ export function DialogCustomProvider(props: Props) {
               </p>
             }
           >
-            <p class="text-14-regular text-text-base">{language.t(standaloneOpenCodeGo() ? "provider.custom.opencodeGo.description" : standaloneOpenCode() ? "provider.custom.opencode.description" : "provider.custom.a6api.description")}</p>
+            <p class="text-14-regular text-text-base">
+              {language.t(
+                standaloneA6Api()
+                  ? "provider.custom.a6api.description"
+                  : standaloneLfApi()
+                    ? "provider.custom.lfapi.description"
+                    : standaloneOpenCodeGo()
+                      ? "provider.custom.opencodeGo.description"
+                      : "provider.custom.opencode.description",
+              )}
+            </p>
           </Show>
 
           <div class="flex flex-col gap-4">
@@ -551,7 +605,13 @@ export function DialogCustomProvider(props: Props) {
               <div class="flex flex-col gap-2">
                 <label class="text-12-medium text-text-weak">{language.t("provider.custom.field.protocol.label")}</label>
                 <RadioGroup
-                  options={form.providerID === A6API_PROVIDER_ID ? [...A6API_MODEL_PROTOCOLS] : [...PROTOCOLS]}
+                  options={
+                    isA6ApiProvider()
+                      ? [...A6API_MODEL_PROTOCOLS]
+                      : isLfApiProvider()
+                        ? [...LFAPI_MODEL_PROTOCOLS]
+                        : [...PROTOCOLS]
+                  }
                   current={form.protocol}
                   value={(value) => value}
                   label={(value) => language.t(`provider.custom.field.protocol.option.${value}`)}
@@ -587,7 +647,7 @@ export function DialogCustomProvider(props: Props) {
                 placeholder={language.t("provider.custom.field.baseURL.placeholder")}
                 value={form.baseURL}
                 onChange={(v) => setField("baseURL", v)}
-                disabled={form.providerID === A6API_PROVIDER_ID}
+                disabled={isA6ApiProvider() || isLfApiProvider()}
                 validationState={form.err.baseURL ? "invalid" : undefined}
                 error={form.err.baseURL}
               />
@@ -598,7 +658,15 @@ export function DialogCustomProvider(props: Props) {
               placeholder={language.t("provider.custom.field.apiKey.placeholder")}
               description={
                 standaloneCatalog()
-                  ? language.t(standaloneOpenCodeGo() ? "provider.custom.opencodeGo.apiKey.description" : standaloneOpenCode() ? "provider.custom.opencode.apiKey.description" : "provider.custom.a6api.apiKey.description")
+                  ? language.t(
+                      standaloneA6Api()
+                        ? "provider.custom.a6api.apiKey.description"
+                        : standaloneLfApi()
+                          ? "provider.custom.lfapi.apiKey.description"
+                          : standaloneOpenCodeGo()
+                            ? "provider.custom.opencodeGo.apiKey.description"
+                            : "provider.custom.opencode.apiKey.description",
+                    )
                   : language.t("provider.custom.field.apiKey.description")
               }
               value={form.apiKey}
@@ -618,13 +686,37 @@ export function DialogCustomProvider(props: Props) {
                   variant="secondary"
                   icon="reset"
                   disabled={discovering()}
-                  onClick={() => void (standaloneOpenCodeGo() ? discoverOpenCodeGoModels() : standaloneOpenCode() ? discoverOpenCodeModels() : discoverA6ApiModels())}
+                  onClick={() =>
+                    void (standaloneA6Api()
+                      ? discoverA6ApiModels()
+                      : standaloneLfApi()
+                        ? discoverLfApiModels()
+                        : standaloneOpenCodeGo()
+                          ? discoverOpenCodeGoModels()
+                          : discoverOpenCodeModels())
+                  }
                 >
                   {discovering()
                     ? language.t("settings.models.suggestionConfirm.loading")
                     : form.models.length
-                      ? language.t("provider.custom.a6api.models.refresh")
-                    : language.t(standaloneOpenCodeGo() ? "provider.custom.opencodeGo.models.fetch" : standaloneOpenCode() ? "provider.custom.opencode.models.fetch" : "provider.custom.a6api.models.fetch")}
+                      ? language.t(
+                          standaloneA6Api()
+                            ? "provider.custom.a6api.models.refresh"
+                            : standaloneLfApi()
+                              ? "provider.custom.lfapi.models.refresh"
+                              : standaloneOpenCodeGo()
+                                ? "provider.custom.opencodeGo.models.refresh"
+                                : "provider.custom.opencode.models.refresh",
+                        )
+                      : language.t(
+                          standaloneA6Api()
+                            ? "provider.custom.a6api.models.fetch"
+                            : standaloneLfApi()
+                              ? "provider.custom.lfapi.models.fetch"
+                              : standaloneOpenCodeGo()
+                                ? "provider.custom.opencodeGo.models.fetch"
+                                : "provider.custom.opencode.models.fetch",
+                        )}
                 </Button>
               </Show>
             </div>
@@ -666,7 +758,13 @@ export function DialogCustomProvider(props: Props) {
                   </div>
                   <Show when={m.available === false}>
                     <div class="text-12-regular text-status-warning">
-                      {language.t("provider.custom.a6api.models.unavailable")}
+                      {language.t(
+                        standaloneA6Api()
+                          ? "provider.custom.a6api.models.unavailable"
+                          : standaloneLfApi()
+                            ? "provider.custom.lfapi.models.unavailable"
+                            : "provider.custom.a6api.models.unavailable",
+                      )}
                     </div>
                   </Show>
                   <div class="grid gap-2 sm:grid-cols-3">
@@ -676,9 +774,11 @@ export function DialogCustomProvider(props: Props) {
                       </label>
                       <Select
                         options={
-                          standaloneA6Api()
+                          isA6ApiProvider()
                             ? [...A6API_MODEL_PROTOCOLS]
-                            : standaloneOpenCodeGo() || standaloneOpenCode()
+                            : isLfApiProvider()
+                              ? [...LFAPI_MODEL_PROTOCOLS]
+                              : standaloneOpenCodeGo() || standaloneOpenCode()
                               ? ["openai-chat" as const]
                               : [...PROTOCOLS]
                         }
@@ -806,7 +906,15 @@ export function DialogCustomProvider(props: Props) {
               : saveMutation.isPending
                 ? language.t("common.saving")
                 : standaloneCatalog()
-                  ? language.t(standaloneOpenCodeGo() ? "provider.custom.opencodeGo.connect" : standaloneOpenCode() ? "provider.custom.opencode.connect" : "provider.custom.a6api.connect")
+                  ? language.t(
+                      standaloneA6Api()
+                        ? "provider.custom.a6api.connect"
+                        : standaloneLfApi()
+                          ? "provider.custom.lfapi.connect"
+                          : standaloneOpenCodeGo()
+                            ? "provider.custom.opencodeGo.connect"
+                            : "provider.custom.opencode.connect",
+                    )
                   : language.t("common.submit")}
           </Button>
         </form>

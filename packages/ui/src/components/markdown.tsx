@@ -1,7 +1,6 @@
 import { useMarked } from "../context/marked"
 import { useI18n } from "../context/i18n"
 import { useFileReferenceContext, type FileReferenceApp } from "../context/file-reference"
-import morphdom from "morphdom"
 import { checksum } from "@lfcode-ai/shared/util/encode"
 import { ComponentProps, createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, splitProps } from "solid-js"
 import { isServer } from "solid-js/web"
@@ -504,15 +503,15 @@ export function Markdown(
       openWithApps: context.openWithApps,
     }
   })
-  const [html] = createResource(
+  const [html] = createResource<string[], { text: string; key?: string; streaming: boolean }>(
     () => ({
       text: local.text,
       key: local.cacheKey,
       streaming: local.streaming ?? false,
     }),
     async (src) => {
-      if (isServer) return fallback(src.text)
-      if (!src.text) return ""
+      if (isServer) return [fallback(src.text)]
+      if (!src.text) return []
 
       const base = src.key ?? checksum(src.text)
       return Promise.all(
@@ -534,25 +533,28 @@ export function Markdown(
           return safe
         }),
       )
-        .then((list) => list.join(""))
-        .catch(() => fallback(src.text))
+        .catch(() => [fallback(src.text)])
     },
-    { initialValue: fallback(local.text) },
+    { initialValue: local.text ? [fallback(local.text)] : [] },
   )
 
   let copyCleanup: (() => void) | undefined
   let fileReferenceCleanup: (() => void) | undefined
   let htmlComponentCleanup: (() => void) | undefined
   let fileReferenceDecorationVersion = 0
+  let renderedBlocks: string[] = []
+  let renderedNodes: Node[][] = []
 
   createEffect(() => {
     const container = root()
-    const content = local.text ? (html.latest ?? html() ?? "") : ""
+    const blocks = local.text ? (html.latest ?? html() ?? []) : []
     if (!container) return
     if (isServer) return
 
-    if (!content) {
+    if (!blocks.length) {
       container.innerHTML = ""
+      renderedBlocks = []
+      renderedNodes = []
       return
     }
 
@@ -560,26 +562,24 @@ export function Markdown(
       copy: i18n.t("ui.message.copy"),
       copied: i18n.t("ui.message.copied"),
     }
-    const temp = document.createElement("div")
-    temp.innerHTML = content
-    decorate(temp, labels, effectiveFileReferences(), local.text)
-
-    morphdom(container, temp, {
-      childrenOnly: true,
-      onBeforeElUpdated: (fromEl, toEl) => {
-        if (
-          fromEl instanceof HTMLButtonElement &&
-          toEl instanceof HTMLButtonElement &&
-          fromEl.getAttribute("data-slot") === "markdown-copy-button" &&
-          toEl.getAttribute("data-slot") === "markdown-copy-button" &&
-          fromEl.getAttribute("data-copied") === "true"
-        ) {
-          setCopyState(toEl, labels, true)
-        }
-        if (fromEl.isEqualNode(toEl)) return false
-        return true
-      },
-    })
+    const firstChanged = blocks.findIndex((value, index) => renderedBlocks[index] !== value)
+    if (firstChanged >= 0 || renderedBlocks.length !== blocks.length) {
+      const start = firstChanged >= 0 ? firstChanged : Math.min(renderedBlocks.length, blocks.length)
+      for (const nodes of renderedNodes.slice(start)) {
+        for (const node of nodes) node.parentNode?.removeChild(node)
+      }
+      renderedNodes = renderedNodes.slice(0, start)
+      renderedBlocks = renderedBlocks.slice(0, start)
+      for (const block of blocks.slice(start)) {
+        const temp = document.createElement("div")
+        temp.innerHTML = block
+        decorate(temp, labels, effectiveFileReferences(), local.text)
+        const nodes = Array.from(temp.childNodes)
+        for (const node of nodes) container.appendChild(node)
+        renderedNodes.push(nodes)
+        renderedBlocks.push(block)
+      }
+    }
 
     if (!copyCleanup)
       copyCleanup = setupCodeCopy(container, () => ({

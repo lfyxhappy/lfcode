@@ -428,6 +428,22 @@ describe("Runner", () => {
   )
 
   it.live(
+    "onIdle failure cannot strand the caller Deferred",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s, {
+        onIdle: Effect.fail("status observer failed"),
+      })
+
+      const exit = yield* runner.ensureRunning(Effect.succeed("ok")).pipe(Effect.exit)
+
+      expect(Exit.isSuccess(exit)).toBe(true)
+      if (Exit.isSuccess(exit)) expect(exit.value).toBe("ok")
+      expect(runner.busy).toBe(false)
+    }),
+  )
+
+  it.live(
     "onIdle fires on cancel",
     Effect.gen(function* () {
       const s = yield* Scope.Scope

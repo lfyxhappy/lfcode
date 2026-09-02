@@ -103,7 +103,6 @@ const api: ElectronAPI = {
   openExternalLink: (url) => ipcRenderer.send("open-external-link", url),
   openBrowserDevTools: (target) => ipcRenderer.invoke("open-browser-devtools", target),
   clearBrowserSiteData: (target) => ipcRenderer.invoke("clear-browser-site-data", target),
-  getBrowserReferenceState: (target) => ipcRenderer.invoke("get-browser-reference-state", target),
   getBrowserCacheOverview: () => ipcRenderer.invoke("get-browser-cache-overview"),
   clearBrowserCache: () => ipcRenderer.invoke("clear-browser-cache"),
   listBrowserCookies: () => ipcRenderer.invoke("list-browser-cookies"),

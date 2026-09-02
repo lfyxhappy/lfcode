@@ -6,6 +6,14 @@ export class NotFound extends Error {
   }
 }
 
+/** Supports bundled runtimes where duplicate module copies break instanceof. */
+export function isNotFound(error: unknown, name?: string) {
+  if (error instanceof NotFound) return name === undefined || error.name === name
+  if (!(error instanceof Error)) return false
+  if (name !== undefined && error.name !== name) return false
+  return error.message === `No context found for ${name ?? error.name}`
+}
+
 export function create<T>(name: string) {
   const storage = new AsyncLocalStorage<T>()
   return {

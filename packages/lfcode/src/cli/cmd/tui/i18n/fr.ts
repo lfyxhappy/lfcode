@@ -126,12 +126,12 @@ export const dict = {
   "tui.tips.custom_agent":
     "Ajoutez des fichiers {highlight}.md{/highlight} dans {highlight}.lfcode/agent/{/highlight} pour des personas IA spécialisés",
   "tui.tips.agent_perms":
-    "Configurez par agent les permissions des outils {highlight}edit{/highlight}, {highlight}bash{/highlight} et {highlight}webfetch{/highlight}",
-  "tui.tips.bash_allow":
-    'Utilisez des motifs comme {highlight}"git *": "allow"{/highlight} pour des permissions bash fines',
-  "tui.tips.bash_deny":
+    "Configurez par agent les permissions des outils {highlight}edit{/highlight}, {highlight}shell{/highlight} et {highlight}webfetch{/highlight}",
+  "tui.tips.shell_allow":
+    'Utilisez des motifs comme {highlight}"git *": "allow"{/highlight} pour des permissions shell fines',
+  "tui.tips.shell_deny":
     'Définissez {highlight}"rm -rf *": "deny"{/highlight} pour bloquer les commandes destructrices',
-  "tui.tips.bash_ask":
+  "tui.tips.shell_ask":
     'Configurez {highlight}"git push": "ask"{/highlight} pour exiger une confirmation avant le push',
   "tui.tips.formatter": "Lfcode formate automatiquement les fichiers avec prettier, gofmt, ruff, etc.",
   "tui.tips.disable_formatter":
@@ -185,7 +185,7 @@ export const dict = {
   "tui.tips.steps":
     "Configurez {highlight}steps{/highlight} pour limiter les itérations agentiques par requête",
   "tui.tips.disable_tool":
-    'Définissez {highlight}"tools": {"bash": false}{/highlight} pour désactiver des outils spécifiques',
+    'Définissez {highlight}"tool_allowlist": ["read", "search"]{/highlight} pour désactiver des outils spécifiques',
   "tui.tips.disable_mcp_tools":
     'Définissez {highlight}"mcp_*": false{/highlight} pour désactiver tous les outils d\'un serveur MCP',
   "tui.tips.tool_override":

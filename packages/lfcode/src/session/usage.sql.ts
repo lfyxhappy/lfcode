@@ -14,6 +14,7 @@ export const UsageFactTable = sqliteTable(
     agent_id: text().notNull(),
     provider_id: text().notNull(),
     model_id: text().notNull(),
+    variant: text(),
     status: text().notNull(),
     input_tokens: integer().notNull().default(0),
     output_tokens: integer().notNull().default(0),

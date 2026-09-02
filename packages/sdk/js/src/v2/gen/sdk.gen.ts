@@ -3,6 +3,7 @@
 import { client } from "./client.gen.js"
 import { buildClientParams, type Client, type Options as Options2, type TDataShape } from "./client/index.js"
 import type {
+  ActivityListResponses,
   ActorDispatchCancelErrors,
   ActorDispatchCancelResponses,
   ActorDispatchConfig,
@@ -294,14 +295,19 @@ import type {
   ProviderA6ApiModelsListResponses,
   ProviderAuthResponses,
   ProviderConfig,
+  ProviderDeepseekUsageResponses,
+  ProviderLfapiModelsDiscoverResponses,
+  ProviderLfapiModelsListResponses,
   ProviderListResponses,
   ProviderMinimaxUsageResponses,
   ProviderModelDetectErrors,
   ProviderModelDetectResponses,
+  ProviderModelsDiscoverErrors,
   ProviderModelsDiscoverResponses,
   ProviderModelsMatchResponses,
   ProviderModelsSuggestErrors,
   ProviderModelsSuggestResponses,
+  ProviderMoonshotUsageResponses,
   ProviderOauthAuthorizeErrors,
   ProviderOauthAuthorizeResponses,
   ProviderOauthCallbackErrors,
@@ -312,6 +318,8 @@ import type {
   ProviderOpencodeModelsDiscoverResponses,
   ProviderOpencodeModelsListResponses,
   ProviderOpencodeUsageResponses,
+  ProviderOpenrouterUsageResponses,
+  ProviderSiliconflowUsageResponses,
   PtyConnectErrors,
   PtyConnectResponses,
   PtyCreateErrors,
@@ -469,6 +477,8 @@ import type {
   TuiSubmitPromptResponses,
   UsageGetErrors,
   UsageGetResponses,
+  UsageSummaryErrors,
+  UsageSummaryResponses,
   VcsGetResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
@@ -5359,7 +5369,11 @@ export class Models extends HeyApiClient {
         },
       ],
     )
-    return (options?.client ?? this.client).post<ProviderModelsDiscoverResponses, unknown, ThrowOnError>({
+    return (options?.client ?? this.client).post<
+      ProviderModelsDiscoverResponses,
+      ProviderModelsDiscoverErrors,
+      ThrowOnError
+    >({
       url: "/provider/models/discover",
       ...options,
       ...params,
@@ -5460,6 +5474,82 @@ export class Models extends HeyApiClient {
 
 export class Models2 extends HeyApiClient {
   /**
+   * Discover LFAPI models
+   *
+   * Read the LFAPI model catalog using the saved LFAPI credential. The response includes model IDs only and never includes credentials.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderLfapiModelsListResponses, unknown, ThrowOnError>({
+      url: "/provider/lfapi/models/discover",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Discover LFAPI models with an optional temporary key
+   *
+   * Read the LFAPI model catalog using a temporary key from this request, or the saved LFAPI credential when omitted. The key is neither stored nor returned.
+   */
+  public discover<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      apiKey?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "apiKey" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<ProviderLfapiModelsDiscoverResponses, unknown, ThrowOnError>({
+      url: "/provider/lfapi/models/discover",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Lfapi extends HeyApiClient {
+  private _models?: Models2
+  get models(): Models2 {
+    return (this._models ??= new Models2({ client: this.client }))
+  }
+}
+
+export class Models3 extends HeyApiClient {
+  /**
    * Discover A6API models
    *
    * Read the A6API model catalog using the saved A6API credential. The response includes only supported model IDs and never includes credentials.
@@ -5528,13 +5618,13 @@ export class Models2 extends HeyApiClient {
 }
 
 export class A6Api extends HeyApiClient {
-  private _models?: Models2
-  get models(): Models2 {
-    return (this._models ??= new Models2({ client: this.client }))
+  private _models?: Models3
+  get models(): Models3 {
+    return (this._models ??= new Models3({ client: this.client }))
   }
 }
 
-export class Models3 extends HeyApiClient {
+export class Models4 extends HeyApiClient {
   /**
    * Discover OpenCode Zen models
    *
@@ -5632,13 +5722,13 @@ export class Opencode extends HeyApiClient {
     })
   }
 
-  private _models?: Models3
-  get models(): Models3 {
-    return (this._models ??= new Models3({ client: this.client }))
+  private _models?: Models4
+  get models(): Models4 {
+    return (this._models ??= new Models4({ client: this.client }))
   }
 }
 
-export class Models4 extends HeyApiClient {
+export class Models5 extends HeyApiClient {
   /**
    * Discover OpenCode Go models
    *
@@ -5738,9 +5828,9 @@ export class OpencodeGo extends HeyApiClient {
     })
   }
 
-  private _models?: Models4
-  get models(): Models4 {
-    return (this._models ??= new Models4({ client: this.client }))
+  private _models?: Models5
+  get models(): Models5 {
+    return (this._models ??= new Models5({ client: this.client }))
   }
 }
 
@@ -5770,6 +5860,134 @@ export class Minimax extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProviderMinimaxUsageResponses, unknown, ThrowOnError>({
       url: "/provider/minimax/usage",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Deepseek extends HeyApiClient {
+  /**
+   * Get DeepSeek account balance
+   *
+   * Read DeepSeek account balance using the saved API key. Credentials are never returned.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderDeepseekUsageResponses, unknown, ThrowOnError>({
+      url: "/provider/deepseek/usage",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Moonshot extends HeyApiClient {
+  /**
+   * Get Moonshot account balance
+   *
+   * Read Kimi/Moonshot account balance using the saved API key and the configured Moonshot regional endpoint. Credentials are never returned.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderMoonshotUsageResponses, unknown, ThrowOnError>({
+      url: "/provider/moonshot/usage",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Siliconflow extends HeyApiClient {
+  /**
+   * Get SiliconFlow account balance
+   *
+   * Read SiliconFlow account balance using the saved API key. Credentials are never returned.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderSiliconflowUsageResponses, unknown, ThrowOnError>({
+      url: "/provider/siliconflow/usage",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Openrouter extends HeyApiClient {
+  /**
+   * Get OpenRouter key usage
+   *
+   * Read the OpenRouter key quota endpoint using the saved API key. This does not call Management-Key-only account credit endpoints.
+   */
+  public usage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderOpenrouterUsageResponses, unknown, ThrowOnError>({
+      url: "/provider/openrouter/usage",
       ...options,
       ...params,
     })
@@ -5974,6 +6192,11 @@ export class Provider extends HeyApiClient {
     return (this._models ??= new Models({ client: this.client }))
   }
 
+  private _lfapi?: Lfapi
+  get lfapi(): Lfapi {
+    return (this._lfapi ??= new Lfapi({ client: this.client }))
+  }
+
   private _a6Api?: A6Api
   get a6Api(): A6Api {
     return (this._a6Api ??= new A6Api({ client: this.client }))
@@ -5992,6 +6215,26 @@ export class Provider extends HeyApiClient {
   private _minimax?: Minimax
   get minimax(): Minimax {
     return (this._minimax ??= new Minimax({ client: this.client }))
+  }
+
+  private _deepseek?: Deepseek
+  get deepseek(): Deepseek {
+    return (this._deepseek ??= new Deepseek({ client: this.client }))
+  }
+
+  private _moonshot?: Moonshot
+  get moonshot(): Moonshot {
+    return (this._moonshot ??= new Moonshot({ client: this.client }))
+  }
+
+  private _siliconflow?: Siliconflow
+  get siliconflow(): Siliconflow {
+    return (this._siliconflow ??= new Siliconflow({ client: this.client }))
+  }
+
+  private _openrouter?: Openrouter
+  get openrouter(): Openrouter {
+    return (this._openrouter ??= new Openrouter({ client: this.client }))
   }
 
   private _model?: Model
@@ -6624,7 +6867,7 @@ export class File extends HeyApiClient {
   /**
    * List reference directory
    *
-   * List the direct children of a directory previously granted by the desktop reference-tree view.
+   * List the direct children of an authenticated absolute directory. The optional compatibility token is ignored.
    */
   public referenceTree<ThrowOnError extends boolean = false>(
     parameters: {
@@ -6656,9 +6899,9 @@ export class File extends HeyApiClient {
   }
 
   /**
-   * Grant desktop reference directory
+   * Grant desktop reference directory (compatibility)
    *
-   * Create a short-lived project-bound grant for a desktop user-selected reference directory.
+   * Create a short-lived compatibility grant for a desktop user-selected reference directory. File access no longer requires this grant.
    */
   public referenceGrant<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -7527,6 +7770,40 @@ export class ActorDispatch extends HeyApiClient {
   private _config?: Config3
   get config(): Config3 {
     return (this._config ??= new Config3({ client: this.client }))
+  }
+}
+
+export class Activity extends HeyApiClient {
+  /**
+   * List session activities
+   *
+   * Return the current activity snapshot for a session.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ActivityListResponses, unknown, ThrowOnError>({
+      url: "/activity",
+      ...options,
+      ...params,
+    })
   }
 }
 
@@ -10362,6 +10639,52 @@ export class Usage extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Get usage summary
+   *
+   * Return only aggregated usage totals without trend, heatmap, or log rows.
+   */
+  public summary<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      range?: "today" | "7d" | "30d" | "all"
+      provider?: string
+      model?: string
+      project?: string
+      session?: string
+      status?: "completed" | "error" | "aborted"
+      agent_kind?: "main" | "subagent"
+      source?: "lfcode"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "range" },
+            { in: "query", key: "provider" },
+            { in: "query", key: "model" },
+            { in: "query", key: "project" },
+            { in: "query", key: "session" },
+            { in: "query", key: "status" },
+            { in: "query", key: "agent_kind" },
+            { in: "query", key: "source" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<UsageSummaryResponses, UsageSummaryErrors, ThrowOnError>({
+      url: "/usage/summary",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Control extends HeyApiClient {
@@ -11107,6 +11430,11 @@ export class LfcodeClient extends HeyApiClient {
   private _actorDispatch?: ActorDispatch
   get actorDispatch(): ActorDispatch {
     return (this._actorDispatch ??= new ActorDispatch({ client: this.client }))
+  }
+
+  private _activity?: Activity
+  get activity(): Activity {
+    return (this._activity ??= new Activity({ client: this.client }))
   }
 
   private _backgroundJob?: BackgroundJob

@@ -40,20 +40,6 @@ import { join } from "node:path"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
-const PLAYWRIGHT_MCP_BASE_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
-const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_BASE_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
-const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_BASE_COMMAND, "--browser", "chrome"] as const
-const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
-const PLAYWRIGHT_CDP_ENDPOINT = "http://127.0.0.1:9222"
-const PLAYWRIGHT_CDP_WAIT_TIMEOUT = 10_000
-const PLAYWRIGHT_BROWSER_TOOL_GUIDANCE = [
-  "Lfcode Playwright target rule:",
-  "Use Playwright browser tools on the embedded side browser webview, not the Electron Lfcode application shell.",
-  "Reuse an existing embedded side browser target when one is already open.",
-  "Do not navigate or replace the main Lfcode window with external pages; use the side browser panel instead.",
-  "Use whatever observe, act, and wait loop best fits the page.",
-  "If the page fails or looks inconsistent, inspect browser_screenshot, browser_get_console, and browser_get_network.",
-].join("\n")
 
 export const Resource = z
   .object({
@@ -182,10 +168,6 @@ export function resolveCodegraphInitCommand(
   return undefined
 }
 
-function sameCommand(command: readonly string[], expected: readonly string[]) {
-  return command.length === expected.length && command.every((item, index) => item === expected[index])
-}
-
 function normalizedPath(value: string) {
   const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "")
   return process.platform === "win32" ? normalized.toLowerCase() : normalized
@@ -287,34 +269,6 @@ export function materializeCodegraphRuntime(
     }
     return withCodegraphCommand(mcp, [targetExecutable, ...mcp.command.slice(1)])
   })
-}
-
-function hasExactKeys(value: object, expected: readonly string[]) {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && expected.every((key) => key in value)
-}
-
-function isManagedPlaywrightConfig(mcp: ConfigMCP.Info) {
-  if (typeof mcp !== "object" || mcp === null) return false
-  if (!hasExactKeys(mcp, PLAYWRIGHT_MCP_KEYS)) return false
-  if (mcp.type !== "local") return false
-  if (mcp.enabled !== true) return false
-  return sameCommand(mcp.command, PLAYWRIGHT_MCP_CDP_COMMAND) || sameCommand(mcp.command, PLAYWRIGHT_MCP_LEGACY_COMMAND)
-}
-
-async function waitForPlaywrightCdpEndpoint(timeoutMs: number) {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await isPlaywrightCdpEndpointReady()) return true
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-  return false
-}
-
-async function isPlaywrightCdpEndpointReady() {
-  return fetch(`${PLAYWRIGHT_CDP_ENDPOINT}/json/version`)
-    .then((response) => response.ok)
-    .catch(() => false)
 }
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
@@ -510,7 +464,6 @@ export const layer = Layer.effect(
       key: string,
       mcp: ConfigMCP.Info & { type: "remote" },
     ) {
-      const cwd = yield* InstanceState.directory
       const oauthDisabled = mcp.oauth === false
       const oauthConfig = typeof mcp.oauth === "object" ? mcp.oauth : undefined
       let authProvider: McpOAuthProvider | undefined
@@ -534,12 +487,7 @@ export const layer = Layer.effect(
         )
       }
 
-      const requestHeaders = {
-        ...(mcp.headers ?? {}),
-        ...(mcp.url.includes("/global/mcp/playwright")
-          ? { "x-lfcode-directory": encodeURIComponent(cwd) }
-          : {}),
-      }
+      const requestHeaders = { ...(mcp.headers ?? {}) }
 
       const remoteUrl = yield* Effect.try({
         try: () => new URL(mcp.url),
@@ -686,26 +634,6 @@ export const layer = Layer.effect(
             error: formatMiniMaxTokenPlanError(new Error("MINIMAX_API_KEY is missing")),
           },
         } satisfies { client: MCPClient | undefined; status: Status }
-      }
-
-      if (key === "playwright" && isManagedPlaywrightConfig(mcp)) {
-        const cdpReady = yield* Effect.promise(() => waitForPlaywrightCdpEndpoint(PLAYWRIGHT_CDP_WAIT_TIMEOUT))
-        if (!cdpReady) {
-          log.warn("playwright MCP embedded browser endpoint is not ready; falling back to external browser", {
-            key,
-            endpoint: PLAYWRIGHT_CDP_ENDPOINT,
-          })
-          return yield* connectLocalCommand(PLAYWRIGHT_MCP_LEGACY_COMMAND)
-        }
-
-        const primary = yield* connectLocalCommand(PLAYWRIGHT_MCP_CDP_COMMAND)
-        if (primary.client) return primary
-
-        log.warn("playwright MCP internal browser startup failed; falling back to external browser", {
-          key,
-          command: ConfigMCP.redactCommand([...PLAYWRIGHT_MCP_CDP_COMMAND]),
-        })
-        return yield* connectLocalCommand(PLAYWRIGHT_MCP_LEGACY_COMMAND)
       }
 
       return yield* connectLocalCommand(mcp.command)
@@ -1086,7 +1014,6 @@ export const layer = Layer.effect(
               if (key !== preferredName) log.warn("MCP tool name collision; retaining namespaced CodeGraph tool", { key: preferredName })
               result[key] = convertMcpTool(mcpTool, client, {
                 timeout,
-                descriptionPrefix: clientName === "playwright" ? PLAYWRIGHT_BROWSER_TOOL_GUIDANCE : undefined,
               })
             }
           }),

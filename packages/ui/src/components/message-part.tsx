@@ -184,7 +184,6 @@ export function PacedMarkdown(props: {
     () => props.text,
     () => props.streaming,
   )
-
   return (
     <Show when={value()}>
       <Markdown

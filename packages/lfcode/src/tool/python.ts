@@ -67,7 +67,7 @@ export const PythonTool = Tool.define(
           const patchBypass = PatchRecovery.blockedShellWrite(ctx.sessionID, ctx.messageID, normalized, params.code)
           if (patchBypass) throw new Error(patchBypass)
           yield* ctx.ask({
-            permission: "bash",
+            permission: "shell",
             patterns: [python.command],
             always: ["*"],
             metadata: {

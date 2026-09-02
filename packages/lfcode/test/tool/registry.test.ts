@@ -168,27 +168,20 @@ describe("tool.registry", () => {
     ),
   )
 
-  it.live("todowrite tool is not registered; task is", () =>
+  it.live("registers only the canonical base tool surface", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
         const ids = yield* registry.ids()
-        expect(ids).not.toContain("todowrite")
-        expect(ids).not.toContain("todo")
-        expect(ids).not.toContain("multiedit")
-        expect(ids).toContain("task")
-        expect(ids).toContain("cpp")
-        expect(ids).toContain("runtime_manage")
-        expect(ids).toContain("file_info")
-        expect(ids).toContain("search")
-        expect(ids).toContain("tree")
-        expect(ids).toContain("archive_inspect")
-        expect(ids).toContain("edit")
-        expect(ids).not.toContain("replace_range")
-        expect(ids).not.toContain("symbol_edit")
-        expect(ids).not.toContain("apply_patch")
-        expect(ids).not.toContain("write")
-        expect(ids).toContain("edit_history")
+        for (const id of [
+          "read", "search", "edit", "shell", "shell_process", "browser", "app_control", "webfetch", "websearch",
+          "skill", "memory", "task", "actor", "question", "create_goal", "get_goal", "update_goal",
+        ]) expect(ids).toContain(id)
+        for (const id of [
+          "todowrite", "todo", "multiedit", "write", "apply_patch", "replace_range", "symbol_edit",
+          "glob", "grep", "bash", "cpp", "runtime_manage", "file_info", "tree",
+          "archive_inspect", "edit_history", "app_open_browser", "app_browser_snapshot",
+        ]) expect(ids).not.toContain(id)
       }),
     ),
   )
@@ -217,7 +210,6 @@ describe("tool.registry", () => {
         for (const tools of [patchTools, legacyTools]) {
           expect(tools.find((tool) => tool.id === "edit")).toBeDefined()
           expect(tools.find((tool) => tool.id === "shell_process")).toBeDefined()
-          expect(tools.find((tool) => tool.id === "edit_history")).toBeDefined()
           expect(tools.find((tool) => tool.id === "search")).toBeDefined()
           expect(tools.find((tool) => tool.id === "apply_patch")).toBeUndefined()
           expect(tools.find((tool) => tool.id === "replace_range")).toBeUndefined()
@@ -228,8 +220,6 @@ describe("tool.registry", () => {
           expect(tools.find((tool) => tool.id === "grep")).toBeUndefined()
         }
 
-        expect(patchTools.find((tool) => tool.id === "edit")?.description).toContain("only file-editing tool")
-        expect(legacyTools.find((tool) => tool.id === "edit")?.description).toContain("only file-editing tool")
       }),
     ),
   )
@@ -275,13 +265,13 @@ describe("tool.registry", () => {
         })
         const ids = new Set(tools.map((tool) => tool.id))
         expect(ids.has("browser")).toBe(true)
-        expect(ids.has("app_open_browser")).toBe(true)
-        expect(ids.has("app_browser_snapshot")).toBe(true)
+        expect(ids.has("app_open_browser")).toBe(false)
+        expect(ids.has("app_browser_snapshot")).toBe(false)
       }),
     ),
   )
 
-  it.live("hides management tools from normal Build agents but honors an explicit allowlist", () =>
+  it.live("does not reintroduce removed tools through agent allowlists", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
@@ -295,7 +285,7 @@ describe("tool.registry", () => {
           agent: build,
         })
         const normalIDs = new Set(normal.map((tool) => tool.id))
-        for (const id of ["read", "search", "edit", "shell", "shell_process", "task", "question"]) {
+        for (const id of ["read", "search", "edit", "shell", "task", "question"]) {
           expect(normalIDs.has(id)).toBe(true)
         }
         for (const id of [
@@ -312,19 +302,19 @@ describe("tool.registry", () => {
           expect(normalIDs.has(id)).toBe(false)
         }
 
-        const management = yield* registry.tools({
+        const restricted = yield* registry.tools({
           providerID: ProviderID.make("test"),
           modelID: ModelID.make("test-model"),
           agent: {
             ...build,
-            name: "management-fixture",
-            toolAllowlist: ["plugin_manage", "credential_manage"],
+            name: "removed-tool-fixture",
+            toolAllowlist: ["write", "apply_patch", "bash"],
           },
         })
-        const managementIDs = new Set(management.map((tool) => tool.id))
-        expect(managementIDs.has("plugin_manage")).toBe(true)
-        expect(managementIDs.has("credential_manage")).toBe(true)
-        expect(managementIDs.has("skill_manage")).toBe(false)
+        const restrictedIDs = new Set(restricted.map((tool) => tool.id))
+        expect(restrictedIDs.has("write")).toBe(false)
+        expect(restrictedIDs.has("apply_patch")).toBe(false)
+        expect(restrictedIDs.has("bash")).toBe(false)
       }),
     ),
   )

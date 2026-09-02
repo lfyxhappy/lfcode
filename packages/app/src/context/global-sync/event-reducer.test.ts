@@ -3,7 +3,7 @@ import type { Message, Part, PermissionRequest, Project, QuestionRequest, Sessio
 import { isInlineImageCacheUrl, resolveInlineImageUrl } from "@lfcode-ai/ui/inline-image-cache"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
-import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
+import { applyActivitySnapshot, applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
 
 const rootSession = (input: { id: string; parentID?: string; archived?: number }) =>
   ({
@@ -171,6 +171,69 @@ describe("applyGlobalEvent", () => {
 })
 
 describe("applyDirectoryEvent", () => {
+  test("reconciles an activity snapshot while preserving a newer in-flight event", () => {
+    const [store, setStore] = createStore(
+      baseState({
+        activity: {
+          ses_1: [
+            {
+              id: "act_1",
+              sessionID: "ses_1",
+              kind: "main",
+              status: "running",
+              revision: 3,
+              createdAt: 1,
+              updatedAt: 30,
+            },
+            {
+              id: "act_2",
+              sessionID: "ses_1",
+              kind: "background",
+              status: "running",
+              revision: 1,
+              createdAt: 2,
+              updatedAt: 2,
+            },
+            {
+              id: "act_3",
+              sessionID: "ses_1",
+              kind: "subagent",
+              status: "queued",
+              revision: 1,
+              createdAt: 3,
+              updatedAt: 3,
+            },
+          ],
+        },
+      }),
+    )
+
+    applyActivitySnapshot({
+      sessionID: "ses_1",
+      activities: [
+        {
+          id: "act_1",
+          sessionID: "ses_1",
+          kind: "main",
+          status: "queued",
+          revision: 2,
+          time: { created: 1, updated: 20 },
+        },
+      ],
+      store,
+      setStore,
+      revisionsBeforeRequest: new Map([
+        ["act_1", 2],
+        ["act_2", 1],
+      ]),
+    })
+
+    expect(store.activity?.ses_1).toHaveLength(2)
+    expect(store.activity?.ses_1?.find((item) => item.id === "act_1")?.revision).toBe(3)
+    expect(store.activity?.ses_1?.find((item) => item.id === "act_2")).toBeUndefined()
+    expect(store.activity?.ses_1?.find((item) => item.id === "act_3")).toBeDefined()
+  })
+
   test("inserts root sessions in sorted order and updates sessionTotal", () => {
     const [store, setStore] = createStore(
       baseState({
@@ -849,5 +912,72 @@ describe("applyDirectoryEvent", () => {
     expect(store.hook_run?.ses_1).toHaveLength(6)
     expect(store.hook_run?.ses_1?.[0]?.summary).toBe("8")
     expect(store.hook_run?.ses_1?.at(-1)?.summary).toBe("3")
+    expect(store.activity?.ses_1).toHaveLength(8)
+    expect(store.activity?.ses_1?.[0]?.kind).toBe("hook")
+  })
+
+  test("upserts and removes generic session activity without requiring a backend type", () => {
+    const [store, setStore] = createStore(baseState())
+    const apply = (type: string, properties: unknown) =>
+      applyDirectoryEvent({
+        event: { type, properties },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+
+    apply("activity.created", {
+      sessionID: "ses_1",
+      activity: { id: "act_1", kind: "background-job", status: "running", createdAt: 10 },
+    })
+    apply("activity.updated", {
+      sessionID: "ses_1",
+      activity: { id: "act_1", kind: "background-job", status: "completed", createdAt: 10, updatedAt: 20 },
+    })
+
+    expect(store.activity?.ses_1).toEqual([
+      { id: "act_1", sessionID: "ses_1", kind: "background-job", status: "completed", createdAt: 10, updatedAt: 20 },
+    ])
+
+    apply("activity.removed", { sessionID: "ses_1", activityID: "act_1" })
+    expect(store.activity?.ses_1).toEqual([])
+  })
+
+  test("accepts the durable activity event envelope and nested time fields", () => {
+    const [store, setStore] = createStore(baseState())
+    applyDirectoryEvent({
+      event: {
+        type: "activity.completed",
+        properties: {
+          activity: {
+            id: "act_2",
+            sessionID: "ses_1",
+            kind: "subagent",
+            status: "completed",
+            sourceType: "actor",
+            sourceID: "actor_1",
+            revision: 2,
+            metadata: { dispatch: { id: "dispatch-2", agent: "reviewer", description: "Review" } },
+            time: { created: 100, updated: 120 },
+          },
+        },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.activity?.ses_1?.[0]).toMatchObject({
+      id: "act_2",
+      kind: "subagent",
+      status: "completed",
+      createdAt: 100,
+      updatedAt: 120,
+      metadata: { dispatch: { id: "dispatch-2", agent: "reviewer", description: "Review" } },
+    })
   })
 })

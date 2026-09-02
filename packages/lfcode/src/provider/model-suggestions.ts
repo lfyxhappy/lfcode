@@ -44,6 +44,8 @@ export type ModelSuggestion = {
   source: ModelSuggestionSource
   patch: ModelSuggestionPatch
   warning?: string
+  sourceUpdatedAt?: string
+  sourceUrl?: string
   matchedProviderID?: string
   candidates?: ModelSuggestionCandidate[]
 }
@@ -128,23 +130,27 @@ export function suggestModel(input: SuggestionInput): ModelSuggestion {
   }
 }
 
-export function suggestModelWithOnlineCatalog(input: SuggestionInput, onlineCatalog?: Record<string, CatalogProvider>) {
+export function suggestModelWithOnlineCatalog(
+  input: SuggestionInput,
+  onlineCatalog?: Record<string, CatalogProvider>,
+  options?: { authoritative?: boolean },
+) {
   const local = suggestModel(input)
-  if (!onlineCatalog || local.source === "catalog" || local.source === "alias") return local
+  if (!onlineCatalog) return local
 
   const displayName = input.displayName?.trim() || input.modelID
   const match = findCatalogMatch(onlineCatalog[input.providerID], input.modelID, displayName)
   if (match) {
-    const result = fromCatalog(input.providerID, input.modelID, displayName, match.model, "online")
+    const result = fromCatalog(input.providerID, input.modelID, displayName, match.model, "online", options?.authoritative)
     return {
       ...result,
-      warning: "已从在线 Models.dev 目录匹配，保存前请确认当前供应商仍提供该模型。",
+      warning: `已从在线 Models.dev 目录匹配${result.sourceUpdatedAt ? `（数据更新于 ${result.sourceUpdatedAt}）` : ""}，保存前请确认当前供应商仍提供该模型。`,
     }
   }
 
   const global = findGlobalMatches(onlineCatalog, input.modelID, displayName)
   if (global.matches.length === 1) {
-    const result = fromCatalog(input.providerID, input.modelID, displayName, global.matches[0].model, "online")
+    const result = fromCatalog(input.providerID, input.modelID, displayName, global.matches[0].model, "online", options?.authoritative)
     return {
       ...result,
       matchedProviderID: global.matches[0].providerID,
@@ -172,9 +178,10 @@ export function suggestModelWithOnlineCatalog(input: SuggestionInput, onlineCata
 export async function suggestModelWithOnlineFallback(
   input: SuggestionInput,
   loadOnlineCatalog: () => Promise<Record<string, CatalogProvider> | undefined>,
+  options?: { preferOnline?: boolean },
 ) {
   const local = suggestModel(input)
-  if (local.source === "catalog" || local.source === "alias") return local
+  if (!options?.preferOnline && (local.source === "catalog" || local.source === "alias")) return local
 
   try {
     const onlineCatalog = await loadOnlineCatalog()
@@ -184,7 +191,7 @@ export async function suggestModelWithOnlineFallback(
         warning: `${local.warning ?? "未找到目录信息。"} 在线目录暂时不可用，已保留本地建议。`,
       }
     }
-    return suggestModelWithOnlineCatalog(input, onlineCatalog)
+    return suggestModelWithOnlineCatalog(input, onlineCatalog, { authoritative: options?.preferOnline })
   } catch {
     return {
       ...local,
@@ -208,28 +215,35 @@ function fromCatalog(
   displayName: string,
   model: CatalogModel,
   source: Exclude<ModelSuggestionSource, "inferred" | "none">,
+  authoritative = false,
 ): ModelSuggestion {
-  // Catalog entries are used for discovery/cost hints only. Capability,
-  // limits, modalities, and reasoning tiers are always derived from the
-  // model identity so the same model behaves identically behind any provider.
+  // Models.dev is the authoritative metadata source for catalog-backed
+  // suggestions. Do not replace its limits/modalities/capabilities with a
+  // model-name guess: a newly released alias is exactly where that guess is
+  // most likely to be wrong.
   const profile = inferModelProfile({ modelID: model.id, apiID: model.name })
-  const input = profile.modalities.input
-  const output = profile.modalities.output
+  const modalities = authoritative ? model.modalities : profile.modalities
+  const input = modalities?.input
+  const output = modalities?.output
   const capabilities = {
-    text: profile.capabilities.input.text,
-    image: profile.capabilities.input.image,
-    audio: profile.capabilities.input.audio,
-    video: profile.capabilities.input.video,
-    pdf: profile.capabilities.input.pdf,
-    attachment: profile.capabilities.attachment,
-    reasoning: profile.capabilities.reasoning,
-    temperature: profile.capabilities.temperature,
-    tool_call: profile.capabilities.tool_call,
-    patch_editing: profile.capabilities.patch_editing,
-    native_web: profile.capabilities.native_web,
+    ...(input ? {
+      text: input.includes("text"),
+      image: input.includes("image"),
+      audio: input.includes("audio"),
+      video: input.includes("video"),
+      pdf: input.includes("pdf"),
+    } : {}),
+    attachment: authoritative ? model.attachment : profile.capabilities.attachment,
+    reasoning: authoritative ? model.reasoning : profile.capabilities.reasoning,
+    temperature: authoritative ? model.temperature : profile.capabilities.temperature,
+    tool_call: authoritative ? model.tool_call : profile.capabilities.tool_call,
+    patch_editing: authoritative ? model.attachment : profile.capabilities.patch_editing,
   }
-  const reasoningOptions = profile.reasoningOptions
-  const reasoningModes = profile.reasoningModes.length ? profile.reasoningModes : undefined
+  const reasoningModes = (authoritative ? model.reasoning_options : profile.reasoningModes)?.map((mode) => ({
+    type: mode.type,
+    values: mode.values,
+  }))
+  const reasoningOptions = reasoningModes?.flatMap((mode) => mode.values ?? []) ?? []
   const variantOptions = reasoningOptions.filter((option) =>
     ["none", "minimal", "low", "medium", "high", "xhigh", "max"].includes(option),
   )
@@ -240,8 +254,8 @@ function fromCatalog(
     source,
     patch: {
       capabilities,
-      limit: profile.limit,
-      modalities: { input, output },
+      limit: authoritative ? model.limit : profile.limit,
+      ...(input && output ? { modalities: { input, output } } : {}),
       cost: model.cost
         ? {
             input: model.cost.input,
@@ -255,6 +269,9 @@ function fromCatalog(
       variantGroup: variantOptions.length > 0 ? "custom" : undefined,
       variantOptions: variantOptions.length > 0 ? variantOptions : undefined,
     },
+    ...(authoritative
+      ? { sourceUpdatedAt: model.last_updated ?? model.release_date ?? undefined, sourceUrl: "https://models.dev/api.json" }
+      : {}),
   }
 }
 

@@ -893,6 +893,8 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
           model: mdl,
         })
 
+        console.log("pending-cleanup: created")
+
         const run = yield* handle
           .process({
             user: {
@@ -910,9 +912,11 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
             messages: [{ role: "user", content: "tool abort" }],
             tools: {},
           })
-          .pipe(Effect.forkChild)
+          .pipe(Effect.forkChild({ startImmediately: true }))
 
+        console.log("pending-cleanup: forked")
         yield* llm.wait(1)
+        console.log("pending-cleanup: waited")
         yield* Effect.promise(async () => {
           const end = Date.now() + 500
           while (Date.now() < end) {
@@ -921,9 +925,12 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
             await Bun.sleep(10)
           }
         })
+        console.log("pending-cleanup: parts")
         yield* Fiber.interrupt(run)
+        console.log("pending-cleanup: interrupted")
 
         const exit = yield* Fiber.await(run)
+        console.log("pending-cleanup: awaited")
         const parts = MessageV2.parts(msg.id)
         const call = parts.find((part): part is MessageV2.ToolPart => part.type === "tool")
 

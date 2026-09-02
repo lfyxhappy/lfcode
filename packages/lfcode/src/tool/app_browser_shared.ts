@@ -1,5 +1,7 @@
 import z from "zod"
 import { Effect } from "effect"
+import { isAbsolute, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { Config } from "@/config"
 import { Session } from "@/session"
 import type * as Tool from "./tool"
@@ -15,6 +17,23 @@ export function withAppControlAccess(
     ensureAppControlAccess(current, required)
     return yield* Effect.promise(() => createAppControlClient())
   })
+}
+
+export function normalizeBrowserToolURL(value: string, directory: string) {
+  const input = value.trim()
+  if (!input) return input
+  if (/^(?:file|https?|about):\/\//i.test(input) || /^about:/i.test(input)) return input
+
+  const looksLikePath =
+    /^[A-Za-z]:[\\/]/.test(input) ||
+    /^\\\\/.test(input) ||
+    /^\/(?!\/)/.test(input) ||
+    /(?:^|[\\/])[^\\/]+\.html?(?:[?#].*)?$/i.test(input)
+  if (!looksLikePath) return input
+
+  const match = input.match(/^([^?#]*)([?#].*)?$/)
+  const path = isAbsolute(match?.[1] ?? input) ? (match?.[1] ?? input) : resolve(directory, match?.[1] ?? input)
+  return `${pathToFileURL(path).href}${match?.[2] ?? ""}`
 }
 
 export const appBrowserAccess = Effect.gen(function* () {
@@ -41,6 +60,10 @@ export const appBrowserAccess = Effect.gen(function* () {
       session
         .get(ctx.sessionID)
         .pipe(Effect.map((info) => browserSessionKey({ directory: info.directory, sessionID: ctx.sessionID }))),
+    browserURL: (ctx: Tool.Context, value: string) =>
+      session.get(ctx.sessionID).pipe(
+        Effect.map((info) => normalizeBrowserToolURL(value, info.directory)),
+      ),
   }
 })
 

@@ -110,11 +110,11 @@ export const dict = {
   "tui.tips.custom_agent":
     "{highlight}.lfcode/agent/{/highlight} に {highlight}.md{/highlight} ファイルを追加して専用 AI ペルソナを作れます",
   "tui.tips.agent_perms":
-    "エージェントごとに {highlight}edit{/highlight}、{highlight}bash{/highlight}、{highlight}webfetch{/highlight} ツールの権限を設定できます",
-  "tui.tips.bash_allow":
-    '{highlight}"git *": "allow"{/highlight} のようなパターンで bash 権限を細かく制御できます',
-  "tui.tips.bash_deny": '{highlight}"rm -rf *": "deny"{/highlight} を設定して破壊的なコマンドをブロックします',
-  "tui.tips.bash_ask": '{highlight}"git push": "ask"{/highlight} を設定すると push 前に承認を求めます',
+    "エージェントごとに {highlight}edit{/highlight}、{highlight}shell{/highlight}、{highlight}webfetch{/highlight} ツールの権限を設定できます",
+  "tui.tips.shell_allow":
+    '{highlight}"git *": "allow"{/highlight} のようなパターンで shell 権限を細かく制御できます',
+  "tui.tips.shell_deny": '{highlight}"rm -rf *": "deny"{/highlight} を設定して破壊的なコマンドをブロックします',
+  "tui.tips.shell_ask": '{highlight}"git push": "ask"{/highlight} を設定すると push 前に承認を求めます',
   "tui.tips.formatter": "Lfcode は prettier、gofmt、ruff などでファイルを自動整形します",
   "tui.tips.disable_formatter":
     '設定で {highlight}"formatter": false{/highlight} にするとすべての自動整形を無効化できます',
@@ -151,7 +151,7 @@ export const dict = {
   "tui.tips.temperature":
     "エージェントの {highlight}temperature{/highlight} を 0.0（厳密）から 1.0（創造的）まで調整します",
   "tui.tips.steps": "{highlight}steps{/highlight} を設定するとリクエストごとのエージェント反復回数を制限します",
-  "tui.tips.disable_tool": '{highlight}"tools": {"bash": false}{/highlight} で特定のツールを無効化できます',
+  "tui.tips.disable_tool": '{highlight}"tool_allowlist": ["read", "search"]{/highlight} で特定のツールを無効化できます',
   "tui.tips.disable_mcp_tools":
     '{highlight}"mcp_*": false{/highlight} で MCP サーバ由来のツールをすべて無効化できます',
   "tui.tips.tool_override": "エージェントごとの設定でグローバルなツール設定を上書きできます",

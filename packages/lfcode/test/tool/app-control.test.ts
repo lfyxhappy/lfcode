@@ -136,7 +136,7 @@ describe("app control tools", () => {
     ),
   )
 
-  it.live("keeps explicitly allowlisted legacy app and browser tools for fixed agents", () =>
+  it.live("does not reintroduce removed app or browser tools through an allowlist", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
         const registry = yield* ToolRegistry.Service
@@ -155,15 +155,15 @@ describe("app control tools", () => {
           modelID: ModelID.make("test-model"),
           agent: {
             ...general,
-            name: "legacy-app-control-fixture",
+            name: "removed-app-control-fixture",
             toolAllowlist: ["app_dom", "app_browser_snapshot"],
           },
         })
         const ids = new Set(tools.map((tool) => tool.id))
-        expect(ids.has("app_dom")).toBe(true)
-        expect(ids.has("app_browser_snapshot")).toBe(true)
-        expect(ids.has("app_control")).toBe(false)
-        expect(ids.has("browser")).toBe(false)
+        expect(ids.has("app_dom")).toBe(false)
+        expect(ids.has("app_browser_snapshot")).toBe(false)
+        expect(ids.has("app_control")).toBe(true)
+        expect(ids.has("browser")).toBe(true)
       }),
     ),
   )
@@ -1051,23 +1051,28 @@ describe("app control tools", () => {
             const browser = tools.find((item) => item.id === "browser")
             if (!browser) throw new Error("browser tool not found")
             yield* browser.execute({ operation: "click", session_key: "dir/ses_1", ref: "button:login" }, baseCtx)
+            yield* browser.execute({ operation: "click", session_key: "dir/ses_1", selector: "[data-action=save]" }, baseCtx)
             yield* browser.execute({ operation: "type", session_key: "dir/ses_1", ref: "input:query", text: "lfcode", submit: true }, baseCtx)
             yield* browser.execute({ operation: "wait", session_key: "dir/ses_1", text: "Done", text_gone: "Loading", time_ms: 50, timeout_ms: 1000 }, baseCtx)
           }),
         )
 
-        expect(received.map((item) => item.url.pathname)).toEqual(["/browser/click", "/browser/type", "/browser/wait"])
+        expect(received.map((item) => item.url.pathname)).toEqual(["/browser/click", "/browser/click", "/browser/type", "/browser/wait"])
         expect(received[0]?.body).toEqual({
           sessionKey: "dir/ses_1",
           ref: "button:login",
         })
         expect(received[1]?.body).toEqual({
           sessionKey: "dir/ses_1",
+          selector: "[data-action=save]",
+        })
+        expect(received[2]?.body).toEqual({
+          sessionKey: "dir/ses_1",
           ref: "input:query",
           text: "lfcode",
           submit: true,
         })
-        expect(received[2]?.body).toEqual({
+        expect(received[3]?.body).toEqual({
           sessionKey: "dir/ses_1",
           text: "Done",
           textGone: "Loading",
@@ -1176,6 +1181,56 @@ describe("app control tools", () => {
     ),
   )
 
+  it.live("unified browser tool exposes browser history navigation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const info = yield* session.create()
+        const ctx = { ...baseCtx, sessionID: info.id }
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.url.pathname === "/browser/back") return { ok: true, data: { url: "https://example.com/previous" } }
+              if (request.url.pathname === "/browser/forward") return { ok: true, data: { url: "https://example.com/current" } }
+              if (request.url.pathname === "/browser/reload") return { ok: true, data: { url: "https://example.com/current" } }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        yield* withAutomationEnv(port, "browser-navigation-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({
+              providerID: ProviderID.make("test"),
+              modelID: ModelID.make("test-model"),
+              agent: general,
+            })
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            yield* browser.execute({ operation: "back" }, ctx)
+            yield* browser.execute({ operation: "forward", session_key: "dir/custom" }, ctx)
+            yield* browser.execute({ operation: "reload" }, ctx)
+          }),
+        )
+
+        expect(received.map((item) => item.url.pathname)).toEqual(["/browser/back", "/browser/forward", "/browser/reload"])
+        expect(received[0]?.body).toEqual({
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
+        })
+        expect(received[1]?.body).toEqual({ sessionKey: "dir/custom" })
+        expect(received[2]?.body).toEqual({
+          sessionKey: browserSessionKey({ directory: info.directory, sessionID: info.id }),
+        })
+      }),
+    ),
+  )
+
   it.live("unified browser tool normalizes snapshot and scroll payloads", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -1236,7 +1291,7 @@ describe("app control tools", () => {
         const { port, received } = yield* Effect.acquireRelease(
           Effect.promise(() =>
             startStubServer((request) => {
-              if (request.url.pathname === "/browser/close") return { ok: true, data: { closed: true } }
+              if (request.url.pathname === "/browser/close") return { ok: true }
               if (request.url.pathname === "/browser/download-resource") {
                 return { ok: true, data: { url: "https://example.com/image.png", path: "C:/tmp/image.png", filename: "image.png" } }
               }
@@ -1260,7 +1315,8 @@ describe("app control tools", () => {
             })
             const browser = tools.find((item) => item.id === "browser")
             if (!browser) throw new Error("browser tool not found")
-            yield* browser.execute({ operation: "close" }, ctx)
+            const closed = yield* browser.execute({ operation: "close" }, ctx)
+            expect(closed.output).toBe("null")
             yield* browser.execute(
               { operation: "download_resource", session_key: "dir/custom", selector: "img.hero", filename: "hero.png" },
               ctx,
@@ -1317,10 +1373,145 @@ describe("app control tools", () => {
 
         expect(received.map((item) => item.url.pathname)).toEqual(["/browser/focus-tab"])
         expect(received[0]?.body).toEqual({
+          sessionKey: "dir/custom",
           windowID: 6,
           tabID: "b_demo",
         })
         expect(result.title).toBe("Focused side browser tab")
+      }),
+    ),
+  )
+
+  it.live("unified browser tool supports semantic waits, assertions, tab handles, and element controls", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const session = yield* Session.Service
+        const info = yield* session.create()
+        const ctx = { ...baseCtx, sessionID: info.id }
+        const { port, received } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startStubServer((request) => {
+              if (request.url.pathname === "/browser/open") {
+                const body = request.body as { newTab?: boolean } | undefined
+                return { ok: true, data: { target: { tabID: body?.newTab ? "b_two" : "b_one" } } }
+              }
+              if (request.url.pathname === "/browser/wait-selector") return { ok: true, data: { matched: true, detail: "selector matched" } }
+              if (request.url.pathname === "/browser/wait-url") return { ok: true, data: { matched: true, detail: "URL matched" } }
+              if (request.url.pathname === "/browser/wait-load-state") return { ok: true, data: { matched: true, detail: "load matched" } }
+              if (request.url.pathname === "/browser/wait-navigation") return { ok: true, data: { matched: true, detail: "navigation matched" } }
+              if (request.url.pathname === "/browser/read-page") {
+                return {
+                  ok: true,
+                  data: {
+                    title: "Example",
+                    url: "https://example.com/ready",
+                    text: "Ready content",
+                    target: { tabID: "b_one" },
+                  },
+                }
+              }
+              if (request.url.pathname === "/browser/console") return { ok: true, data: { entries: [] } }
+              if (request.url.pathname === "/browser/network") {
+                return {
+                  ok: true,
+                  data: {
+                    entries: [
+                      { url: "https://example.com/ready", method: "GET", error: "net::ERR_ABORTED", time: Date.now() - 20 },
+                      { url: "https://example.com/ready", method: "GET", statusCode: 200, time: Date.now() },
+                    ],
+                  },
+                }
+              }
+              if (request.url.pathname === "/browser/clear") return { ok: true, data: { tabID: "b_one" } }
+              if (request.url.pathname === "/browser/select-option") return { ok: true, data: { tabID: "b_one" } }
+              if (request.url.pathname === "/browser/upload-file") return { ok: true, data: { tabID: "b_one" } }
+              if (request.url.pathname === "/browser/capture-element") {
+                return {
+                  ok: true,
+                  data: {
+                    target: { tabID: "b_one" },
+                    selector: ".dialog",
+                    path: "C:/tmp/dialog.png",
+                    width: 640,
+                    height: 420,
+                    viewport: { width: 1280, height: 800 },
+                    deviceScaleFactor: 1,
+                  },
+                }
+              }
+              throw new Error(`Unexpected request: ${request.method} ${request.url.pathname}`)
+            }),
+          ),
+          (server) => Effect.promise(() => server.close()),
+        )
+        const result = yield* withAutomationEnv(port, "browser-unified-upgrade-token", () =>
+          Effect.gen(function* () {
+            const registry = yield* ToolRegistry.Service
+            const agent = yield* Agent.Service
+            const config = yield* Config.Service
+            yield* config.saveGlobalAppControl({ enabled: false, permission: "read_only", browser: { enabled: true, permission: "interactive" } })
+            const general = yield* agent.get("general")
+            if (!general) throw new Error("general agent not found")
+            const tools = yield* registry.tools({ providerID: ProviderID.make("test"), modelID: ModelID.make("test-model"), agent: general })
+            const browser = tools.find((item) => item.id === "browser")
+            if (!browser) throw new Error("browser tool not found")
+            const opened = yield* browser.execute({ operation: "open", url: "https://example.com/ready" }, ctx)
+            expect(opened.metadata).toMatchObject({ tabID: "b_one" })
+            const navigated = yield* browser.execute({ operation: "navigate", tab_id: "b_one", url: "https://www.iana.org/help" }, ctx)
+            expect(navigated.title).toBe("Navigated browser test target")
+            expect(navigated.metadata).toMatchObject({ operation: "navigate", tabID: "b_one" })
+            yield* browser.execute({ operation: "wait_for_selector", tab_id: "b_one", selector: ".dialog", visible: true, timeout_ms: 500 }, ctx)
+            yield* browser.execute({ operation: "wait_for_url", tab_id: "b_one", url: "https://example.com", match: "includes" }, ctx)
+            yield* browser.execute({ operation: "wait_for_load_state", tab_id: "b_one", state: "load", stable_ms: 50 }, ctx)
+            yield* browser.execute({ operation: "wait_for_navigation", tab_id: "b_one", url: "ready", match: "includes" }, ctx)
+            const assertions = yield* browser.execute({
+              operation: "assert",
+              tab_id: "b_one",
+              checks: [
+                { kind: "url", expected: "example.com", match: "includes" },
+                { kind: "title", expected: "Example" },
+                { kind: "text", expected: "Ready content", match: "contains" },
+                { kind: "selector", selector: ".dialog" },
+                { kind: "console", mode: "has_no_error" },
+                { kind: "network", mode: "has_no_failed_request" },
+              ],
+            }, ctx)
+            expect(JSON.parse(assertions.output)).toMatchObject({ passed: true })
+            const nestedIncludes = yield* browser.execute({
+              operation: "assert",
+              tab_id: "b_one",
+              check: { kind: "text", expected: "Ready content", match: "includes" },
+            }, ctx)
+            expect(JSON.parse(nestedIncludes.output)).toMatchObject({ passed: true })
+            const second = yield* browser.execute({ operation: "open", url: "https://httpbin.org/forms/post", new_tab: true }, ctx)
+            expect(second.metadata).toMatchObject({ tabID: "b_two" })
+            yield* browser.execute({ operation: "clear", tab_id: "b_one", selector: "input[name=q]" }, ctx)
+            yield* browser.execute({ operation: "select_option", tab_id: "b_one", selector: "select[name=mode]", label: "Fast" }, ctx)
+            yield* browser.execute({ operation: "upload_file", tab_id: "b_one", selector: "input[type=file]", files: ["fixture.txt"] }, ctx)
+            const capture = yield* browser.execute({ operation: "capture_element", tab_id: "b_one", selector: ".dialog" }, ctx)
+            expect(JSON.parse(capture.output)).toMatchObject({ width: 640, height: 420, viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
+          }),
+        )
+
+        const paths = received.map((item) => item.url.pathname)
+        expect(paths.filter((path) => path === "/browser/wait-selector")).toHaveLength(2)
+        expect(paths).toEqual(expect.arrayContaining([
+          "/browser/open",
+          "/browser/wait-url",
+          "/browser/wait-load-state",
+          "/browser/wait-navigation",
+          "/browser/read-page",
+          "/browser/console",
+          "/browser/network",
+          "/browser/clear",
+          "/browser/select-option",
+          "/browser/upload-file",
+          "/browser/capture-element",
+        ]))
+        expect(received.find((item) => item.url.pathname === "/browser/clear")?.body).toMatchObject({ sessionKey: expect.any(String), tabID: "b_one", selector: "input[name=q]" })
+        expect(received.find((item) => item.url.pathname === "/browser/wait-load-state")?.body).toMatchObject({ tabID: "b_one", state: "load", stableMs: 50 })
+        expect(received.find((item) => item.url.pathname === "/browser/open" && (item.body as { newTab?: boolean })?.newTab)?.body).toMatchObject({ newTab: true })
+        expect(received.find((item) => item.url.pathname === "/browser/open" && (item.body as { url?: string })?.url === "https://www.iana.org/help")?.body).toMatchObject({ tabID: "b_one" })
       }),
     ),
   )

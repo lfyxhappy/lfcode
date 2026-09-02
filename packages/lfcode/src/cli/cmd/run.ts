@@ -13,17 +13,14 @@ import { Provider } from "../../provider"
 import { Agent } from "../../agent/agent"
 import { Permission } from "../../permission"
 import { Tool } from "../../tool"
-import { GlobTool } from "../../tool/glob"
-import { GrepTool } from "../../tool/grep"
 import { ReadTool } from "../../tool/read"
 import { WebFetchTool } from "../../tool/webfetch"
 import { EditTool } from "../../tool/edit"
-import { WriteTool } from "../../tool/write"
 import { CodeSearchTool } from "../../tool/codesearch"
 import { WebSearchTool } from "../../tool/websearch"
 import { ActorTool } from "../../tool/actor"
 import { SkillTool } from "../../tool/skill"
-import { BashTool } from "../../tool/bash"
+import { ShellTool } from "../../tool/bash"
 import { Locale } from "../../util"
 import { AppRuntime } from "@/effect/app-runtime"
 import { createCompletionTracker, type CompletionTracker } from "./run-completion"
@@ -32,6 +29,21 @@ type ToolProps<T> = {
   input: Tool.InferParameters<T>
   metadata: Tool.InferMetadata<T>
   part: ToolPart
+}
+
+type LegacyToolProps<Input, Metadata> = {
+  input: Input
+  metadata: Metadata
+  part: ToolPart
+}
+
+function legacyProps<Input, Metadata>(part: ToolPart): LegacyToolProps<Input, Metadata> {
+  const state = part.state
+  return {
+    input: state.input as Input,
+    metadata: ("metadata" in state ? state.metadata : {}) as Metadata,
+    part,
+  }
 }
 
 function props<T>(part: ToolPart): ToolProps<T> {
@@ -74,7 +86,7 @@ function fallback(part: ToolPart) {
   })
 }
 
-function glob(info: ToolProps<typeof GlobTool>) {
+function glob(info: LegacyToolProps<{ pattern: string; path?: string }, { count?: number }>) {
   const root = info.input.path ?? ""
   const title = `Glob "${info.input.pattern}"`
   const suffix = root ? `in ${normalizePath(root)}` : ""
@@ -88,7 +100,7 @@ function glob(info: ToolProps<typeof GlobTool>) {
   })
 }
 
-function grep(info: ToolProps<typeof GrepTool>) {
+function grep(info: LegacyToolProps<{ pattern: string; path?: string }, { matches?: number }>) {
   const root = info.input.path ?? ""
   const title = `Grep "${info.input.pattern}"`
   const suffix = root ? `in ${normalizePath(root)}` : ""
@@ -116,7 +128,7 @@ function read(info: ToolProps<typeof ReadTool>) {
   })
 }
 
-function write(info: ToolProps<typeof WriteTool>) {
+function write(info: LegacyToolProps<{ filePath: string }, Record<string, never>>) {
   block(
     {
       icon: "←",
@@ -134,7 +146,7 @@ function webfetch(info: ToolProps<typeof WebFetchTool>) {
 }
 
 function edit(info: ToolProps<typeof EditTool>) {
-  const title = normalizePath(info.input.filePath)
+  const title = normalizePath(info.input.path)
   const diff = info.metadata.diff
   block(
     {
@@ -182,7 +194,7 @@ function skill(info: ToolProps<typeof SkillTool>) {
   })
 }
 
-function bash(info: ToolProps<typeof BashTool>) {
+function shell(info: ToolProps<typeof ShellTool>) {
   const output = info.part.state.status === "completed" ? info.part.state.output?.trim() : undefined
   block(
     {
@@ -397,11 +409,11 @@ export const RunCommand = cmd({
     async function execute(sdk: LfcodeClient) {
       function tool(part: ToolPart) {
         try {
-          if (part.tool === "bash") return bash(props<typeof BashTool>(part))
-          if (part.tool === "glob") return glob(props<typeof GlobTool>(part))
-          if (part.tool === "grep") return grep(props<typeof GrepTool>(part))
+          if (part.tool === "shell" || part.tool === "bash") return shell(props<typeof ShellTool>(part))
+          if (part.tool === "glob") return glob(legacyProps<{ pattern: string; path?: string }, { count?: number }>(part))
+          if (part.tool === "grep") return grep(legacyProps<{ pattern: string; path?: string }, { matches?: number }>(part))
           if (part.tool === "read") return read(props<typeof ReadTool>(part))
-          if (part.tool === "write") return write(props<typeof WriteTool>(part))
+          if (part.tool === "write") return write(legacyProps<{ filePath: string }, Record<string, never>>(part))
           if (part.tool === "webfetch") return webfetch(props<typeof WebFetchTool>(part))
           if (part.tool === "edit") return edit(props<typeof EditTool>(part))
           if (part.tool === "codesearch") return codesearch(props<typeof CodeSearchTool>(part))

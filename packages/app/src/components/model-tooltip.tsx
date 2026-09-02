@@ -1,4 +1,5 @@
 import { Show, type Component } from "solid-js"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import { useLanguage } from "@/context/language"
 
 type InputKey = "text" | "image" | "audio" | "video" | "pdf"
@@ -34,6 +35,10 @@ type ModelInfo = {
   temperature?: boolean
   limit: {
     context: number
+  }
+  metadata?: {
+    source: string
+    updatedAt?: string
   }
 }
 
@@ -95,7 +100,7 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       ? language.t("model.tooltip.reasoning.allowed")
       : language.t("model.tooltip.reasoning.none")
   }
-  const context = () => language.t("model.tooltip.context", { limit: props.model.limit.context.toLocaleString() })
+  const context = () => language.t("model.tooltip.context", { limit: formatTokenCount(props.model.limit.context) })
   const capabilities = () => {
     const next: CapabilityMap = {
       text: true,
@@ -138,6 +143,16 @@ export const ModelTooltip: Component<{ model: ModelInfo; latest?: boolean; free?
       )}
       <div class="text-12-regular text-text-invert-base">{reasoning()}</div>
       <div class="text-12-regular text-text-invert-base">{context()}</div>
+      <Show when={props.model.metadata}>
+        {(metadata) => (
+          <div class="text-12-regular text-text-invert-base">
+            {language.t("model.tooltip.source", {
+              source: metadata().source,
+              updatedAt: metadata().updatedAt ?? language.t("model.tooltip.unknown"),
+            })}
+          </div>
+        )}
+      </Show>
     </div>
   )
 }

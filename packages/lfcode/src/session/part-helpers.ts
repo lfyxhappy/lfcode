@@ -65,12 +65,24 @@ export function sameToolFailureCount(input: {
 }
 
 export function isRetryableToolValidationFailure(error: string) {
+  const legacyCode = legacyToolErrorCode(error)
   return (
     structuredToolError(error)?.category === "schema" ||
+    (legacyCode !== undefined && RETRYABLE_EDIT_TOOL_ERRORS.has(legacyCode)) ||
     /tool was called with invalid arguments/i.test(error) ||
     error.startsWith("This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax.")
   )
 }
+
+const RETRYABLE_EDIT_TOOL_ERRORS = new Set([
+  "edit_path_missing",
+  "edit_content_missing",
+  "edit_replace_fields_missing",
+  "edit_patch_missing",
+  "edit_context_not_found",
+  "edit_context_ambiguous",
+  "edit_create_target_exists",
+])
 
 function toolFailureSignature(tool: string, error: string) {
   const structured = structuredToolError(error)
@@ -95,6 +107,11 @@ function structuredToolError(error: string): Record<string, unknown> | undefined
   } catch {
     return
   }
+}
+
+function legacyToolErrorCode(error: string): string | undefined {
+  const match = /^\[tool_error\]\s+([a-z0-9_]+)/iu.exec(error)
+  return match?.[1]
 }
 
 function normalizeFailureText(value: unknown) {

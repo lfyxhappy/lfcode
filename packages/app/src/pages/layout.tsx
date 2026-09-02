@@ -88,7 +88,7 @@ import {
   isSettingsTabUiDriverToken,
   resolveAutomationDialogUiDriverElement,
   resolveLanAccessSettingsUiDriverElement,
-  settingsTabUiDriverSelector,
+  settingsTabUiDriverSelectors,
   snapshotUiDriverElement,
   type UiDriverQueryInput,
   type UiDriverTypeInput,
@@ -238,6 +238,7 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
   const [settingsOpen, setSettingsOpen] = createSignal(false)
   const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("general")
   const [settingsDirect, setSettingsDirect] = createSignal(false)
+  const isTopLevelWorkspacePage = createMemo(() => /\/(plugins|automation)$/.test(location.pathname))
   const colorSchemeOrder: ColorScheme[] = ["system", "light", "dark"]
   const colorSchemeKey: Record<ColorScheme, "theme.scheme.system" | "theme.scheme.light" | "theme.scheme.dark"> = {
     system: "theme.scheme.system",
@@ -259,6 +260,7 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
     nav: undefined as HTMLElement | undefined,
     sizing: false,
   })
+  const [sidebarDragWidth, setSidebarDragWidth] = createSignal<number>()
 
   const editor = createRenameDialogController(dialog)
   const setBusy = (directory: string, value: boolean) => {
@@ -276,13 +278,10 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
   }
   const isBusy = (directory: string) => !!state.busyWorkspaces[workspaceKey(directory)]
   const navLeave = { current: undefined as number | undefined }
-  let sizet: number | undefined
-
   onCleanup(() => {
     dialogDead = true
     dialogRun += 1
     if (navLeave.current !== undefined) clearTimeout(navLeave.current)
-    if (sizet !== undefined) clearTimeout(sizet)
   })
 
   onMount(() => {
@@ -1571,7 +1570,9 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
       return card instanceof HTMLElement ? card : undefined
     }
     if (isSettingsTabUiDriverToken(input.token)) {
-      const button = document.querySelector(settingsTabUiDriverSelector(input.token))
+      const button = settingsTabUiDriverSelectors(input.token)
+        .map((selector) => document.querySelector(selector))
+        .find((element): element is HTMLElement => element instanceof HTMLElement)
       return button instanceof HTMLElement ? button : undefined
     }
     if (isLanAccessSettingsUiDriverToken(input.token)) {
@@ -1620,6 +1621,13 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
         }
         if (input.token === "settings.close") {
           closeSettings()
+          await waitForGlobalUiFrame()
+          return snapshotGlobalUiToken(input)
+        }
+        if (input.token === "settings.tab.plugins" || input.token === "settings.tab.automation") {
+          const node = resolveGlobalUiToken(input)
+          if (!node) throw new Error(`UI token was not found: ${input.token}`)
+          node.click()
           await waitForGlobalUiFrame()
           return snapshotGlobalUiToken(input)
         }
@@ -2605,11 +2613,11 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
   )
 
   createEffect(() => {
-    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 64
+    const sidebarWidth = layout.sidebar.opened() ? Math.max(sidebarDragWidth() ?? layout.sidebar.width(), 244) : 64
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
   })
 
-  const side = createMemo(() => Math.max(layout.sidebar.width(), 244))
+  const side = createMemo(() => Math.max(sidebarDragWidth() ?? layout.sidebar.width(), 244))
   const desktopSidebarWidth = createMemo(() => (layout.sidebar.opened() ? side() : 64))
   const panel = createMemo(() => Math.max(side() - 64, 0))
 
@@ -3177,15 +3185,21 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
       id: "scheduled",
       icon: "status",
       label: () => language.t("sidebar.quickAction.scheduled"),
-      active: () => settingsOpen() && settingsTab() === "automation",
-      onSelect: () => openSettings("automation", true),
+      active: () => location.pathname.endsWith("/automation"),
+      onSelect: () => {
+        const directory = currentDir() || currentProject()?.worktree
+        if (directory) navigateWithSidebarReset(`/${base64Encode(directory)}/automation`)
+      },
     },
     {
       id: "plugins",
       icon: "mcp",
       label: () => language.t("settings.plugins.title"),
-      active: () => settingsOpen() && settingsTab() === "plugins",
-      onSelect: () => openSettings("plugins", true),
+      active: () => location.pathname.endsWith("/plugins"),
+      onSelect: () => {
+        const directory = currentDir() || currentProject()?.worktree
+        if (directory) navigateWithSidebarReset(`/${base64Encode(directory)}/plugins`)
+      },
     },
   ]
   const sidebarRail = () => (
@@ -3355,14 +3369,21 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
               >
                 <ResizeHandle
                   direction="horizontal"
-                  size={layout.sidebar.width()}
+                  class="sidebar-resize-handle"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整侧边栏宽度"
+                  size={side()}
                   min={244}
                   max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + 64}
                   onResize={(w) => {
                     setState("sizing", true)
-                    if (sizet !== undefined) clearTimeout(sizet)
-                    sizet = window.setTimeout(() => setState("sizing", false), 120)
+                    setSidebarDragWidth(w)
+                  }}
+                  onResizeEnd={(w) => {
                     layout.sidebar.resize(w)
+                    setSidebarDragWidth()
+                    setState("sizing", false)
                   }}
                 />
               </div>
@@ -3417,7 +3438,7 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
               <main
                 classList={{
                   "size-full overflow-x-hidden flex flex-col items-start contain-strict border-t border-border-weak-base bg-background-base lg:border-l": true,
-                  "lg:rounded-tl-[12px]": !settingsOpen(),
+                  "lg:rounded-tl-[12px]": !settingsOpen() && !isTopLevelWorkspacePage(),
                 }}
               >
                 <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
@@ -3434,7 +3455,7 @@ export default function Layout(props: ParentProps<{ quotaAction?: Accessor<JSX.E
           </div>
         </div>
       </div>
-      <Show when={settingsOpen()}>
+      <Show when={settingsOpen() && !isTopLevelWorkspacePage()}>
         <section
           class="absolute inset-x-0 top-10 bottom-0 z-[60] bg-background-base"
           data-component="settings-full-page"

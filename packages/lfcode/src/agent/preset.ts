@@ -31,21 +31,17 @@ export const Info = z
   .meta({ ref: "AgentPreset" })
 export type Info = z.infer<typeof Info>
 
-const readOnlyTools = ["read", "search", "tree", "file_info", "archive_inspect", "webfetch", "websearch", "codesearch", "skill"]
-const diagnosisTools = [...readOnlyTools, "shell"]
-const implementationTools = [...diagnosisTools, "edit", "edit_history", "shell_process", "task"]
+const readOnlyTools = ["read", "search", "webfetch", "websearch", "skill"]
+const diagnosisTools = [...readOnlyTools, "shell", "shell_process"]
+const implementationTools = [...diagnosisTools, "edit", "task"]
+const testerTools = [...diagnosisTools, "edit"]
 
 const readOnlyPermission = {
   "*": "deny",
   read: "allow",
-  grep: "allow",
-  glob: "allow",
-  tree: "allow",
-  file_info: "allow",
   search: "allow",
   webfetch: "allow",
   websearch: "allow",
-  codesearch: "allow",
   actor: "deny",
 } as const
 
@@ -53,10 +49,14 @@ const implementationPermission = {
   ...readOnlyPermission,
   edit: "ask",
   shell: "ask",
-  lsp: "allow",
   skill: "allow",
   task: "allow",
-  todowrite: "allow",
+} as const
+
+const testerPermission = {
+  ...readOnlyPermission,
+  shell: "ask",
+  edit: "ask",
 } as const
 
 const researchCoordinatorPermission = {
@@ -144,9 +144,10 @@ export const presets: readonly Info[] = [
     defaultExecution: "background",
     defaultContext: "minimal",
     modelInheritance: "primary",
-    permission: { ...readOnlyPermission, shell: "ask" },
-    toolAllowlist: diagnosisTools,
-    prompt: "优先运行最小相关验证，记录命令、结果和未覆盖的风险。不要修改业务文件。",
+    permission: testerPermission,
+    toolAllowlist: testerTools,
+    prompt:
+      "优先运行最小相关验证，记录命令、结果和未覆盖的风险。可以用 edit 创建或更新测试与审查文档；新文件必须使用 operation=write，已有文件使用明确的 edit 操作。不要修改业务功能文件。",
   },
   {
     id: "debugger",

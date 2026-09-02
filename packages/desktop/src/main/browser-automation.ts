@@ -1,4 +1,5 @@
 import { mkdir, stat, writeFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import { app, BrowserWindow, type DownloadItem, type Event, type WebContents } from "electron"
 import {
@@ -27,6 +28,7 @@ import {
   getBrowserTargetForSession,
   getReadyBrowserTargetForSession,
   hasBrowserTargetForSession,
+  refreshBrowserGuestPerformance,
   findBrowserCachedResourceByUrl,
   listBrowserConsoleForSession,
   listBrowserCachedResources,
@@ -41,9 +43,14 @@ const HEADING_LIMIT = 24
 const LANDMARK_LIMIT = 24
 const MEDIA_LIMIT = 48
 const DEFAULT_WAIT_TIMEOUT_MS = 10_000
-const WAIT_POLL_MS = 200
+// Keep semantic waits responsive during rapid model-driven UI tests. Event
+// handlers remain the fast path; this interval only backs polling operations.
+const WAIT_POLL_MS = 50
+const WAIT_POLL_MAX_MS = 250
 const NETWORK_IDLE_STABLE_MS = 600
 const OPEN_BROWSER_TARGET_TIMEOUT_MS = 10_000
+const READY_TARGET_POLL_MS = 25
+const NAVIGATION_RETRY_DELAYS_MS = [150, 300, 600]
 const DOWNLOAD_TIMEOUT_MS = 30_000
 const DEFAULT_SCROLL_AMOUNT = 600
 const CAPTURE_RETRY_LIMIT = 3
@@ -59,6 +66,8 @@ type ActiveBrowserAutomationTarget = {
 
 type SnapshotRef = {
   selector: string
+  guestID: number
+  url: string
 }
 
 type RawSnapshotElement = {
@@ -100,22 +109,23 @@ const snapshotRefs = new Map<string, Map<string, SnapshotRef>>()
 export function registerBrowserAutomationBridge() {
   registerDesktopBrowserAutomationBridge({
     getTarget: (input) => {
-      const target = getTargetForSession(input.sessionKey)
+      const target = getTargetForSession(input.sessionKey, input.tabID)
+      if (input.tabID && !target) throw browserAutomationError("browser_tab_not_found")
       return target ? serializeTarget(target) : undefined
     },
     navigate: async (input) => {
       const url = normalizeURL(input.url)
-      const target =
-        (await ensureSessionTarget(input.sessionKey, input.sessionID, url, input.title, input.presentation)) ??
-        (await requireTargetForSession(input.sessionKey))
-      if (target.guest.getURL() !== url) {
-        await target.guest.loadURL(url)
-      }
+      const target = input.newTab
+        ? await ensureSessionTarget(input.sessionKey, input.sessionID, undefined, url, input.title, input.presentation, true)
+        : (await ensureSessionTarget(input.sessionKey, input.sessionID, input.tabID, url, input.title, input.presentation)) ??
+          (await requireTargetForSession(input.sessionKey, input.tabID))
+      if (!target) throw browserAutomationError("browser_target_not_ready")
+      await navigateTarget(target, input.sessionKey, url, input.newTab ? target.tabID : input.tabID)
       return serializeTarget(target)
     },
     snapshot: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
-      const elements = await executeJSON<RawSnapshotElement[]>(target.guest, buildSnapshotScript(SNAPSHOT_LIMIT))
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
+      const elements = await executeJSON<RawSnapshotElement[]>(target.guest, buildSnapshotScript(SNAPSHOT_LIMIT), { retryReadOnly: true })
       storeSnapshotRefs(target, elements)
       return {
         target: serializeTarget(target),
@@ -124,7 +134,7 @@ export function registerBrowserAutomationBridge() {
       } satisfies DesktopBrowserAutomationSnapshot
     },
     screenshot: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const image = await captureGuestPage(target.guest)
       const size = image.getSize()
       const outputDir = join(app.getPath("userData"), "output", "browser-automation")
@@ -139,7 +149,7 @@ export function registerBrowserAutomationBridge() {
       } satisfies DesktopBrowserAutomationScreenshot
     },
     readPage: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const page = await executeJSON<RawPage>(
         target.guest,
         buildReadPageScript({
@@ -149,9 +159,10 @@ export function registerBrowserAutomationBridge() {
           landmarkLimit: LANDMARK_LIMIT,
           mediaLimit: MEDIA_LIMIT,
         }),
+        { retryReadOnly: true },
       )
       storeSnapshotRefs(target, page.interactive)
-      const media = enrichResourcesWithNetwork(page.media, listBrowserNetworkForSession(input.sessionKey, 200))
+      const media = enrichResourcesWithNetwork(page.media, listBrowserNetworkForSession(input.sessionKey, 200, input.tabID))
       return {
         target: serializeTarget(target),
         title: page.title,
@@ -165,7 +176,7 @@ export function registerBrowserAutomationBridge() {
       } satisfies DesktopBrowserAutomationPage
     },
     extractResource: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const selector = input.ref ? requireSnapshotRef(target, input.ref).selector : input.selector
       const resources = await executeJSON<RawResource[]>(
         target.guest,
@@ -173,20 +184,22 @@ export function registerBrowserAutomationBridge() {
           selector,
           limit: MEDIA_LIMIT,
         }),
+        { retryReadOnly: true },
       )
-      const enriched = enrichResourcesWithNetwork(resources, listBrowserNetworkForSession(input.sessionKey, 200))
+      const enriched = enrichResourcesWithNetwork(resources, listBrowserNetworkForSession(input.sessionKey, 200, input.tabID))
       return {
         target: serializeTarget(target),
         resources: enriched,
       } satisfies DesktopBrowserAutomationResourceSnapshot
     },
     captureElement: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const selector = input.ref ? requireSnapshotRef(target, input.ref).selector : input.selector
       if (!selector) throw new Error("capture_element requires ref or selector")
       const rect = await executeJSON<{ selector: string; x: number; y: number; width: number; height: number }>(
         target.guest,
         buildCaptureElementRectScript(selector),
+        { retryReadOnly: true },
       )
       if (rect.width < 2 || rect.height < 2) {
         throw new Error(`Element is not visible enough to capture: ${selector}`)
@@ -198,6 +211,9 @@ export function registerBrowserAutomationBridge() {
         height: rect.height,
       })
       const size = image.getSize()
+      const sourceWindow = BrowserWindow.fromId(target.sourceWindowID)
+      const viewport = sourceWindow?.getContentSize() ?? [size.width, size.height]
+      const deviceScaleFactor = sourceWindow?.webContents.getZoomFactor() ?? 1
       const outputDir = join(app.getPath("userData"), "output", "browser-automation")
       await mkdir(outputDir, { recursive: true })
       const path = join(outputDir, `${sanitizeForPath(target.tabID)}-element-${Date.now()}.png`)
@@ -208,20 +224,22 @@ export function registerBrowserAutomationBridge() {
         path,
         width: size.width,
         height: size.height,
+        viewport: { width: viewport[0], height: viewport[1] },
+        deviceScaleFactor,
       } satisfies DesktopBrowserAutomationElementCapture
     },
     getConsole: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       return {
         target: serializeTarget(target),
-        entries: listBrowserConsoleForSession(input.sessionKey, input.limit ?? 50),
+        entries: listBrowserConsoleForSession(input.sessionKey, input.limit ?? 50, input.tabID),
       } satisfies DesktopBrowserAutomationConsoleLog
     },
     getNetwork: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       return {
         target: serializeTarget(target),
-        entries: listBrowserNetworkForSession(input.sessionKey, input.limit ?? 50),
+        entries: listBrowserNetworkForSession(input.sessionKey, input.limit ?? 50, input.tabID),
       } satisfies DesktopBrowserAutomationNetworkLog
     },
     listCachedResources: async (input) => {
@@ -233,7 +251,7 @@ export function registerBrowserAutomationBridge() {
       }) satisfies Promise<DesktopBrowserAutomationCachedResourceList>
     },
     downloadResource: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const resolved = await resolveDownloadRequest(target, input)
       const cachePolicy = input.cachePolicy ?? "prefer-cache"
       const download =
@@ -259,7 +277,7 @@ export function registerBrowserAutomationBridge() {
       } satisfies DesktopBrowserAutomationDownload
     },
     scroll: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       await runScrollAction(target.guest, {
         selector: input.ref ? requireSnapshotRef(target, input.ref).selector : input.selector,
         direction: input.direction,
@@ -274,30 +292,29 @@ export function registerBrowserAutomationBridge() {
       throw nonPreemptiveBrowserInteractionError("focus")
     },
     clear: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       await runClearAction(target.guest, resolveElementSelector(target, input.ref, input.selector, "clear"))
       return serializeTarget(target)
     },
     selectOption: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       await runSelectOptionAction(target.guest, resolveElementSelector(target, input.ref, input.selector, "select_option"), input)
       return serializeTarget(target)
     },
     uploadFile: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const selector = resolveElementSelector(target, input.ref, input.selector, "upload_file")
       const files = await resolveUploadFiles(input.sessionKey, input.files)
       await runUploadFileAction(target.guest, selector, files)
       return serializeTarget(target)
     },
     click: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
-      const ref = requireSnapshotRef(target, input.ref)
-      await runSelectorAction(target.guest, ref.selector, "click")
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
+      await runSelectorAction(target.guest, resolveElementSelector(target, input.ref, input.selector, "click"), "click")
       return serializeTarget(target)
     },
     type: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const ref = requireSnapshotRef(target, input.ref)
       await runTypeAction(target.guest, ref.selector, input.text, input.submit === true)
       return serializeTarget(target)
@@ -306,40 +323,50 @@ export function registerBrowserAutomationBridge() {
       throw nonPreemptiveBrowserInteractionError("press_key")
     },
     back: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       if (!target.guest.navigationHistory.canGoBack()) {
-        throw new Error("The current side browser tab has no back history")
+        throw browserAutomationError("no_back_history")
       }
+      const initialUrl = target.guest.getURL()
+      clearSnapshotRefs(target)
       target.guest.navigationHistory.goBack()
+      await ensureNavigationSettled(target.guest, initialUrl)
       return serializeTarget(target)
     },
     forward: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       if (!target.guest.navigationHistory.canGoForward()) {
-        throw new Error("The current side browser tab has no forward history")
+        throw browserAutomationError("no_forward_history")
       }
+      const initialUrl = target.guest.getURL()
+      clearSnapshotRefs(target)
       target.guest.navigationHistory.goForward()
+      await ensureNavigationSettled(target.guest, initialUrl)
       return serializeTarget(target)
     },
     reload: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
+      const initialUrl = target.guest.getURL()
+      clearSnapshotRefs(target)
       target.guest.reload()
+      await ensureNavigationSettled(target.guest, initialUrl, true)
       return serializeTarget(target)
     },
     close: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const win = BrowserWindow.fromId(target.sourceWindowID)
       if (!win || win.isDestroyed()) {
         throw new Error(`Browser window ${target.sourceWindowID} is not available`)
       }
+      clearSnapshotRefs(target)
       await callRendererAutomation(win, "browser.close", { tabID: target.tabID })
       await delay(100)
       if (isBackgroundDetachedBrowserWindow(win)) win.destroy()
-      const next = getReadyTargetForSession(input.sessionKey)
+      const next = getReadyTargetForSession(input.sessionKey, input.tabID)
       return next ? serializeTarget(next) : undefined
     },
     waitFor: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       if (input.timeMs && input.timeMs > 0) {
         await delay(input.timeMs)
         return {
@@ -358,7 +385,7 @@ export function registerBrowserAutomationBridge() {
       }
     },
     waitForSelector: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const matched = await waitForSelector(target.guest, input)
       return {
         matched,
@@ -367,7 +394,7 @@ export function registerBrowserAutomationBridge() {
       }
     },
     waitForUrl: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const matched = await waitForUrl(target.guest, input)
       return {
         matched,
@@ -376,7 +403,7 @@ export function registerBrowserAutomationBridge() {
       }
     },
     waitForLoadState: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const matched = await waitForLoadState(target.guest, input)
       return {
         matched,
@@ -385,7 +412,7 @@ export function registerBrowserAutomationBridge() {
       }
     },
     waitForNavigation: async (input) => {
-      const target = await requireTargetForSession(input.sessionKey)
+      const target = await requireTargetForSession(input.sessionKey, input.tabID)
       const matched = await waitForNavigation(target.guest, input)
       return {
         matched,
@@ -403,35 +430,43 @@ export function registerBrowserAutomationBridge() {
   } satisfies DesktopBrowserAutomationBridge)
 }
 
-export function getBrowserAutomationTargetForSession(sessionKey: string) {
-  const target = getTargetForSession(sessionKey)
+export function getBrowserAutomationTargetForSession(sessionKey: string, tabID?: string) {
+  const target = getTargetForSession(sessionKey, tabID)
   return target ? serializeTarget(target) : undefined
 }
 
-function getTargetForSession(sessionKey: string) {
-  return getBrowserTargetForSession(sessionKey)
+function getTargetForSession(sessionKey: string, tabID?: string) {
+  return getBrowserTargetForSession(sessionKey, tabID)
 }
 
-function getReadyTargetForSession(sessionKey: string) {
-  return getReadyBrowserTargetForSession(sessionKey)
+function getReadyTargetForSession(sessionKey: string, tabID?: string) {
+  return getReadyBrowserTargetForSession(sessionKey, tabID)
 }
 
-async function requireTargetForSession(sessionKey: string) {
-  const target = getReadyTargetForSession(sessionKey)
-  if (target) return target
-  if (hasBrowserTargetForSession(sessionKey)) return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS)
-  throw browserAutomationError("browser_target_missing")
+async function requireTargetForSession(sessionKey: string, tabID?: string) {
+  const target = getReadyTargetForSession(sessionKey, tabID)
+  if (target) {
+    refreshBrowserGuestPerformance({ sourceWindowID: target.sourceWindowID, tabID: target.tabID })
+    return target
+  }
+  if (hasBrowserTargetForSession(sessionKey, tabID)) return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS, tabID)
+  if (tabID) clearSnapshotRefsForTab(tabID)
+  throw browserAutomationError(tabID ? "browser_tab_not_found" : "browser_target_missing")
 }
 
 async function ensureSessionTarget(
   sessionKey: string,
   sessionID: string | undefined,
+  tabID: string | undefined,
   url: string,
   title: string | undefined,
   presentation: "headless" | "detached" | "sidebar" | undefined,
+  newTab = false,
 ) {
-  const existing = getReadyTargetForSession(sessionKey)
+  const requestedTabID = newTab ? createAutomationTabID() : tabID
+  const existing = newTab ? undefined : getReadyTargetForSession(sessionKey, tabID)
   if (existing) return existing
+  if (tabID && !newTab) return undefined
 
   const win = getBrowserOpenWindow(sessionKey)
   if (!win) return undefined
@@ -443,8 +478,14 @@ async function ensureSessionTarget(
     title,
     presentation,
     reason: "tool",
+    newTab,
+    tabID: requestedTabID,
   })
-  return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS)
+  return waitForReadyTarget(sessionKey, OPEN_BROWSER_TARGET_TIMEOUT_MS, requestedTabID)
+}
+
+function createAutomationTabID() {
+  return `b_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`
 }
 
 function getBrowserOpenWindow(sessionKey: string) {
@@ -473,22 +514,22 @@ function findWindowForSession(sessionKey: string) {
   })
 }
 
-async function waitForReadyTarget(sessionKey: string, timeoutMs: number) {
+async function waitForReadyTarget(sessionKey: string, timeoutMs: number, tabID?: string) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
-    const target = getReadyTargetForSession(sessionKey)
+    const target = getReadyTargetForSession(sessionKey, tabID)
     if (target) return target
-    await delay(100)
+    await delay(READY_TARGET_POLL_MS)
   }
   throw browserAutomationError("browser_target_not_ready")
 }
 
 function requireSnapshotRef(target: ActiveBrowserAutomationTarget, ref: string) {
   const refs = snapshotRefs.get(targetKey(target))
-  if (!refs) throw new Error("No browser snapshot is available for the active side browser tab")
+  if (!refs) throw browserAutomationError("stale_snapshot_ref", { ref })
   const result = refs.get(ref)
-  if (result) return result
-  throw new Error(`Snapshot element ${ref} was not found; take a fresh browser snapshot first`)
+  if (result && result.guestID === target.guest.id && result.url === target.guest.getURL()) return result
+  throw browserAutomationError("stale_snapshot_ref", { ref })
 }
 
 function resolveElementSelector(
@@ -503,7 +544,20 @@ function resolveElementSelector(
 }
 
 function storeSnapshotRefs(target: ActiveBrowserAutomationTarget, elements: RawSnapshotElement[]) {
-  snapshotRefs.set(targetKey(target), new Map(elements.map((item) => [item.ref, { selector: item.selector }])))
+  snapshotRefs.set(
+    targetKey(target),
+    new Map(elements.map((item) => [item.ref, { selector: item.selector, guestID: target.guest.id, url: target.guest.getURL() }])),
+  )
+}
+
+function clearSnapshotRefs(target: ActiveBrowserAutomationTarget) {
+  snapshotRefs.delete(targetKey(target))
+}
+
+function clearSnapshotRefsForTab(tabID: string) {
+  for (const key of snapshotRefs.keys()) {
+    if (key.endsWith(`:${tabID}`)) snapshotRefs.delete(key)
+  }
 }
 
 function serializeTarget(target: ActiveBrowserAutomationTarget): DesktopBrowserAutomationTarget {
@@ -532,6 +586,31 @@ function normalizeURL(input: string) {
   return url.toString()
 }
 
+async function navigateTarget(target: ActiveBrowserAutomationTarget, sessionKey: string, url: string, tabID?: string) {
+  if (target.guest.getURL() === url) return
+  clearSnapshotRefs(target)
+
+  for (let attempt = 0; attempt <= NAVIGATION_RETRY_DELAYS_MS.length; attempt++) {
+    if (target.guest.isDestroyed() || getTargetForSession(sessionKey, tabID)?.tabID !== target.tabID) {
+      throw browserAutomationError("browser_navigation_failed")
+    }
+
+    try {
+      await target.guest.loadURL(url)
+      if (target.guest.getURL() === url) return
+    } catch {
+      if (target.guest.isDestroyed()) throw browserAutomationError("browser_navigation_failed")
+    }
+
+    if (target.guest.getURL() === url) return
+    const delayMs = NAVIGATION_RETRY_DELAYS_MS[attempt]
+    if (delayMs === undefined) break
+    await delay(delayMs)
+  }
+
+  throw browserAutomationError("browser_navigation_failed")
+}
+
 function nonPreemptiveBrowserInteractionError(action: "focus" | "hover" | "press_key") {
   return new AutomationHttpError(
     409,
@@ -543,12 +622,23 @@ function nonPreemptiveBrowserInteractionError(action: "focus" | "hover" | "press
   )
 }
 
-async function executeJSON<T>(guest: WebContents, script: string) {
-  try {
-    return (await guest.executeJavaScript(script, true)) as T
-  } catch {
-    throw browserAutomationError("browser_renderer_unavailable")
+async function executeJSON<T>(guest: WebContents, script: string, options?: { retryReadOnly?: boolean }) {
+  const attempts = options?.retryReadOnly ? 2 : 1
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return (await guest.executeJavaScript(script, true)) as T
+    } catch (error) {
+      if (!isRendererLifecycleError(error)) throw error instanceof Error ? error : new Error(String(error))
+      if (attempt + 1 >= attempts || guest.isDestroyed()) throw browserAutomationError("browser_renderer_unavailable")
+      await delay(75)
+    }
   }
+  throw browserAutomationError("browser_renderer_unavailable")
+}
+
+function isRendererLifecycleError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return /render frame|render process|webcontents.*destroy|object has been destroyed|frame.*disposed|renderer.*gone/i.test(message)
 }
 
 async function runSelectorAction(guest: WebContents, selector: string, action: "click") {
@@ -735,6 +825,7 @@ async function runUploadFileAction(guest: WebContents, selector: string, files: 
         }
         return { ok: true }
       })()`,
+      { retryReadOnly: true },
     )
     if (!role.ok) throw new Error(role.error ?? "Upload target is invalid")
     await guest.debugger.sendCommand("DOM.setFileInputFiles", {
@@ -757,6 +848,7 @@ async function waitForText(
   if (!input.text && !input.textGone) throw new Error("wait_for requires text or textGone")
   const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
   const startedAt = Date.now()
+  let polls = 0
   while (Date.now() - startedAt < timeoutMs) {
     const matched = await executeJSON<boolean>(
       guest,
@@ -766,9 +858,10 @@ async function waitForText(
         const missingText = ${input.textGone ? `!text.includes(${JSON.stringify(input.textGone)})` : "true"}
         return hasText && missingText
       })()`,
+      { retryReadOnly: true },
     )
     if (matched) return true
-    await delay(WAIT_POLL_MS)
+    await delay(pollDelay(polls++))
   }
   return false
 }
@@ -779,10 +872,14 @@ async function waitForSelector(
     selector: string
     visible?: boolean
     timeoutMs?: number
+    stableMs?: number
   },
 ) {
   const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
   const startedAt = Date.now()
+  const stableMs = input.stableMs ?? 0
+  let polls = 0
+  let stableStartedAt: number | undefined
   while (Date.now() - startedAt < timeoutMs) {
     const matched = await executeJSON<boolean>(
       guest,
@@ -795,9 +892,15 @@ async function waitForSelector(
         const style = getComputedStyle(element)
         return style.display !== "none" && style.visibility !== "hidden"
       })()`,
+      { retryReadOnly: true },
     )
-    if (matched) return true
-    await delay(WAIT_POLL_MS)
+    if (matched) {
+      stableStartedAt = stableStartedAt ?? Date.now()
+      if (Date.now() - stableStartedAt >= stableMs) return true
+    } else {
+      stableStartedAt = undefined
+    }
+    await delay(pollDelay(polls++))
   }
   return false
 }
@@ -808,14 +911,23 @@ async function waitForUrl(
     url: string
     match?: "equals" | "includes"
     timeoutMs?: number
+    stableMs?: number
   },
 ) {
   const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
   const startedAt = Date.now()
+  const stableMs = input.stableMs ?? 0
+  let polls = 0
+  let stableStartedAt: number | undefined
   while (Date.now() - startedAt < timeoutMs) {
     const current = guest.getURL()
-    if (urlMatched(current, input.url, input.match)) return true
-    await delay(WAIT_POLL_MS)
+    if (urlMatched(current, input.url, input.match)) {
+      stableStartedAt = stableStartedAt ?? Date.now()
+      if (Date.now() - stableStartedAt >= stableMs) return true
+    } else {
+      stableStartedAt = undefined
+    }
+    await delay(pollDelay(polls++))
   }
   return false
 }
@@ -835,10 +947,11 @@ async function waitForLoadState(
 ) {
   const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS
   const stableMs = input.stableMs ?? NETWORK_IDLE_STABLE_MS
+  let polls = 0
   const startedAt = Date.now()
   let stableStartedAt: number | undefined
   while (Date.now() - startedAt < timeoutMs) {
-    const readyState = await executeJSON<string>(guest, `document.readyState`)
+    const readyState = await executeJSON<string>(guest, `document.readyState`, { retryReadOnly: true })
     if (input.state === "domcontentloaded" && (readyState === "interactive" || readyState === "complete")) return true
     if (input.state === "load" && readyState === "complete") return true
     if (input.state === "networkidle") {
@@ -849,7 +962,7 @@ async function waitForLoadState(
         stableStartedAt = undefined
       }
     }
-    await delay(WAIT_POLL_MS)
+    await delay(pollDelay(polls++))
   }
   return false
 }
@@ -868,24 +981,45 @@ async function waitForNavigation(
   const startedAt = Date.now()
   const initialUrl = guest.getURL()
   let sawActivity = false
+  let polls = 0
   while (Date.now() - startedAt < timeoutMs) {
     const current = guest.getURL()
     const matchesExpected = input.url ? urlMatched(current, input.url, input.match) : false
     const loading = guest.isLoading()
-    if (loading || current !== initialUrl || matchesExpected) {
+    if (loading || current !== initialUrl) {
       sawActivity = true
     }
-    if (matchesExpected) {
+    if (matchesExpected && sawActivity) {
       const remaining = Math.max(250, timeoutMs - (Date.now() - startedAt))
       return waitForLoadState(guest, { state: "networkidle", timeoutMs: remaining, stableMs })
     }
     if (sawActivity && !loading) {
-      const readyState = await executeJSON<string>(guest, `document.readyState`)
+      const readyState = await executeJSON<string>(guest, `document.readyState`, { retryReadOnly: true })
       if (current !== initialUrl || readyState === "complete") return true
     }
-    await delay(WAIT_POLL_MS)
+    await delay(pollDelay(polls++))
   }
   return false
+}
+
+/** Wait until a history/reload action has produced a settled document. */
+async function ensureNavigationSettled(guest: WebContents, initialUrl: string, reload = false) {
+  const matched = await waitForNavigation(guest, {
+    timeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+    stableMs: reload ? 0 : NETWORK_IDLE_STABLE_MS,
+  })
+  if (matched) return
+  // A reload keeps the same URL, so waitForNavigation cannot observe a URL
+  // change. Check the load state once more before reporting a timeout.
+  if (reload && guest.getURL() === initialUrl) {
+    const loaded = await waitForLoadState(guest, {
+      state: "load",
+      timeoutMs: 250,
+      stableMs: 0,
+    })
+    if (loaded) return
+  }
+  throw browserAutomationError("navigation_timeout")
 }
 
 function formatSnapshotText(elements: DesktopBrowserAutomationElement[]) {
@@ -939,6 +1073,11 @@ async function resolveDownloadRequest(
       selector,
       limit: MEDIA_LIMIT,
     }),
+    // Resource discovery is read-only. A guest renderer can briefly be
+    // unavailable while a navigation commits, so use the same bounded
+    // lifecycle recovery as extractResource/readPage instead of failing the
+    // whole download request on the first transient renderer error.
+    { retryReadOnly: true },
   )
   const enrichedResources = enrichResourcesWithNetwork(resources, listBrowserNetworkForSession(target.sessionKey ?? "", 200))
   const resource =
@@ -1056,6 +1195,7 @@ async function exportBlobAsDataUrl(guest: WebContents, url: string) {
         reader.onload = () => resolve(String(reader.result || ""))
         reader.readAsDataURL(blob)
       }))`,
+    { retryReadOnly: true },
   )
 }
 
@@ -1067,6 +1207,7 @@ async function exportCanvasAsDataUrl(guest: WebContents, selector: string) {
       if (!(element instanceof HTMLCanvasElement)) throw new Error("Canvas element not found")
       return element.toDataURL("image/png")
     })()`,
+    { retryReadOnly: true },
   )
 }
 
@@ -2437,4 +2578,8 @@ function ensureDebugger(guest: WebContents) {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function pollDelay(attempt: number) {
+  return Math.min(WAIT_POLL_MAX_MS, WAIT_POLL_MS + attempt * 20)
 }

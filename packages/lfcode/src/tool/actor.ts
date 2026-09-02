@@ -7,6 +7,7 @@ import { SessionID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
 import { Provider } from "../provider"
+import { Config } from "../config"
 import type { SessionPrompt } from "../session/prompt"
 import { ActorRegistry } from "@/actor/registry"
 import { ActorWaiter } from "@/actor/waiter"
@@ -29,7 +30,7 @@ export interface ActorPromptOps {
 const id = "actor"
 
 const MODEL_PARAM_DESCRIPTION =
-  "(optional) Model for this subagent: a model group name (e.g. ultra/standard/lite) or a literal provider/model (e.g. provider/model). Overrides the role model policy; by default roles inherit the parent's model, while configured roles use their configured model. If no model_groups are configured, the tier names resolve to the default model."
+  "(optional) Model for this subagent: use a configured model group name (for example ultra, standard, or lite) or a literal provider/model reference (for example openai/gpt-4.1). Do not pass a bare provider model ID; it is interpreted as a group name. Overrides the role model policy; by default roles inherit the parent's model, while configured roles use their configured model. If no model_groups are configured, tier names resolve to the default model."
 
 const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "send"]
 
@@ -285,7 +286,38 @@ export function recoverActorArgs(rawArgs: unknown): ActorShellArgs | undefined {
     try {
       const inner = JSON.parse(obj.operation)
       if (inner && typeof inner === "object" && !Array.isArray(inner)) obj = { operation: inner }
-    } catch {}
+    } catch {
+      // Some providers flatten the JSON envelope as
+      // { operation: "wait", actor_id, timeout_ms }. Preserve only fields
+      // valid for that action so compatibility recovery cannot smuggle
+      // unrelated arguments into the strict schema.
+      const action = obj.operation
+      if (action === "status" || action === "cancel") {
+        if (typeof obj.actor_id === "string") obj = { operation: { action, actor_id: obj.actor_id } }
+      } else if (action === "wait") {
+        if (typeof obj.actor_id === "string") {
+          obj = {
+            operation: {
+              action,
+              actor_id: obj.actor_id,
+              ...(typeof obj.timeout_ms === "number" ? { timeout_ms: obj.timeout_ms } : {}),
+            },
+          }
+        }
+      } else if (action === "send") {
+        if (typeof obj.to_actor_id === "string" && typeof obj.content === "string") {
+          obj = {
+            operation: {
+              action,
+              to_actor_id: obj.to_actor_id,
+              content: obj.content,
+              ...(typeof obj.to_session_id === "string" ? { to_session_id: obj.to_session_id } : {}),
+              ...(typeof obj.type === "string" ? { type: obj.type } : {}),
+            },
+          }
+        }
+      }
+    }
   }
   if (obj.operation && typeof obj.operation === "object" && !Array.isArray(obj.operation))
     return { operation: obj.operation } as ActorShellArgs
@@ -317,6 +349,7 @@ export const ActorTool = Tool.define(
   Effect.gen(function* () {
     const agent = yield* Agent.Service
     const provider = yield* Provider.Service
+    const config = yield* Config.Service
     const actorRegistry = yield* ActorRegistry.Service
     const checkpoint = yield* SessionCheckpoint.Service
     const waiter = yield* ActorWaiter.Service
@@ -853,7 +886,12 @@ export const ActorTool = Tool.define(
           )
         }
 
-        if (ctx.actorID) {
+        // The persistent session owner is registered as actorID="main", but
+        // it is not a configurable subagent role and therefore has no
+        // delegationAllowlist. Primary sessions may delegate to any visible
+        // spawnable agent; only nested subagents use their role allowlist and
+        // one-level depth limit below.
+        if (ctx.actorID && ctx.actorID !== "main") {
           const parent = parentActor
           if (!parent) {
             return yield* Effect.fail(new Error("Subagent delegation denied because the current actor is not registered"))
@@ -923,14 +961,32 @@ export const ActorTool = Tool.define(
           },
         })
 
-        const model = modelRef
+        const inheritedModel = configuredModel ?? {
+          modelID: msg.info.modelID,
+          providerID: msg.info.providerID,
+        }
+        const modelRefIsResolvable =
+          !!modelRef &&
+          (modelRef.includes("/") || ["ultra", "standard", "lite"].includes(modelRef) || !!(yield* config.get()).model_groups?.[modelRef])
+        const resolved = modelRef && modelRefIsResolvable
           ? yield* provider
               .resolveModelRef(modelRef, msg.info.providerID)
-              .pipe(Effect.map((m) => ({ modelID: m.id, providerID: m.providerID })))
-          : (configuredModel ?? {
-              modelID: msg.info.modelID,
-              providerID: msg.info.providerID,
-            })
+              .pipe(
+                Effect.map((m) => ({
+                  model: { modelID: m.id, providerID: m.providerID },
+                  fallback: false,
+                })),
+                // A bare model ID is commonly emitted by role instructions.
+                // It is syntactically valid but cannot be resolved as a group;
+                // inherit the parent model instead of turning the whole actor
+                // call into a terminal tool failure. Explicit provider/model
+                // references still surface their real ModelNotFoundError.
+              )
+          : { model: inheritedModel, fallback: !!modelRef }
+        const model = resolved.model
+        const modelNotice = resolved.fallback
+          ? `note: model "${modelRef}" is not a configured model group; inherited the parent model ${model.providerID}/${model.modelID}. Use provider/model for an explicit model.`
+          : ""
 
         // Validate task_id by reference at execute time (NOT in the schema, so a
         // bad value degrades instead of hard-failing the call). A malformed shape
@@ -998,7 +1054,7 @@ export const ActorTool = Tool.define(
               ...(spawnResult.dispatchID ? { dispatchID: spawnResult.dispatchID } : {}),
             },
             output:
-              (taskNotice ? taskNotice + "\n" : "") +
+              (taskNotice || modelNotice ? [taskNotice, modelNotice].filter(Boolean).join("\n") + "\n" : "") +
               `Background actor queued. actor_id: ${spawnResult.actorID}` +
               (spawnResult.dispatchID ? `\ndispatch_id: ${spawnResult.dispatchID}` : "") +
               "\nThe result is available for manual receipt when complete.",
@@ -1054,7 +1110,7 @@ export const ActorTool = Tool.define(
           title: description,
           metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model } as Record<string, any>,
           output: [
-            ...(taskNotice ? [taskNotice, ""] : []),
+            ...(taskNotice || modelNotice ? [[taskNotice, modelNotice].filter(Boolean).join("\n"), ""] : []),
             `actor_id: ${spawnResult.actorID} (for resuming to continue this task if needed)`,
             "",
             `<actor_result status="${statusAttr}"${summaryAttr}>`,

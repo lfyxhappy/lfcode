@@ -8,6 +8,7 @@ export const popularProviders = [
   "opencode",
   "opencode-go",
   "a6api",
+  "lfapi",
   "lfcode-go",
   "anthropic",
   "github-copilot",

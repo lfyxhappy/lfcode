@@ -43,6 +43,7 @@ import { ConfigServer } from "./server"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@/npm"
 import { A6Api } from "@/provider/a6api"
+import { LfApi } from "@/provider/lfapi"
 import { OpenCode } from "@/provider/opencode"
 import { OpenCodeGo } from "@/provider/opencode-go"
 import { listManagedPluginSpecs, registryFile } from "@/plugin/library"
@@ -231,7 +232,9 @@ const InfoSchema = Schema.Struct({
   }),
   layout: Schema.optional(ConfigLayout.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(PermissionRef),
-  tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
+  tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
+    description: "Removed. Use permission with canonical tool IDs.",
+  }),
   tool: Schema.optional(
     Schema.Struct({
       invocation_style: Schema.optional(Schema.Literals(["json", "shell"])).annotate({
@@ -991,6 +994,7 @@ export const layer = Layer.effect(
       )
       const parsed = ConfigParse.jsonc(expanded, source)
       const data = ConfigParse.schema(Info, normalizeLoadedConfig(parsed, source), source)
+      if (data.tools) throw new Error("tools is removed; configure canonical tool IDs through permission instead.")
       if (!("path" in options)) return data
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
@@ -1359,19 +1363,6 @@ export const layer = Layer.effect(
 
         if (Flag.LFCODE_PERMISSION) {
           result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.LFCODE_PERMISSION))
-        }
-
-        if (result.tools) {
-          const perms: Record<string, ConfigPermission.Action> = {}
-          for (const [tool, enabled] of Object.entries(result.tools)) {
-            const action: ConfigPermission.Action = enabled ? "allow" : "deny"
-            if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
-              perms.edit = action
-              continue
-            }
-            perms[tool] = action
-          }
-          result.permission = mergeDeep(perms, result.permission ?? {})
         }
 
         if (!result.username) result.username = os.userInfo().username
@@ -1861,6 +1852,7 @@ export const layer = Layer.effect(
       key?: string,
     ) {
       if (providerID === A6Api.A6API_PROVIDER_ID) A6Api.assertConfiguration(provider)
+      if (providerID === LfApi.PROVIDER_ID) LfApi.assertConfiguration(provider)
       if (providerID === OpenCode.PROVIDER_ID) OpenCode.assertConfiguration(provider)
       if (providerID === OpenCodeGo.PROVIDER_ID) OpenCodeGo.assertConfiguration(provider)
       const target = yield* Effect.fn(function* () {

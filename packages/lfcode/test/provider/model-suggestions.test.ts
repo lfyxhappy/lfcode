@@ -215,6 +215,40 @@ test("online fallback uses a custom provider name to resolve duplicate mainstrea
   expect(result.patch.limit?.context).toBe(1_050_000)
 })
 
+test("authoritative online metadata preserves provider limits and modalities", async () => {
+  const online = {
+    "opencode-go": {
+      id: "opencode-go",
+      name: "OpenCode Go",
+      env: [],
+      models: {
+        "qwen3.8-flash": {
+          id: "qwen3.8-flash",
+          name: "Qwen3.8 Flash",
+          release_date: "2026-08-26",
+          last_updated: "2026-08-26",
+          attachment: true,
+          reasoning: true,
+          temperature: true,
+          tool_call: true,
+          limit: { context: 1_000_000, output: 131_072 },
+          modalities: { input: ["text", "image", "video"], output: ["text"] },
+        },
+      },
+    },
+  } satisfies Record<string, CatalogProvider>
+
+  const result = await suggestModelWithOnlineFallback(
+    { providerID: "opencode-go", modelID: "qwen3.8-flash", catalog: {} },
+    async () => online,
+    { preferOnline: true },
+  )
+  expect(result.source).toBe("online")
+  expect(result.patch.limit).toEqual({ context: 1_000_000, output: 131_072 })
+  expect(result.patch.modalities).toEqual({ input: ["text", "image", "video"], output: ["text"] })
+  expect(result.sourceUpdatedAt).toBe("2026-08-26")
+})
+
 test("online catalog failures keep the local inference and warning", async () => {
   const result = await suggestModelWithOnlineFallback(
     { providerID: "custom", modelID: "my-gpt-5-coding" },

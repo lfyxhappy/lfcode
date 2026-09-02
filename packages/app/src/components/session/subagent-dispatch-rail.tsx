@@ -1,16 +1,14 @@
 import { Icon } from "@lfcode-ai/ui/icon"
 import { showToast } from "@lfcode-ai/ui/toast"
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServer } from "@/context/server"
 import { formatServerError } from "@/utils/server-errors"
-import { startVisiblePolling } from "@/utils/visible-poll"
-import { actorDispatches, requestSubagentApi, type ActorDispatch } from "../subagent-api"
+import { requestSubagentApi, type ActorDispatch } from "../subagent-api"
 import { type VisibleSubagent, SubagentCard } from "./subagent-card"
 
 type SessionActor = VisibleSubagent & { mode: string; visible?: boolean }
 
-const pollMs = 5_000
 const terminal = new Set(["completed", "failed", "cancelled"])
 
 function groupLabel(status: string, manualResume?: boolean) {
@@ -31,13 +29,14 @@ function isTerminal(dispatch: ActorDispatch) {
 export function SubagentDispatchRail(props: {
   sessionID: string
   directory: string
+  dispatches: () => ActorDispatch[]
+  onRefresh: () => Promise<void>
   actors: () => SessionActor[]
   onOpenSubagent: (actorID: string) => void
   showEmpty?: boolean
 }) {
   const language = useLanguage()
   const server = useServer()
-  const [dispatches, setDispatches] = createSignal<ActorDispatch[]>([])
   const [loaded, setLoaded] = createSignal(false)
   const [actionID, setActionID] = createSignal<string>()
   const connection = () => ({
@@ -48,53 +47,39 @@ export function SubagentDispatchRail(props: {
   })
   let initial = true
   let lastStatuses = new Map<string, string>()
+  let observedSessionID = props.sessionID
 
-  const refresh = async () => {
-    try {
-      const next = actorDispatches(
-        await requestSubagentApi<unknown>({
-          connection: connection(),
-          path: "/actor-dispatch",
-          query: { sessionID: props.sessionID },
-        }),
-      )
-      if (!initial) {
-        for (const item of next) {
-          const previous = lastStatuses.get(item.id)
-          if (!isTerminal(item) || previous === item.status) continue
-          showToast({
-            variant: item.status === "completed" ? "success" : "error",
-            title: `${item.description}: ${language.t(groupLabel(item.status))}`,
-            description:
-              item.status === "completed"
-                ? language.t("subagent.rail.resultReady")
-                : item.error ?? language.t("subagent.rail.stopped"),
-          })
-        }
-      }
-      initial = false
-      lastStatuses = new Map(next.map((item) => [item.id, item.status]))
-      setDispatches(next)
-    } catch (error) {
-      if (!loaded()) {
+  const observeDispatches = () => {
+    if (observedSessionID !== props.sessionID) {
+      observedSessionID = props.sessionID
+      initial = true
+      lastStatuses = new Map()
+      setLoaded(false)
+    }
+    const next = props.dispatches()
+    setLoaded(true)
+    if (!initial) {
+      for (const item of next) {
+        const previous = lastStatuses.get(item.id)
+        if (!isTerminal(item) || previous === item.status) continue
         showToast({
-          variant: "error",
-          title: language.t("common.requestFailed"),
-          description: formatServerError(error, language.t, language.t("common.requestFailed")),
+          variant: item.status === "completed" ? "success" : "error",
+          title: `${item.description}: ${language.t(groupLabel(item.status))}`,
+          description:
+            item.status === "completed"
+              ? language.t("subagent.rail.resultReady")
+              : (item.error ?? language.t("subagent.rail.stopped")),
         })
       }
-    } finally {
-      setLoaded(true)
     }
+    initial = false
+    lastStatuses = new Map(next.map((item) => [item.id, item.status]))
   }
 
   createEffect(() => {
     props.sessionID
-    initial = true
-    lastStatuses = new Map()
-    setLoaded(false)
-    const stopPolling = startVisiblePolling(refresh, pollMs)
-    onCleanup(stopPolling)
+    props.dispatches()
+    observeDispatches()
   })
 
   const runAction = async (id: string, action: "cancel" | "resume" | "receive") => {
@@ -107,7 +92,7 @@ export function SubagentDispatchRail(props: {
         method: "POST",
         query: { sessionID: props.sessionID },
       })
-      await refresh()
+      await props.onRefresh()
     } catch (error) {
       showToast({
         variant: "error",
@@ -120,7 +105,8 @@ export function SubagentDispatchRail(props: {
   }
 
   const dispatchActors = createMemo(() =>
-    dispatches()
+    props
+      .dispatches()
       .filter((dispatch) => !dispatch.research)
       .map((dispatch) => ({
         dispatch,
@@ -134,16 +120,32 @@ export function SubagentDispatchRail(props: {
         } satisfies VisibleSubagent,
       })),
   )
-  const attachedActorIDs = createMemo(() => new Set(dispatches().map((item) => item.actorID).filter((item): item is string => !!item)))
+  const attachedActorIDs = createMemo(
+    () =>
+      new Set(
+        props
+          .dispatches()
+          .map((item) => item.actorID)
+          .filter((item): item is string => !!item),
+      ),
+  )
   const directActors = createMemo(() =>
     props
       .actors()
-      .filter((actor) => actor.mode === "subagent" && actor.visible !== false && !attachedActorIDs().has(actor.actorID)),
+      .filter(
+        (actor) => actor.mode === "subagent" && actor.visible !== false && !attachedActorIDs().has(actor.actorID),
+      ),
   )
   const running = createMemo(() => dispatchActors().filter((item) => item.dispatch.status === "running"))
-  const queued = createMemo(() => dispatchActors().filter((item) => item.dispatch.status === "queued" || item.dispatch.status === "interrupted"))
-  const awaitingReceipt = createMemo(() => dispatchActors().filter((item) => isTerminal(item.dispatch) && item.dispatch.unread))
-  const completed = createMemo(() => dispatchActors().filter((item) => isTerminal(item.dispatch) && !item.dispatch.unread))
+  const queued = createMemo(() =>
+    dispatchActors().filter((item) => item.dispatch.status === "queued" || item.dispatch.status === "interrupted"),
+  )
+  const awaitingReceipt = createMemo(() =>
+    dispatchActors().filter((item) => isTerminal(item.dispatch) && item.dispatch.unread),
+  )
+  const completed = createMemo(() =>
+    dispatchActors().filter((item) => isTerminal(item.dispatch) && !item.dispatch.unread),
+  )
   const count = createMemo(() => dispatchActors().length + directActors().length)
 
   const card = (item: { dispatch: ActorDispatch; actor: VisibleSubagent }) => (
@@ -162,7 +164,10 @@ export function SubagentDispatchRail(props: {
             )}
           </Show>
           <Show when={item.dispatch.conflicts.length > 0}>
-            <span class="rounded-md bg-status-warning/10 px-1.5 py-1 text-11-medium text-status-warning" title={item.dispatch.conflicts.join(", ")}>
+            <span
+              class="rounded-md bg-status-warning/10 px-1.5 py-1 text-11-medium text-status-warning"
+              title={item.dispatch.conflicts.join(", ")}
+            >
               {language.t("subagent.rail.conflict")}
             </span>
           </Show>
@@ -241,7 +246,13 @@ export function SubagentDispatchRail(props: {
         <Show when={directActors().length > 0}>
           <div class="mt-2 border-t border-border-weak-base pt-1">
             <For each={directActors()}>
-              {(actor) => <SubagentCard sessionID={props.sessionID} actor={actor} onClick={() => props.onOpenSubagent(actor.actorID)} />}
+              {(actor) => (
+                <SubagentCard
+                  sessionID={props.sessionID}
+                  actor={actor}
+                  onClick={() => props.onOpenSubagent(actor.actorID)}
+                />
+              )}
             </For>
           </div>
         </Show>

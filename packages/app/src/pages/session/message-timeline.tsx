@@ -1,4 +1,15 @@
-import { For, createEffect, createMemo, createResource, on, onCleanup, Show, Index, type JSX, createSignal } from "solid-js"
+import {
+  For,
+  createEffect,
+  createMemo,
+  createResource,
+  on,
+  onCleanup,
+  Show,
+  Index,
+  type JSX,
+  createSignal,
+} from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useNavigate } from "@solidjs/router"
 import { useMutation } from "@tanstack/solid-query"
@@ -128,6 +139,8 @@ const markBoundaryGesture = (input: {
 }
 
 function indexTimelineMessages(messages: MessageType[], partsByMessageID: Record<string, Part[] | undefined>) {
+  const cachedParts = timelineIndexCache.get(messages)?.get(partsByMessageID)
+  if (cachedParts) return cachedParts
   const turns = new Map<string, MessageType[]>()
   let latestUserID: string | undefined
 
@@ -153,12 +166,33 @@ function indexTimelineMessages(messages: MessageType[], partsByMessageID: Record
     turn.push(message)
     turns.set(turnID, turn)
   }
+  let byParts = timelineIndexCache.get(messages)
+  if (!byParts) {
+    byParts = new WeakMap()
+    timelineIndexCache.set(messages, byParts)
+  }
+  byParts.set(partsByMessageID, turns)
   return turns
 }
 
 function selectTimelineMessages(turns: Map<string, MessageType[]>, users: UserMessage[]) {
-  return users.flatMap((message) => turns.get(message.id) ?? [])
+  const cached = timelineSelectionCache.get(turns)?.get(users)
+  if (cached) return cached
+  const result = users.flatMap((message) => turns.get(message.id) ?? [])
+  let byUsers = timelineSelectionCache.get(turns)
+  if (!byUsers) {
+    byUsers = new WeakMap()
+    timelineSelectionCache.set(turns, byUsers)
+  }
+  byUsers.set(users, result)
+  return result
 }
+
+const timelineIndexCache = new WeakMap<
+  MessageType[],
+  WeakMap<Record<string, Part[] | undefined>, Map<string, MessageType[]>>
+>()
+const timelineSelectionCache = new WeakMap<Map<string, MessageType[]>, WeakMap<UserMessage[], MessageType[]>>()
 
 function sameMessageReferences(left: MessageType[], right: MessageType[]) {
   return left.length === right.length && left.every((message, index) => message === right[index])
@@ -296,7 +330,9 @@ export function MessageTimeline(props: MessageTimelineProps) {
     if (!id) return
     return sync.session.get(id)
   })
-  const tavernSession = createMemo(() => info()?.extension?.pluginID === "lfcode-tavern" && info()?.extension?.type === "tavern")
+  const tavernSession = createMemo(
+    () => info()?.extension?.pluginID === "lfcode-tavern" && info()?.extension?.type === "tavern",
+  )
   const [tavernData] = createResource(
     () => (tavernSession() ? "lfcode-tavern" : undefined),
     async (pluginID) =>
@@ -371,9 +407,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
     equals: (left, right) => left.length === right.length && left.every((id, index) => id === right[index]),
   })
   const railTurnIDs = rendered
-  const historyRailSpace = createMemo(
-    () => !props.embedded && props.viewAgentID === "main" && railTurnIDs().length > 0,
-  )
+  const historyRailSpace = createMemo(() => !props.embedded && props.viewAgentID === "main" && railTurnIDs().length > 0)
   const virtualizerState = createMemo((previous?: { data: string[]; shift: boolean }) => {
     const data = rendered()
     return {
@@ -838,9 +872,7 @@ export function MessageTimeline(props: MessageTimelineProps) {
               class="pointer-events-auto flex items-center justify-center w-10 h-8 bg-transparent border-none cursor-pointer p-0 group"
               onClick={props.onResumeScroll}
             >
-              <div
-                class="flex items-center justify-center w-8 h-6 rounded-md border border-border-weaker-base bg-surface-raised-stronger-non-alpha shadow-[var(--shadow-xs-border)] transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]"
-              >
+              <div class="flex items-center justify-center w-8 h-6 rounded-md border border-border-weaker-base bg-surface-raised-stronger-non-alpha shadow-[var(--shadow-xs-border)] transition-colors group-hover:border-[var(--border-weak-base)] group-hover:[--icon-base:var(--icon-hover)]">
                 <Icon name="arrow-down-to-line" size="small" />
               </div>
             </button>

@@ -4,6 +4,7 @@ import { useSync } from "@tui/context/sync"
 import { useTheme } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
 import type { AssistantMessage } from "@lfcode-ai/sdk/v2"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
 import { Locale } from "@/util"
@@ -60,7 +61,7 @@ export function SubagentFooter() {
     )
     const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context: pct ? `${formatTokenCount(tokens)} (${pct})` : formatTokenCount(tokens),
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })

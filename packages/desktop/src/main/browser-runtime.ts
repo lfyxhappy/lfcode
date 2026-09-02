@@ -25,6 +25,7 @@ const targetOwners = new Map<BrowserTabKey, BrowserTargetOwner>()
 const sessionActiveTargets = new Map<string, BrowserTabKey>()
 const sessionRecentTargets = new Map<string, BrowserTabKey[]>()
 const readyGuests = new Map<BrowserTabKey, number>()
+const performanceLeases = new Map<BrowserTabKey, ReturnType<typeof setTimeout>>()
 const consoleEntries = new Map<BrowserTabKey, BrowserConsoleEntry[]>()
 const networkEntries = new Map<BrowserTabKey, BrowserNetworkEntry[]>()
 const pendingConsoleEntries = new Map<number, BrowserConsoleEntry[]>()
@@ -83,20 +84,6 @@ export type BrowserCacheOverview = {
   lastSeenAt: number | null
 }
 
-type BrowserReferenceCandidate = {
-  label?: string
-  text?: string
-  url?: string
-  title?: string
-  selector?: string
-  mode?: "selection" | "element"
-}
-
-type BrowserReferenceState = {
-  selection?: BrowserReferenceCandidate
-  element?: BrowserReferenceCandidate
-}
-
 export function browserPartition() {
   return BROWSER_PARTITION
 }
@@ -126,6 +113,9 @@ export function trackBrowserGuest(input: {
     if (current?.guestID !== input.guestID) return
     guests.delete(id)
     guestLookup.delete(input.guestID)
+    const lease = performanceLeases.get(id)
+    if (lease) clearTimeout(lease)
+    performanceLeases.delete(id)
     clearTargetOwner(id)
     clearWindowTab(input.sourceWindowID, input.tabID)
   }
@@ -154,6 +144,24 @@ export function markBrowserGuestReady(input: {
   readyGuests.set(id, input.guestID)
 }
 
+export function refreshBrowserGuestPerformance(input: { sourceWindowID: number; tabID: string; leaseMs?: number }) {
+  const currentKey = key(input.sourceWindowID, input.tabID)
+  const current = guests.get(currentKey)
+  const guest = current ? webContents.fromId(current.guestID) : undefined
+  if (!guest || guest.isDestroyed()) return
+  const existing = performanceLeases.get(currentKey)
+  if (existing) clearTimeout(existing)
+  guest.setBackgroundThrottling(false)
+  guest.setFrameRate(60)
+  const timer = setTimeout(() => {
+    performanceLeases.delete(currentKey)
+    if (activeTabs.get(input.sourceWindowID) === input.tabID || guest.isDestroyed()) return
+    guest.setBackgroundThrottling(true)
+    guest.setFrameRate(30)
+  }, input.leaseMs ?? 60000)
+  performanceLeases.set(currentKey, timer)
+}
+
 export function untrackBrowserGuest(input: {
   sourceWindowID: number
   tabID: string
@@ -165,6 +173,10 @@ export function untrackBrowserGuest(input: {
   guestLookup.delete(current.guestID)
   pendingConsoleEntries.delete(current.guestID)
   pendingNetworkEntries.delete(current.guestID)
+  const currentKey = key(input.sourceWindowID, input.tabID)
+  const lease = performanceLeases.get(currentKey)
+  if (lease) clearTimeout(lease)
+  performanceLeases.delete(currentKey)
   readyGuests.delete(key(input.sourceWindowID, input.tabID))
   clearTargetOwner(key(input.sourceWindowID, input.tabID))
   clearWindowTab(input.sourceWindowID, input.tabID)
@@ -179,6 +191,9 @@ export function clearBrowserWindow(sourceWindowID: number) {
     guests.delete(currentKey)
     guestLookup.delete(current.guestID)
     readyGuests.delete(currentKey)
+    const lease = performanceLeases.get(currentKey)
+    if (lease) clearTimeout(lease)
+    performanceLeases.delete(currentKey)
     clearTargetOwner(currentKey)
   }
   activeTabs.delete(sourceWindowID)
@@ -210,8 +225,12 @@ export function setActiveBrowserTab(input: {
     if (input.sessionKey && sessionActiveTargets.get(input.sessionKey) === currentKey) {
       sessionActiveTargets.delete(input.sessionKey)
     }
+    throttleGuest(currentKey)
     return
   }
+  const previousTabID = activeTabs.get(input.sourceWindowID)
+  if (previousTabID && previousTabID !== input.tabID) throttleGuest(key(input.sourceWindowID, previousTabID))
+  refreshBrowserGuestPerformance({ sourceWindowID: input.sourceWindowID, tabID: input.tabID })
   activeTabs.set(input.sourceWindowID, input.tabID)
   recentTabs.set(input.sourceWindowID, input.tabID)
   const owner = targetOwners.get(currentKey)
@@ -221,13 +240,25 @@ export function setActiveBrowserTab(input: {
   }
 }
 
+function throttleGuest(currentKey: BrowserTabKey) {
+  const lease = performanceLeases.get(currentKey)
+  if (lease) clearTimeout(lease)
+  performanceLeases.delete(currentKey)
+  const current = guests.get(currentKey)
+  const guest = current ? webContents.fromId(current.guestID) : undefined
+  if (!guest || guest.isDestroyed()) return
+  guest.setBackgroundThrottling(true)
+  guest.setFrameRate(30)
+}
+
 export function getActiveBrowserTarget(input: {
   sourceWindowID: number
 }) {
   return resolveWindowTarget(input.sourceWindowID)
 }
 
-export function getBrowserTargetForSession(sessionKey: string) {
+export function getBrowserTargetForSession(sessionKey: string, tabID?: string) {
+  if (tabID) return getBrowserTargetForSessionTab(sessionKey, tabID)
   const active = sessionActiveTargets.get(sessionKey) ?? findSessionTargetBySessionID(sessionKey, sessionActiveTargets)
   if (active) {
     const target = resolveOwnedTarget(active)
@@ -239,14 +270,15 @@ export function getBrowserTargetForSession(sessionKey: string) {
     if (target) return target
   }
   for (const [currentKey, owner] of targetOwners.entries()) {
-    if (!ownerMatchesSession(sessionKey, owner)) continue
+    if (owner.sessionKey !== sessionKey) continue
     const target = resolveOwnedTarget(currentKey)
     if (target) return target
   }
   return undefined
 }
 
-export function getReadyBrowserTargetForSession(sessionKey: string) {
+export function getReadyBrowserTargetForSession(sessionKey: string, tabID?: string) {
+  if (tabID) return getBrowserTargetForSessionTab(sessionKey, tabID, true)
   const active = sessionActiveTargets.get(sessionKey) ?? findSessionTargetBySessionID(sessionKey, sessionActiveTargets)
   if (active) {
     const target = resolveOwnedTarget(active, true)
@@ -265,7 +297,25 @@ export function getReadyBrowserTargetForSession(sessionKey: string) {
   return undefined
 }
 
-export function hasBrowserTargetForSession(sessionKey: string) {
+function getBrowserTargetForSessionTab(sessionKey: string, tabID: string, readyOnly = false) {
+  for (const [currentKey, owner] of targetOwners.entries()) {
+    if (owner.sessionKey !== sessionKey) continue
+    const split = currentKey.indexOf(":")
+    if (split < 0 || currentKey.slice(split + 1) !== tabID) continue
+    const target = resolveOwnedTarget(currentKey, readyOnly)
+    if (target) return target
+  }
+  return undefined
+}
+
+export function hasBrowserTargetForSession(sessionKey: string, tabID?: string) {
+  if (tabID) {
+    return Array.from(targetOwners.entries()).some(([currentKey, owner]) => {
+      if (owner.sessionKey !== sessionKey) return false
+      const split = currentKey.indexOf(":")
+      return split >= 0 && currentKey.slice(split + 1) === tabID && guests.has(currentKey)
+    })
+  }
   if (sessionActiveTargets.has(sessionKey) || !!findSessionTargetBySessionID(sessionKey, sessionActiveTargets)) return true
   if ((sessionRecentTargets.get(sessionKey) ?? findRecentTargetsBySessionID(sessionKey)).length > 0) return true
   return Array.from(targetOwners.values()).some((owner) => ownerMatchesSession(sessionKey, owner))
@@ -303,8 +353,8 @@ export function recordBrowserConsole(input: {
   pushEntry(consoleEntries, currentKey, input.entry)
 }
 
-export function listBrowserConsoleForSession(sessionKey: string, limit = 50) {
-  const currentKey = resolveTargetKeyForSession(sessionKey)
+export function listBrowserConsoleForSession(sessionKey: string, limit = 50, tabID?: string) {
+  const currentKey = resolveTargetKeyForSession(sessionKey, tabID)
   if (!currentKey) return []
   return [...(consoleEntries.get(currentKey) ?? [])].slice(-limit)
 }
@@ -321,8 +371,8 @@ export function recordBrowserNetwork(input: {
   pushEntry(networkEntries, currentKey, input.entry)
 }
 
-export function listBrowserNetworkForSession(sessionKey: string, limit = 50) {
-  const currentKey = resolveTargetKeyForSession(sessionKey)
+export function listBrowserNetworkForSession(sessionKey: string, limit = 50, tabID?: string) {
+  const currentKey = resolveTargetKeyForSession(sessionKey, tabID)
   if (!currentKey) return []
   return [...(networkEntries.get(currentKey) ?? [])].slice(-limit)
 }
@@ -470,6 +520,7 @@ export async function clearBrowserCache() {
     sessionActiveTargets: Object.fromEntries(sessionActiveTargets.entries()),
     sessionRecentTargets: Object.fromEntries(sessionRecentTargets.entries()),
     readyGuests: Object.fromEntries(readyGuests.entries()),
+    performanceLeases: performanceLeases.size,
     consoleEntries: Object.fromEntries(consoleEntries.entries()),
     networkEntries: Object.fromEntries(networkEntries.entries()),
     targetOwners: Object.fromEntries(
@@ -522,27 +573,6 @@ export async function clearBrowserGuestSiteData(input: {
     ...(current.origin !== "null" ? { origin: current.origin } : {}),
     clearedCookies: cookies.length,
   } satisfies BrowserSiteDataResult
-}
-
-export async function getBrowserGuestReferenceState(input: {
-  sourceWindowID: number
-  tabID?: string
-}) {
-  const guest = requireGuestWithFallback(input)
-  const result = await guest.executeJavaScript(
-    `(() => {
-      const raw = document.documentElement?.dataset?.lfcodeBrowserReference
-      if (!raw) return null
-      try {
-        return JSON.parse(raw)
-      } catch {
-        return null
-      }
-    })()`,
-    true,
-  ).catch(() => null)
-  if (!result || typeof result !== "object") return null
-  return result as BrowserReferenceState
 }
 
 function key(sourceWindowID: number, tabID: string): BrowserTabKey {
@@ -678,7 +708,15 @@ function hasPendingOrBlockedTarget(currentKey: BrowserTabKey, readyOnly: boolean
   return readyGuests.get(currentKey) !== current.guestID
 }
 
-function resolveTargetKeyForSession(sessionKey: string) {
+function resolveTargetKeyForSession(sessionKey: string, tabID?: string) {
+  if (tabID) {
+    for (const [currentKey, owner] of targetOwners.entries()) {
+      if (!ownerMatchesSession(sessionKey, owner)) continue
+      const split = currentKey.indexOf(":")
+      if (split >= 0 && currentKey.slice(split + 1) === tabID) return currentKey
+    }
+    return undefined
+  }
   const active = sessionActiveTargets.get(sessionKey) ?? findSessionTargetBySessionID(sessionKey, sessionActiveTargets)
   if (active) return active
   const recent = sessionRecentTargets.get(sessionKey) ?? findRecentTargetsBySessionID(sessionKey)

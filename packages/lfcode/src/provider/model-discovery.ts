@@ -1,5 +1,6 @@
 import type { Info as ProviderInfo, Model as ProviderModel } from "./provider"
 import { A6API_PROVIDER_ID, discover as discoverA6Api } from "./a6api"
+import { LfApi } from "./lfapi"
 import { OpenCodeGo } from "./opencode-go"
 import { OpenCode } from "./opencode"
 
@@ -106,6 +107,12 @@ async function discoverSpecialized(
       ? { source: "specialized", models: result.models }
       : { source: "specialized", models: [], error: mapDiscoveryError(result.error) }
   }
+  if (providerID === LfApi.PROVIDER_ID) {
+    const result = await LfApi.discover({ storedApiKey: key, signal })
+    return result.ok
+      ? { source: "specialized", models: result.models }
+      : { source: "specialized", models: [], error: mapDiscoveryError(result.error) }
+  }
   if (providerID === OpenCode.PROVIDER_ID) {
     const result = await OpenCode.discover({ storedApiKey: key, signal })
     return result.ok
@@ -118,6 +125,7 @@ async function discoverSpecialized(
       ? { source: "specialized", models: result.models }
       : { source: "specialized", models: [], error: mapDiscoveryError(result.error) }
   }
+  return undefined
 }
 
 function mapDiscoveryError(error: "missing_api_key" | "unauthorized" | "invalid_response" | "network"): DiscoveryError {

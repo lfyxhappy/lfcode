@@ -59,6 +59,7 @@ import { TaskRegistry } from "@/task/registry"
 import { History } from "@/history"
 import { Memory } from "@/memory"
 import { ContextReview } from "@/context-review"
+import { Activity } from "@/activity"
 import * as BashInteractive from "@/tool/bash-interactive"
 import { defaultLayer as ShellBackgroundRuntimeLayer } from "@/background-job/runtime"
 import { memoMap } from "./memo-map"
@@ -91,6 +92,7 @@ export const AppLayer = Layer.suspend(() =>
     ),
     Layer.mergeAll(
       Session.defaultLayer,
+      Activity.defaultLayer,
       SessionStatus.defaultLayer,
       SessionRunState.defaultLayer,
       Goal.defaultLayer,

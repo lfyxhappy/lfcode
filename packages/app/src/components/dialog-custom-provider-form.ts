@@ -27,6 +27,12 @@ import {
   OPENCODE_PRESET_ID,
   OPENCODE_PROVIDER_ID,
 } from "@lfcode-ai/shared/opencode"
+import {
+  LFAPI_BASE_URL,
+  LFAPI_NAME,
+  LFAPI_PRESET_ID,
+  LFAPI_PROVIDER_ID,
+} from "@lfcode-ai/shared/lfapi"
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-_]*$/
 
@@ -46,6 +52,11 @@ export const A6API_MODEL_PROTOCOLS = [
 
 export const A6API_PROVIDER_ID = "a6api"
 export const A6API_BASE_URL = "https://a6api.com/v1"
+export const LFAPI_MODEL_PROTOCOLS = [
+  ProviderProtocol.OpenAIChat,
+  ProviderProtocol.OpenAIResponses,
+] as const
+export { LFAPI_BASE_URL, LFAPI_NAME, LFAPI_PRESET_ID, LFAPI_PROVIDER_ID }
 export { OPENCODE_GO_PROVIDER_ID }
 
 export const CAPABILITY_KEYS = MODEL_CAPABILITY_KEYS
@@ -130,6 +141,14 @@ export const CUSTOM_PROVIDER_PRESETS = [
     models: [],
   },
   {
+    id: LFAPI_PRESET_ID,
+    providerID: LFAPI_PROVIDER_ID,
+    name: LFAPI_NAME,
+    protocol: ProviderProtocol.OpenAIChat,
+    baseURL: LFAPI_BASE_URL,
+    models: [],
+  },
+  {
     id: VOLCENGINE_CODING_PLAN_PRESET_ID,
     providerID: VOLCENGINE_CODING_PLAN_PROVIDER_ID,
     name: VOLCENGINE_CODING_PLAN_NAME,
@@ -199,7 +218,9 @@ export function validateCustomProvider(input: ValidateArgs) {
       ? input.t("provider.custom.error.baseURL.format")
       : providerID === A6API_PROVIDER_ID && baseURL !== A6API_BASE_URL
         ? input.t("provider.custom.a6api.error.baseURL")
-      : undefined
+        : providerID === LFAPI_PROVIDER_ID && baseURL !== LFAPI_BASE_URL
+          ? input.t("provider.custom.lfapi.error.baseURL")
+          : undefined
 
   const disabled = input.disabledProviders.includes(providerID)
   const existsError = idError
@@ -224,6 +245,8 @@ export function validateCustomProvider(input: ValidateArgs) {
     const protocolError =
       providerID === A6API_PROVIDER_ID && !isA6ApiProtocol(m.protocol ?? protocol)
         ? input.t("provider.custom.a6api.error.unsupportedProtocol")
+        : providerID === LFAPI_PROVIDER_ID && !isLfApiProtocol(m.protocol ?? protocol)
+          ? input.t("provider.custom.lfapi.error.unsupportedProtocol")
         : undefined
     const nameError = !m.name.trim() ? input.t("provider.custom.error.required") : undefined
     const context = m.limit?.context.trim() ?? ""
@@ -370,6 +393,10 @@ export type A6ApiDiscoveredModel = {
   protocol: (typeof A6API_MODEL_PROTOCOLS)[number]
   capabilities?: Partial<ModelCapabilities>
   reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
+  limit?: { context: number; input?: number; output: number }
+  modalities?: { input: string[]; output: string[] }
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number }
+  source_updated_at?: string
 }
 
 export function isA6ApiModelID(input: string) {
@@ -383,7 +410,11 @@ export function isA6ApiModelID(input: string) {
 }
 
 export function isA6ApiProtocol(input: Protocol): input is (typeof A6API_MODEL_PROTOCOLS)[number] {
-  return A6API_MODEL_PROTOCOLS.includes(input as (typeof A6API_MODEL_PROTOCOLS)[number])
+  return A6API_MODEL_PROTOCOLS.some((protocol) => protocol === input)
+}
+
+export function isLfApiProtocol(input: Protocol): input is (typeof LFAPI_MODEL_PROTOCOLS)[number] {
+  return LFAPI_MODEL_PROTOCOLS.some((protocol) => protocol === input)
 }
 
 export function mergeA6ApiModelRows(input: {
@@ -401,12 +432,23 @@ export function mergeA6ApiModelRows(input: {
     // that must not override a model-level protocol returned by the catalog.
     const protocol = candidate.protocol
     const profile = inferModelProfile({ modelID: model.id, apiID: model.name })
+    const discoveredCapabilities = candidate.modalities
+      ? {
+          ...candidate.capabilities,
+          text: candidate.modalities.input.includes("text"),
+          image: candidate.modalities.input.includes("image"),
+          audio: candidate.modalities.input.includes("audio"),
+          video: candidate.modalities.input.includes("video"),
+          pdf: candidate.modalities.input.includes("pdf"),
+          attachment: candidate.modalities.input.some((item) => item !== "text"),
+        }
+      : candidate.capabilities
     const capabilities = inferCapabilities({
       id: model.id,
       name: model.name,
       providerID: input.providerID,
       protocol,
-      explicit: candidate.capabilities,
+      explicit: discoveredCapabilities,
       current: model.capabilities,
       manual: model.manual,
     })
@@ -457,8 +499,8 @@ function a6ApiModelRow(input: A6ApiDiscoveredModel, providerID?: string): ModelR
     name: input.name,
     available: true,
     limit: {
-      context: String(profile.limit.context),
-      output: String(profile.limit.output),
+      context: String(input.limit?.context ?? profile.limit.context),
+      output: String(input.limit?.output ?? profile.limit.output),
     },
     capabilities: inferCapabilities({
       id: input.id,

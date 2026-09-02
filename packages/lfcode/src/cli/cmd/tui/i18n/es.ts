@@ -131,12 +131,12 @@ export const dict = {
   "tui.tips.custom_agent":
     "Añade archivos {highlight}.md{/highlight} en {highlight}.lfcode/agent/{/highlight} para personajes de IA especializados",
   "tui.tips.agent_perms":
-    "Configura por agente los permisos de las herramientas {highlight}edit{/highlight}, {highlight}bash{/highlight} y {highlight}webfetch{/highlight}",
-  "tui.tips.bash_allow":
+    "Configura por agente los permisos de las herramientas {highlight}edit{/highlight}, {highlight}shell{/highlight} y {highlight}webfetch{/highlight}",
+  "tui.tips.shell_allow":
     'Usa patrones como {highlight}"git *": "allow"{/highlight} para permisos de bash más finos',
-  "tui.tips.bash_deny":
+  "tui.tips.shell_deny":
     'Define {highlight}"rm -rf *": "deny"{/highlight} para bloquear comandos destructivos',
-  "tui.tips.bash_ask":
+  "tui.tips.shell_ask":
     'Configura {highlight}"git push": "ask"{/highlight} para exigir confirmación antes de hacer push',
   "tui.tips.formatter": "Lfcode formatea archivos automáticamente con prettier, gofmt, ruff y más",
   "tui.tips.disable_formatter":
@@ -195,7 +195,7 @@ export const dict = {
   "tui.tips.steps":
     "Configura {highlight}steps{/highlight} para limitar las iteraciones agénticas por petición",
   "tui.tips.disable_tool":
-    'Define {highlight}"tools": {"bash": false}{/highlight} para deshabilitar herramientas concretas',
+    'Define {highlight}"tool_allowlist": ["read", "search"]{/highlight} para deshabilitar herramientas concretas',
   "tui.tips.disable_mcp_tools":
     'Define {highlight}"mcp_*": false{/highlight} para deshabilitar todas las herramientas de un servidor MCP',
   "tui.tips.tool_override":

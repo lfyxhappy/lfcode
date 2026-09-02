@@ -67,7 +67,6 @@ import {
   clearBrowserCache,
   clearBrowserGuestSiteData,
   getBrowserCacheOverview,
-  getBrowserGuestReferenceState,
   markBrowserGuestReady,
   openBrowserGuestDevTools,
   setActiveBrowserTab,
@@ -75,6 +74,7 @@ import {
   untrackBrowserGuest,
 } from "./browser-runtime"
 import { createAutomationEventBuffer } from "./automation-events"
+import { configureGpuMode } from "./gpu-diagnostics"
 import type { startAutomationServer } from "./automation-server"
 import { removeAutomationDiscovery, writeAutomationDiscovery } from "../automation-discovery"
 import type { LanAccessManager } from "./mobile-access"
@@ -114,6 +114,7 @@ const detachedDockTargets = new Map<
     rect: { x: number; y: number; width: number; height: number }
   }
 >()
+const browserStateSignatures = new Map<string, string>()
 const APP_SESSION_CACHE_STARTUP_CLEAR_BYTES = 64 * 1024 * 1024
 const APP_SESSION_CACHE_SOFT_LIMIT_BYTES = 256 * 1024 * 1024
 const BROWSER_SESSION_CACHE_STARTUP_CLEAR_BYTES = 64 * 1024 * 1024
@@ -185,9 +186,12 @@ async function installCli() {
 
 function setupApp() {
   ensureLoopbackNoProxy()
+  // Keep Chromium's default background scheduling so inactive browser tabs can
+  // be lowered without affecting the active/automation performance lease.
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_LIMIT_BYTES))
   app.commandLine.appendSwitch("media-cache-size", String(MEDIA_CACHE_LIMIT_BYTES))
+  configureGpuMode()
   setRelaunchHandler(relaunchApp)
   if (process.env.LFCODE_DISABLE_SINGLE_INSTANCE_LOCK !== "1" && !app.requestSingleInstanceLock()) {
     app.quit()
@@ -844,9 +848,6 @@ registerIpcHandlers({
   clearBrowserSiteData: async (target) => {
     return clearBrowserGuestSiteData(target)
   },
-  getBrowserReferenceState: async (target) => {
-    return getBrowserGuestReferenceState(target)
-  },
   getBrowserCacheOverview: async () => {
     return getBrowserCacheOverview()
   },
@@ -905,6 +906,14 @@ registerIpcHandlers({
     })
   },
   reportBrowserState: async (senderWindowID, input) => {
+    const stateKey = `${input.sessionKey}:${input.tabID}`
+    const signature = JSON.stringify(input)
+    if (browserStateSignatures.get(stateKey) === signature) return
+    browserStateSignatures.set(stateKey, signature)
+    if (browserStateSignatures.size > 512) {
+      const oldest = browserStateSignatures.keys().next().value
+      if (oldest) browserStateSignatures.delete(oldest)
+    }
     const recipients = new Set<BrowserWindow>()
     for (const item of detachedSidePanels.values()) {
       if (item.sessionKey !== input.sessionKey) continue
@@ -913,6 +922,7 @@ registerIpcHandlers({
       recipients.add(source)
     }
     for (const win of recipients) win.webContents.send("browser-state", input)
+    if (input.closed) browserStateSignatures.delete(stateKey)
   },
 })
 
@@ -1036,6 +1046,12 @@ function closeAutomationServer() {
 }
 
 function handleFatalAppError(source: string, error: unknown) {
+  // Background server tasks can outlive their request-scoped instance. A
+  // missing ALS context is recoverable and must not block desktop startup.
+  if (isMissingInstanceContextError(error)) {
+    logger.warn("ignored missing instance context", { source, error: formatError(error) })
+    return
+  }
   automationEvents.push({
     scope: "main",
     type: "fatal-error",
@@ -1108,6 +1124,10 @@ function formatError(error: unknown) {
   if (error instanceof Error) return `${error.name}: ${error.message}`
   if (typeof error === "string") return error
   return String(error)
+}
+
+function isMissingInstanceContextError(error: unknown) {
+  return error instanceof Error && error.message === "No context found for instance"
 }
 
 function isClosedPipeWriteError(error: unknown) {

@@ -35,11 +35,8 @@ const ObjectShape = Schema.StructWithRest(
     __originalKeys: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
     read: Schema.optional(Rule),
     edit: Schema.optional(Rule),
-    glob: Schema.optional(Rule),
-    grep: Schema.optional(Rule),
     list: Schema.optional(Rule),
     shell: Schema.optional(Rule),
-    bash: Schema.optional(Rule),
     task: Schema.optional(Rule),
     actor: Schema.optional(Rule),
     external_directory: Schema.optional(Rule),
@@ -64,6 +61,9 @@ const InnerSchema = Schema.Union([ObjectShape, Action]).annotate({
 const transform = (x: unknown): Record<string, Rule> => {
   if (typeof x === "string") return { "*": x as Action }
   const obj = x as { __originalKeys?: string[] } & Record<string, unknown>
+  const removed = ["bash", "glob", "grep", "write", "apply_patch", "replace_range", "symbol_edit", "multiedit"]
+    .find((key) => key in obj)
+  if (removed) throw new Error(`Permission '${removed}' was removed. Use its canonical tool permission instead.`)
   const { __originalKeys, ...rest } = obj
   if (!__originalKeys) return rest as Record<string, Rule>
   const result: Record<string, Rule> = {}

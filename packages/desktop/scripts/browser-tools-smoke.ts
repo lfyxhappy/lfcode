@@ -166,11 +166,15 @@ try {
   if (!sessionKey) throw new Error("Session page did not expose sessionKey for browser tools smoke")
 
   await client.post("/browser/open", {
-    windowID,
+    sessionKey,
     url: fixture.pageURL,
     title: "Browser Tools Smoke",
   })
-  await waitForUiState(client, windowID, (ui) => (ui.session?.browser?.items?.length ?? 0) >= 1)
+  await waitForUiState(
+    client,
+    windowID,
+    (ui) => ui.session?.browser?.items?.some((item) => item.url === fixture.pageURL) === true,
+  )
   await client.post("/browser/wait-load-state", {
     sessionKey,
     state: "load",

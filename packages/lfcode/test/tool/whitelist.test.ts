@@ -402,23 +402,16 @@ describe("Tool whitelist (Task 14)", () => {
     ),
   )
 
-  test("checkpoint-writer runtime whitelist is patch-first (F3a)", async () => {
+  test("checkpoint-writer runtime whitelist only uses canonical file tools", async () => {
     const src = await Bun.file(`${import.meta.dir}/../../src/session/checkpoint.ts`).text()
     const checkpointWriterSpawn = src.match(/tools:\s*\[[\s\S]*?"task",\s*\]/)
     expect(checkpointWriterSpawn).toBeTruthy()
     expect(checkpointWriterSpawn![0]).toContain('"read"')
-    expect(checkpointWriterSpawn![0]).toContain('"file_info"')
-    expect(checkpointWriterSpawn![0]).toContain('"tree"')
     expect(checkpointWriterSpawn![0]).toContain('"search"')
-    expect(checkpointWriterSpawn![0]).toContain('"archive_inspect"')
-    expect(checkpointWriterSpawn![0]).toContain('"replace_range"')
-    expect(checkpointWriterSpawn![0]).toContain('"symbol_edit"')
-    expect(checkpointWriterSpawn![0]).toContain('"edit_history"')
-    expect(checkpointWriterSpawn![0]).toContain('"apply_patch"')
-    expect(checkpointWriterSpawn![0]).not.toContain('"write"')
-    expect(checkpointWriterSpawn![0]).not.toContain('"edit"')
-    expect(checkpointWriterSpawn![0]).not.toContain('"glob"')
-    expect(checkpointWriterSpawn![0]).not.toContain('"grep"')
+    expect(checkpointWriterSpawn![0]).toContain('"edit"')
+    for (const legacy of ["file_info", "tree", "archive_inspect", "replace_range", "symbol_edit", "edit_history", "apply_patch", "write", "glob", "grep"]) {
+      expect(checkpointWriterSpawn![0]).not.toContain(`"${legacy}"`)
+    }
   })
 })
 

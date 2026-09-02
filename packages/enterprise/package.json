@@ -13,7 +13,7 @@
     "shell-prod": "sst shell --target Teams --stage production"
   },
   "dependencies": {
-    "@lfcode-ai/core": "workspace:*",
+    "@lfcode-ai/shared": "workspace:*",
     "@lfcode-ai/ui": "workspace:*",
     "aws4fetch": "^1.0.20",
     "@pierre/diffs": "catalog:",

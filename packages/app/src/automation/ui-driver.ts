@@ -219,6 +219,12 @@ export function settingsTabUiDriverSelector(token: SettingsTabUiDriverToken) {
   return `[data-action="${SettingsTabUiDriverAction[token]}"]`
 }
 
+export function settingsTabUiDriverSelectors(token: SettingsTabUiDriverToken) {
+  if (token === "settings.tab.plugins") return [`[data-action="sidebar-quick-plugins"]`, settingsTabUiDriverSelector(token)]
+  if (token === "settings.tab.automation") return [`[data-action="sidebar-quick-scheduled"]`, settingsTabUiDriverSelector(token)]
+  return [settingsTabUiDriverSelector(token)]
+}
+
 export const LanAccessSettingsUiDriverAction = {
   "settings.lan.status": "settings-lan-status",
   "settings.lan.pairing": "settings-lan-pairing",

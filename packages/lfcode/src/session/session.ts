@@ -37,6 +37,8 @@ import type { Provider } from "@/provider"
 import { Permission } from "@/permission"
 import { Global } from "@/global"
 import { ActorRegistry } from "@/actor/registry"
+import { ContextPlan } from "./context-plan"
+import { Activity } from "@/activity"
 import { Effect, Layer, Option, Context } from "effect"
 
 const log = Log.create({ service: "session" })
@@ -502,12 +504,13 @@ type Patch = z.infer<typeof Event.Updated.schema>["info"]
 const db = <T>(fn: (d: Parameters<typeof Database.use>[0] extends (trx: infer D) => any ? D : never) => T) =>
   Effect.sync(() => Database.use(fn))
 
-export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | ActorRegistry.Service> = Layer.effect(
+export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | ActorRegistry.Service | Activity.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const storage = yield* Storage.Service
     const actorReg = yield* ActorRegistry.Service
+    const activity = yield* Activity.Service
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -560,6 +563,15 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
           tools: "INHERIT",
         })
         .pipe(Effect.ignore)
+      yield* activity.create({
+        sessionID: result.id,
+        kind: "main",
+        status: "queued",
+        currentStep: "created",
+        sourceType: "session",
+        sourceID: result.id,
+        metadata: { title: result.title },
+      }).pipe(Effect.ignore)
 
       if (!Flag.LFCODE_EXPERIMENTAL_WORKSPACES) {
         // This only exist for backwards compatibility. We should not be
@@ -696,6 +708,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        ContextPlan.forSession(msg.sessionID).upsertMessage(msg)
         const visible = MessageV2.isUserVisible(msg)
         yield* Effect.sync(() =>
           SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }, { publish: visible, persist: visible }),
@@ -705,6 +718,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        ContextPlan.forSession(part.sessionID).upsertPart(part)
         const visible = MessageV2.isUserVisibleMessage({ sessionID: part.sessionID, messageID: part.messageID })
         yield* Effect.sync(() =>
           SyncEvent.run(MessageV2.Event.PartUpdated, {
@@ -967,6 +981,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       const visible = removed ? MessageV2.isUserVisible(removed.info) : false
       const shouldRefresh =
         !!removed && isRealUserMessage(removed) && removed.info.time.created === session.time.lastUser
+      ContextPlan.forSession(input.sessionID).removeMessage(input.messageID)
 
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.Removed, {
@@ -987,6 +1002,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       partID: PartID
     }) {
       const visible = MessageV2.isUserVisibleMessage({ sessionID: input.sessionID, messageID: input.messageID })
+      ContextPlan.forSession(input.sessionID).removePart(input.messageID, input.partID)
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.PartRemoved, {
           sessionID: input.sessionID,
@@ -1004,6 +1020,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       field: string
       delta: string
     }) {
+      ContextPlan.forSession(input.sessionID).applyPartDelta(input.messageID, input.partID, input.field, input.delta)
       if (MessageV2.isUserVisibleMessage({ sessionID: input.sessionID, messageID: input.messageID })) {
         yield* bus.publish(MessageV2.Event.PartDelta, input)
       }
@@ -1074,6 +1091,7 @@ export const defaultLayer = layer.pipe(
   Layer.provide(ActorRegistry.defaultLayer),
   Layer.provide(Bus.layer),
   Layer.provide(Storage.defaultLayer),
+  Layer.provide(Activity.defaultLayer),
 )
 
 const sessionActivityTime = sql<number>`coalesce(${SessionTable.time_last_user}, ${SessionTable.time_created})`
@@ -1202,7 +1220,6 @@ export function clearOrphanAssistants(input?: {
 }) {
   const now = Date.now()
   const minAgeMs = input?.minAgeMs ?? ORPHAN_ASSISTANT_AGE_MS
-  const message = input?.message ?? "Abandoned: previous request interrupted before completion"
   const sessions = input?.sessionID
     ? [getStandalone(input.sessionID)]
     : Array.from(list({ directory: input?.directory, limit: input?.limit }))
@@ -1223,14 +1240,17 @@ export function clearOrphanAssistants(input?: {
       const created = info.time.created ?? 0
       if (now - created < minAgeMs) continue
 
-      const updated = {
-        ...info,
-        time: { ...info.time, completed: now },
-        error: info.error ?? new MessageV2.AbortedError({ message }).toObject(),
-      }
-      const visible = MessageV2.isUserVisible(updated)
-      SyncEvent.run(MessageV2.Event.Updated, { sessionID: info.sessionID, info: updated }, { publish: visible, persist: visible })
-      log.info("orphan-assistant-cleared", { sessionID: info.sessionID, messageID: info.id })
+      Database.use((db) =>
+        db
+          .update(SessionTable)
+          .set({
+            recoverable: 1,
+            recoverable_reason: input?.message ?? "The previous response was interrupted and can be resumed.",
+          })
+          .where(eq(SessionTable.id, info.sessionID))
+          .run(),
+      )
+      log.info("orphan-assistant-preserved", { sessionID: info.sessionID, messageID: info.id })
     }
   }
 }

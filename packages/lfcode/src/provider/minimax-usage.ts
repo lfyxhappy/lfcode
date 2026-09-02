@@ -4,7 +4,7 @@ import { MINIMAX_PROVIDER_ID } from "./minimax"
 const TIMEOUT_MS = 15_000
 const MAX_BYTES = 512 * 1024
 
-export const ErrorCategory = z.enum(["missing_api_key", "unauthorized", "invalid_response", "network"])
+export const ErrorCategory = z.enum(["missing_api_key", "unauthorized", "rate_limited", "invalid_response", "network"])
 export const UsageWindow = z.object({
   // MiniMax can return one entry per model (for example `general` and
   // `video`). Keep the id open so new model names do not get silently lost.
@@ -44,6 +44,7 @@ export async function usage(input: { apiKey?: string; storedApiKey?: string; sig
       signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS),
     })
     if (response.status === 401 || response.status === 403) return { ok: false, error: "unauthorized" }
+    if (response.status === 429) return { ok: false, error: "rate_limited" }
     if (!response.ok) return { ok: false, error: "network" }
     const contentLength = Number(response.headers.get("content-length"))
     if (Number.isFinite(contentLength) && contentLength > MAX_BYTES) return { ok: false, error: "invalid_response" }

@@ -190,14 +190,13 @@ const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5
 // survive into the rebuild context. Their tool_use parts are kept (so the
 // LLM still sees what action was taken), but for tools in this whitelist
 // the tool_result content is replaced with a placeholder. Result is either
-// large-and-regeneratable (read/bash/grep/glob/webfetch/websearch) or
+// large-and-regeneratable (read/search/shell/webfetch/websearch) or
 // essentially a "done" confirmation (edit). Tools NOT here
 // carry state the LLM references later (actor/task/question/skill/memory).
 const COMPACTABLE_TOOL_NAMES = new Set<string>([
   "read",
-  "bash",
-  "grep",
-  "glob",
+  "shell",
+  "search",
   "webfetch",
   "websearch",
   "edit",
@@ -338,7 +337,7 @@ function composeWriterPrompt(input: {
 }): string {
   return [
     "<system-reminder>",
-    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The available tools are read, file_info, tree, search, archive_inspect, edit, edit_history, and task; do not invoke others.",
+    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The available tools are read, search, edit, and task; do not invoke others.",
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",
@@ -888,12 +887,8 @@ export const layer: Layer.Layer<
         context: "full",
         tools: [
           "read",
-          "file_info",
-          "tree",
           "search",
-          "archive_inspect",
           "edit",
-          "edit_history",
           "task",
         ],
         model: {

@@ -4,6 +4,7 @@ import "opentui-spinner/solid"
 import path from "path"
 import { fileURLToPath } from "url"
 import { Filesystem } from "@/util"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import { useLocal } from "@tui/context/local"
 import { tint, useTheme } from "@tui/context/theme"
 import { EmptyBorder, SplitBorder } from "@tui/component/border"
@@ -494,7 +495,7 @@ export function Prompt(props: PromptProps) {
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context: pct ? `${formatTokenCount(tokens)} (${pct})` : formatTokenCount(tokens),
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })

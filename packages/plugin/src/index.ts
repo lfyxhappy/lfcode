@@ -311,7 +311,7 @@ export type ActorPreStopInput = ActorStopBaseInput
 export type ActorPostStopInput = ActorStopBaseInput & {
   outcome: ActorOutcome
   error?: string  // outcome === "failure" 时存在
-  // false → the spawned agent cannot use the Write tool (read-only, e.g. explore).
+  // false → the spawned agent cannot use the edit tool (read-only, e.g. explore).
   // Absent/undefined → unknown; hooks must NOT suppress on absence (fail-open).
   canWrite?: boolean
 }

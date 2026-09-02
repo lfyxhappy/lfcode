@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@lfcode-ai/sdk/v2"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@lfcode-ai/plugin/tui"
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { completedTPS, formatTPS, streamingTPS } from "./tps"
@@ -89,7 +90,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().text}>
         <b>Context</b>
       </text>
-      <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
+      <text fg={theme().textMuted}>{formatTokenCount(state().tokens)} tokens</text>
       <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
       <Show when={tpsLabel()}>{(label) => <text fg={theme().textMuted}>{label()}</text>}</Show>
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>

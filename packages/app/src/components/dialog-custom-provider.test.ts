@@ -3,11 +3,16 @@ import {
   A6API_BASE_URL,
   A6API_MODEL_PROTOCOLS,
   A6API_PROVIDER_ID,
+  LFAPI_BASE_URL,
+  LFAPI_MODEL_PROTOCOLS,
+  LFAPI_PRESET_ID,
+  LFAPI_PROVIDER_ID,
   apiKeyForPresetChange,
   CUSTOM_PROVIDER_PRESETS,
   CUSTOM_PROVIDER_PRESET_OPTIONS,
   inferCapabilities,
   isA6ApiModelID,
+  isLfApiProtocol,
   mergeA6ApiModelRows,
   presetModelRow,
   type ModelCapabilities,
@@ -334,10 +339,83 @@ describe("validateCustomProvider", () => {
     expect(A6API_MODEL_PROTOCOLS).toEqual(["openai-chat", "openai-responses", "anthropic-messages"])
   })
 
+  test("keeps the LFAPI connection definition outside the custom preset picker", () => {
+    const preset = CUSTOM_PROVIDER_PRESETS.find((item) => item.id === LFAPI_PRESET_ID)
+
+    expect(CUSTOM_PROVIDER_PRESET_OPTIONS).not.toContain(LFAPI_PRESET_ID)
+    expect(preset).toMatchObject({
+      providerID: LFAPI_PROVIDER_ID,
+      name: "LFAPI",
+      baseURL: LFAPI_BASE_URL,
+      models: [],
+    })
+    expect(LFAPI_MODEL_PROTOCOLS).toEqual(["openai-chat", "openai-responses"])
+    expect(isLfApiProtocol("openai-chat")).toBe(true)
+    expect(isLfApiProtocol("openai-responses")).toBe(true)
+    expect(isLfApiProtocol("anthropic-messages")).toBe(false)
+  })
+
+  test("validates LFAPI protocol and canonical URL while accepting arbitrary model IDs", () => {
+    const base = {
+      providerID: LFAPI_PROVIDER_ID,
+      name: "LFAPI",
+      apiKey: "secret",
+      models: [
+        {
+          row: "m0",
+          id: "vendor-model",
+          name: "Vendor Model",
+          protocol: "anthropic-messages" as const,
+          capabilities: caps(),
+          manual: {},
+          err: {},
+        },
+      ],
+      headers: [{ row: "h0", key: "", value: "", err: {} }],
+      err: {},
+    }
+    const invalidProtocol = validateCustomProvider({
+      form: { ...base, protocol: "openai-chat", baseURL: LFAPI_BASE_URL },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    })
+    const invalidURL = validateCustomProvider({
+      form: {
+        ...base,
+        protocol: "openai-chat",
+        baseURL: "https://example.com/v1",
+        models: [{ ...base.models[0], protocol: "openai-chat" }],
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    })
+    const valid = validateCustomProvider({
+      form: {
+        ...base,
+        protocol: "openai-responses",
+        baseURL: LFAPI_BASE_URL,
+        models: [{ ...base.models[0], protocol: "openai-responses" }],
+      },
+      t,
+      disabledProviders: [],
+      existingProviderIDs: new Set(),
+    })
+
+    expect(invalidProtocol.result).toBeUndefined()
+    expect(invalidProtocol.models[0].id).toBe("provider.custom.lfapi.error.unsupportedProtocol")
+    expect(invalidURL.result).toBeUndefined()
+    expect(invalidURL.err.baseURL).toBe("provider.custom.lfapi.error.baseURL")
+    expect(valid.result?.providerID).toBe(LFAPI_PROVIDER_ID)
+    expect(valid.result?.config.models["vendor-model"].protocol).toBe("openai-responses")
+  })
+
   test("clears an unsaved key when changing provider presets", () => {
     expect(
       apiKeyForPresetChange({ current: A6API_PROVIDER_ID, next: "custom", apiKey: "a6-api-key" }),
     ).toBe("")
+    expect(apiKeyForPresetChange({ current: LFAPI_PRESET_ID, next: "custom", apiKey: "lfapi-key" })).toBe("")
     expect(apiKeyForPresetChange({ current: "custom", next: "custom", apiKey: "new-key" })).toBe("new-key")
   })
 

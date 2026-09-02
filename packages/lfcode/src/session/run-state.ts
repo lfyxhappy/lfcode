@@ -1,6 +1,6 @@
 import { EffectLogger, InstanceState } from "@/effect"
 import { Runner } from "@/effect"
-import { Effect, Layer, Scope, Context } from "effect"
+import { Context, Deferred, Effect, Layer, Scope } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { MessageID, SessionID } from "./schema"
@@ -50,6 +50,8 @@ type AsyncReservation = {
   abortController: AbortController
 }
 
+const CANCEL_SETTLE_TIMEOUT = "2 seconds"
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -71,6 +73,11 @@ export const layer = Layer.effect(
       })
     const restoreSettledStatus = (sessionID: SessionID) =>
       Effect.gen(function* () {
+        const current = yield* status.get(sessionID)
+        if (current.type === "recoverable") {
+          yield* elog.debug("session_status_preserved", { sessionID, status: current })
+          return
+        }
         const next = yield* settledStatus(sessionID).pipe(Effect.orElseSucceed(() => ({ type: "idle" as const })))
         yield* status.set(sessionID, next)
         yield* elog.debug("session_status_settled", { sessionID, status: next })
@@ -81,6 +88,7 @@ export const layer = Layer.effect(
         const scope = yield* Scope.Scope
         const runners = new Map<string, ActiveRunner>()
         const reservations = new Map<string, AsyncReservation>()
+        const settling = new Map<string, Deferred.Deferred<void>>()
         const pendingSteer = new Map<SessionID, Set<MessageID>>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
@@ -101,6 +109,7 @@ export const layer = Layer.effect(
             )
             runners.clear()
             reservations.clear()
+            settling.clear()
             pendingSteer.clear()
             yield* Effect.forEach(mainSessionIDs, restoreSettledStatus, {
               concurrency: "unbounded",
@@ -108,7 +117,7 @@ export const layer = Layer.effect(
             })
           }),
         )
-        return { runners, reservations, pendingSteer, scope }
+        return { runners, reservations, settling, pendingSteer, scope }
       }),
     )
 
@@ -119,10 +128,27 @@ export const layer = Layer.effect(
       requestedAbortSignal?: AbortSignal,
     ) {
       const key = runnerKey(sessionID, agentID)
-      const data = yield* InstanceState.get(state)
+      let data = yield* InstanceState.get(state)
       const existing = data.runners.get(key)
       if (existing) return existing
       if (requestedAbortSignal?.aborted) return
+
+      const pendingCancellation = data.settling.get(key)
+      if (pendingCancellation) {
+        const settled = yield* Deferred.await(pendingCancellation).pipe(
+          Effect.timeout(CANCEL_SETTLE_TIMEOUT),
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+        if (!settled) {
+          yield* elog.warn("cancel-settle-timeout", { sessionID, agentID, timeout: CANCEL_SETTLE_TIMEOUT })
+        }
+        data = yield* InstanceState.get(state)
+        const replacement = data.runners.get(key)
+        if (replacement) return replacement
+        if (data.settling.get(key) === pendingCancellation) data.settling.delete(key)
+      }
+
       const reservation = data.reservations.get(key)
       if (reservation && reservation.abortController.signal !== requestedAbortSignal) {
         throw new Session.BusyError(sessionID)
@@ -206,8 +232,17 @@ export const layer = Layer.effect(
       existing.abortController.abort()
       if (data.runners.get(key) === existing) data.runners.delete(key)
       yield* restoreSettledStatus(sessionID)
+
+      const cancellation = yield* Deferred.make<void>()
+      data.settling.set(key, cancellation)
       yield* existing.runner.cancel.pipe(
         Effect.catchCause((cause) => elog.warn("cancel-background-failed", { sessionID, cause: String(cause) })),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(cancellation, undefined).pipe(Effect.ignore)
+            if (data.settling.get(key) === cancellation) data.settling.delete(key)
+          }),
+        ),
         Effect.forkIn(data.scope),
       )
       yield* elog.info("session_abort_signalled", { sessionID, busy: true })
@@ -226,8 +261,16 @@ export const layer = Layer.effect(
         data.runners.delete(key)
       }
       if (agentID === "main") yield* restoreSettledStatus(sessionID)
+      const cancellation = yield* Deferred.make<void>()
+      data.settling.set(key, cancellation)
       yield* existing.runner.cancel.pipe(
         Effect.catchCause((cause) => elog.warn("cancel-actor-background-failed", { sessionID, agentID, cause: String(cause) })),
+        Effect.ensuring(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(cancellation, undefined).pipe(Effect.ignore)
+            if (data.settling.get(key) === cancellation) data.settling.delete(key)
+          }),
+        ),
         Effect.forkIn(data.scope),
       )
     })

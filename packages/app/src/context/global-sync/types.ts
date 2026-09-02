@@ -85,6 +85,23 @@ export type HookRunActivity = {
   timeCreated: number
 }
 
+export type SessionActivity = {
+  id: string
+  sessionID: string
+  revision?: number
+  kind: string
+  status?: string
+  title?: string
+  summary?: string
+  createdAt: number
+  updatedAt?: number
+  hookID?: string
+  hookName?: string
+  event?: string
+  durationMs?: number
+  metadata?: Record<string, unknown>
+}
+
 export type State = {
   status: "loading" | "partial" | "complete"
   agent: Agent[]
@@ -109,6 +126,9 @@ export type State = {
   }
   hook_run?: {
     [sessionID: string]: HookRunActivity[] | undefined
+  }
+  activity?: {
+    [sessionID: string]: SessionActivity[] | undefined
   }
   session_diff: {
     [sessionID: string]: SnapshotFileDiff[]

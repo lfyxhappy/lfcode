@@ -30,7 +30,7 @@ export function attach<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A
       workspace: WorkspaceContext.workspaceID,
     })
   } catch (err) {
-    if (!(err instanceof LocalContext.NotFound)) throw err
+    if (!LocalContext.isNotFound(err, "instance")) throw err
   }
   return effect
 }

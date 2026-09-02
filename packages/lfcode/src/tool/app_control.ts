@@ -47,7 +47,7 @@ export function AppControlTool(targets: Targets) {
       "Control the local Lfcode desktop app through one App Control entrypoint. This does not use mouse, keyboard, focus, or screen-coordinate injection.",
       "Choose operation, then put that operation's exact arguments in input. App Control permissions are evaluated by the same underlying operation used before consolidation.",
       "State and diagnostics: get_state, list_windows, get_events, get_automation_status, wait_for_event, capture_window, capture_diagnostics_bundle, wait_for_state.",
-      "Application and editor UI: ui_query, ui_action, dom, editor_query, editor_action, filetab_query, filetab_action.",
+      "Application and editor UI is accessed through app_control operations: editor_action, editor_query, filetab_query, filetab_action, ui_action, ui_query, and dom. These are operation values, not separate tools.",
       "Session and composer: open_route, open_session, open_side_chat, focus_side_chat, close_side_chat, set_input, append_input, send.",
       "Use browser for built-in browser pages and browser-specific diagnostics or interactions.",
     ].join("\n"),

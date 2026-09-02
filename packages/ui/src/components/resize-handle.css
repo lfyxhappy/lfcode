@@ -10,7 +10,8 @@
   }
 
   &:hover::after,
-  &:active::after {
+  &:active::after,
+  &[data-dragging="true"]::after {
     opacity: 1;
   }
 
@@ -32,6 +33,15 @@
       inset-block: 0;
       inset-inline-start: 50%;
       transform: translateX(-50%);
+    }
+  }
+
+  &.sidebar-resize-handle[data-direction="horizontal"] {
+    width: 16px;
+
+    &::after {
+      width: 2px;
+      background-color: var(--border-strong-base);
     }
   }
 

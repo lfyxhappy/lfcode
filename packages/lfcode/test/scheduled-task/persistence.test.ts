@@ -173,6 +173,28 @@ describe("scheduled task persistence", () => {
     Persistence.remove(task.id, now + 5)
   })
 
+  test("applies run limits in the query and returns latest runs in one batch", () => {
+    const now = Date.UTC(2026, 0, 2, 13, 45)
+    const firstTask = Persistence.create(input("limited history"), now)
+    const secondTask = Persistence.create(input("latest history"), now)
+    Persistence.runNow(firstTask.id, now + 1)
+    const second = Persistence.runNow(firstTask.id, now + 2)!
+    const third = Persistence.runNow(firstTask.id, now + 3)!
+    const other = Persistence.runNow(secondTask.id, now + 4)!
+
+    expect(Persistence.listRuns(firstTask.id, { limit: 1 }).map((run) => run.id)).toEqual([third.id])
+    expect(Persistence.listRuns(firstTask.id, { limit: 2 }).map((run) => run.id)).toEqual([third.id, second.id])
+    expect(new Map(Persistence.listLatestRuns([firstTask.id, secondTask.id]).map((run) => [run.taskID, run.id]))).toEqual(
+      new Map([
+        [firstTask.id, third.id],
+        [secondTask.id, other.id],
+      ]),
+    )
+
+    Persistence.remove(firstTask.id, now + 5)
+    Persistence.remove(secondTask.id, now + 5)
+  })
+
   test("fences stale workers after a lease recovery", () => {
     const now = Date.UTC(2026, 0, 2, 13, 45)
     const task = Persistence.create(input("stale worker"), now)

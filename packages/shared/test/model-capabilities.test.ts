@@ -100,6 +100,28 @@ describe("inferModelProfile", () => {
     expect(inferModelProfile({ modelID: "kimi-k3" }).reasoningOptions).toEqual(["low", "high", "max"])
     expect(inferModelProfile({ modelID: "claude-opus-4-7" }).reasoningOptions).toEqual(["low", "medium", "high", "xhigh", "max"])
   })
+
+  test("maps GLM-5.3-Flash to its official multimodal reasoning profile", () => {
+    const profile = inferModelProfile({ modelID: "glm-5.3-flash" })
+
+    expect(profile.capabilities).toMatchObject({
+      reasoning: true,
+      tool_call: true,
+      temperature: true,
+      native_web: false,
+      attachment: true,
+      patch_editing: true,
+      input: { text: true, audio: false, image: true, video: true, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+    })
+    expect(profile.limit).toEqual({ context: 1_000_000, output: 128_000 })
+    expect(profile.modalities).toEqual({
+      input: ["text", "image", "video", "pdf"],
+      output: ["text"],
+    })
+    expect(profile.reasoningOptions).toEqual(["low", "high", "max"])
+    expect(profile.reasoningModes).toEqual([{ type: "effort", values: ["low", "high", "max"] }])
+  })
 })
 
 describe("normalizeModelCapabilities", () => {

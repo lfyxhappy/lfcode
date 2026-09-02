@@ -223,14 +223,14 @@ All migration groups are complete or superseded. `packages/lfcode/src/storage/db
 
 Status: Superseded. No opencode data-migration group remains.
 
-The previous opencode `data-migration.ts` service only backfilled session usage from message rows. That work is now covered by core database migration `packages/core/src/database/migration/20260510033149_session_usage.ts`, so there is no separate opencode data-migration group.
+The previous opencode `data-migration.ts` service only backfilled session usage from message rows. That work is now covered by the Lfcode database migration chain, so there is no separate opencode data-migration group.
 
 ## Invariants To Preserve
 
 - Nested reads inside a transaction must use the active transaction, not the root client.
 - `SyncEvent.run` sequence allocation must keep immediate transaction behavior.
 - Post-commit publish effects must not run before the transaction commits.
-- Existing schema ownership remains in `packages/core/src/**/*.sql.ts`; do not move table definitions back into `packages/lfcode`.
+- Existing schema ownership remains in `packages/lfcode/src/**/*.sql.ts`.
 
 ## Verification Commands
 

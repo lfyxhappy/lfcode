@@ -45,7 +45,7 @@ const AgentSchema = Schema.StructWithRest(
     top_p: Schema.optional(Schema.Number),
     prompt: Schema.optional(Schema.String),
     tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
-      description: "@deprecated Use 'permission' field instead",
+      description: "Removed. Configure canonical tool IDs through permission or tool_allowlist.",
     }),
     disable: Schema.optional(Schema.Boolean),
     description: Schema.optional(Schema.String).annotate({ description: "Description of when to use the agent" }),
@@ -121,32 +121,23 @@ const KNOWN_KEYS = new Set([
   "tool_allowlist",
 ])
 
-// Post-parse normalisation:
-//  - Promote any unknown-but-present keys into `options` so they survive the
-//    round-trip in a well-known field.
-//  - Translate the deprecated `tools: { name: boolean }` map into the new
-//    `permission` shape (write-adjacent tools collapse into `permission.edit`).
-//  - Coalesce `steps ?? maxSteps` so downstream can ignore the deprecated alias.
+const canonicalToolIDs = new Set([
+  "read", "search", "edit", "shell", "browser", "app_control", "webfetch", "websearch",
+  "skill", "memory", "task", "actor", "question", "create_goal", "get_goal", "update_goal",
+])
+
+// Promote unknown options and reject removed configuration surfaces. A deleted
+// tool name must be fixed by the configuration author, never rewritten.
 const normalize = (agent: z.infer<typeof Info>) => {
+  if (agent.tools) throw new Error("agent.tools is removed; use permission or tool_allowlist with canonical tool IDs.")
+  const removed = agent.tool_allowlist?.find((tool: string) => !canonicalToolIDs.has(tool))
+  if (removed) throw new Error(`Unknown or removed tool '${removed}' in agent tool_allowlist.`)
   const options: Record<string, unknown> = { ...agent.options }
   for (const [key, value] of Object.entries(agent)) {
     if (!KNOWN_KEYS.has(key)) options[key] = value
   }
 
-  const permission: ConfigPermission.Info = {}
-  for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
-    const action = enabled ? "allow" : "deny"
-    if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
-      permission.edit = action
-      continue
-    }
-    if (tool === "task") {
-      permission.actor = action
-      continue
-    }
-    permission[tool] = action
-  }
-  globalThis.Object.assign(permission, agent.permission)
+  const permission: ConfigPermission.Info = { ...agent.permission }
 
   return { ...agent, options, permission, steps: agent.steps ?? agent.maxSteps }
 }

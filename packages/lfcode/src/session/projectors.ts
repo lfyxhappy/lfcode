@@ -101,17 +101,17 @@ function upsertUsageFact(
   }
   db.run(sql`INSERT INTO usage_fact (
     part_id, message_id, session_id, project_id, time_created, agent_id, provider_id, model_id, status,
-    input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, overhead_tokens,
+    variant, input_tokens, output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, overhead_tokens,
     cost, overhead_cost, duration, ttft, submit_to_first_delta, pre_stream
   ) VALUES (
     ${input.part.id}, ${input.part.messageID}, ${input.part.sessionID}, ${session.project_id}, ${input.part.time},
-    ${message.agent_id}, ${stringAt(message.data, ["providerID"])}, ${stringAt(message.data, ["modelID"])}, ${values.status},
+    ${message.agent_id}, ${stringAt(message.data, ["providerID"])}, ${stringAt(message.data, ["modelID"])}, ${values.status}, ${stringAt(message.data, ["variant"]) || null},
     ${values.input}, ${values.output}, ${values.reasoning}, ${values.cacheRead}, ${values.cacheWrite}, ${overheadTokens},
     ${values.cost}, ${values.overheadCost}, ${values.duration}, ${values.ttft}, ${values.submitToFirstDelta}, ${values.preStream}
   ) ON CONFLICT(part_id) DO UPDATE SET
     message_id=excluded.message_id, session_id=excluded.session_id, project_id=excluded.project_id,
     time_created=excluded.time_created, agent_id=excluded.agent_id, provider_id=excluded.provider_id,
-    model_id=excluded.model_id, status=excluded.status, input_tokens=excluded.input_tokens,
+    model_id=excluded.model_id, variant=excluded.variant, status=excluded.status, input_tokens=excluded.input_tokens,
     output_tokens=excluded.output_tokens, reasoning_tokens=excluded.reasoning_tokens,
     cache_read_tokens=excluded.cache_read_tokens, cache_write_tokens=excluded.cache_write_tokens,
     overhead_tokens=excluded.overhead_tokens, cost=excluded.cost, overhead_cost=excluded.overhead_cost,

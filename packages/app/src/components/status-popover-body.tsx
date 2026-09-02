@@ -6,7 +6,7 @@ import { Tabs } from "@lfcode-ai/ui/tabs"
 import { useMutation } from "@tanstack/solid-query"
 import { showToast } from "@lfcode-ai/ui/toast"
 import { useNavigate } from "@solidjs/router"
-import { type Accessor, createEffect, createMemo, createSignal, For, type JSXElement, onCleanup, Show } from "solid-js"
+import { type Accessor, createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { ServerHealthIndicator, ServerRow } from "@/components/server/server-row"
 import { useLanguage } from "@/context/language"
@@ -20,21 +20,6 @@ import { startVisiblePolling } from "@/utils/visible-poll"
 
 const pollMs = 10_000
 
-const pluginEmptyMessage = (value: string, file: string): JSXElement => {
-  const parts = value.split(file)
-  if (parts.length === 1) return value
-  return (
-    <>
-      {parts[0]}
-      <code class="bg-surface-raised-base px-1.5 py-0.5 rounded-sm text-text-base">{file}</code>
-      {parts.slice(1).join(file)}
-    </>
-  )
-}
-
-type PluginItem = NonNullable<
-  Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["plugin"]["list"]>>["data"]
->[number]
 type BackgroundJobItem = NonNullable<
   Awaited<ReturnType<ReturnType<typeof useSDK>["client"]["backgroundJob"]["list"]>>["data"]
 >[number]
@@ -83,24 +68,6 @@ const tabTrigger = (label: string, count: number) => (
     </Show>
   </>
 )
-
-const pluginTargetTone = (status: PluginItem["server"]["status"]) => {
-  if (status === "ready") return "bg-icon-success-base"
-  if (status === "missing") return "bg-icon-warning-base"
-  return "bg-icon-critical-base"
-}
-
-const pluginTargetLabel = (status: PluginItem["server"]["status"]) => {
-  if (status === "ready") return "Ready"
-  if (status === "missing") return "Missing"
-  if (status === "unresolved") return "Unresolved"
-  return "Error"
-}
-
-const pluginCompatLabel = (item: PluginItem) => {
-  if (item.compatible) return "Compatible"
-  return "Incompatible"
-}
 
 const listServersByHealth = (
   list: ServerConnection.Any[],
@@ -237,18 +204,13 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
   const sdk = useSDK()
 
   const [load, setLoad] = createStore({
-    lspDone: false,
-    lspLoading: false,
     mcpDone: false,
     mcpLoading: false,
-    pluginsDone: false,
-    pluginsLoading: false,
     jobsLoading: false,
     jobsDone: false,
     planLoading: false,
     planDone: false,
   })
-  const [plugins, setPlugins] = createSignal<PluginItem[]>([])
   const [jobs, setJobs] = createSignal<BackgroundJobItem[]>([])
   const [sessionTasks, setSessionTasks] = createSignal<SessionTaskItem[]>([])
   const [expandedJobID, setExpandedJobID] = createSignal<string>()
@@ -287,68 +249,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
         })
     }
 
-    if (!sync.data.lsp_ready && !load.lspDone && !load.lspLoading) {
-      setLoad("lspLoading", true)
-      void sdk.client.lsp
-        .status()
-        .then((result) => {
-          sync.set("lsp", result.data ?? [])
-          sync.set("lsp_ready", true)
-        })
-        .catch((err) => {
-          setLoad("lspDone", true)
-          fail(err)
-        })
-        .finally(() => {
-          setLoad("lspLoading", false)
-        })
-    }
-
-    if (!load.pluginsDone && !load.pluginsLoading) {
-      setLoad("pluginsLoading", true)
-      void sdk.client.plugin
-        .list()
-        .then((result) => {
-          setPlugins(
-            (result.data ?? []).toSorted((a, b) =>
-              (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec),
-            ),
-          )
-        })
-        .catch((err) => {
-          setLoad("pluginsDone", true)
-          fail(err)
-        })
-        .finally(() => {
-          setLoad("pluginsLoading", false)
-        })
-    }
-  })
-
-  createEffect(() => {
-    if (!props.shown()) return
-    let dead = false
-    const refresh = async () => {
-      try {
-        const result = await sdk.client.plugin.list()
-        if (dead) return
-        setPlugins(
-          (result.data ?? []).toSorted((a, b) =>
-            (a.manifest?.name ?? a.spec).localeCompare(b.manifest?.name ?? b.spec),
-          ),
-        )
-      } catch (err) {
-        if (dead) return
-        fail(err)
-      }
-    }
-
-    void refresh()
-    const stopPolling = startVisiblePolling(refresh, pollMs, { immediate: false })
-    onCleanup(() => {
-      dead = true
-      stopPolling()
-    })
   })
 
   createEffect(() => {
@@ -472,11 +372,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
   const mcpNames = createMemo(() => Object.keys(sync.data.mcp ?? {}).sort((a, b) => a.localeCompare(b)))
   const mcpStatus = (name: string) => sync.data.mcp?.[name]?.status
   const mcpCount = createMemo(() => mcpNames().length)
-  const lspItems = createMemo(() => sync.data.lsp ?? [])
-  const lspCount = createMemo(() => lspItems().length)
-  const pluginItems = createMemo(() => plugins())
-  const pluginCount = createMemo(() => pluginItems().length)
-  const pluginEmpty = createMemo(() => pluginEmptyMessage(language.t("dialog.plugins.empty"), "lfcode.json"))
   const jobItems = createMemo(() =>
     jobs().toSorted((a, b) => {
       if (a.status === "running" && b.status !== "running") return -1
@@ -494,7 +389,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
   }
   const jobDetailLabel = () => tOr(language, "status.popover.jobs.details", "Details")
   const jobHideLabel = () => tOr(language, "status.popover.jobs.hide", "Hide")
-  const pluginSourceLabel = (source: PluginItem["source"]) => (source === "file" ? "File" : "NPM")
   const refreshSessionJobs = async () => {
     if (!props.sessionID) return
     const result = await sdk.client.backgroundJob.list({ sessionID: props.sessionID })
@@ -531,15 +425,11 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
           <Tabs.Trigger value="servers" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
             {tabTrigger(language.t("status.popover.tab.servers"), sortedServers().length)}
           </Tabs.Trigger>
-          <Tabs.Trigger value="mcp" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
-            {tabTrigger(language.t("status.popover.tab.mcp"), mcpCount())}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="lsp" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
-            {tabTrigger(language.t("status.popover.tab.lsp"), lspCount())}
-          </Tabs.Trigger>
-          <Tabs.Trigger value="plugins" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
-            {tabTrigger(language.t("status.popover.tab.plugins"), pluginCount())}
-          </Tabs.Trigger>
+          <Show when={mcpCount() > 0}>
+            <Tabs.Trigger value="mcp" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
+              {tabTrigger(language.t("status.popover.tab.mcp"), mcpCount())}
+            </Tabs.Trigger>
+          </Show>
           <Show when={props.sessionID}>
             <Tabs.Trigger value="jobs" data-slot="tab" class="inline-flex items-center gap-1.5 text-12-regular">
               {tabTrigger(language.t("status.popover.tab.jobs"), jobCount())}
@@ -659,118 +549,6 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean>; directory?:
                     )
                   }}
                 </For>
-              </Show>
-            </div>
-          </div>
-        </Tabs.Content>
-
-        <Tabs.Content value="lsp">
-          <div class="flex flex-col px-2 pb-2">
-            <div class="flex flex-col p-3 bg-background-base rounded-sm min-h-14">
-              <Show
-                when={lspItems().length > 0}
-                fallback={
-                  <div class="text-14-regular text-text-base text-center my-auto">{language.t("dialog.lsp.empty")}</div>
-                }
-              >
-                <For each={lspItems()}>
-                  {(item) => (
-                    <div class="flex items-center gap-2 w-full px-2 py-1">
-                      <div
-                        classList={{
-                          "size-1.5 rounded-full shrink-0": true,
-                          "bg-icon-success-base": item.status === "connected",
-                          "bg-icon-critical-base": item.status === "error",
-                        }}
-                      />
-                      <span class="text-14-regular text-text-base truncate">{item.name || item.id}</span>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </div>
-          </div>
-        </Tabs.Content>
-
-        <Tabs.Content value="plugins">
-          <div class="flex flex-col px-2 pb-2">
-            <div class="flex flex-col gap-2 p-3 bg-background-base rounded-sm min-h-14">
-              <Show
-                when={!load.pluginsLoading}
-                fallback={
-                  <div class="text-14-regular text-text-base text-center my-auto">
-                    {language.t("common.loading")}...
-                  </div>
-                }
-              >
-                <Show
-                  when={pluginItems().length > 0}
-                  fallback={<div class="text-14-regular text-text-base text-center my-auto">{pluginEmpty()}</div>}
-                >
-                  <For each={pluginItems()}>
-                    {(plugin) => (
-                      <div class="rounded-md border border-border-weak-base bg-surface-base px-3 py-2">
-                        <div class="flex items-start gap-2">
-                          <div
-                            class={`mt-1 size-1.5 shrink-0 rounded-full ${pluginTargetTone(plugin.server.status === "ready" ? "ready" : plugin.tui.status)}`}
-                          />
-                          <div class="min-w-0 flex-1">
-                            <div class="truncate text-13-medium text-text-base">
-                              {plugin.manifest?.name || plugin.packageName || plugin.spec}
-                            </div>
-                            <div class="mt-1 flex flex-wrap items-center gap-2 text-11-regular text-text-weak">
-                              <span>{pluginSourceLabel(plugin.source)}</span>
-                              <span>•</span>
-                              <span>{plugin.scope}</span>
-                              <Show when={plugin.manifest?.trust}>
-                                <span>• {plugin.manifest?.trust}</span>
-                              </Show>
-                              <span>• {pluginCompatLabel(plugin)}</span>
-                            </div>
-                            <div class="mt-1 truncate text-11-regular text-text-weak">{plugin.spec}</div>
-                            <Show when={plugin.manifest?.apiVersion || plugin.manifest?.lfcodeRange}>
-                              <div class="mt-1 flex flex-wrap items-center gap-2 text-11-regular text-text-weak">
-                                <Show when={plugin.manifest?.apiVersion}>
-                                  <span>api {plugin.manifest?.apiVersion}</span>
-                                </Show>
-                                <Show when={plugin.manifest?.lfcodeRange}>
-                                  <span>lfcode {plugin.manifest?.lfcodeRange}</span>
-                                </Show>
-                              </div>
-                            </Show>
-                            <Show when={!plugin.compatible && plugin.compatibilityMessage}>
-                              <div class="mt-1 line-clamp-2 text-11-regular text-text-danger">
-                                {plugin.compatibilityMessage}
-                              </div>
-                            </Show>
-                            <div class="mt-2 grid grid-cols-2 gap-2 text-11-regular">
-                              <div class="rounded-sm border border-border-weak-base bg-background-base px-2 py-1.5">
-                                <div class="flex items-center gap-1.5 text-text-weak">
-                                  <div class={`size-1.5 rounded-full ${pluginTargetTone(plugin.server.status)}`} />
-                                  <span>server</span>
-                                </div>
-                                <div class="mt-1 text-text-base">{pluginTargetLabel(plugin.server.status)}</div>
-                                <Show when={plugin.server.message}>
-                                  <div class="mt-1 line-clamp-2 text-text-weak">{plugin.server.message}</div>
-                                </Show>
-                              </div>
-                              <div class="rounded-sm border border-border-weak-base bg-background-base px-2 py-1.5">
-                                <div class="flex items-center gap-1.5 text-text-weak">
-                                  <div class={`size-1.5 rounded-full ${pluginTargetTone(plugin.tui.status)}`} />
-                                  <span>tui</span>
-                                </div>
-                                <div class="mt-1 text-text-base">{pluginTargetLabel(plugin.tui.status)}</div>
-                                <Show when={plugin.tui.message}>
-                                  <div class="mt-1 line-clamp-2 text-text-weak">{plugin.tui.message}</div>
-                                </Show>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </Show>
               </Show>
             </div>
           </div>

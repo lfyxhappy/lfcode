@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   actorDispatches,
+  actorDispatchesFromActivities,
   agentManageResponse,
   agentPresetContextFromSubagent,
   subagentContextFromAgentPreset,
@@ -127,6 +128,60 @@ describe("subagent API adapters", () => {
     expect(url.pathname).toBe("/actor-dispatch/dispatch-1/cancel")
     expect(url.searchParams.get("directory")).toBe("C:/work/project")
     expect(url.searchParams.get("sessionID")).toBe("session-1")
+  })
+
+  test("maps activity metadata dispatch without polling the dispatch route", () => {
+    expect(
+      actorDispatchesFromActivities([
+        {
+          id: "activity-1",
+          sessionID: "session-1",
+          kind: "actor-dispatch",
+          status: "running",
+          createdAt: 42,
+          metadata: {
+            dispatch: {
+              id: "dispatch-1",
+              agent: "implementer",
+              description: "Update the API",
+              status: "queued",
+              actorID: "actor-1",
+            },
+          },
+        },
+      ]),
+    ).toMatchObject([
+      {
+        id: "activity-1",
+        sessionID: "session-1",
+        actorID: "actor-1",
+        agent: "implementer",
+        description: "Update the API",
+        status: "running",
+      },
+    ])
+  })
+
+  test("renders a minimum dispatch state when metadata is unavailable", () => {
+    expect(
+      actorDispatchesFromActivities([
+        {
+          id: "activity-2",
+          sessionID: "session-1",
+          kind: "subagent",
+          status: "completed",
+          title: "Review changes",
+          createdAt: 10,
+        },
+      ]),
+    ).toMatchObject([
+      {
+        id: "activity-2",
+        agent: "subagent",
+        description: "Review changes",
+        status: "completed",
+      },
+    ])
   })
 
   test("maps persisted role contexts to dispatch contexts without widening them", () => {

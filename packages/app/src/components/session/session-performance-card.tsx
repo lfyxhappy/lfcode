@@ -23,6 +23,7 @@ export function SessionPerformanceCard(props: {
   const [now, setNow] = createSignal(Date.now())
   const [tokenSamplesByMessageID, setTokenSamplesByMessageID] = createSignal<Record<string, TokenSample[]>>({})
   let usageRequestID = 0
+  let usageInFlight: Promise<void> | undefined
 
   const estimatedOutputTokensByMessageID = createMemo(() => {
     const output: Record<string, number> = {}
@@ -58,12 +59,13 @@ export function SessionPerformanceCard(props: {
     setUsageState("loading")
 
     const refreshUsage = () => {
+      if (usageInFlight) return usageInFlight
       const requestID = ++usageRequestID
-      void sdk.client.usage
-        .get({ range: "all", session: sessionID, limit: 1 }, { signal: controller.signal })
+      usageInFlight = sdk.client.usage
+        .summary({ range: "all", session: sessionID }, { signal: controller.signal })
         .then((response) => {
           if (controller.signal.aborted || requestID !== usageRequestID) return
-          const totalTokens = response.data?.summary.totalTokens
+          const totalTokens = response.data?.totalTokens
           if (typeof totalTokens !== "number") throw new Error("Usage response did not include summary.totalTokens")
           setUsageTotalTokens(totalTokens)
           setUsageState("ready")
@@ -72,13 +74,17 @@ export function SessionPerformanceCard(props: {
           if (controller.signal.aborted || requestID !== usageRequestID) return
           setUsageState("error")
         })
+        .finally(() => {
+          usageInFlight = undefined
+        })
+      return usageInFlight
     }
 
     refreshUsage()
 
     const timer = window.setInterval(() => {
       if (metrics().streaming) refreshUsage()
-    }, 1000)
+    }, 5000)
 
     onCleanup(() => {
       controller.abort()
@@ -92,12 +98,13 @@ export function SessionPerformanceCard(props: {
     if (metrics().currentTokens === 0) return
     const sessionID = props.sessionID
     const controller = new AbortController()
+    if (usageInFlight) return
     const requestID = ++usageRequestID
-    void sdk.client.usage
-      .get({ range: "all", session: sessionID, limit: 1 }, { signal: controller.signal })
+    usageInFlight = sdk.client.usage
+      .summary({ range: "all", session: sessionID }, { signal: controller.signal })
       .then((response) => {
         if (controller.signal.aborted || requestID !== usageRequestID) return
-        const totalTokens = response.data?.summary.totalTokens
+        const totalTokens = response.data?.totalTokens
         if (typeof totalTokens !== "number") throw new Error("Usage response did not include summary.totalTokens")
         setUsageTotalTokens(totalTokens)
         setUsageState("ready")
@@ -105,6 +112,9 @@ export function SessionPerformanceCard(props: {
       .catch(() => {
         if (controller.signal.aborted || requestID !== usageRequestID) return
         setUsageState("error")
+      })
+      .finally(() => {
+        usageInFlight = undefined
       })
 
     onCleanup(() => controller.abort())
@@ -116,7 +126,7 @@ export function SessionPerformanceCard(props: {
     const timer = window.setInterval(() => {
       const timestamp = Date.now()
       setNow(timestamp)
-      const message = props.messages().find((item) => item.id === currentMessageID(props.messages()))
+      const message = props.messages().findLast((item) => item.role === "assistant")
       if (message?.role !== "assistant") return
       const realTokens = message.responseMetrics
         ? message.responseMetrics.tokens.output + message.responseMetrics.tokens.reasoning
@@ -156,13 +166,12 @@ export function SessionPerformanceCard(props: {
         </Show>
       </header>
       <div class="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 px-1">
-        <Metric label={language.t("session.performance.tps")} value={metrics().tps === null ? "—" : formatTps().format(metrics().tps!)} />
-        <Metric label={language.t("session.performance.request")} value={formatTokenCount(metrics().currentTokens)} />
         <Metric
-          label={language.t("session.performance.conversation")}
-          value={conversationDisplay()}
-          wide
+          label={language.t("session.performance.tps")}
+          value={metrics().tps === null ? "—" : formatTps().format(metrics().tps!)}
         />
+        <Metric label={language.t("session.performance.request")} value={formatTokenCount(metrics().currentTokens)} />
+        <Metric label={language.t("session.performance.conversation")} value={conversationDisplay()} wide />
       </div>
     </section>
   )

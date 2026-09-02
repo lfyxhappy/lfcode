@@ -79,6 +79,7 @@ async function fillStep(
   options?: {
     agentID?: string
     status?: "completed" | "error" | "aborted"
+    variant?: string
     start?: number
     end?: number
     ttft?: number | null
@@ -97,6 +98,7 @@ async function fillStep(
     parentID: MessageID.ascending(),
     providerID,
     modelID,
+    variant: options?.variant,
     mode: "",
     agent: "test",
     path: { cwd: "/tmp", root: "/tmp" },
@@ -179,6 +181,23 @@ describe("usage route", () => {
     )
   }, 20000)
 
+  test("returns the lightweight session summary without log materialization", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({ title: "usage-summary-session" })
+          await fillStep(session.id, "anthropic", "claude-3", 1.25, 10, 20)
+          const summary = SessionUsage.summary({ range: "all", session: session.id, source: "lfcode" })
+          expect(summary.requestCount).toBe(1)
+          expect(summary.totalTokens).toBe(33)
+          expect(summary.totalCost).toBe(1.25)
+        },
+      }),
+    )
+  }, 20000)
+
   test("preserves step timing/status and counts terminal failures", async () => {
     await using tmp = await tmpdir({ git: true })
     await withoutWatcher(() =>
@@ -235,6 +254,23 @@ describe("usage route", () => {
           expect(body.summary.requestCount).toBe(1)
           expect(body.logs[0]?.submitToFirstDelta).toBe(450)
           expect(body.logs[0]?.preStream).toBe(300)
+        },
+      }),
+    )
+  }, 20000)
+
+  test("includes the assistant reasoning variant in new usage logs", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await svc.create({ title: "variant-usage-session" })
+          await fillStep(session.id, "openai", "gpt-5.5", 1, 10, 20, 0, { variant: "high" })
+          await fillStep(session.id, "openai", "gpt-5.5", 1, 10, 20, 0, { variant: "max" })
+
+          const body = SessionUsage.get({ range: "all", source: "lfcode", search: "variant-usage-session" })
+          expect(body.logs.map((item) => item.variant)).toEqual(["max", "high"])
         },
       }),
     )

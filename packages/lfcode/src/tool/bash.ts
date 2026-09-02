@@ -460,9 +460,9 @@ const parser = lazy(async () => {
   return { bash, ps }
 })
 
-function defineShellTool(id: "shell" | "bash") {
+function defineShellTool() {
   return Tool.define(
-    id,
+    "shell",
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner
       const fs = yield* AppFileSystem.Service
@@ -652,5 +652,4 @@ function defineShellTool(id: "shell" | "bash") {
   )
 }
 
-export const ShellTool = defineShellTool("shell")
-export const BashTool = defineShellTool("bash")
+export const ShellTool = defineShellTool()

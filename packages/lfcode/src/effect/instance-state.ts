@@ -17,7 +17,7 @@ export const bind = <F extends (...args: any[]) => any>(fn: F): F => {
   try {
     return Instance.bind(fn)
   } catch (err) {
-    if (!(err instanceof LocalContext.NotFound)) throw err
+    if (!LocalContext.isNotFound(err, "instance")) throw err
   }
   const fiber = Fiber.getCurrent()
   const ctx = fiber ? Context.getReferenceUnsafe(fiber.context, InstanceRef) : undefined

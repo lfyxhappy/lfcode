@@ -11,8 +11,8 @@ export type SubagentPreset = {
   toolAllowlist: string[]
 }
 
-const writeTools = ["read", "glob", "grep", "edit", "apply_patch", "bash"]
-const readTools = ["read", "glob", "grep"]
+const writeTools = ["read", "search", "edit", "shell"]
+const readTools = ["read", "search"]
 
 export const SUBAGENT_PRESETS: SubagentPreset[] = [
   {
@@ -58,7 +58,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "full",
     avatar: 4,
-    toolAllowlist: ["read", "glob", "grep", "git"],
+    toolAllowlist: ["read", "search"],
   },
   {
     id: "tester",
@@ -67,7 +67,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "state",
     avatar: 5,
-    toolAllowlist: ["read", "glob", "grep", "bash"],
+    toolAllowlist: ["read", "search", "shell"],
   },
   {
     id: "debugger",
@@ -76,7 +76,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "state",
     avatar: 6,
-    toolAllowlist: ["read", "glob", "grep", "bash"],
+    toolAllowlist: ["read", "search", "shell"],
   },
   {
     id: "frontend",
@@ -94,7 +94,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "state",
     avatar: 8,
-    toolAllowlist: ["read", "glob", "grep", "edit", "apply_patch"],
+    toolAllowlist: ["read", "search", "edit"],
   },
   {
     id: "researcher",
@@ -103,7 +103,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "none",
     avatar: 9,
-    toolAllowlist: ["read", "glob", "grep", "webfetch", "websearch"],
+    toolAllowlist: ["read", "search", "webfetch", "websearch"],
   },
   {
     id: "security",
@@ -121,7 +121,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "background",
     context: "state",
     avatar: 11,
-    toolAllowlist: ["read", "glob", "grep", "bash"],
+    toolAllowlist: ["read", "search", "shell"],
   },
   {
     id: "database",
@@ -139,7 +139,7 @@ export const SUBAGENT_PRESETS: SubagentPreset[] = [
     execution: "wait",
     context: "state",
     avatar: 13,
-    toolAllowlist: ["read", "glob", "grep", "bash", "git"],
+    toolAllowlist: ["read", "search", "shell"],
   },
 ]
 

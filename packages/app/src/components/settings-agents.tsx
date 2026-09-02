@@ -37,8 +37,7 @@ export type AgentPermissionConfig = Record<string, AgentPermissionRule>
 export const DEFAULT_CUSTOM_AGENT_PERMISSION: AgentPermissionConfig = {
   "*": "deny",
   read: "allow",
-  glob: "allow",
-  grep: "allow",
+  search: "allow",
   actor: "deny",
 }
 
@@ -47,7 +46,7 @@ const permissionProfiles = [
     id: "read-only",
     label: "subagent.settings.profile.readOnly",
     permission: DEFAULT_CUSTOM_AGENT_PERMISSION,
-    tools: ["read", "glob", "grep"],
+    tools: ["read", "search"],
   },
   {
     id: "confirmed-write",
@@ -57,7 +56,7 @@ const permissionProfiles = [
       edit: "ask",
       shell: "ask",
     } satisfies AgentPermissionConfig,
-    tools: ["read", "glob", "grep", "edit", "write", "apply_patch", "shell"],
+    tools: ["read", "search", "edit", "shell"],
   },
   {
     id: "research",
@@ -67,7 +66,7 @@ const permissionProfiles = [
       webfetch: "allow",
       websearch: "allow",
     } satisfies AgentPermissionConfig,
-    tools: ["read", "glob", "grep", "webfetch", "websearch"],
+    tools: ["read", "search", "webfetch", "websearch"],
   },
 ] as const
 
@@ -338,7 +337,7 @@ export function SettingsAgents() {
       steps: "",
       execution: "background",
       context: "state",
-      toolAllowlist: "read, glob, grep",
+      toolAllowlist: "read, search",
       delegationAllowlist: "",
       permission: agentPermissionText(DEFAULT_CUSTOM_AGENT_PERMISSION),
       native: false,

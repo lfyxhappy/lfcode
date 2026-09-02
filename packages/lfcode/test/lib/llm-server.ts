@@ -759,6 +759,10 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
           if (hits.length >= count) return
           const ready = yield* Deferred.make<void>()
           waits = [...waits, { count, ready }]
+          if (hits.length >= count) {
+            waits = waits.filter((item) => item.ready !== ready)
+            yield* Deferred.succeed(ready, void 0)
+          }
           yield* Deferred.await(ready)
         }),
         inputs: Effect.sync(() => hits.map((hit) => hit.body)),

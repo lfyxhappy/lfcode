@@ -95,10 +95,10 @@ export const dict = {
   "tui.tips.custom_agent":
     "在 {highlight}.lfcode/agent/{/highlight} 加入 {highlight}.md{/highlight} 檔案來建立專用 AI 角色",
   "tui.tips.agent_perms":
-    "為每個智慧代理單獨設定 {highlight}edit{/highlight}、{highlight}bash{/highlight}、{highlight}webfetch{/highlight} 工具權限",
-  "tui.tips.bash_allow": '使用 {highlight}"git *": "allow"{/highlight} 這類模式做精細 bash 權限',
-  "tui.tips.bash_deny": '設定 {highlight}"rm -rf *": "deny"{/highlight} 阻擋破壞性指令',
-  "tui.tips.bash_ask": '設定 {highlight}"git push": "ask"{/highlight} 在推送前要求確認',
+    "為每個智慧代理單獨設定 {highlight}edit{/highlight}、{highlight}shell{/highlight}、{highlight}webfetch{/highlight} 工具權限",
+  "tui.tips.shell_allow": '使用 {highlight}"git *": "allow"{/highlight} 這類模式做精細 shell 權限',
+  "tui.tips.shell_deny": '設定 {highlight}"rm -rf *": "deny"{/highlight} 阻擋破壞性指令',
+  "tui.tips.shell_ask": '設定 {highlight}"git push": "ask"{/highlight} 在推送前要求確認',
   "tui.tips.formatter": "Lfcode 自動使用 prettier、gofmt、ruff 等格式化檔案",
   "tui.tips.disable_formatter": '在設定中設定 {highlight}"formatter": false{/highlight} 關閉所有自動格式化',
   "tui.tips.custom_formatter": "在設定中依檔案副檔名定義自訂格式化指令",
@@ -131,7 +131,7 @@ export const dict = {
   "tui.tips.instructions": "在設定中用 {highlight}instructions{/highlight} 載入額外的規則檔案",
   "tui.tips.temperature": "把智慧代理的 {highlight}temperature{/highlight} 從 0.0（專注）調到 1.0（創造）",
   "tui.tips.steps": "設定 {highlight}steps{/highlight} 限制每次請求的代理迭代次數",
-  "tui.tips.disable_tool": '設定 {highlight}"tools": {"bash": false}{/highlight} 停用特定工具',
+  "tui.tips.disable_tool": '設定 {highlight}"tool_allowlist": ["read", "search"]{/highlight} 停用特定工具',
   "tui.tips.disable_mcp_tools": '設定 {highlight}"mcp_*": false{/highlight} 停用某個 MCP 伺服器的所有工具',
   "tui.tips.tool_override": "在每個智慧代理設定中覆寫全域工具設定",
   "tui.tips.share_auto": '設定 {highlight}"share": "auto"{/highlight} 自動分享所有工作階段',

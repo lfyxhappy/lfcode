@@ -15,7 +15,7 @@ import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { Log } from "../util"
 import { Protected } from "./protected"
-import { authorize, grant } from "./reference-access"
+import { grant } from "./reference-access"
 import { Ripgrep } from "./ripgrep"
 
 export const Info = z
@@ -668,7 +668,9 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const full = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
 
-      if (!Instance.containsPath(full, ctx)) {
+      // Absolute paths are intentionally allowed for authenticated clients so
+      // external files can be previewed. Relative paths remain project-bound.
+      if (!path.isAbsolute(file) && !Instance.containsPath(full, ctx)) {
         throw new Error("Access denied: path escapes project directory")
       }
 
@@ -686,10 +688,10 @@ export const layer = Layer.effect(
       using _ = log.time("read", { file })
       const ctx = yield* InstanceState.context
       const resolved = AppFileSystem.normalizePath(path.isAbsolute(file) ? file : path.join(ctx.directory, file))
-      const full =
-        path.isAbsolute(file) && !Instance.containsPath(resolved, ctx)
-          ? authorize({ owner: ctx.directory, path: resolved, token: options?.referenceToken })
-          : resolved
+      // `referenceToken` is retained for backwards compatibility but is no
+      // longer required. Absolute paths are readable after normalisation;
+      // relative paths continue to be constrained to the project/worktree.
+      const full = resolved
       const projectRelative = AppFileSystem.contains(ctx.directory, full) ? path.relative(ctx.directory, full) : undefined
 
       if (!path.isAbsolute(file) && !Instance.containsPath(full, ctx)) {
@@ -800,7 +802,7 @@ export const layer = Layer.effect(
         path.isAbsolute(input.path) ? input.path : path.join(ctx.directory, input.path),
       )
 
-      if (!Instance.containsPath(full, ctx)) {
+      if (!path.isAbsolute(input.path) && !Instance.containsPath(full, ctx)) {
         throw new Error("Access denied: path escapes project directory")
       }
 
@@ -845,8 +847,10 @@ export const layer = Layer.effect(
         ignored = ig.ignores.bind(ig)
       }
 
-      const resolved = dir ? path.join(ctx.directory, dir) : ctx.directory
-      if (!Instance.containsPath(resolved, ctx)) {
+      const resolved = dir
+        ? AppFileSystem.normalizePath(path.isAbsolute(dir) ? dir : path.join(ctx.directory, dir))
+        : ctx.directory
+      if (dir && !path.isAbsolute(dir) && !Instance.containsPath(resolved, ctx)) {
         throw new Error("Access denied: path escapes project directory")
       }
 
@@ -856,14 +860,16 @@ export const layer = Layer.effect(
       for (const entry of entries) {
         if (exclude.includes(entry.name)) continue
         const absolute = path.join(resolved, entry.name)
-        const file = path.relative(ctx.directory, absolute)
+        const file = AppFileSystem.contains(ctx.directory, absolute) ? path.relative(ctx.directory, absolute) : absolute
         const type = entry.type === "directory" ? "directory" : "file"
         nodes.push({
           name: entry.name,
           path: file,
           absolute,
           type,
-          ignored: ignored(type === "directory" ? file + "/" : file),
+          ignored: AppFileSystem.contains(ctx.directory, absolute)
+            ? ignored(type === "directory" ? file + "/" : file)
+            : false,
         })
       }
       return nodes.sort((a, b) => {
@@ -888,8 +894,9 @@ export const layer = Layer.effect(
       input: { path: string; token?: string },
     ) {
       if (!path.isAbsolute(input.path)) throw new Error("Reference directory path must be absolute")
-      const ctx = yield* InstanceState.context
-      const resolved = authorize({ owner: ctx.directory, path: input.path, token: input.token })
+      // `token` remains an accepted compatibility field. Access is governed
+      // by the authenticated API/session layer rather than a pre-grant gate.
+      const resolved = AppFileSystem.normalizePath(input.path)
       const info = yield* appFs.stat(resolved).pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!info) throw new Error("Reference directory does not exist")
       if (info.type !== "Directory") throw new Error("Reference path is not a directory")

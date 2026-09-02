@@ -55,6 +55,7 @@ export type MaxStepInput = {
   /** Execute-bearing tools from resolveTools — used to run the winner. */
   tools: Record<string, AITool>
   agentID?: string
+  requestEnvelopeTokens?: number
   /**
    * Tool-choice from the per-step args. Accepted (so the same processArgs object
    * can be spread in) but unused: candidates always run propose-only and the
@@ -112,7 +113,9 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       reasoning: "",
       text: "",
       toolCalls: [],
-      finishReason: "stop",
+      // A candidate is valid only after the provider emits finish-step. Do not
+      // fabricate `stop` for a truncated stream and let the judge select it.
+      finishReason: "",
     }
 
     const schemaOnly = toSchemaOnlyTools(input.tools)
@@ -129,6 +132,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       tools: schemaOnly,
       agentID: input.agentID,
       abortSignal: input.abortSignal,
+      requestEnvelopeTokens: input.requestEnvelopeTokens,
     })
 
     yield* Stream.runForEach(stream, (event: LLM.Event) => {
@@ -169,6 +173,7 @@ export const runCandidate = (input: MaxStepInput, index: number): Effect.Effect<
       return Effect.void
     })
 
+    if (!candidate.finishReason) return null
     return candidate
   }).pipe(
     // Mirror the proven build/plan path (processor.ts): convert any DEFECT into
@@ -317,7 +322,20 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
   Effect.gen(function* () {
     const n = Math.max(1, input.candidates ?? DEFAULT_CANDIDATES)
     const setStatus = (message: string | undefined) =>
-      input.setStatus ? input.setStatus(message) : Effect.void
+      (input.setStatus ? input.setStatus(message) : Effect.void).pipe(
+        // Max-mode progress is informational. A status store failure must not
+        // discard a valid candidate, judge result, or fallback model call.
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) =>
+            Effect.sync(() =>
+              log.warn("max-mode status update failed; continuing", {
+                message,
+                error: String(cause),
+              }),
+            ),
+        ),
+      )
 
     // Total wall-clock of the whole ensemble phase (N parallel candidates +
     // judge), measured from just before the candidates start until just before
@@ -347,6 +365,7 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
         model: input.model,
         agentID: input.agentID,
         abortSignal: input.abortSignal,
+        requestEnvelopeTokens: input.requestEnvelopeTokens,
       })
     }
 
@@ -396,6 +415,8 @@ export const runMaxStep = (input: MaxStepInput): Effect.Effect<SessionProcessor.
       selection: { winner: pick, total: survivors.length },
       thinkingMs: Date.now() - ensembleStartedAt,
       overhead,
+      requestEnvelopeTokens: input.requestEnvelopeTokens,
+      abortSignal: input.abortSignal,
     })
   })
 

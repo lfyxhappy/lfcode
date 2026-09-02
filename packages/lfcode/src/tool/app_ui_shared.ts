@@ -79,7 +79,7 @@ export const appUiShared = z.object({
 })
 
 export const appUiWriteShared = appUiShared.extend({
-  window_id: z.number().describe("Explicit desktop window ID for this write action. Read app_list_windows or app_ui_query first."),
+  window_id: z.number().describe("Explicit desktop window ID for this write action. Use app_control with operation=list_windows first when a specific window is required."),
 })
 
 export function buildAppUiBody(args: { token: z.infer<typeof appUiToken>; block_key?: string; window_id?: number }) {

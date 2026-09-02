@@ -1,4 +1,4 @@
-import { splitProps, type JSX } from "solid-js"
+import { createSignal, splitProps, type JSX } from "solid-js"
 
 export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "onResize"> {
   direction: "horizontal" | "vertical"
@@ -7,6 +7,7 @@ export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElemen
   min: number
   max: number
   onResize: (size: number) => void
+  onResizeEnd?: (size: number) => void
   onCollapse?: () => void
   collapseThreshold?: number
   collapseWhen?: "below" | "above"
@@ -20,22 +21,41 @@ export function ResizeHandle(props: ResizeHandleProps) {
     "min",
     "max",
     "onResize",
+    "onResizeEnd",
     "onCollapse",
     "collapseThreshold",
     "collapseWhen",
     "class",
     "classList",
   ])
+  const [dragging, setDragging] = createSignal(false)
 
   const handlePointerDown = (e: PointerEvent) => {
     e.preventDefault()
+    setDragging(true)
+    const target = e.currentTarget as HTMLElement
     const edge = local.edge ?? (local.direction === "vertical" ? "start" : "end")
     const start = local.direction === "horizontal" ? e.clientX : e.clientY
     const startSize = local.size
     let current = startSize
+    let scheduledSize = startSize
+    let frame: number | undefined
+    const previousUserSelect = document.body.style.userSelect
+    const previousOverflow = document.body.style.overflow
+
+    try {
+      target.setPointerCapture(e.pointerId)
+    } catch {
+      // Pointer capture is unavailable in a few embedded webviews.
+    }
 
     document.body.style.userSelect = "none"
     document.body.style.overflow = "hidden"
+
+    const flush = () => {
+      frame = undefined
+      local.onResize(scheduledSize)
+    }
 
     const onPointerMove = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== e.pointerId) return
@@ -50,16 +70,27 @@ export function ResizeHandle(props: ResizeHandleProps) {
             : pos - start
       current = startSize + delta
       const clamped = Math.min(local.max, Math.max(local.min, current))
-      local.onResize(clamped)
+      scheduledSize = clamped
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(flush)
     }
 
     const onPointerUp = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== e.pointerId) return
-      document.body.style.userSelect = ""
-      document.body.style.overflow = ""
+      if (frame !== undefined) {
+        window.cancelAnimationFrame(frame)
+        flush()
+      }
+      local.onResizeEnd?.(scheduledSize)
+      setDragging(false)
+      document.body.style.userSelect = previousUserSelect
+      document.body.style.overflow = previousOverflow
       document.removeEventListener("pointermove", onPointerMove)
       document.removeEventListener("pointerup", onPointerUp)
       document.removeEventListener("pointercancel", onPointerUp)
+      try {
+        target.releasePointerCapture(e.pointerId)
+      } catch {}
 
       const threshold = local.collapseThreshold ?? 0
       const shouldCollapse = local.collapseWhen === "above" ? current > threshold : current < threshold
@@ -79,6 +110,7 @@ export function ResizeHandle(props: ResizeHandleProps) {
       data-component="resize-handle"
       data-direction={local.direction}
       data-edge={local.edge ?? (local.direction === "vertical" ? "start" : "end")}
+      data-dragging={dragging()}
       classList={{
         ...local.classList,
         [local.class ?? ""]: !!local.class,

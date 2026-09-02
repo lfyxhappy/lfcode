@@ -46,15 +46,19 @@ describe("GET /session/:sessionID/context-status", () => {
       headers: { "x-lfcode-directory": tmp.path },
     })
     const body = (await response.json()) as Record<string, unknown>
+    const activeContextTokens = Number(body.active_context_tokens)
 
     expect(response.status).toBe(200)
     expect(body).toMatchObject({
+      active_context_tokens: expect.any(Number),
       used_tokens: 0,
       pressure: "idle",
       source: "raw",
       projection: { media: 0, reasoning: 0, tool_results: 0 },
       checkpoint: { exists: false, writer_running: false, watermark: null },
     })
+    expect(body.active_context_tokens).not.toBeNull()
+    expect(activeContextTokens).toBeGreaterThan(0)
     expect(JSON.stringify(body)).not.toContain("private prompt content")
   })
 })

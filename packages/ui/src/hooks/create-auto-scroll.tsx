@@ -14,6 +14,8 @@ export function createAutoScroll(options: AutoScrollOptions) {
   let settling = false
   let settleTimer: ReturnType<typeof setTimeout> | undefined
   let autoTimer: ReturnType<typeof setTimeout> | undefined
+  let resizeFrame: number | undefined
+  let resizeSignature: string | undefined
   let auto: { top: number; time: number } | undefined
 
   const threshold = () => options.bottomThreshold ?? 10
@@ -169,22 +171,26 @@ export function createAutoScroll(options: AutoScrollOptions) {
     el.style.overflowAnchor = store.userScrolled ? "auto" : "none"
   }
 
-  createResizeObserver(
-    () => store.contentRef,
-    () => {
+  const scheduleResizeWork = () => {
+    if (resizeFrame !== undefined) return
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = undefined
       const el = store.scrollRef
-      if (el && !canScroll(el)) {
+      if (!el) return
+      const signature = `${el.scrollHeight}:${el.clientHeight}`
+      if (signature === resizeSignature) return
+      resizeSignature = signature
+      if (!canScroll(el)) {
         if (store.userScrolled) setStore("userScrolled", false)
         return
       }
       if (!active()) return
       if (store.userScrolled) return
-      // ResizeObserver fires after layout, before paint.
-      // Keep the bottom locked in the same frame to avoid visible
-      // "jump up then catch up" artifacts while streaming content.
       scrollToBottom(false)
-    },
-  )
+    })
+  }
+
+  createResizeObserver(() => store.contentRef, scheduleResizeWork)
 
   createEffect(
     on(options.working, (working: boolean) => {
@@ -218,10 +224,14 @@ export function createAutoScroll(options: AutoScrollOptions) {
   onCleanup(() => {
     if (settleTimer) clearTimeout(settleTimer)
     if (autoTimer) clearTimeout(autoTimer)
+    if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
   })
 
   return {
-    scrollRef: (el: HTMLElement | undefined) => setStore("scrollRef", el),
+    scrollRef: (el: HTMLElement | undefined) => {
+      resizeSignature = undefined
+      setStore("scrollRef", el)
+    },
     contentRef: (el: HTMLElement | undefined) => setStore("contentRef", el),
     handleScroll,
     handleInteraction,

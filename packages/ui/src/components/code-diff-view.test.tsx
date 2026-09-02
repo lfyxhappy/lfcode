@@ -90,4 +90,24 @@ describe("CodeDiffView fallback", () => {
     expect(host.textContent).toContain("native diff")
     dispose()
   })
+
+  test("keeps cleanup idempotent when the component is disposed repeatedly", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const dispose = render(
+      () =>
+        createComponent(CodeDiffView, {
+          path: "src/example.ts",
+          before: "const before = true",
+          after: "const after = false",
+        }),
+      host,
+    )
+
+    dispose()
+    dispose()
+    await flush()
+
+    expect(host.innerHTML).toBe("")
+  })
 })

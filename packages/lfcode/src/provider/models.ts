@@ -74,11 +74,13 @@ const Cost = z.object({
 export const Model = z.object({
   id: z.string(),
   name: z.string(),
+  description: z.string().optional(),
   // A provider can expose different models through different wire formats.
   // Keep the protocol on the model instead of inferring it from the provider.
   protocol: z.enum(["openai-chat", "openai-responses", "anthropic-messages", "gemini"]).optional(),
   family: z.string().optional(),
   release_date: z.string(),
+  last_updated: z.string().optional(),
   attachment: z.boolean(),
   reasoning: z.boolean(),
   temperature: z.boolean(),
@@ -324,11 +326,31 @@ export const Data = lazy(async () => {
 })
 
 export async function get(): Promise<Record<string, Provider>> {
+  // A catalog read is also the normal model-information read path. Refresh a
+  // stale cache here so the app does not keep serving an old snapshot until
+  // the hourly background timer happens to run. The persisted cache remains
+  // the fallback when the upstream is unavailable.
+  if (!Flag.LFCODE_DISABLE_MODELS_FETCH && !fresh()) await refresh()
   const result = await Data()
-  return {
-    ...(result as Record<string, Provider>),
-    ...builtin(),
-  }
+  const online = result as Record<string, Provider>
+  const bundled = builtin()
+  const providers = new Set([...Object.keys(bundled), ...Object.keys(online)])
+  return Object.fromEntries(
+    [...providers].map((providerID) => [
+      providerID,
+      {
+        ...(bundled[providerID] ?? {}),
+        ...(online[providerID] ?? {}),
+        ...(bundled[providerID]?.name ? { name: bundled[providerID].name } : {}),
+        ...(bundled[providerID]?.id ? { id: bundled[providerID].id } : {}),
+        ...(bundled[providerID]?.env ? { env: bundled[providerID].env } : {}),
+        models: {
+          ...(bundled[providerID]?.models ?? {}),
+          ...(online[providerID]?.models ?? {}),
+        },
+      },
+    ]),
+  ) as Record<string, Provider>
 }
 
 export function refresh(force = false) {

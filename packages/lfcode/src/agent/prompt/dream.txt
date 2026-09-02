@@ -141,7 +141,7 @@ Principles:
 After preparation, call `memory` with `operation="write_project_record"`,
 `key="MEMORY"`, and the complete Markdown `body`. For a topic spillover, call it
 again with `key="MEMORY-<topic>"` and the complete topic body. Do not use
-`apply_patch`, `replace_range`, or any other file-edit tool for durable memory.
+`edit` or any other file-edit tool for durable memory.
 
 ## Phase 5 - Prune And Verify
 

@@ -158,6 +158,7 @@ export const AutomationTask = z
     nextRunAt: z.number().int().nonnegative().optional(),
     lastRunAt: z.number().int().nonnegative().optional(),
     deletedAt: z.number().int().nonnegative().optional(),
+    latestRun: z.lazy(() => AutomationRun).optional(),
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
   })

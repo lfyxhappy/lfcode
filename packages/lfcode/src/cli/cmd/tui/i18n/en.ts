@@ -102,10 +102,10 @@ export const dict: Record<string, string> = {
   "tui.tips.custom_agent":
     "Add {highlight}.md{/highlight} files to {highlight}.lfcode/agent/{/highlight} for specialized AI personas",
   "tui.tips.agent_perms":
-    "Configure per-agent permissions for {highlight}edit{/highlight}, {highlight}bash{/highlight}, and {highlight}webfetch{/highlight} tools",
-  "tui.tips.bash_allow": 'Use patterns like {highlight}"git *": "allow"{/highlight} for granular bash permissions',
-  "tui.tips.bash_deny": 'Set {highlight}"rm -rf *": "deny"{/highlight} to block destructive commands',
-  "tui.tips.bash_ask": 'Configure {highlight}"git push": "ask"{/highlight} to require approval before pushing',
+    "Configure per-agent permissions for {highlight}edit{/highlight}, {highlight}shell{/highlight}, and {highlight}webfetch{/highlight} tools",
+  "tui.tips.shell_allow": 'Use patterns like {highlight}"git *": "allow"{/highlight} for granular shell permissions',
+  "tui.tips.shell_deny": 'Set {highlight}"rm -rf *": "deny"{/highlight} to block destructive commands',
+  "tui.tips.shell_ask": 'Configure {highlight}"git push": "ask"{/highlight} to require approval before pushing',
   "tui.tips.formatter": "Lfcode auto-formats files using prettier, gofmt, ruff, and more",
   "tui.tips.disable_formatter": 'Set {highlight}"formatter": false{/highlight} in config to disable all auto-formatting',
   "tui.tips.custom_formatter": "Define custom formatter commands with file extensions in config",
@@ -138,7 +138,7 @@ export const dict: Record<string, string> = {
   "tui.tips.instructions": "Use {highlight}instructions{/highlight} in config to load additional rules files",
   "tui.tips.temperature": "Set agent {highlight}temperature{/highlight} from 0.0 (focused) to 1.0 (creative)",
   "tui.tips.steps": "Configure {highlight}steps{/highlight} to limit agentic iterations per request",
-  "tui.tips.disable_tool": 'Set {highlight}"tools": {"bash": false}{/highlight} to disable specific tools',
+  "tui.tips.disable_tool": 'Set {highlight}"tool_allowlist": ["read", "search"]{/highlight} to disable specific tools',
   "tui.tips.disable_mcp_tools": 'Set {highlight}"mcp_*": false{/highlight} to disable all tools from an MCP server',
   "tui.tips.tool_override": "Override global tool settings per agent configuration",
   "tui.tips.share_auto": 'Set {highlight}"share": "auto"{/highlight} to automatically share all sessions',

@@ -36,6 +36,7 @@ import {
   waitForAutomationDom,
 } from "./automation-renderer"
 import { clearBrowserCache, getBrowserCacheOverview } from "./browser-runtime"
+import { getGpuDiagnostics } from "./gpu-diagnostics"
 
 type Logger = {
   log: (message: string, data?: unknown) => void
@@ -50,6 +51,7 @@ const AUTOMATION_EVENT_WAIT_MAX_MS = 30_000
 const AUTOMATION_FEATURES = [
   "diagnostics.events.cursor",
   "diagnostics.events.long_poll",
+  "diagnostics.gpu",
   "desktop.non_preemptive",
   "dom.semantic_refs",
   "dom.snapshot_revisions",
@@ -89,6 +91,8 @@ export async function startAutomationServer(input: Options) {
     const requestPath = safeAutomationRequestPath(request.url)
     const isEventPoll = requestPath === "/diagnostics/events/next"
     let errorCode: string | undefined
+    let errorSessionKey: string | undefined
+    let errorTabID: string | undefined
     if (!isEventPoll) {
       response.once("finish", () => {
         input.events.push({
@@ -121,6 +125,8 @@ export async function startAutomationServer(input: Options) {
         requireAutomationCapability(capability, method, url.pathname)
       }
       const body = method === "POST" ? await readAutomationRequestBody(request) : undefined
+      errorSessionKey = stringInput(objectInput(body)?.sessionKey) ?? stringInput(url.searchParams.get("sessionKey"))
+      errorTabID = stringInput(objectInput(body)?.tabID) ?? stringInput(url.searchParams.get("tabID"))
 
       if (method === "GET" && url.pathname === "/health") {
         send(response, 200, requestID, {
@@ -188,6 +194,11 @@ export async function startAutomationServer(input: Options) {
           request.off("aborted", cancel)
           response.off("close", cancel)
         }
+        return
+      }
+
+      if (method === "GET" && url.pathname === "/diagnostics/gpu") {
+        send(response, 200, requestID, { ok: true, data: await getGpuDiagnostics() })
         return
       }
 
@@ -536,10 +547,12 @@ export async function startAutomationServer(input: Options) {
         if (sessionKey) {
           const result = await requireBrowserBridge().navigate({
             sessionKey,
+            tabID: stringInput(body?.tabID),
             sessionID: stringInput(body?.sessionID),
             url: requiredString(body?.url, "url"),
             title: stringInput(body?.title),
             presentation: parseBrowserPresentation(stringInput(body?.presentation)),
+            newTab: body?.newTab === true,
           })
           send(response, 200, requestID, { ok: true, data: result })
           return
@@ -549,6 +562,7 @@ export async function startAutomationServer(input: Options) {
           url: requiredString(body?.url, "url"),
           title: stringInput(body?.title),
           presentation: stringInput(body?.presentation),
+          newTab: body?.newTab === true,
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -619,28 +633,31 @@ export async function startAutomationServer(input: Options) {
 
       if (method === "GET" && url.pathname === "/browser/target") {
         const sessionKey = requiredString(url.searchParams.get("sessionKey"), "sessionKey")
-        const result = getDesktopBrowserAutomationBridge()?.getTarget({ sessionKey }) ?? null
+        const result = getDesktopBrowserAutomationBridge()?.getTarget({
+          sessionKey,
+          tabID: stringInput(url.searchParams.get("tabID")),
+        }) ?? null
         send(response, 200, requestID, { ok: true, data: result })
         return
       }
 
       if (method === "POST" && url.pathname === "/browser/snapshot") {
         const sessionKey = requiredString(body?.sessionKey, "sessionKey")
-        const result = await requireBrowserBridge().snapshot({ sessionKey })
+        const result = await requireBrowserBridge().snapshot({ sessionKey, tabID: stringInput(body?.tabID) })
         send(response, 200, requestID, { ok: true, data: result })
         return
       }
 
       if (method === "POST" && url.pathname === "/browser/screenshot") {
         const sessionKey = requiredString(body?.sessionKey, "sessionKey")
-        const result = await requireBrowserBridge().screenshot({ sessionKey })
+        const result = await requireBrowserBridge().screenshot({ sessionKey, tabID: stringInput(body?.tabID) })
         send(response, 200, requestID, { ok: true, data: result })
         return
       }
 
       if (method === "POST" && url.pathname === "/browser/read-page") {
         const sessionKey = requiredString(body?.sessionKey, "sessionKey")
-        const result = await requireBrowserBridge().readPage({ sessionKey })
+        const result = await requireBrowserBridge().readPage({ sessionKey, tabID: stringInput(body?.tabID) })
         send(response, 200, requestID, { ok: true, data: result })
         return
       }
@@ -648,6 +665,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/extract-resource") {
         const result = await requireBrowserBridge().extractResource({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
         })
@@ -658,6 +676,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/capture-element") {
         const result = await requireBrowserBridge().captureElement({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
         })
@@ -668,6 +687,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/console") {
         const result = await requireBrowserBridge().getConsole({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           limit: numberInput(body?.limit),
         })
         send(response, 200, requestID, { ok: true, data: result })
@@ -677,6 +697,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/network") {
         const result = await requireBrowserBridge().getNetwork({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           limit: numberInput(body?.limit),
         })
         send(response, 200, requestID, { ok: true, data: result })
@@ -708,6 +729,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/download-resource") {
         const result = await requireBrowserBridge().downloadResource({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           url: stringInput(body?.url),
           filename: stringInput(body?.filename),
           resourceID: stringInput(body?.resourceID),
@@ -722,7 +744,9 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/click") {
         const result = await requireBrowserBridge().click({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
-          ref: requiredString(body?.ref, "ref"),
+          tabID: stringInput(body?.tabID),
+          ref: stringInput(body?.ref),
+          selector: stringInput(body?.selector),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -731,6 +755,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/type") {
         const result = await requireBrowserBridge().type({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: requiredString(body?.ref, "ref"),
           text: requiredString(body?.text, "text"),
           submit: body?.submit === true,
@@ -743,6 +768,7 @@ export async function startAutomationServer(input: Options) {
         const direction = parseScrollDirection(stringInput(body?.direction))
         const result = await requireBrowserBridge().scroll({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
           direction,
@@ -767,6 +793,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/clear") {
         const result = await requireBrowserBridge().clear({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
         })
@@ -777,6 +804,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/select-option") {
         const result = await requireBrowserBridge().selectOption({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
           value: stringInput(body?.value),
@@ -791,6 +819,7 @@ export async function startAutomationServer(input: Options) {
         const files = Array.isArray(body?.files) ? body.files.filter((item): item is string => typeof item === "string" && item.length > 0) : []
         const result = await requireBrowserBridge().uploadFile({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           ref: stringInput(body?.ref),
           selector: stringInput(body?.selector),
           files,
@@ -802,6 +831,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/back") {
         const result = await requireBrowserBridge().back({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -810,6 +840,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/forward") {
         const result = await requireBrowserBridge().forward({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -818,6 +849,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/reload") {
         const result = await requireBrowserBridge().reload({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -826,6 +858,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/close") {
         const result = await requireBrowserBridge().close({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -834,9 +867,11 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/wait-selector") {
         const result = await requireBrowserBridge().waitForSelector({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           selector: requiredString(body?.selector, "selector"),
           visible: body?.visible === true,
           timeoutMs: numberInput(body?.timeoutMs),
+          stableMs: numberInput(body?.stableMs),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -846,9 +881,11 @@ export async function startAutomationServer(input: Options) {
         const match = stringInput(body?.match)
         const result = await requireBrowserBridge().waitForUrl({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           url: requiredString(body?.url, "url"),
           match: match === "includes" ? "includes" : "equals",
           timeoutMs: numberInput(body?.timeoutMs),
+          stableMs: numberInput(body?.stableMs),
         })
         send(response, 200, requestID, { ok: true, data: result })
         return
@@ -858,6 +895,7 @@ export async function startAutomationServer(input: Options) {
         const state = parseLoadState(requiredString(body?.state, "state"))
         const result = await requireBrowserBridge().waitForLoadState({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           state,
           timeoutMs: numberInput(body?.timeoutMs),
           stableMs: numberInput(body?.stableMs),
@@ -870,6 +908,7 @@ export async function startAutomationServer(input: Options) {
         const match = stringInput(body?.match)
         const result = await requireBrowserBridge().waitForNavigation({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           url: stringInput(body?.url),
           match: match === "includes" ? "includes" : "equals",
           timeoutMs: numberInput(body?.timeoutMs),
@@ -882,6 +921,7 @@ export async function startAutomationServer(input: Options) {
       if (method === "POST" && url.pathname === "/browser/wait") {
         const result = await requireBrowserBridge().waitFor({
           sessionKey: requiredString(body?.sessionKey, "sessionKey"),
+          tabID: stringInput(body?.tabID),
           text: stringInput(body?.text),
           textGone: stringInput(body?.textGone),
           timeMs: numberInput(body?.timeMs),
@@ -900,7 +940,7 @@ export async function startAutomationServer(input: Options) {
 
       send(response, 404, requestID, { ok: false, error: `Unknown route: ${method} ${url.pathname}` })
     } catch (error) {
-      const failure = automationErrorResponse(domAutomationHttpError(error))
+      const failure = automationErrorResponse(domAutomationHttpError(error, requestPath))
       errorCode = failure.code
       input.logger.error("automation server request failed", {
         method,
@@ -912,6 +952,8 @@ export async function startAutomationServer(input: Options) {
         error: failure.error,
         code: failure.code,
         retryable: failure.retryable,
+        ...(errorSessionKey ? { session_key: errorSessionKey } : {}),
+        ...(errorTabID ? { tab_id: errorTabID } : {}),
         ...(failure.recovery ? { recovery: failure.recovery } : {}),
       })
     }
@@ -1010,10 +1052,37 @@ function withAutomationDomWindow(win: ReturnType<typeof requireWindow>, result: 
   }
 }
 
-function domAutomationHttpError(error: unknown) {
-  if (!(error instanceof AutomationDomError)) return error
-  const recovery = "Take a fresh DOM snapshot and pass its snapshotID, ref, and fingerprint to the action."
-  return new AutomationHttpError(409, error.code, error.message, { retryable: true, recovery })
+function domAutomationHttpError(error: unknown, requestPath?: string) {
+  if (error instanceof AutomationHttpError) return error
+  if (error instanceof AutomationDomError) {
+    const recovery = "Take a fresh DOM snapshot and pass its snapshotID, ref, and fingerprint to the action."
+    return new AutomationHttpError(409, error.code, error.message, { retryable: true, recovery })
+  }
+  if (!requestPath?.startsWith("/browser/") || !(error instanceof Error)) return error
+  if (/renderer automation bridge is not ready/i.test(error.message)) return browserAutomationError("browser_renderer_unavailable")
+  if (/render frame|render process|webcontents.*destroy|object has been destroyed|frame.*disposed|renderer.*gone/i.test(error.message)) {
+    const mapped = browserAutomationError("browser_renderer_unavailable")
+    if (["/browser/click", "/browser/type", "/browser/clear", "/browser/select-option", "/browser/upload-file", "/browser/scroll"].includes(requestPath ?? "")) {
+      return new AutomationHttpError(mapped.status, mapped.code, mapped.message, {
+        retryable: mapped.options?.retryable,
+        recovery: "状态可能已部分改变。先执行 browser.read 或 browser.snapshot 确认当前页面状态，再决定是否重试该操作。",
+      })
+    }
+    return mapped
+  }
+  if (/browser tab was not found|no active browser tab/i.test(error.message)) {
+    return browserAutomationError("browser_tab_not_found")
+  }
+  if (["/browser/open", "/browser/back", "/browser/forward", "/browser/reload"].includes(requestPath)) {
+    return browserAutomationError("browser_navigation_failed")
+  }
+  // Preserve semantic browser errors (invalid selectors, missing elements,
+  // failed resource extraction) as a non-retryable structured observation so
+  // the model can correct its request instead of repeating the same action.
+  return new AutomationHttpError(400, "browser_action_failed", error.message, {
+    retryable: false,
+    recovery: "检查 selector、ref 或页面状态后修正请求；不要重复发送完全相同的操作。",
+  })
 }
 
 function requiredString(value: unknown, key: string) {

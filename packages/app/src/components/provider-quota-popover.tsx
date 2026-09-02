@@ -1,5 +1,5 @@
 import { Button } from "@lfcode-ai/ui/button"
-import { Dialog } from "@lfcode-ai/ui/dialog"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { Icon } from "@lfcode-ai/ui/icon"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
@@ -7,71 +7,40 @@ import { type Accessor, createEffect, createSignal, For, onCleanup, Show } from 
 import { Portal } from "solid-js/web"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
-import { quotaProviderIDs } from "./provider-quota-capability"
+import { Link } from "./link"
+import {
+  quotaBalanceFields,
+  quotaProviderDocsURL,
+  quotaProviderIDs,
+  quotaRefreshResult,
+  shouldRefreshQuota,
+  supportsQuotaQuery,
+  visibleQuotaWindows,
+  type QuotaBalance,
+  type QuotaResult,
+  type QuotaWindow,
+} from "./provider-quota-capability"
 
-type QuotaWindow = {
-  id: string
-  percent: number
-  resetsAt: string
-  status?: "ok" | "rate-limited"
-  scope?: "account" | "model"
-  modelName?: string
-  usedPercent?: number
-  remainingPercent?: number
-  resetInSeconds?: number
-  remaining?: number
-  total?: number
-  used?: number
-  unit?: "requests" | "tokens" | "unknown"
-}
-type QuotaResult = { ok: true; usage: { windows: QuotaWindow[] } } | { ok: false; error: "missing_api_key" | "unauthorized" | "invalid_response" | "network" }
 type QuotaProvider = {
   name: string
   query: (client: ReturnType<typeof useSDK>["client"]) => Promise<{ data?: QuotaResult }>
 }
 
-const quotaResultCache = new Map<string, Extract<QuotaResult, { ok: true }>>()
+type QuotaCacheEntry = {
+  result: Extract<QuotaResult, { ok: true }>
+  cachedAt: number
+}
+
+const quotaResultCache = new Map<string, QuotaCacheEntry>()
 
 export const quotaProviders: Record<string, QuotaProvider> = {
   opencode: {
     name: "OpenCode Zen",
-    query: async (client) => {
-      const response = await client.provider.opencode.usage()
-      if (!response.data) return { data: { ok: false, error: "network" } }
-      if (!response.data.ok) return { data: response.data }
-      return {
-        data: {
-          ok: true,
-          usage: {
-            windows: [
-              { id: "rolling", ...response.data.usage.rolling },
-              { id: "weekly", ...response.data.usage.weekly },
-              { id: "monthly", ...response.data.usage.monthly },
-            ],
-          },
-        },
-      }
-    },
+    query: (client) => client.provider.opencode.usage(),
   },
   "opencode-go": {
     name: "OpenCode Go",
-    query: async (client) => {
-      const response = await client.provider.opencodeGo.usage()
-      if (!response.data) return { data: { ok: false, error: "network" } }
-      if (!response.data.ok) return { data: response.data }
-      return {
-        data: {
-          ok: true,
-          usage: {
-            windows: [
-              { id: "rolling", ...response.data.usage.rolling },
-              { id: "weekly", ...response.data.usage.weekly },
-              { id: "monthly", ...response.data.usage.monthly },
-            ],
-          },
-        },
-      }
-    },
+    query: (client) => client.provider.opencodeGo.usage(),
   },
   minimax: {
     name: "MiniMax Token Plan",
@@ -80,6 +49,22 @@ export const quotaProviders: Record<string, QuotaProvider> = {
   "minimax-cn-coding-plan": {
     name: "MiniMax Token Plan",
     query: (client) => client.provider.minimax.usage(),
+  },
+  deepseek: {
+    name: "DeepSeek",
+    query: (client) => client.provider.deepseek.usage(),
+  },
+  moonshotai: {
+    name: "Moonshot AI",
+    query: (client) => client.provider.moonshot.usage(),
+  },
+  siliconflow: {
+    name: "SiliconFlow",
+    query: (client) => client.provider.siliconflow.usage(),
+  },
+  openrouter: {
+    name: "OpenRouter",
+    query: (client) => client.provider.openrouter.usage(),
   },
 } satisfies Record<string, QuotaProvider>
 
@@ -93,6 +78,10 @@ function formatNumber(value: number, locale: string) {
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)
 }
 
+function formatAmount(value: number, currency: string, locale: string) {
+  return `${formatNumber(value, locale)} ${currency}`
+}
+
 function formatDuration(seconds: number) {
   const value = Math.max(0, Math.round(seconds))
   const days = Math.floor(value / 86_400)
@@ -103,140 +92,274 @@ function formatDuration(seconds: number) {
   return `${minutes}m`
 }
 
-function QuotaRow(props: { quota: QuotaWindow; locale: string; label: (id: string) => string; resetLabel: (time: string) => string; updated: boolean }) {
-  const language = useLanguage()
-  const usedPercent = () => Math.min(100, Math.max(0, props.quota.usedPercent ?? props.quota.percent))
-  const remainingPercent = () => Math.min(100, Math.max(0, props.quota.remainingPercent ?? 100 - usedPercent()))
-  const status = () => props.quota.status === "rate-limited" ? "provider.quota.status.rateLimited" : "provider.quota.status.ok"
-  const details = () => {
-    const unit = props.quota.unit === "requests"
-      ? ` ${language.t("provider.quota.unit.requests")}`
-      : props.quota.unit === "tokens"
-        ? ` ${language.t("provider.quota.unit.tokens")}`
-        : ""
-    const values = []
-    if (props.quota.remaining !== undefined) {
-      values.push(`${language.t("provider.quota.remaining")}: ${formatNumber(props.quota.remaining, props.locale)}${props.quota.total !== undefined ? ` / ${formatNumber(props.quota.total, props.locale)}` : ""}${unit}`)
-    }
-    if (props.quota.used !== undefined) {
-      values.push(`${language.t("provider.quota.used")}: ${formatNumber(props.quota.used, props.locale)}${props.quota.total !== undefined ? ` / ${formatNumber(props.quota.total, props.locale)}` : ""}${unit}`)
-    }
-    if (props.quota.total !== undefined && props.quota.remaining === undefined && props.quota.used === undefined) {
-      values.push(`${language.t("provider.quota.total")}: ${formatNumber(props.quota.total, props.locale)}${unit}`)
-    }
-    return values.length ? values.join(" · ") : undefined
-  }
-  return (
-    <div classList={{ "flex flex-col gap-1.5 py-2 first:pt-0 last:pb-0": true, "provider-quota-updated": props.updated }} data-component="provider-quota-window">
-      <div class="flex items-center justify-between gap-3 text-12-medium">
-        <span class="text-text-strong">{props.label(props.quota.id)}</span>
-        <span class={props.quota.status === "rate-limited" ? "text-status-warning" : "text-status-success"}>
-          {language.t("provider.quota.percent", { used: usedPercent().toFixed(0), remaining: remainingPercent().toFixed(0) })} · {language.t(status() as never)}
-        </span>
-      </div>
-      <div class="h-1.5 overflow-hidden rounded-sm bg-surface-base" aria-label={`${props.label(props.quota.id)}: ${usedPercent().toFixed(0)}%`}>
-        <div class={props.quota.status === "rate-limited" ? "h-full bg-status-warning transition-[width] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)]" : "h-full bg-status-success transition-[width] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)]"} style={{ width: `${usedPercent()}%` }} />
-      </div>
-      <Show when={details()}>
-        {(value) => <span class="text-11-regular text-text-weak">{value()}</span>}
-      </Show>
-      <span class="text-11-regular text-text-weak truncate">
-        {props.resetLabel(resetTime(props.quota.resetsAt, props.locale))}
-        {(() => {
-          const seconds = props.quota.resetInSeconds ?? resetSeconds(props.quota.resetsAt)
-          return seconds === undefined ? null : <> · {language.t("provider.quota.resetsIn", { time: formatDuration(seconds) })}</>
-        })()}
-      </span>
-    </div>
-  )
-}
-
 function resetSeconds(value: string) {
   const timestamp = Date.parse(value)
   if (Number.isNaN(timestamp)) return
   return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000))
 }
 
+function quotaWindowPeriod(quota: QuotaWindow) {
+  if (quota.resetPeriod) return quota.resetPeriod
+  return quota.id.includes(":") ? quota.id.split(":", 2)[1] : quota.id
+}
+
+function readableQuotaWindowID(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function networkQuotaResult(): Extract<QuotaResult, { ok: false }> {
+  return { ok: false, error: "network" }
+}
+
+function QuotaBalanceGroup(props: { balance: QuotaBalance; locale: string }) {
+  const language = useLanguage()
+  const fields = () => quotaBalanceFields(props.balance)
+  return (
+    <section class="flex flex-col gap-2 py-2 first:pt-0 last:pb-0" data-component="provider-quota-balance" aria-label={language.t("provider.quota.scope.account")}>
+      <div class="flex items-center justify-between gap-3 text-12-medium">
+        <span class="text-text-strong">{language.t("provider.quota.scope.account")}</span>
+        <Show when={props.balance.isAvailable === false}>
+          <span class="text-status-warning">{language.t("provider.quota.unavailable")}</span>
+        </Show>
+      </div>
+      <dl class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <For each={fields()}>
+          {(field) => (
+            <div class="flex min-w-0 items-baseline justify-between gap-2" data-component="provider-quota-balance-field" data-balance-field={field.id}>
+              <dt class="text-11-regular text-text-weak">{language.t(`provider.quota.balance.${field.id}` as never)}</dt>
+              <dd class="truncate text-12-medium text-text-strong" title={formatAmount(field.value, props.balance.currency, props.locale)}>{formatAmount(field.value, props.balance.currency, props.locale)}</dd>
+            </div>
+          )}
+        </For>
+      </dl>
+    </section>
+  )
+}
+
+function QuotaRow(props: { quota: QuotaWindow; locale: string; label: (quota: QuotaWindow) => string; updated: boolean }) {
+  const language = useLanguage()
+  const usedPercent = () => {
+    const explicit = props.quota.usedPercent ?? props.quota.percent
+    if (explicit !== undefined) return Math.min(100, Math.max(0, explicit))
+    if (props.quota.used !== undefined && props.quota.total !== undefined && props.quota.total > 0) return Math.min(100, Math.max(0, (props.quota.used / props.quota.total) * 100))
+    if (props.quota.remaining !== undefined && props.quota.total !== undefined && props.quota.total > 0) return Math.min(100, Math.max(0, (1 - props.quota.remaining / props.quota.total) * 100))
+  }
+  const remainingPercent = () => {
+    const explicit = props.quota.remainingPercent
+    if (explicit !== undefined) return Math.min(100, Math.max(0, explicit))
+    const used = usedPercent()
+    if (used === undefined) return
+    return 100 - used
+  }
+  const hasPercent = () => usedPercent() !== undefined
+  const details = () => {
+    const unit = props.quota.unit === "requests"
+      ? ` ${language.t("provider.quota.unit.requests")}`
+      : props.quota.unit === "tokens"
+        ? ` ${language.t("provider.quota.unit.tokens")}`
+        : ""
+    const value = (amount: number) => props.quota.currency
+      ? formatAmount(amount, props.quota.currency, props.locale)
+      : props.quota.unit === "tokens"
+        ? `${formatTokenCount(amount)}${unit}`
+        : `${formatNumber(amount, props.locale)}${unit}`
+    const values = []
+    if (props.quota.remaining !== undefined) {
+      values.push(`${language.t("provider.quota.remaining")}: ${value(props.quota.remaining)}${props.quota.total !== undefined ? ` / ${value(props.quota.total)}` : ""}`)
+    }
+    if (props.quota.used !== undefined) {
+      values.push(`${language.t("provider.quota.used")}: ${value(props.quota.used)}${props.quota.total !== undefined ? ` / ${value(props.quota.total)}` : ""}`)
+    }
+    if (props.quota.total !== undefined && props.quota.remaining === undefined && props.quota.used === undefined) {
+      values.push(`${language.t("provider.quota.total")}: ${value(props.quota.total)}`)
+    }
+    return values.length ? values.join(" · ") : undefined
+  }
+  const reset = () => {
+    if (!props.quota.resetsAt) return
+    return props.quota.resetInSeconds ?? resetSeconds(props.quota.resetsAt)
+  }
+
+  return (
+    <div classList={{ "flex flex-col gap-1.5 py-2 first:pt-0 last:pb-0": true, "provider-quota-updated": props.updated }} data-component="provider-quota-window">
+      <div class="flex items-center justify-between gap-3 text-12-medium">
+        <span class="min-w-0 truncate text-text-strong">{props.label(props.quota)}</span>
+        <Show when={hasPercent()}>
+          <span class={props.quota.status === "rate-limited" ? "shrink-0 text-status-warning" : "shrink-0 text-status-success"}>
+            {language.t("provider.quota.percent", { used: (usedPercent() ?? 0).toFixed(0), remaining: (remainingPercent() ?? 0).toFixed(0) })}
+          </span>
+        </Show>
+        <Show when={!hasPercent() && props.quota.status === "rate-limited"}>
+          <span class="shrink-0 text-status-warning">{language.t("provider.quota.status.rateLimited")}</span>
+        </Show>
+      </div>
+      <Show when={hasPercent()}>
+        <div class="h-1.5 overflow-hidden rounded-sm bg-surface-base" aria-label={`${props.label(props.quota)}: ${(usedPercent() ?? 0).toFixed(0)}%`}>
+          <div class={props.quota.status === "rate-limited" ? "h-full bg-status-warning transition-[width] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)]" : "h-full bg-status-success transition-[width] duration-[var(--motion-content-ms)] ease-[var(--motion-ease-out)]"} style={{ width: `${usedPercent() ?? 0}%` }} />
+        </div>
+      </Show>
+      <Show when={details()}>
+        {(value) => <span class="text-11-regular text-text-weak">{value()}</span>}
+      </Show>
+      <Show when={props.quota.resetsAt}>
+        {(resetsAt) => (
+          <span class="text-11-regular text-text-weak leading-4">
+            {language.t("provider.quota.resetsAt", { time: resetTime(resetsAt(), props.locale) })}
+            {(() => {
+              const seconds = reset()
+              return seconds === undefined ? null : <> · {language.t("provider.quota.resetsIn", { time: formatDuration(seconds) })}</>
+            })()}
+          </span>
+        )}
+      </Show>
+    </div>
+  )
+}
+
 function ProviderQuotaCard(props: { providerID: string; refresh: Accessor<number>; onConfigure?: () => void }) {
   const language = useLanguage()
   const sdk = useSDK()
-  const [result, setResult] = createSignal<QuotaResult | undefined>(quotaResultCache.get(props.providerID))
-  const [loading, setLoading] = createSignal(!quotaResultCache.has(props.providerID))
+  const cached = quotaResultCache.get(props.providerID)
+  const [result, setResult] = createSignal<QuotaResult | undefined>(cached?.result)
+  const [loading, setLoading] = createSignal(!cached)
   const [updated, setUpdated] = createSignal(false)
-  const [refreshError, setRefreshError] = createSignal<string>()
-  const provider = () => quotaProviders[props.providerID]!
+  const [refreshError, setRefreshError] = createSignal<Extract<QuotaResult, { ok: false }>["error"]>()
+  const provider = () => quotaProviders[props.providerID]
   const usage = () => {
     const value = result()
     if (!value?.ok) return
     return value.usage
   }
-  const label = (id: string) => {
-    const [, period] = id.includes(":") ? id.split(":", 2) : [undefined, id]
-    const translated = language.t(`provider.quota.window.${period}` as never)
-    return translated
-  }
+  const unsupported = () => !supportsQuotaQuery(props.providerID)
   const error = () => {
     const value = result()
     if (!value || value.ok) return
+    if (value.error === "rate_limited") return language.t("provider.quota.status.rateLimited")
     return language.t(`provider.quota.error.${value.error}` as never)
   }
   const missingApiKey = () => {
     const value = result()
     return value?.ok === false && value.error === "missing_api_key"
   }
-  const visibleWindows = (windows: QuotaWindow[]) => windows.filter((quota) => quota.modelName !== "video" && !quota.id.startsWith("video:"))
+  const label = (quota: QuotaWindow) => {
+    const period = quotaWindowPeriod(quota)
+    if (["rolling", "five_hour", "daily", "weekly", "monthly"].includes(period)) return language.t(`provider.quota.window.${period}` as never)
+    return language.t("provider.quota.window.unknown" as never, { name: readableQuotaWindowID(period) })
+  }
+  const lastSuccessfulAt = () => {
+    const value = usage()
+    if (!value) return
+    return value.fetchedAt ?? new Date(quotaResultCache.get(props.providerID)?.cachedAt ?? Date.now()).toISOString()
+  }
 
   createEffect(() => {
-    props.refresh()
-    setLoading(!quotaResultCache.has(props.providerID))
-    void (async (): Promise<QuotaResult> => {
+    const refresh = props.refresh()
+    const source = provider()
+    if (!source || unsupported()) {
+      setLoading(false)
+      return
+    }
+    const entry = quotaResultCache.get(props.providerID)
+    if (!shouldRefreshQuota({ cachedAt: entry?.cachedAt, force: refresh > 0 })) {
+      setResult(entry?.result)
+      setRefreshError(undefined)
+      setLoading(false)
+      return
+    }
+    let disposed = false
+    onCleanup(() => {
+      disposed = true
+    })
+    setLoading(true)
+    setRefreshError(undefined)
+    void (async () => {
       try {
-        const response = await provider().query(sdk.client)
-        return response.data ?? { ok: false, error: "network" }
+        const response = await source.query(sdk.client)
+        return response.data ?? networkQuotaResult()
       } catch {
-        return { ok: false, error: "network" }
+        return networkQuotaResult()
       }
     })().then((next) => {
+      if (disposed) return
       if (next.ok) {
-        setRefreshError(undefined)
-        const changed = JSON.stringify(quotaResultCache.get(props.providerID)) !== JSON.stringify(next)
-        quotaResultCache.set(props.providerID, next)
+        const changed = JSON.stringify(quotaResultCache.get(props.providerID)?.result) !== JSON.stringify(next)
+        quotaResultCache.set(props.providerID, { result: next, cachedAt: Date.now() })
         setResult(next)
-        if (changed) {
-          setUpdated(true)
-          window.setTimeout(() => setUpdated(false), 420)
-        }
+        if (!changed) return
+        setUpdated(true)
+        window.setTimeout(() => setUpdated(false), 420)
         return
       }
-      setRefreshError(next.error)
-      if (!quotaResultCache.has(props.providerID)) setResult(next)
-    }).finally(() => setLoading(false))
+      const applied = quotaRefreshResult({ cached: quotaResultCache.get(props.providerID)?.result, next })
+      setRefreshError(applied.refreshError)
+      setResult(applied.result)
+    }).finally(() => {
+      if (!disposed) setLoading(false)
+    })
   })
 
   return (
     <div class="flex min-h-24 flex-col gap-3" data-component="provider-quota-card" data-provider-id={props.providerID}>
-      <Show when={loading()}>
-        <span class="text-12-regular text-text-weak">{language.t("provider.quota.loading")}</span>
-      </Show>
-      <Show when={refreshError() && quotaResultCache.has(props.providerID)}>
-        <span class="text-11-regular text-status-warning">刷新失败，仍显示上次结果</span>
-      </Show>
       <Show
-        when={usage()}
+        when={!unsupported()}
         fallback={
-          <Show when={!loading()}>
-            <div class="flex flex-col items-start gap-3">
-              <span class="text-12-regular text-status-warning">{error()}</span>
-              <Show when={props.onConfigure && missingApiKey()}>
-                <Button size="small" variant="secondary" icon="settings-gear" onClick={props.onConfigure}>
-                  {language.t("provider.quota.configure")}
-                </Button>
-              </Show>
-            </div>
-          </Show>
+          <div class="flex flex-col items-start gap-2">
+            <span class="text-12-regular text-text-weak">{language.t("provider.quota.unsupported" as never)}</span>
+            <Show when={quotaProviderDocsURL(props.providerID)}>
+              {(url) => <Link href={url()} data-action={`provider-quota-docs-${props.providerID}`}>{language.t("provider.quota.view")}</Link>}
+            </Show>
+          </div>
         }
       >
-        {(value) => <div class="divide-y divide-border-weak-base"><For each={visibleWindows(value().windows)}>{(quota) => <QuotaRow quota={quota} updated={updated()} locale={language.intl()} label={label} resetLabel={(time) => language.t("provider.quota.resetsAt", { time })} />}</For></div>}
+        <Show when={loading()}>
+          <span class="text-12-regular text-text-weak">{language.t("provider.quota.loading")}</span>
+        </Show>
+        <Show when={refreshError() && quotaResultCache.has(props.providerID)}>
+          <span class="text-11-regular text-status-warning">{language.t("provider.quota.refreshFailed" as never)}</span>
+        </Show>
+        <Show
+          when={usage()}
+          fallback={
+            <Show when={!loading()}>
+              <div class="flex flex-col items-start gap-3">
+                <span class="text-12-regular text-status-warning">{error()}</span>
+                <Show when={props.onConfigure && missingApiKey()}>
+                  <Button size="small" variant="secondary" icon="settings-gear" onClick={props.onConfigure}>
+                    {language.t("provider.quota.configure")}
+                  </Button>
+                </Show>
+              </div>
+            </Show>
+          }
+        >
+          {(value) => {
+            const windows = () => visibleQuotaWindows(value().windows)
+            return (
+              <div class="divide-y divide-border-weak-base">
+                <Show when={value().balance}>
+                  {(balance) => <QuotaBalanceGroup balance={balance()} locale={language.intl()} />}
+                </Show>
+                <Show when={windows().length > 0}>
+                  <section class="flex flex-col gap-1.5 py-2 first:pt-0 last:pb-0" data-component="provider-quota-windows" aria-label={language.t("provider.quota.title")}>
+                    <span class="text-12-medium text-text-strong">{language.t("provider.quota.title")}</span>
+                    <div class="divide-y divide-border-weak-base">
+                      <For each={windows()}>{(quota) => <QuotaRow quota={quota} updated={updated()} locale={language.intl()} label={label} />}</For>
+                    </div>
+                  </section>
+                </Show>
+                <Show when={!value().balance && windows().length === 0}>
+                  <span class="block py-2 text-12-regular text-text-weak">{language.t("provider.quota.unavailable")}</span>
+                </Show>
+              </div>
+            )
+          }}
+        </Show>
+        <Show when={lastSuccessfulAt()}>
+          {(fetchedAt) => <span class="text-11-regular text-text-weak" data-component="provider-quota-fetched-at">{language.t("provider.quota.lastUpdated" as never, { time: resetTime(fetchedAt(), language.intl()) })}</span>}
+        </Show>
+        <Show when={usage()?.source}>
+          <span class="text-11-regular text-text-weak" data-component="provider-quota-source">{language.t("provider.quota.source.providerApi" as never)}</span>
+        </Show>
       </Show>
     </div>
   )
@@ -252,9 +375,13 @@ export function ProviderQuotaCardContent(props: { providerID: string; providerNa
         <div class="min-w-0">
           <span class="text-14-medium text-text-strong truncate">{props.providerName}</span>
         </div>
-        <Tooltip placement="top" value={language.t("provider.quota.refresh")}>
-          <IconButton icon="reset" variant="ghost" size="small" aria-label={language.t("provider.quota.refresh")} onClick={() => setRefresh((value) => value + 1)} />
-        </Tooltip>
+        <Show when={supportsQuotaQuery(props.providerID)}>
+          <div data-ui-control-group="provider-quota-refresh" data-ui-control-intent="command" data-ui-control-presentation="icon-button" data-ui-option-count="1">
+            <Tooltip placement="top" value={language.t("provider.quota.refresh")}>
+              <IconButton icon="reset" variant="ghost" size="small" aria-label={language.t("provider.quota.refresh")} data-action={`provider-quota-refresh-${props.providerID}`} onClick={() => setRefresh((value) => value + 1)} />
+            </Tooltip>
+          </div>
+        </Show>
       </div>
       <ProviderQuotaCard providerID={props.providerID} refresh={refresh} onConfigure={props.onConfigure} />
     </div>
@@ -300,8 +427,13 @@ export function ProviderQuotaSidebarAction(props: { providerID: string | Accesso
           data-variant="ghost"
           data-size="large"
           data-action={`sidebar-provider-quota-${providerID()}`}
+          data-ui-control-group="provider-quota-sidebar"
+          data-ui-control-intent="command"
+          data-ui-control-presentation="icon-button"
+          data-ui-option-count="1"
           aria-label={language.t("provider.quota.view")}
           aria-expanded={open()}
+          aria-haspopup="dialog"
           onClick={() => setOpen((value) => !value)}
         >
           <Icon name="usage" size="normal" />
@@ -309,12 +441,12 @@ export function ProviderQuotaSidebarAction(props: { providerID: string | Accesso
         <Show when={open() && providerID()} keyed>
           {(id) => (
             <Portal mount={document.body}>
-              <div ref={content} data-component="popover-content" data-provider-id={id} role="dialog" class="fixed bottom-16 left-24 w-[320px] max-w-[calc(100vw-32px)] rounded-md border border-border-base bg-surface-raised-stronger-non-alpha shadow-lg" style={{ "z-index": "2147483647" }}>
+              <div ref={content} data-component="popover-content" data-provider-id={id} role="dialog" class="fixed bottom-16 left-4 sm:left-24 w-[320px] max-w-[calc(100vw-32px)] rounded-md border border-border-base bg-surface-raised-stronger-non-alpha shadow-lg" style={{ "z-index": "2147483647" }}>
                 <div class="flex items-center justify-between border-b border-border-weak-base px-3 py-2">
                   <span class="text-14-medium text-text-strong">{language.t("provider.quota.title")}</span>
                   <IconButton icon="close" variant="ghost" size="small" aria-label={language.t("ui.common.close")} onClick={() => setOpen(false)} />
                 </div>
-                <div class="p-3"><ProviderQuotaCardContent providerID={id} providerName={providerName() ?? ""} onConfigure={props.onConfigure} /></div>
+                <div class="p-3"><ProviderQuotaCardContent providerID={id} providerName={providerName() ?? ""} onConfigure={supportsQuotaQuery(id) ? props.onConfigure : undefined} /></div>
               </div>
             </Portal>
           )}
@@ -326,10 +458,14 @@ export function ProviderQuotaSidebarAction(props: { providerID: string | Accesso
 
 export function ProviderQuotaConfigurationAction(props: { providerID: string; providerName: string; onConfigure: () => void; configured?: boolean }) {
   const language = useLanguage()
+  const docsURL = quotaProviderDocsURL(props.providerID)
   if (!quotaProviderIDs.has(props.providerID)) return
+  if (!supportsQuotaQuery(props.providerID) && docsURL) {
+    return <Link href={docsURL} class="text-12-medium whitespace-nowrap" data-action={`settings-provider-quota-docs-${props.providerID}`}>{language.t("provider.quota.view")}</Link>
+  }
   return (
     <Button size="small" variant="secondary" icon="settings-gear" data-action={`settings-provider-quota-config-${props.providerID}`} onClick={props.onConfigure}>
-      {props.configured ? "管理用量" : language.t("provider.quota.configure")}
+      {props.configured ? language.t("provider.quota.manage" as never) : language.t("provider.quota.configure")}
     </Button>
   )
 }

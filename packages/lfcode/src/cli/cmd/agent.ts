@@ -15,7 +15,24 @@ import type { Argv } from "yargs"
 
 type AgentMode = "all" | "primary" | "subagent"
 
-const AVAILABLE_TOOLS = ["bash", "read", "write", "edit", "glob", "grep", "webfetch", "actor", "task"]
+const AVAILABLE_TOOLS = [
+  "read",
+  "search",
+  "edit",
+  "shell",
+  "browser",
+  "app_control",
+  "webfetch",
+  "websearch",
+  "skill",
+  "memory",
+  "task",
+  "actor",
+  "question",
+  "create_goal",
+  "get_goal",
+  "update_goal",
+]
 
 const AgentCreateCommand = cmd({
   command: "create",
@@ -167,25 +184,17 @@ const AgentCreateCommand = cmd({
           mode = modeResult
         }
 
-        // Build tools config
-        const tools: Record<string, boolean> = {}
-        for (const tool of AVAILABLE_TOOLS) {
-          if (!selectedTools.includes(tool)) {
-            tools[tool] = false
-          }
-        }
-
         // Build frontmatter
         const frontmatter: {
           description: string
           mode: AgentMode
-          tools?: Record<string, boolean>
+          tool_allowlist?: string[]
         } = {
           description: generated.whenToUse,
           mode,
         }
-        if (Object.keys(tools).length > 0) {
-          frontmatter.tools = tools
+        if (selectedTools.length !== AVAILABLE_TOOLS.length) {
+          frontmatter.tool_allowlist = selectedTools
         }
 
         // Write file

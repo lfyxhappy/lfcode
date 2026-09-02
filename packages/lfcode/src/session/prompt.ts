@@ -56,6 +56,7 @@ import { sessionPromptRef } from "@/inbox/inbox-ref"
 import { Tool } from "@/tool"
 import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
+import { SessionRetry } from "./retry"
 import { LLM } from "./llm"
 import { MaxMode } from "./max-mode"
 import { Shell } from "@/shell/shell"
@@ -76,6 +77,8 @@ import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
 import { isExplicitMemoryRequest } from "@/memory/intent"
 import { ContextReview, ContextReviewFindingsOutput, type Record as ContextReviewRecord } from "@/context-review"
+import { boundedContextReviewMessages } from "@/context-review/bounded-messages"
+import { Activity } from "@/activity"
 import { dispatchHooks } from "@/hook/runtime"
 import { Snapshot as ResearchDispatchSnapshot } from "@/research/dispatch"
 import { isUserHiddenSystemActorID } from "@/actor/visibility"
@@ -99,6 +102,21 @@ const MAX_GOAL_REACT = 12
  */
 const REPEATED_STEP_THRESHOLD = 3
 const REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD = 3
+
+const dispatchHooksFailOpen = (input: Parameters<typeof dispatchHooks>[0]) =>
+  Effect.promise(() => dispatchHooks(input)).pipe(
+    Effect.catchCause((cause) => {
+      if (Cause.hasInterrupts(cause)) return Effect.interrupt
+      return Effect.sync(() => {
+        log.warn("session hook failed open", {
+          event: input.event,
+          sessionID: input.sessionID,
+          error: String(cause),
+        })
+        return { blocked: false, additionalContext: [], runs: [] }
+      })
+    }),
+  )
 
 /**
  * Stable signature for an assistant step's *action* — the tool calls it made
@@ -125,7 +143,7 @@ export function codegraphFallbackReminder(reason?: string) {
     "<system-reminder>",
     "CodeGraph is unavailable for this request, so codegraph_explore is intentionally hidden.",
     detail ? `Reason: ${detail}` : undefined,
-    "Do not retry codegraph_explore. Continue with Read, Grep, Glob, and the other available tools.",
+    "Do not retry codegraph_explore. Continue with read, search, and the other available tools.",
     "</system-reminder>",
   ]
     .filter((line): line is string => Boolean(line))
@@ -190,6 +208,18 @@ function loadedSkillNames(messages: MessageV2.WithParts[]) {
 
 const log = Log.create({ service: "session.prompt" })
 const elog = EffectLogger.create({ service: "session.prompt" })
+
+const failOpen = <A, E, R>(label: string, effect: Effect.Effect<A, E, R>, fallback: A): Effect.Effect<A, never, R> =>
+  effect.pipe(
+    Effect.catchCause((cause) => {
+      if (Cause.hasInterrupts(cause)) return Effect.interrupt
+      return Effect.sync(() => {
+        log.warn("non-critical session side effect failed; continuing", { label, error: String(cause) })
+        return fallback
+      })
+    }),
+  )
+
 type SweepOrphanAssistantsOptions = {
   minAgeMs?: number
   message?: string
@@ -259,6 +289,37 @@ export const layer = Layer.effect(
     const skill = yield* Skill.Service
     const contextReview = yield* ContextReview.Service
 
+    const transitionMainActivity = (
+      sessionID: SessionID,
+      nextStatus: Activity.Info["status"],
+      currentStep: string,
+    ) =>
+      Effect.serviceOption(Activity.Service).pipe(
+        Effect.flatMap((service) => {
+          if (Option.isNone(service)) return Effect.void
+          return service.value
+            .getBySource("session", sessionID)
+            .pipe(
+              Effect.flatMap((current) => {
+                if (!current || ["completed", "failed", "cancelled"].includes(current.status)) return Effect.void
+                return service.value.transition({ id: current.id, status: nextStatus, currentStep }).pipe(Effect.ignore)
+              }),
+            )
+        }),
+      )
+
+    const markSessionRecoverable = (sessionID: SessionID, reason: string) =>
+      Effect.gen(function* () {
+        const at = Date.now()
+        yield* status.set(sessionID, {
+          type: "recoverable",
+          message: "The session can be resumed.",
+          reason,
+          at,
+        })
+        yield* transitionMainActivity(sessionID, "recoverable", reason)
+      })
+
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
     const instructionsNotified = new Set<SessionID>()
@@ -267,12 +328,33 @@ export const layer = Layer.effect(
     const codegraphUnavailableRequests = new Set<MessageID>()
     const steerWakeups = new Set<SessionID>()
 
+    const emptyInstructions = () => ({ content: [] as string[], paths: new Set<string>() })
+    const loadInstructionsFailOpen = (
+      sessionID: SessionID,
+    ): Effect.Effect<{ content: string[]; paths: Set<string> }, never> =>
+      instruction.system().pipe(
+        // Instruction files are context enrichment. Preserve cancellation, but
+        // do not let a transient filesystem/network read failure terminate an
+        // otherwise valid model request; the next turn can retry the load.
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) =>
+            Effect.sync(() => {
+              log.warn("system instructions unavailable; continuing without them", {
+                sessionID,
+                error: String(cause),
+              })
+              return emptyInstructions()
+            }),
+        ),
+      ) as unknown as Effect.Effect<{ content: string[]; paths: Set<string> }, never>
+
     // Late-bind prefix-capture helper so SessionCheckpoint.tryStartCheckpointWriter
     // can call buildLLMRequestPrefix without forming a layer cycle
     // (ToolRegistry → SessionCheckpoint → ToolRegistry). See prefix-capture-ref.ts.
     // The closure resolves Agent.Info and Provider.Model internally so checkpoint.ts
     // only needs to pass string IDs.
-    const capture: typeof prefixCaptureRef.current = (input) =>
+    const capture: NonNullable<typeof prefixCaptureRef.current> = (input) =>
       Effect.gen(function* () {
         const empty = {
           system: [] as string[],
@@ -311,7 +393,7 @@ export const layer = Layer.effect(
         const [skills, env, instructions] = yield* Effect.all([
           sys.skills(ag),
           Effect.sync(() => sys.environment(model)),
-          instruction.system().pipe(Effect.orDie),
+          loadInstructionsFailOpen(input.sessionID),
         ])
         // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
         // is not included; parent's runLoop adds it conditionally based on user.format)
@@ -373,11 +455,12 @@ export const layer = Layer.effect(
       // Everything after durable admission can fail while preparing the reviewer
       // snapshot. A detached scheduling fiber must never strand a pending record.
       const result: SpawnResult | undefined = yield* Effect.gen(function* () {
+        const reviewMessages = boundedContextReviewMessages(input.messages, input.user.id, input.assistant.id)
         const catalogSkills = (yield* skill.available(input.agent, input.permission)).toSorted((a, b) =>
           a.name.localeCompare(b.name),
         )
         const catalog = buildSkillCatalogEntries(catalogSkills, input.model)
-        const loadedSkills = loadedSkillNames(input.messages)
+        const loadedSkills = loadedSkillNames(reviewMessages)
         const prefix = yield* capture({
           sessionID: input.sessionID,
           agentName: "context-reviewer",
@@ -385,7 +468,7 @@ export const layer = Layer.effect(
           modelID: String(input.model.id),
           permission: input.permission,
           actorID: "context-reviewer",
-          msgs: input.messages,
+          msgs: reviewMessages,
         })
         // Spawn is asynchronous and may fail after the durable review record is
         // admitted (for example, while registering its in-memory fork context).
@@ -396,7 +479,7 @@ export const layer = Layer.effect(
           sessionID: input.sessionID,
           agentType: "context-reviewer",
           task: [
-            "Audit the completed main-agent turn now. The full primary conversation is inherited. Compare the completed turn with this exact current Skill catalog; identify only workflows that were materially relevant but omitted.",
+            "Audit the completed main-agent turn now. A bounded primary-session slice is inherited. Compare the completed turn with this exact current Skill catalog; identify only workflows that were materially relevant but omitted.",
             "If continuity or durable user/project context was materially omitted, use the read-only memory tool with one or two distinctive search terms and return only the narrow follow-up query, never retrieved content.",
             "Return the required structured result with empty arrays when nothing was omitted.",
             loadedSkills.length > 0
@@ -474,15 +557,14 @@ export const layer = Layer.effect(
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* elog.info("cancel", { sessionID })
       yield* state.cancel(sessionID)
-      yield* Effect.promise(() =>
-        dispatchHooks({
-          event: "Stop",
-          sessionID,
-          projectID: String(Instance.project.id),
-          cwd: Instance.worktree,
-          payload: { reason: "cancelled" },
-        }),
-      ).pipe(
+      yield* transitionMainActivity(sessionID, "interrupted", "cancelled")
+      yield* dispatchHooksFailOpen({
+        event: "Stop",
+        sessionID,
+        projectID: String(Instance.project.id),
+        cwd: Instance.worktree,
+        payload: { reason: "cancelled" },
+      }).pipe(
         Effect.timeout("2 seconds"),
         Effect.catchCause((cause) => elog.warn("stop-hook-failed", { sessionID, cause: String(cause) })),
         Effect.forkIn(scope),
@@ -790,7 +872,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // whitelist. `INHERIT` and a missing actor row both mean full access.
       const whitelistFor = Effect.fn("SessionPrompt.whitelistFor")(function* () {
         if (!input.agentID) return undefined
-        const actor = yield* actorRegistry.get(input.session.id, input.agentID)
+        const actor = yield* failOpen(
+          "actor-whitelist",
+          actorRegistry.get(input.session.id, input.agentID),
+          undefined,
+        )
         if (!actor || !Array.isArray(actor.tools)) return undefined
         return new Set(actor.tools)
       })
@@ -850,17 +936,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }),
         ask: (req) =>
           Effect.gen(function* () {
-            const hook = yield* Effect.promise(() =>
-              dispatchHooks({
-                event: "PermissionRequest",
-                sessionID: input.session.id,
-                projectID: String(input.session.projectID),
-                cwd: input.session.directory,
-                tool: req.permission,
-                payload: { patterns: req.patterns, metadata: req.metadata },
-                promptEvaluator: (request) => evaluateHookPrompt(request),
-              }),
-            )
+            const hook = yield* dispatchHooksFailOpen({
+              event: "PermissionRequest",
+              sessionID: input.session.id,
+              projectID: String(input.session.projectID),
+              cwd: input.session.directory,
+              tool: req.permission,
+              payload: { patterns: req.patterns, metadata: req.metadata },
+              promptEvaluator: (request) => evaluateHookPrompt(request),
+            })
             if (hook.blocked) throw new Error("Permission request was blocked by a Hook")
             const ruleset = effectivePermission
             if (
@@ -887,7 +971,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 },
                 options.abortSignal,
               )
-              .pipe(Effect.orDie)
+              // ToolContext.ask historically exposes a no-error Effect. Keep
+              // the public contract while preserving permission failures at
+              // runtime so the tool boundary can report them as observations.
+              .pipe(Effect.mapError((error) => error as never))
           }),
       })
 
@@ -942,13 +1029,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         )
       }
 
-      const visibleTools = (yield* registry.tools({
-        modelID: ModelID.make(input.model.api.id),
-        providerID: input.model.providerID,
-        agent: input.agent,
-        capabilities: input.model.capabilities,
-        activeSkills: Skill.activeNames(input.messages),
-      })).filter((item) => {
+      const visibleTools = (yield* failOpen(
+        "tool-registry",
+        registry.tools({
+          modelID: ModelID.make(input.model.api.id),
+          providerID: input.model.providerID,
+          agent: input.agent,
+          capabilities: input.model.capabilities,
+          activeSkills: Skill.activeNames(input.messages),
+        }),
+        [],
+      )).filter((item) => {
+        // The actor registry is the runtime capability boundary. Apply the
+        // same allowlist while building the provider schema so a subagent
+        // cannot be told about a tool that execution would reject (or vice
+        // versa). Main sessions have no registry whitelist and keep the
+        // normal agent-level visibility rules.
+        if (whitelist && !whitelist.has(item.id)) return false
         if (item.id === ActorTool.id && input.agent.mode !== "primary" && input.agent.name !== "deep-research-coordinator") return false
         if (item.id === "memory" && !memoryEnabled) return false
         return true
@@ -956,7 +1053,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const presentation = resolvePresentation({
         // The context reviewer has a fixed read-only probe contract and must keep
         // its native memory tool available for that internal protocol.
-        configured: input.agent.name === "context-reviewer" ? "native" : (yield* config.get()).tool?.presentation,
+        configured:
+          input.agent.name === "context-reviewer"
+            ? "native"
+            : (yield* failOpen("tool-presentation-config", config.get(), undefined))?.tool?.presentation,
         tools: visibleTools,
       })
       const nativeTools = nativeToolsForPresentation(presentation, visibleTools)
@@ -990,17 +1090,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   return output
                 }
                 if (userExtensionsEnabled) {
-                  const beforeHook = yield* Effect.promise(() =>
-                    dispatchHooks({
-                      event: "PreToolUse",
-                      sessionID: ctx.sessionID,
-                      projectID: String(input.session.projectID),
-                      cwd: input.session.directory,
-                      tool: item.id,
-                      payload: { args, callID },
-                      promptEvaluator: (request) => evaluateHookPrompt(request),
-                    }),
-                  )
+                  const beforeHook = yield* dispatchHooksFailOpen({
+                    event: "PreToolUse",
+                    sessionID: ctx.sessionID,
+                    projectID: String(input.session.projectID),
+                    cwd: input.session.directory,
+                    tool: item.id,
+                    payload: { args, callID },
+                    promptEvaluator: (request) => evaluateHookPrompt(request),
+                  })
                   if (beforeHook.blocked) {
                     const output = {
                       title: "Hook blocked tool",
@@ -1020,19 +1118,17 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
                 const execute = item.execute(args, ctx)
                 const result = yield* (userExtensionsEnabled
-                  ? execute.pipe(
+                      ? execute.pipe(
                       Effect.tapError(() =>
-                        Effect.promise(() =>
-                          dispatchHooks({
-                            event: "PostToolUseFailure",
-                            sessionID: ctx.sessionID,
-                            projectID: String(input.session.projectID),
-                            cwd: input.session.directory,
-                            tool: item.id,
-                            payload: { args, callID },
-                            promptEvaluator: (request) => evaluateHookPrompt(request),
-                          }),
-                        ),
+                        dispatchHooksFailOpen({
+                          event: "PostToolUseFailure",
+                          sessionID: ctx.sessionID,
+                          projectID: String(input.session.projectID),
+                          cwd: input.session.directory,
+                          tool: item.id,
+                          payload: { args, callID },
+                          promptEvaluator: (request) => evaluateHookPrompt(request),
+                        }),
                       ),
                     )
                   : execute)
@@ -1057,17 +1153,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
                     output,
                   )
-                  yield* Effect.promise(() =>
-                    dispatchHooks({
-                      event: "PostToolUse",
-                      sessionID: ctx.sessionID,
-                      projectID: String(input.session.projectID),
-                      cwd: input.session.directory,
-                      tool: item.id,
-                      payload: { args, output: output.output },
-                      promptEvaluator: (request) => evaluateHookPrompt(request),
-                    }),
-                  )
+                  yield* dispatchHooksFailOpen({
+                    event: "PostToolUse",
+                    sessionID: ctx.sessionID,
+                    projectID: String(input.session.projectID),
+                    cwd: input.session.directory,
+                    tool: item.id,
+                    payload: { args, output: output.output },
+                    promptEvaluator: (request) => evaluateHookPrompt(request),
+                  })
                 }
                 if (userExtensionsEnabled) {
                   yield* bus
@@ -1129,16 +1223,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         ensureCodegraph &&
         codegraphUser &&
         !codegraphUnavailableRequests.has(codegraphUser.info.id)
-          ? yield* ensureCodegraph()
+          ? yield* failOpen(
+              "codegraph-readiness",
+              ensureCodegraph(),
+              { status: "unavailable" as const, reason: "CodeGraph readiness check failed" },
+            )
           : undefined
       const codegraphMode =
         !codegraphRequested ||
+        !ensureCodegraph ||
         (codegraphUser && codegraphUnavailableRequests.has(codegraphUser.info.id)) ||
         codegraphReadiness?.status === "failed" ||
         codegraphReadiness?.status === "unavailable"
           ? "off"
           : "auto"
-      const connectedMcpTools = yield* mcp.tools({ codegraph: codegraphMode })
+      const connectedMcpTools = yield* failOpen("mcp-tools", mcp.tools({ codegraph: codegraphMode }), {})
       if (
         codegraphReadiness &&
         (codegraphReadiness.status === "failed" || codegraphReadiness.status === "unavailable")
@@ -1229,10 +1328,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const execute = item.execute
         if (!execute) continue
 
-        const schemaBuildStartedAt = Date.now()
-        const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
-        const transformed = ProviderTransform.schema(input.model, schema)
-        const schemaBuildMs = Date.now() - schemaBuildStartedAt
+        const prepared = yield* failOpen(
+          `mcp-schema:${key}`,
+          Effect.promise(async () => {
+            const schema = await asSchema(item.inputSchema).jsonSchema
+            const schemaBuildStartedAt = Date.now()
+            const transformed = ProviderTransform.schema(input.model, schema)
+            return { transformed, schemaBuildMs: Date.now() - schemaBuildStartedAt }
+          }),
+          undefined,
+        )
+        if (!prepared) continue
+        const { transformed, schemaBuildMs } = prepared
         item.inputSchema = jsonSchema(transformed)
         item.execute = (args, opts) =>
           run.promise(
@@ -1440,8 +1547,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
-        yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() })
-        throw error
+        const end = Date.now()
+        const startedAt = "time" in part.state ? part.state.time.start : end
+        // The subtask request is already persisted as an assistant tool part.
+        // Close it as a model-visible observation so the parent can choose an
+        // alternative instead of losing the whole turn to an unknown agent.
+        yield* sessions
+          .updatePart({
+            ...part,
+            state: {
+              status: "error",
+              input: part.state.input,
+              error: error.message,
+              metadata: { recoverable: true, reason: "agent-not-found" },
+              time: { start: startedAt, end },
+            },
+          } satisfies MessageV2.ToolPart)
+          .pipe(Effect.catchCause((cause) => Effect.sync(() => log.warn("subtask error observation failed", { cause }))))
+        assistantMessage.finish = "tool-calls"
+        assistantMessage.time.completed = end
+        yield* sessions
+          .updateMessage(assistantMessage)
+          .pipe(Effect.catchCause((cause) => Effect.sync(() => log.warn("subtask assistant close failed", { cause }))))
+        yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() }).pipe(Effect.ignore)
+        return
       }
 
       let error: Error | undefined
@@ -1473,8 +1602,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 ...req,
                 sessionID,
                 ruleset: Permission.merge(taskAgent.permission, session.permission ?? []),
-              })
-              .pipe(Effect.orDie),
+              }),
         })
         .pipe(
           Effect.catchCause((cause) => {
@@ -2244,26 +2372,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const userExtensionsEnabled = input.agent !== "context-reviewer"
         if (userExtensionsEnabled && !hookStarted.has(input.sessionID)) {
           hookStarted.add(input.sessionID)
-          yield* Effect.promise(() =>
-            dispatchHooks({
-              event: "SessionStart",
-              sessionID: input.sessionID,
-              projectID: String(session.projectID),
-              cwd: session.directory,
-              payload: { source: input.source ?? "user" },
-            }),
-          )
+          yield* dispatchHooksFailOpen({
+            event: "SessionStart",
+            sessionID: input.sessionID,
+            projectID: String(session.projectID),
+            cwd: session.directory,
+            payload: { source: input.source ?? "user" },
+          })
         }
         if (userExtensionsEnabled) {
-          const submitted = yield* Effect.promise(() =>
-            dispatchHooks({
-              event: "UserPromptSubmit",
-              sessionID: input.sessionID,
-              projectID: String(session.projectID),
-              cwd: session.directory,
-              payload: { parts: input.parts },
-            }),
-          )
+          const submitted = yield* dispatchHooksFailOpen({
+            event: "UserPromptSubmit",
+            sessionID: input.sessionID,
+            projectID: String(session.projectID),
+            cwd: session.directory,
+            payload: { parts: input.parts },
+          })
           if (submitted.blocked) throw new Error("User prompt was blocked by a Hook")
         }
         if (input.source !== "spawn" && input.source !== "hook") {
@@ -2509,6 +2633,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               error: input.assistant.error,
               visible: !isUserHiddenSystemActorID(input.assistant.agentID),
             })
+            if (agentID === "main") yield* markSessionRecoverable(sessionID, "The model response reached its output limit.")
             return false
           }
 
@@ -2666,6 +2791,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               error: input.assistant.error,
               visible: !isUserHiddenSystemActorID(input.assistant.agentID),
             })
+            if (agentID === "main") yield* markSessionRecoverable(sessionID, input.reason)
             return false
           }
 
@@ -2871,6 +2997,44 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           })
         })
 
+        // A renderer/provider crash can happen after tool-input-start was
+        // persisted but before the processor's in-memory cleanup runs. On the
+        // next loop there is no Deferred to settle, so normalize those stale
+        // parts into a durable tool observation and let the model recover.
+        const recoverDanglingToolParts = Effect.fn("SessionPrompt.recoverDanglingToolParts")(
+          function* (assistant: MessageV2.Assistant, parts: MessageV2.Part[]) {
+            for (const part of parts) {
+              if (
+                part.type !== "tool" ||
+                part.metadata?.providerExecuted ||
+                (part.state.status !== "pending" && part.state.status !== "running")
+              )
+                continue
+              const startedAt = "time" in part.state ? part.state.time.start : Date.now()
+              yield* sessions.updatePart({
+                ...part,
+                state: {
+                  status: "error",
+                  input: part.state.input,
+                  error: "Tool execution did not complete; retry the tool call from this observation.",
+                  metadata: {
+                    ...("metadata" in part.state ? (part.state.metadata ?? {}) : {}),
+                    interrupted: true,
+                    recovered: true,
+                  },
+                  time: { start: startedAt, end: Date.now() },
+                },
+              })
+              yield* slog.warn("recovered dangling tool part", {
+                partID: part.id,
+                tool: part.tool,
+                callID: part.callID,
+                assistantID: assistant.id,
+              })
+            }
+          },
+        )
+
         while (true) {
           // F55: only main agent sets session status to busy; subagent runners
           // must not touch session-level status (Runner.onBusy is Effect.void
@@ -2914,12 +3078,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
           )
+          if (lastAssistant && lastAssistantMsg) {
+            yield* recoverDanglingToolParts(lastAssistant, lastAssistantMsg.parts)
+          }
+          const currentAssistantMsg = lastAssistantMsg
+            ? {
+                ...lastAssistantMsg,
+                parts: MessageV2.parts(lastAssistantMsg.info.id),
+              }
+            : undefined
           // Some providers return "stop" even when the assistant message contains tool calls.
           // Keep the loop running so tool results can be sent back to the model.
           // Skip provider-executed tool parts — those were fully handled within the
           // provider's stream (e.g. DWS Agent Platform) and don't need a re-loop.
           const hasToolCalls =
-            lastAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
+            currentAssistantMsg?.parts.some((part) => part.type === "tool" && !part.metadata?.providerExecuted) ?? false
 
           if (
             lastAssistant?.finish === "length" &&
@@ -2931,7 +3104,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
 
           if (lastAssistant && lastUser.id < lastAssistant.id) {
-            const lastAssistantParts = lastAssistantMsg?.parts ?? []
+            const lastAssistantParts = currentAssistantMsg?.parts ?? []
             if (yield* autoContinueNativeWebSearchFallback({ lastUser, parts: lastAssistantParts })) continue
             const classification = classifyAssistantStep({
               phase: "existing-assistant",
@@ -2954,12 +3127,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
                 continue
               yield* writeModelError({ assistant: lastAssistant, reason: classification.reason })
+              if (agentID === "main" && lastAssistant.error && SessionRetry.retryable(lastAssistant.error)) {
+                yield* markSessionRecoverable(
+                  sessionID,
+                  lastAssistant.error.data && "message" in lastAssistant.error.data
+                    ? String(lastAssistant.error.data.message)
+                    : lastAssistant.error.name,
+                )
+              }
               yield* slog.info("exiting loop", { classification: classification.type, reason: classification.reason })
               break
             }
             if (classification.type === "think-only" || classification.type === "invalid") {
               const reason = classification.type === "invalid" ? classification.reason : "think-only"
               if (yield* autoContinueInvalidOutput({ lastUser, assistant: lastAssistant, reason })) continue
+              if (agentID === "main") yield* markSessionRecoverable(sessionID, reason)
               yield* slog.info("exiting loop", { classification: classification.type })
               break
             }
@@ -2988,6 +3170,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 assistant: lastAssistant,
                 reason: `Stopped automatic continuation after ${REPEATED_TOOL_VALIDATION_FAILURE_THRESHOLD} identical tool validation failures. Use a different tool shape or report the provider compatibility problem instead of retrying the same invalid call.`,
               })
+              if (agentID === "main") yield* markSessionRecoverable(sessionID, "Repeated identical tool validation failures.")
             }
             break
           }
@@ -3175,6 +3358,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             throw error
           }
           const maxSteps = agent.steps ?? Infinity
+          if (step > maxSteps) {
+            if (agentID === "main") yield* markSessionRecoverable(sessionID, "The session reached the configured step limit.")
+            break
+          }
           const isLastStep = step >= maxSteps
           msgs = yield* insertReminders({ messages: msgs, agent, session })
 
@@ -3455,6 +3642,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
               if (forkClassification.type === "final" && forkClassification.degraded)
                 yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+              // A parsed local tool observation takes precedence over the
+              // provider's finish reason. Some providers send `stop` alongside
+              // a tool call; the tool error/result must reach the next model
+              // turn so the model can recover or report the blocker itself.
+              if (forkClassification.type === "continue") return "continue" as const
               if (result === "stop") return "break" as const
               // Fork agents are always subagents (lastUser.agentID is set); use
               // per-actor compaction on overflow (same as non-fork subagent path).
@@ -3487,7 +3679,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               const [skills, env, instructions] = yield* Effect.all([
                 sys.skills(agent),
                 Effect.sync(() => sys.environment(model)),
-                instruction.system().pipe(Effect.orDie),
+                loadInstructionsFailOpen(sessionID),
               ])
               yield* slog.info("loadSystemInputs", {
                 status: "completed",
@@ -3561,11 +3753,42 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // Admit the actual request envelope as well, because large tool schemas,
             // system instructions, or the current user message can overflow before
             // the next assistant usage is available.
+            const requestMessages = [
+              ...insertTavernContext(modelMsgs, lastUser.tavernContext),
+              ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : []),
+            ]
             const requestTokens = estimateRequestTokens({
               system: prebuiltSystem,
-              messages: modelMsgs,
+              messages: requestMessages,
               tools,
             })
+            // The session context panel represents the main conversation only.
+            // Subagents share a sessionID but have independent prompt windows.
+            if (agentID === "main") {
+              yield* Effect.promise(() => import("./context-snapshot-store")).pipe(
+                Effect.flatMap(({ saveSnapshot }) =>
+                  Effect.sync(() =>
+                    saveSnapshot({
+                      sessionID,
+                      agentID,
+                      activeContextTokens: requestTokens,
+                      contextWindowTokens: model.limit.context || null,
+                      providerID: model.providerID,
+                      modelID: model.id,
+                      // Use the assistant request's ordering anchor so the
+                      // terminal provider measurement can replace this
+                      // envelope snapshot even when the stream finishes later.
+                      measuredAt: msg.time.created,
+                      measurementSource: "request_envelope",
+                    }),
+                  ),
+                ),
+              ).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => slog.warn("context snapshot persistence failed", { cause })),
+                ),
+              )
+            }
             const requestLimit = usable({ cfg: contextCfg, model })
             if (!skipOverflowCheck && !isBoundedComputation && requestLimit > 0 && requestTokens >= requestLimit) {
               yield* slog.warn("request admission triggered compaction", {
@@ -3614,7 +3837,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // MessageV2.User.system for logging/replay); llm.stream itself uses prebuiltSystem.
               system: additions,
               prebuiltSystem,
-              messages: [...insertTavernContext(modelMsgs, lastUser.tavernContext), ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
+              messages: requestMessages,
               tools,
               model,
               toolChoice:
@@ -3625,6 +3848,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     : undefined,
               agentID: lastUser.agentID,
               abortSignal,
+              requestEnvelopeTokens: requestTokens,
             }
 
             const llmProcessAt = Date.now()
@@ -3694,6 +3918,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
                 return "continue" as const
               yield* writeModelError({ assistant: handle.message, reason: classification.reason })
+              if (agentID === "main" && handle.message.error && SessionRetry.retryable(handle.message.error)) {
+                yield* markSessionRecoverable(
+                  sessionID,
+                  handle.message.error.data && "message" in handle.message.error.data
+                    ? String(handle.message.error.data.message)
+                    : handle.message.error.name,
+                )
+              }
               return "break" as const
             }
             if (classification.type !== "continue" && !handle.message.error && format.type === "json_schema") {
@@ -3706,13 +3938,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               format.type !== "json_schema"
             ) {
               const reason = classification.type === "invalid" ? classification.reason : "think-only"
-              if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
-                return "continue" as const
-              return "break" as const
+                if (yield* autoContinueInvalidOutput({ lastUser, assistant: handle.message, reason }))
+                  return "continue" as const
+                if (agentID === "main") yield* markSessionRecoverable(sessionID, reason)
+                return "break" as const
             }
 
             if (classification.type === "final" && classification.degraded)
               yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
+            // Do not let a provider `stop` discard a completed local tool
+            // observation. The classifier has established that the model must
+            // see it on the next turn before the session may finish.
+            if (classification.type === "continue") return "continue" as const
             if (result === "stop") return "break" as const
             if (!isBoundedComputation && result === "overflow") {
               // Subagent overflow → per-actor compaction. Insert a boundary
@@ -3821,11 +4058,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         agentID,
         interruptedAssistant(input.sessionID, agentID),
         (signal) =>
-          runLoop(input.sessionID, agentID, input.task_id, signal, {
-            permission: input.permission,
-            interactive: input.interactive,
-            onPermissionRequest: input.onPermissionRequest,
-            onQuestionRequest: input.onQuestionRequest,
+          Effect.gen(function* () {
+            if (agentID === "main") yield* transitionMainActivity(input.sessionID, "running", "running")
+            const result = yield* runLoop(input.sessionID, agentID, input.task_id, signal, {
+              permission: input.permission,
+              interactive: input.interactive,
+              onPermissionRequest: input.onPermissionRequest,
+              onQuestionRequest: input.onQuestionRequest,
+            }).pipe(
+              Effect.tapError(() =>
+                agentID === "main" ? transitionMainActivity(input.sessionID, "interrupted", "failed") : Effect.void,
+              ),
+            )
+            if (agentID === "main") {
+              const settled = yield* sessions.get(input.sessionID)
+              if (settled.interaction?.mode === "interactive-html") {
+                yield* transitionMainActivity(input.sessionID, "waiting", "waiting")
+              } else if (result.info.role === "assistant" && result.info.error && SessionRetry.retryable(result.info.error)) {
+                yield* markSessionRecoverable(
+                  input.sessionID,
+                  result.info.error.data && "message" in result.info.error.data
+                    ? String(result.info.error.data.message)
+                    : result.info.error.name,
+                )
+              } else {
+                yield* transitionMainActivity(input.sessionID, "completed", "completed")
+              }
+            }
+            return result
           }),
         abortSignal,
       )

@@ -151,6 +151,15 @@ window.__LFCODE__.automation = {
   },
 }
 window.addEventListener("error", (event) => {
+  // Chromium emits this notification when a ResizeObserver callback mutates
+  // layout during its delivery cycle. It is a recoverable rendering hint (the
+  // next frame delivers the pending entries), not an application failure. Do
+  // not surface it as an automation error or it will make otherwise healthy
+  // browser assertions fail with a stream of false positives.
+  if (
+    event.message === "ResizeObserver loop completed with undelivered notifications." ||
+    event.message === "ResizeObserver loop limit exceeded"
+  ) return
   emitAutomationEvent("renderer.error", {
     message: event.message,
     filename: event.filename,
@@ -302,9 +311,6 @@ const createPlatform = (): Platform => {
     },
     clearBrowserSiteData: async (target) => {
       return window.api.clearBrowserSiteData(target)
-    },
-    getBrowserReferenceState: async (target) => {
-      return window.api.getBrowserReferenceState(target)
     },
     getBrowserCacheOverview: async () => {
       return window.api.getBrowserCacheOverview()

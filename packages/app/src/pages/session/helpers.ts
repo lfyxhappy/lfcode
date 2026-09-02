@@ -21,6 +21,8 @@ export type BrowserOpenRequestDetail = {
   title?: string
   reason?: "human" | "tool"
   presentation?: "headless" | "detached" | "sidebar"
+  newTab?: boolean
+  tabID?: string
   requestID?: string
 }
 

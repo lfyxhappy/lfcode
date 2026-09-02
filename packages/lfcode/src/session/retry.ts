@@ -13,10 +13,12 @@ export const RETRY_INITIAL_DELAY = 2000
 export const RETRY_BACKOFF_FACTOR = 2
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
 export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
+export const RETRY_MAX_ATTEMPTS = 10
+export const RETRY_MAX_WINDOW_MS = 15 * 60 * 1000
 
-const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT"])
+const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"])
 const SSE_TIMEOUT_MESSAGE = "SSE read timed out"
-const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504, 529])
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529])
 const NON_RETRYABLE_PROVIDER_CODES = new Set([
   "insufficient_quota",
   "usage_not_included",
@@ -40,8 +42,8 @@ function parseErrorBody(input: unknown) {
   }
 }
 
-function isNonRetryableProviderLimitError(error: Error) {
-  const responseBody = (error as { responseBody?: unknown }).responseBody
+function isNonRetryableProviderLimitError(input: { message?: unknown; responseBody?: unknown }) {
+  const responseBody = input.responseBody
   const body = parseErrorBody(responseBody)
   const code =
     typeof body?.error?.code === "string"
@@ -52,7 +54,7 @@ function isNonRetryableProviderLimitError(error: Error) {
   if (code && NON_RETRYABLE_PROVIDER_CODES.has(code)) return true
 
   const candidates = [
-    error.message,
+    typeof input.message === "string" ? input.message : undefined,
     typeof responseBody === "string" ? responseBody : undefined,
     typeof body?.error?.message === "string" ? body.error.message : undefined,
     typeof body?.message === "string" ? body.message : undefined,
@@ -141,6 +143,7 @@ export function retryable(error: Err) {
   }
 
   if (MessageV2.APIError.isInstance(error)) {
+    if (isNonRetryableProviderLimitError(error.data)) return undefined
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,
     // even when the provider SDK doesn't explicitly mark them as retryable.
@@ -193,11 +196,14 @@ export function policy(opts: {
   parse: (error: unknown) => Err
   set: (input: { attempt: number; message: string; next: number }) => Effect.Effect<void>
 }) {
+  const startedAt = Date.now()
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
       const error = opts.parse(meta.input)
       const message = retryable(error)
-      if (!message) return Cause.done(meta.attempt)
+      if (!message || meta.attempt >= RETRY_MAX_ATTEMPTS || Date.now() - startedAt >= RETRY_MAX_WINDOW_MS) {
+        return Cause.done(meta.attempt)
+      }
       return Effect.gen(function* () {
         const wait = delay(meta.attempt, MessageV2.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis

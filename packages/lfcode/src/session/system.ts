@@ -65,7 +65,7 @@ export const layer = Layer.effect(
             `- Verify changes in proportion to their risk; inspection, editing, and verification are not mandatory phases for every request.`,
             `- Saved memory is available only when the user explicitly asks to search, recall, or inspect it. The sole exception is a valid <context_review> hand-off for a related follow-up: then you must use the memory tool to search only its listed query before relying on Memory. Do not use Memory as an implicit planning or recovery step.`,
             `- For web research, use native_web_search first when it is available. If it fails or has no verifiable URL citations, use websearch to follow the configured direct or browser discovery route. Use Exa or Parallel only when the user explicitly selects a configured compatibility provider.`,
-            `- For structured code questions (architecture, symbols, call chains, impact, refactoring, or debugging), use codegraph_explore first when it is available; use Read/Grep for exact text, logs, configuration, documentation, and unindexed files.`,
+            `- For structured code questions (architecture, symbols, call chains, impact, refactoring, or debugging), use codegraph_explore first when it is available; use read/search for exact text, logs, configuration, documentation, and unindexed files.`,
             `- When you choose the Python tool, note that Lfcode's managed Python environment already preinstalls these common packages: ${managedPythonPackageSummary()}. Prefer using them directly before installing duplicates.`,
           ].join("\n"),
         ]

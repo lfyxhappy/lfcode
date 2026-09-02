@@ -73,7 +73,7 @@ export const OfficeTool = Tool.define<typeof Parameters, Tool.Metadata, AppFileS
           const command = yield* resolveOfficeCli(ctx)
           const args = buildOfficeArgs(params, file, destination)
           yield* ctx.ask({
-            permission: "bash",
+            permission: "shell",
             patterns: [command.path],
             always: ["*"],
             metadata: {
@@ -135,7 +135,7 @@ const resolveOfficeCli = Effect.fn("OfficeTool.resolveOfficeCli")(function* (ctx
   const existing = yield* Effect.promise(() => resolveOfficeCliCommand())
   if (existing) return existing
   yield* ctx.ask({
-    permission: "bash",
+    permission: "shell",
     patterns: ["runtime:install:officecli"],
     always: ["*"],
     metadata: { command: "runtime install officecli", runtime_action: "install", runtime_id: "officecli" },

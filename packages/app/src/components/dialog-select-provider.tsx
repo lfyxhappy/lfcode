@@ -12,9 +12,11 @@ import { VOLCENGINE_CODING_PLAN_PROVIDER_ID } from "@lfcode-ai/shared/volcengine
 import { A6API_PROVIDER_ID } from "./dialog-custom-provider-form"
 import { OPENCODE_GO_NAME, OPENCODE_GO_PRESET_ID, OPENCODE_GO_PROVIDER_ID } from "@lfcode-ai/shared/opencode-go"
 import { OPENCODE_NAME, OPENCODE_PRESET_ID, OPENCODE_PROVIDER_ID } from "@lfcode-ai/shared/opencode"
+import { LFAPI_NAME, LFAPI_PRESET_ID, LFAPI_PROVIDER_ID } from "@lfcode-ai/shared/lfapi"
 
 const CUSTOM_ID = "_custom"
 const A6API_PROVIDER = { id: A6API_PROVIDER_ID, name: "A6API" }
+const LFAPI_PROVIDER = { id: LFAPI_PROVIDER_ID, name: LFAPI_NAME }
 const OPENCODE_ZEN_PROVIDER = { id: OPENCODE_PROVIDER_ID, name: OPENCODE_NAME }
 const OPENCODE_GO_PROVIDER = { id: OPENCODE_GO_PROVIDER_ID, name: OPENCODE_GO_NAME }
 
@@ -32,6 +34,8 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
     if (id === "openai") return language.t("dialog.provider.openai.note")
     if (id.startsWith("github-copilot")) return language.t("dialog.provider.copilot.note")
     if (id === "lfcode-go") return language.t("dialog.provider.lfcodeGo.tagline")
+    if (id === LFAPI_PROVIDER_ID) return language.t("dialog.provider.lfapi.note")
+    return undefined
   }
 
   return (
@@ -49,6 +53,7 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
               (provider) =>
                 provider.id !== VOLCENGINE_CODING_PLAN_PROVIDER_ID &&
                 provider.id !== A6API_PROVIDER_ID &&
+                provider.id !== LFAPI_PROVIDER_ID &&
                 provider.id !== OPENCODE_ZEN_PROVIDER.id &&
                 provider.id !== OPENCODE_GO_PROVIDER_ID,
             )
@@ -56,6 +61,7 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
             { id: CUSTOM_ID, name: customLabel() },
             { id: VOLCENGINE_CODING_PLAN_PROVIDER_ID, name: volcengineCodingPlanLabel() },
             A6API_PROVIDER,
+            LFAPI_PROVIDER,
             OPENCODE_ZEN_PROVIDER,
             OPENCODE_GO_PROVIDER,
             ...allProviders,
@@ -86,6 +92,10 @@ export const DialogSelectProvider: Component<{ returnTo?: "models" | "settings-m
           }
           if (x.id === A6API_PROVIDER_ID) {
             dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} preset={A6API_PROVIDER_ID} />)
+            return
+          }
+          if (x.id === LFAPI_PROVIDER_ID) {
+            dialog.show(() => <DialogCustomProvider back="providers" returnTo={props.returnTo} preset={LFAPI_PRESET_ID} />)
             return
           }
           if (x.id === OPENCODE_GO_PROVIDER_ID) {

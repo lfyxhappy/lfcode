@@ -93,6 +93,21 @@ describe("global automation routes", () => {
     expect(AutomationRun.array().parse((await deletedHistory.json()).items)).toHaveLength(1)
   })
 
+  test("includes the latest run from one batch lookup", async () => {
+    const service = fakeService()
+    const app = createGlobalAutomationRoutes(service)
+    const created = await request(app, "/", { method: "POST", body: createInput() })
+    const task = AutomationTask.parse(await created.json())
+    const queued = await request(app, `/${task.id}/run`, { method: "POST" })
+    const run = AutomationRun.parse(await queued.json())
+
+    const listed = await request(app, "/")
+    const item = (await listed.json()).items[0]
+    expect(item.latestRun.id).toBe(run.id)
+    expect(AutomationTask.parse(item).latestRun?.id).toBe(run.id)
+    expect(service.latestRunCalls()).toBe(1)
+  })
+
   test("blocks the automation surface outside the local desktop server", async () => {
     const previousClient = process.env.LFCODE_CLIENT
     const previousWorkspace = process.env.LFCODE_WORKSPACE_ID
@@ -130,9 +145,10 @@ function fakeService() {
   const runs = new Map<string, Run>()
   let nextTask = 1
   let nextRun = 1
+  let latestRunLookups = 0
   let settings = { concurrency: 4 }
 
-  const service: AutomationRouteService & { attachSession(runID: string, sessionID: string): void } = {
+  const service: AutomationRouteService & { attachSession(runID: string, sessionID: string): void; latestRunCalls(): number } = {
     getSettings() {
       return settings
     },
@@ -142,6 +158,17 @@ function fakeService() {
     },
     list(input) {
       return [...tasks.values()].filter((task) => input?.includeDeleted || task.status !== "deleted")
+    },
+    listLatestRuns(taskIDs) {
+      latestRunLookups++
+      const wanted = new Set(taskIDs)
+      const latest = new Map<string, Run>()
+      for (const run of runs.values()) {
+        if (!wanted.has(run.taskID)) continue
+        const current = latest.get(run.taskID)
+        if (!current || run.createdAt > current.createdAt || (run.createdAt === current.createdAt && run.id > current.id)) latest.set(run.taskID, run)
+      }
+      return [...latest.values()]
     },
     create(input) {
       const now = Date.now()
@@ -228,6 +255,9 @@ function fakeService() {
       const current = runs.get(runID)
       if (!current) throw new Error(`Unknown run: ${runID}`)
       runs.set(runID, AutomationRun.parse({ ...current, sessionID, updatedAt: Date.now() }))
+    },
+    latestRunCalls() {
+      return latestRunLookups
     },
   }
   return service

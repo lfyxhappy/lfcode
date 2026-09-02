@@ -45,7 +45,7 @@ guess the exact value from a paraphrase.
 
 WHEN SEARCH RETURNS 0:
 1. Retry once with fewer / rarer terms (see guidelines above).
-2. For a literal string the tokenizer splits (URL, port, path) — Grep
+2. For a literal string the tokenizer splits (URL, port, path) — use `search(kind="content")`
    the memory dir directly; FTS can't match the punctuation form.
 3. For verbatim recall a summary may have glossed over — use the
    history tool (raw conversation messages).
@@ -58,9 +58,9 @@ Actions:
   refreshes its Markdown compatibility projection. Never use direct file edits
   for durable memory.
 
-After search returns paths, use Read on the most relevant ones to
+After search returns paths, use read on the most relevant ones to
 load full content (snippets are truncated). Use `search(kind="path")`
-or `tree` on `<data>/memory` if you need to find files by name pattern
+or `search(kind="path")` on `<data>/memory` if you need to find files by name pattern
 instead of body.
 
 CC SCOPE:

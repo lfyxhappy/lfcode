@@ -69,6 +69,20 @@ async function onceBus<D extends BusEvent.Definition>(def: D) {
 
 describe("tool.edit", () => {
   describe("creating new files", () => {
+    test("creates a new file when content is provided without operation", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "content-only.txt")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          await Effect.runPromise(edit.execute({ path: filepath, content: "content-only" }, ctx))
+          expect(await fs.readFile(filepath, "utf-8")).toBe("content-only")
+        },
+      })
+    })
+
     test("creates new file when oldString is empty", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "newfile.txt")
@@ -80,7 +94,7 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "",
                 newString: "new content",
               },
@@ -107,7 +121,7 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "",
                 newString: "nested file",
               },
@@ -137,7 +151,7 @@ describe("tool.edit", () => {
             await Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "",
                   newString: "content",
                 },
@@ -166,7 +180,7 @@ describe("tool.edit", () => {
             edit.execute(
               {
                 operation: "replace",
-                filePath: filepath,
+                path: filepath,
                 oldString: "old",
                 newString: "new",
               },
@@ -181,6 +195,23 @@ describe("tool.edit", () => {
   })
 
   describe("editing existing files", () => {
+    test("rejects content-only calls for an existing file", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "implicit-overwrite.txt")
+      await fs.writeFile(filepath, "before", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const edit = await resolve()
+          await expect(Effect.runPromise(edit.execute({ path: filepath, content: "after" }, ctx))).rejects.toThrow(
+            "operation is required",
+          )
+          expect(await fs.readFile(filepath, "utf-8")).toBe("before")
+        },
+      })
+    })
+
     test("replaces text in existing file", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "existing.txt")
@@ -193,7 +224,7 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "old content",
                 newString: "new content",
               },
@@ -222,7 +253,7 @@ describe("tool.edit", () => {
             edit.execute(
               {
                 operation: "write",
-                filePath: filepath,
+                path: filepath,
                 content: "after",
               },
               ctx,
@@ -246,7 +277,7 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "old",
                   newString: "new",
                 },
@@ -271,7 +302,7 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "same",
                   newString: "same",
                 },
@@ -296,7 +327,7 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "not in file",
                   newString: "replacement",
                 },
@@ -320,7 +351,7 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "foo",
                 newString: "qux",
                 replaceAll: true,
@@ -352,7 +383,7 @@ describe("tool.edit", () => {
             await Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "original",
                   newString: "modified",
                 },
@@ -382,7 +413,7 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "line2",
                 newString: "new line 2\nextra line",
               },
@@ -408,7 +439,7 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "old",
                 newString: "new",
               },
@@ -435,7 +466,7 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: filepath,
+                  path: filepath,
                   oldString: "",
                   newString: "",
                 },
@@ -460,7 +491,7 @@ describe("tool.edit", () => {
             Effect.runPromise(
               edit.execute(
                 {
-                  filePath: dirpath,
+                  path: dirpath,
                   oldString: "old",
                   newString: "new",
                 },
@@ -484,7 +515,7 @@ describe("tool.edit", () => {
           const result = await Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "line2",
                 newString: "new line a\nnew line b",
               },
@@ -554,7 +585,7 @@ describe("tool.edit", () => {
           await Effect.runPromise(
             edit.execute(
               {
-                filePath,
+                path: filePath,
                 oldString: input.oldString,
                 newString: input.newString,
                 replaceAll: input.replaceAll,
@@ -710,7 +741,7 @@ describe("tool.edit", () => {
           const promise1 = Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "top = 0",
                 newString: "top = 1",
               },
@@ -723,7 +754,7 @@ describe("tool.edit", () => {
           const promise2 = Effect.runPromise(
             edit.execute(
               {
-                filePath: filepath,
+                path: filepath,
                 oldString: "bottom = 0",
                 newString: "bottom = 2",
               },

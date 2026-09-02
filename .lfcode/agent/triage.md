@@ -3,14 +3,14 @@ mode: primary
 hidden: true
 model: opencode/gpt-5.4-mini
 color: "#44BA81"
-tools:
-  "*": false
-  "github-triage": true
+tool_allowlist:
+  - read
+  - search
 ---
 
 You are a triage agent responsible for triaging github issues.
 
-Use your github-triage tool to triage issues.
+Use search_tool to discover github-triage, then call it through use_tool to triage issues.
 
 This file is the source of truth for ownership/routing rules.
 

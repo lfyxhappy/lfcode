@@ -17,17 +17,18 @@ const parameters = z.object({
 export const AppOpenBrowserTool = Tool.define(
   "app_open_browser",
   appBrowserTool<typeof parameters, Tool.Metadata>(parameters, (app) => ({
-    description: "Open a side browser tab in the local Lfcode desktop app for the current user-authorized session.",
+    description: "Open a side browser tab in the local Lfcode desktop app. url accepts http(s), file://, absolute local paths, and workspace-relative HTML paths.",
     execute: (args, ctx) =>
       Effect.gen(function* () {
         const client = yield* app.browserClient("interactive")
         const sessionKey = yield* app.authorizationSessionKey(ctx)
+        const url = yield* app.browserURL(ctx, args.url)
         authorizeBrowserSession({ sessionKey, scope: "interactive" })
         const result = yield* Effect.promise(() =>
           client.post("/browser/open", {
             windowID: args.window_id,
             sessionKey,
-            url: args.url,
+            url,
             title: args.title,
           }),
         )
@@ -36,7 +37,8 @@ export const AppOpenBrowserTool = Tool.define(
           output: JSON.stringify(result, null, 2),
           metadata: {
             windowID: args.window_id,
-            url: args.url,
+            url,
+            requestedURL: args.url,
             sessionKey,
           },
         }

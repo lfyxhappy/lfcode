@@ -7,4 +7,4 @@ Usage:
 - Use `include` to narrow the scope with a file glob such as `*.ts` or `*.{ts,tsx}`.
 - Path search accepts either a directory scope or a specific file.
 - Content search returns grep-style matches. Path search returns absolute paths.
-- Prefer this tool over legacy `glob` / `grep` when those tools are unavailable.
+- Use this single tool for both path discovery and content search.

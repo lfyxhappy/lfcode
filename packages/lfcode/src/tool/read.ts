@@ -383,9 +383,7 @@ export const ReadTool = Tool.define(
         }),
       )
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
-        return yield* Effect.fail(
-          new Error(`Offset ${file.offset} is out of range for this file (${file.count} lines)`),
-        )
+        return yield* Effect.fail(new Error(formatOffsetOutOfRange(file.offset, file.count)))
       }
 
       let output = [`<path>${filepath}</path>`, `<type>file</type>`, versionAnchor(version), "<content>\n"].join("\n")
@@ -478,6 +476,26 @@ async function lines(filepath: string, opts: { limit: number; offset: number; st
   }
 
   return { raw, count, cut, more, offset: opts.offset }
+}
+
+function formatOffsetOutOfRange(offset: number, totalLines: number) {
+  const validRange = totalLines === 0 ? "1 (the file is empty)" : `1-${totalLines}`
+  const recovery =
+    totalLines === 0
+      ? "The file is empty. Retry with offset=1, or read a different file."
+      : `Retry with an offset from 1 to ${totalLines}; use offset=${totalLines} to read the final available line.`
+  const error: Tool.ValidationError = {
+    type: "tool_error",
+    tool: "read",
+    category: "schema",
+    field: "offset",
+    fields: ["offset"],
+    expected: validRange,
+    retryable: true,
+    recovery,
+    message: `Offset ${offset} is out of range for this file. total_lines=${totalLines}; valid_offset_range=${validRange}.`,
+  }
+  return [`[tool_error] ${JSON.stringify(error)}`, error.message, `Recovery: ${error.recovery}`].join("\n")
 }
 
 function sliceLine(text: string, opts: { startChar?: number; endChar?: number }) {

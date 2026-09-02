@@ -288,7 +288,7 @@ test("desktop session-scoped browser open request reuses the current review pane
   }
 })
 
-test("desktop browser reference actions append selection and element pills into the prompt", async () => {
+test("desktop browser selection does not expose legacy reference actions", async () => {
   const appData = await createAppData()
   const tempFile = await createTempFile(
     "Web Reference Test",
@@ -308,39 +308,11 @@ test("desktop browser reference actions append selection and element pills into 
     await expect.poll(() => readGuestValue(app, tempFile, "document.title"), { timeout: 30_000 }).toBe("Web Reference Test")
 
     await expect.poll(() => selectGuestText(app, tempFile, "#summary"), { timeout: 30_000 }).toBe(true)
-    await expect.poll(() => readBrowserReferenceState(page), { timeout: 30_000 }).toMatchObject({
-      selection: {
-        label: "Web Reference Test",
-        text: "This domain is for web reference testing.",
-        url: expectedTempFileURL,
-        selector: "#summary",
-        mode: "selection",
-      },
-    })
-    await expect.poll(() => browserReferenceActionVisible(page, "selection"), { timeout: 30_000 }).toBe(true)
-    await clickBrowserReferenceAction(page, "selection")
-
-    await expect.poll(() => readPromptWebReferenceLabels(page), { timeout: 30_000 }).toEqual([
-      "[web:Web Reference Test]",
-    ])
-
     await expect.poll(() => clickGuestElement(app, tempFile, "#cta"), { timeout: 30_000 }).toBe(true)
-    await expect.poll(() => readBrowserReferenceState(page), { timeout: 30_000 }).toMatchObject({
-      element: {
-        label: "Web Reference Test",
-        text: "Launch action",
-        url: expectedTempFileURL,
-        selector: "#cta",
-        mode: "element",
-      },
-    })
-    await expect.poll(() => browserReferenceActionVisible(page, "element"), { timeout: 30_000 }).toBe(true)
-    await clickBrowserReferenceAction(page, "element")
-
-    await expect.poll(() => readPromptWebReferenceLabels(page), { timeout: 30_000 }).toEqual([
-      "[web:Web Reference Test]",
-      "[element:Web Reference Test]",
-    ])
+    await expect.poll(() => readBrowserReferenceState(page), { timeout: 30_000 }).toEqual({})
+    await expect.poll(() => browserReferenceActionVisible(page, "selection"), { timeout: 30_000 }).toBe(false)
+    await expect.poll(() => browserReferenceActionVisible(page, "element"), { timeout: 30_000 }).toBe(false)
+    await expect.poll(() => readPromptWebReferenceLabels(page), { timeout: 30_000 }).toEqual([])
   } finally {
     await closeApp(app)
     await rm(appData, { recursive: true, force: true }).catch(() => {})

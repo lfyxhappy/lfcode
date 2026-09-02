@@ -299,6 +299,8 @@ function createAppWindow(
       webviewTag: input.webviewTag ?? false,
     },
   })
+  win.webContents.setBackgroundThrottling(false)
+  win.webContents.setFrameRate(60)
   const emitVisibility = () => {
     if (win.isDestroyed()) return
     if (win.webContents.isDestroyed()) return
@@ -323,7 +325,9 @@ function wireBrowserEvents(win: BrowserWindow) {
     webPreferences.contextIsolation = true
     webPreferences.sandbox = true
     webPreferences.webSecurity = true
-    webPreferences.backgroundThrottling = false
+    // Inactive guests are lowered by the runtime; active/automation targets
+    // receive a short performance lease when used.
+    webPreferences.backgroundThrottling = true
     params.partition = browserPartition()
     if (typeof params.src === "string" && !isAllowedEmbeddedURL(params.src)) {
       params.src = "about:blank"
@@ -335,7 +339,8 @@ function wireBrowserEvents(win: BrowserWindow) {
       guestID: guest.id,
       url: guest.getURL(),
     })
-    guest.setBackgroundThrottling(false)
+    guest.setBackgroundThrottling(true)
+    guest.setFrameRate(30)
     wireBrowserGuest({
       sourceWindowID: win.id,
       guest,

@@ -10,14 +10,6 @@ const backupDir = path.join(distDir, ".win-unpacked-runtime")
 const playwrightBaseCommand = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
 const playwrightLegacyCommand = [...playwrightBaseCommand, "--browser", "chrome"] as const
 const playwrightCdpCommand = [...playwrightBaseCommand, "--cdp-endpoint=http://127.0.0.1:9222"] as const
-const playwrightRemoteConfig = {
-  type: "remote",
-  url: "{env:LFCODE_SERVER_URL}/global/mcp/playwright",
-  headers: {
-    authorization: "{env:LFCODE_SERVER_AUTH}",
-  },
-  enabled: true,
-} as const
 const windowsComputerUseLegacyCommand = [
   "cmd",
   "/c",
@@ -29,14 +21,6 @@ const windowsComputerUseCommand = [
   "{env:LFCODE_BUNDLED_NODE}",
   "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
 ] as const
-const windowsComputerUseConfig = {
-  type: "local",
-  command: windowsComputerUseCommand,
-  environment: {
-    ELECTRON_RUN_AS_NODE: "1",
-  },
-  enabled: true,
-} as const
 
 if (process.platform !== "win32") process.exit(0)
 if (!existsSync(targetDir) || !existsSync(backupDir)) process.exit(0)
@@ -63,27 +47,11 @@ function upgradeBundledCommands(text: string) {
   if (!isRecord(parsed)) return text
   let updated = text
   const mcp = isRecord(parsed.mcp) ? parsed.mcp : undefined
-  if (!mcp) {
-    return applyEdits(
-      updated,
-      modify(
-        updated,
-        ["mcp"],
-        { playwright: playwrightRemoteConfig, "windows-computer-use": windowsComputerUseConfig },
-        {
-          formattingOptions: {
-            insertSpaces: true,
-            tabSize: 2,
-          },
-        },
-      ),
-    )
-  }
-  const playwright = mcp.playwright
-  if (isLegacyPlaywrightConfig(playwright) || isPlaywrightCdpConfig(playwright) || isStaleBundledPlaywrightRemoteConfig(playwright)) {
+  if (!mcp) return updated
+  if (Object.hasOwn(mcp, "playwright")) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp", "playwright"], playwrightRemoteConfig, {
+      modify(updated, ["mcp", "playwright"], undefined, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,
@@ -91,11 +59,10 @@ function upgradeBundledCommands(text: string) {
       }),
     )
   }
-  const value = mcp["windows-computer-use"]
-  if (value === undefined || isLegacyWindowsComputerUseConfig(value)) {
+  if (Object.hasOwn(mcp, "windows-computer-use")) {
     updated = applyEdits(
       updated,
-      modify(updated, ["mcp", "windows-computer-use"], windowsComputerUseConfig, {
+      modify(updated, ["mcp", "windows-computer-use"], undefined, {
         formattingOptions: {
           insertSpaces: true,
           tabSize: 2,

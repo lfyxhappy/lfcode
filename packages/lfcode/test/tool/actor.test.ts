@@ -207,6 +207,44 @@ describe("tool.actor", () => {
     ),
   )
 
+  it.live("normalizes a provider JSON-string actor envelope before validation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawned: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          spawned = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        yield* def.execute(
+          JSON.stringify({
+            operation: {
+              action: "run",
+              description: "inspect the test fixture",
+              prompt: "Inspect C:\\test\\fixture.ts and report the result.",
+              subagent_type: "explore",
+            },
+          }) as never,
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {},
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(spawned?.agentType).toBe("explore")
+        expect(spawned?.task).toContain("C:\\test\\fixture.ts")
+      }),
+    ),
+  )
+
   it.live("rejects full context outside an internal frozen fork", () =>
     provideTmpdirInstance(() =>
       Effect.gen(function* () {
@@ -413,6 +451,122 @@ describe("tool.actor", () => {
     ),
   )
 
+  it.live("allows the persistent main actor to delegate to visible subagents", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawned: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          spawned = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "run",
+              description: "delegate from main",
+              prompt: "inspect the browser test harness",
+              subagent_type: "general",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            actorID: "main",
+            abort: new AbortController().signal,
+            extra: { bypassAgentCheck: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.output).toContain("<actor_result")
+        expect(spawned?.agentType).toBe("general")
+        expect(spawned?.parentActorID).toBe("main")
+      }),
+    ),
+  )
+
+  it.live("recovers a legacy flat JSON actor envelope before validation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawned: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          spawned = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            action: "run",
+            description: "legacy flat call",
+            prompt: "inspect the browser test harness",
+            subagent_type: "general",
+          } as never,
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            actorID: "main",
+            abort: new AbortController().signal,
+            extra: { bypassAgentCheck: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.output).toContain("<actor_result")
+        expect(spawned?.agentType).toBe("general")
+      }),
+    ),
+  )
+
+  it.live("parses a provider-supplied JSON string envelope before validation", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawned: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          spawned = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          JSON.stringify({
+            operation: {
+              action: "run",
+              description: "string envelope call",
+              prompt: "inspect the browser test harness",
+              subagent_type: "general",
+            },
+          }) as never,
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            actorID: "main",
+            abort: new AbortController().signal,
+            extra: { bypassAgentCheck: true },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(result.output).toContain("<actor_result")
+        expect(spawned?.agentType).toBe("general")
+      }),
+    ),
+  )
+
   it.live("inherits the parent model when a role explicitly uses the primary policy", () =>
     provideTmpdirInstance(
       () =>
@@ -459,6 +613,45 @@ describe("tool.actor", () => {
           },
         },
       },
+    ),
+  )
+
+  it.live("falls back to the parent model for an unavailable bare model reference", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let spawned: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          spawned = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        const result = yield* def.execute(
+          {
+            operation: {
+              action: "run",
+              description: "recover model selection",
+              prompt: "continue the task",
+              subagent_type: "general",
+              model: "gpt-5.4-mini",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: {},
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(spawned?.model).toEqual(ref)
+        expect(result.output).toContain("inherited the parent model")
+      }),
     ),
   )
 
@@ -853,9 +1046,11 @@ describe("Actor tool subagent_type enum (F36)", () => {
         expect(Object.keys(flat.properties)).toEqual(["operation"])
         expect(flat.required).toEqual(["operation"])
         // The operation node must carry type:"object" (the .meta fix) so models
-        // don't stringify the envelope, and must retain its inner 6-way union.
+        // don't stringify the envelope. Nested discriminated unions are
+        // flattened for providers that reject oneOf/anyOf at any depth.
         expect(flat.properties.operation.type).toBe("object")
-        expect((flat.properties.operation.oneOf ?? flat.properties.operation.anyOf).length).toBe(6)
+        expect(flat.properties.operation.properties.action.enum).toEqual(["run", "spawn", "status", "wait", "cancel", "send"])
+        expect(flat.properties.operation.required).toEqual(["action"])
       }),
     ),
   )

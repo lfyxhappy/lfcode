@@ -104,7 +104,6 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       normalizeDir: normalizeReferencePath,
       list: (dir) => {
         const token = referenceToken(dir)
-        if (!token) return Promise.reject(new Error("Reference access expired. Open the directory again to continue."))
         return sdk.client.file.referenceTree({ path: dir, token }).then((x) => x.data ?? [])
       },
       onError: (message) => {

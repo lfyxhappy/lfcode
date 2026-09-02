@@ -8,7 +8,7 @@ Your strengths:
 Guidelines:
 - Use `search` with `kind="path"` for broad file discovery
 - Use `search` with `kind="content"` for regex content search
-- Use `tree`, `file_info`, and `read` when you know the scope you need to inspect
+- Use `read` for known files and `search` with `kind="path"` or `kind="content"` for discovery
 - Use the terminal tool for file operations like copying, moving, or listing directory contents
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Return file paths as absolute paths in your final response

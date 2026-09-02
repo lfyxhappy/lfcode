@@ -7,10 +7,17 @@ import {
   hasMoreUsageLogs,
   selectedUsageOption,
   usageHeatmapIntensity,
+  usagePollingEnabled,
   USAGE_ALL,
 } from "./settings-usage-helpers"
 
 describe("settings-usage helpers", () => {
+  test("only enables usage polling while the document and desktop window are visible", () => {
+    expect(usagePollingEnabled({ documentVisible: true, nativeVisible: true })).toBe(true)
+    expect(usagePollingEnabled({ documentVisible: false, nativeVisible: true })).toBe(false)
+    expect(usagePollingEnabled({ documentVisible: true, nativeVisible: false })).toBe(false)
+  })
+
   test("builds usage filters and strips empty values", () => {
     expect(
       buildUsageFilters({

@@ -20,9 +20,6 @@ export function formatExternalAgentPrompt(input: ExternalAgentPrompt) {
       const note = part.comment?.trim()
       return ["[选中文本]", selectionRange(part.selection), note ? `说明：${note}` : undefined, fence(part.text)].filter(Boolean).join("\n")
     })
-  const references = input.prompt
-    .filter((part) => part.type === "web-reference")
-    .map((part) => ["[网页引用]", part.title ?? part.label, part.url, fence(part.text)].filter(Boolean).join("\n"))
   const context = input.context.map((item) => {
     const note = item.comment?.trim()
     return [formatFile(item.path, item.selection), note ? `说明：${note}` : undefined, item.preview ? fence(item.preview) : undefined]
@@ -30,7 +27,7 @@ export function formatExternalAgentPrompt(input: ExternalAgentPrompt) {
       .join("\n")
   })
 
-  return [text, ...unique(files), ...unique(selections), ...unique(references), ...unique(context)].filter(Boolean).join("\n\n")
+  return [text, ...unique(files), ...unique(selections), ...unique(context)].filter(Boolean).join("\n\n")
 }
 
 function formatFile(path: string, selection?: { startLine: number; endLine: number }) {

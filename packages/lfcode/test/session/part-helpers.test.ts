@@ -110,6 +110,21 @@ describe("session part helpers", () => {
     ).toBe(true)
   })
 
+  test("legacy edit tool errors are retryable validation", () => {
+    for (const code of [
+      "edit_path_missing",
+      "edit_content_missing",
+      "edit_replace_fields_missing",
+      "edit_patch_missing",
+      "edit_context_not_found",
+      "edit_context_ambiguous",
+      "edit_create_target_exists",
+    ]) {
+      expect(isRetryableToolValidationFailure(`[tool_error] ${code}\nrecovery details`)).toBe(true)
+    }
+    expect(isRetryableToolValidationFailure("[tool_error] unrelated_runtime_error")).toBe(false)
+  })
+
   test("does not carry repeated validation failures into a new user turn", () => {
     const error = "The background_job tool was called with invalid arguments: operation is required"
     const assistants = ["m1", "m2", "m3"].map((id) => ({

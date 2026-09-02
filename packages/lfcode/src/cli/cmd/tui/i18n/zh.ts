@@ -95,10 +95,10 @@ export const dict = {
   "tui.tips.custom_agent":
     "在 {highlight}.lfcode/agent/{/highlight} 添加 {highlight}.md{/highlight} 文件来创建专用 AI 角色",
   "tui.tips.agent_perms":
-    "为每个智能体单独配置 {highlight}edit{/highlight}、{highlight}bash{/highlight}、{highlight}webfetch{/highlight} 工具权限",
-  "tui.tips.bash_allow": '使用 {highlight}"git *": "allow"{/highlight} 这类模式做精细 bash 权限',
-  "tui.tips.bash_deny": '设置 {highlight}"rm -rf *": "deny"{/highlight} 阻止破坏性命令',
-  "tui.tips.bash_ask": '配置 {highlight}"git push": "ask"{/highlight} 在推送前要求确认',
+    "为每个智能体单独配置 {highlight}edit{/highlight}、{highlight}shell{/highlight}、{highlight}webfetch{/highlight} 工具权限",
+  "tui.tips.shell_allow": '使用 {highlight}"git *": "allow"{/highlight} 这类模式做精细 shell 权限',
+  "tui.tips.shell_deny": '设置 {highlight}"rm -rf *": "deny"{/highlight} 阻止破坏性命令',
+  "tui.tips.shell_ask": '配置 {highlight}"git push": "ask"{/highlight} 在推送前要求确认',
   "tui.tips.formatter": "Lfcode 自动使用 prettier、gofmt、ruff 等格式化文件",
   "tui.tips.disable_formatter": '在配置中设置 {highlight}"formatter": false{/highlight} 关闭所有自动格式化',
   "tui.tips.custom_formatter": "在配置中按文件后缀定义自定义格式化命令",
@@ -131,7 +131,7 @@ export const dict = {
   "tui.tips.instructions": "在配置中用 {highlight}instructions{/highlight} 加载额外的规则文件",
   "tui.tips.temperature": "把智能体的 {highlight}temperature{/highlight} 从 0.0（专注）调到 1.0（创造）",
   "tui.tips.steps": "配置 {highlight}steps{/highlight} 限制每次请求的智能体迭代次数",
-  "tui.tips.disable_tool": '设置 {highlight}"tools": {"bash": false}{/highlight} 禁用具体工具',
+  "tui.tips.disable_tool": '设置 {highlight}"tool_allowlist": ["read", "search"]{/highlight} 禁用具体工具',
   "tui.tips.disable_mcp_tools": '设置 {highlight}"mcp_*": false{/highlight} 禁用某个 MCP 服务器的所有工具',
   "tui.tips.tool_override": "在每个智能体配置中覆盖全局工具设置",
   "tui.tips.share_auto": '设置 {highlight}"share": "auto"{/highlight} 自动分享所有会话',

@@ -59,7 +59,7 @@ import { progressPath } from "../../src/session/checkpoint-paths"
 // own permission ruleset decide whether the file can ever be written?
 //
 //   - `general` has permission defaults ("*":"allow") → write/edit survive
-//     Permission.disabled → the postStop "use the Write tool" nudge is satisfiable
+//     Permission.disabled → the postStop "use edit(operation=write)" nudge is satisfiable
 //     → progress.md lands.
 //   - `explore` has "*":"deny" (read-only) → write/edit are stripped from its
 //     LLM-visible tool set by Permission.disabled → the same nudge references a
@@ -292,12 +292,12 @@ const FIVE_SECTION_BODY = [
   "```",
   "",
   "## §5 Outcome and discoveries",
-  "- Outcome (success): wrote progress.md via Write tool",
+  "- Outcome (success): wrote progress.md via edit(operation=write)",
 ].join("\n")
 
 describe("postStop progress.md is gated by the subagent's write permission", () => {
   // PERMISSION-LAYER FACT (deterministic, no LLM): the exact predicate that
-  // decides whether the postStop "use the Write tool" nudge can ever succeed.
+  // decides whether the postStop "use edit(operation=write)" nudge can ever succeed.
   // agents.get reads config, which needs an Instance context — so run it inside
   // provideTmpdirServer like the end-to-end case.
   it.live("explore disables write/edit; general keeps them", () =>
@@ -307,18 +307,16 @@ describe("postStop progress.md is gated by the subagent's write permission", () 
         const explore = yield* agents.get("explore")
         const general = yield* agents.get("general")
 
-        const toolIds = ["read", "write", "edit", "bash"]
+        const toolIds = ["read", "edit", "shell"]
         const exploreDisabled = Permission.disabled(toolIds, explore.permission)
         const generalDisabled = Permission.disabled(toolIds, general.permission)
 
-        // explore ("*":deny) strips write+edit → postStop nudge is unsatisfiable.
-        expect(exploreDisabled.has("write")).toBe(true)
+        // explore ("*":deny) strips edit/shell → postStop nudge is unsatisfiable.
         expect(exploreDisabled.has("edit")).toBe(true)
         expect(exploreDisabled.has("read")).toBe(false) // read explicitly allowed
-        expect(exploreDisabled.has("bash")).toBe(false) // bash explicitly allowed (fallback path)
 
-        // general ("*":allow) keeps write+edit → nudge is satisfiable.
-        expect(generalDisabled.has("write")).toBe(false)
+        // general ("*":allow) keeps edit/shell → nudge is satisfiable.
+        expect(generalDisabled.has("shell")).toBe(false)
         expect(generalDisabled.has("edit")).toBe(false)
       }),
       { git: true, config: providerCfg },
@@ -346,7 +344,7 @@ describe("postStop progress.md is gated by the subagent's write permission", () 
         // file missing and re-prompts with output.continue=true.
         yield* llm.text("**Status**: success\n**Summary**: did the work (forgot the journal)")
         // Turn 2 (postStop re-entry): obey the nudge — write the 5-section file.
-        yield* llm.tool("write", { filePath: target, content: FIVE_SECTION_BODY })
+        yield* llm.tool("edit", { operation: "write", path: target, content: FIVE_SECTION_BODY })
         // Turn 2 still needs a terminal assistant message after the tool result.
         yield* llm.text("**Status**: success\n**Summary**: wrote progress.md")
         // Slack for any additional postStop iterations.

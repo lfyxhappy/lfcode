@@ -236,6 +236,50 @@ test("OpenCode model-name inference wins over stale persisted capability and lim
   })
 })
 
+test("OpenCode Go normalizes GLM-5.3-Flash capabilities and limits", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "lfcode.json"),
+        JSON.stringify({
+          $schema: "https://lfcode.ai/config.json",
+          provider: {
+            "opencode-go": {
+              name: "OpenCode Go",
+              protocol: "openai-chat",
+              models: {
+                "glm-5.3-flash": {
+                  capabilities: {
+                    reasoning: false,
+                    temperature: false,
+                    tool_call: false,
+                    modalities: { input: ["text"], output: ["text"] },
+                  },
+                  limit: { context: 128_000, output: 16_000 },
+                },
+              },
+            },
+          },
+        }),
+      )
+    },
+  })
+
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const model = (await list())[ProviderID.make("opencode-go")].models["glm-5.3-flash"]
+      expect(model.capabilities.reasoning).toBe(true)
+      expect(model.capabilities.temperature).toBe(true)
+      expect(model.capabilities.toolcall).toBe(true)
+      expect(model.capabilities.attachment).toBe(true)
+      expect(model.capabilities.input).toEqual({ text: true, audio: false, image: true, video: true, pdf: true })
+      expect(model.limit).toEqual({ context: 1_000_000, output: 128_000 })
+      expect(Object.keys(model.variants ?? {})).toEqual(["low", "high", "max"])
+    },
+  })
+})
+
 test("models.dev model protocols select the matching SDK independently", () => {
   const info = Provider.fromModelsDevProvider({
     id: "mixed-wire-provider",

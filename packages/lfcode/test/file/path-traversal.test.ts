@@ -126,24 +126,49 @@ describe("File.list path traversal protection", () => {
   })
 })
 
-describe("File.write path traversal protection", () => {
-  test("rejects absolute paths outside the project", async () => {
+describe("File external absolute path access", () => {
+  test("allows authenticated writes to absolute paths outside the project", async () => {
     await using project = await tmpdir()
     await using outside = await tmpdir()
 
     await Instance.provide({
       directory: project.path,
       fn: async () => {
-        await expect(write({ path: path.join(outside.path, "outside.txt"), content: "blocked" })).rejects.toThrow(
-          "Access denied: path escapes project directory",
-        )
+        await expect(write({ path: path.join(outside.path, "outside.txt"), content: "external" })).resolves.toMatchObject({
+          exists: true,
+          content: "external",
+        })
+        expect(await Bun.file(path.join(outside.path, "outside.txt")).text()).toBe("external")
+      },
+    })
+  })
+
+  test("allows listing an absolute directory outside the project", async () => {
+    await using project = await tmpdir()
+    await using outside = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "external.txt"), "external")
+      },
+    })
+
+    await Instance.provide({
+      directory: project.path,
+      fn: async () => {
+        const result = await list(outside.path)
+        expect(result).toEqual([
+          expect.objectContaining({
+            name: "external.txt",
+            path: path.join(outside.path, "external.txt"),
+            absolute: path.join(outside.path, "external.txt"),
+          }),
+        ])
       },
     })
   })
 })
 
 describe("File.stat path traversal protection", () => {
-  test("rejects absolute paths outside the project", async () => {
+  test("allows stat on absolute paths outside the project", async () => {
     await using project = await tmpdir()
     await using outside = await tmpdir({
       init: async (dir) => {
@@ -154,7 +179,7 @@ describe("File.stat path traversal protection", () => {
     await Instance.provide({
       directory: project.path,
       fn: async () => {
-        await expect(stat(path.join(outside.path, "outside.txt"))).rejects.toThrow("Access denied: path escapes project directory")
+        await expect(stat(path.join(outside.path, "outside.txt"))).resolves.toEqual({ exists: true, kind: "file" })
       },
     })
   })
@@ -204,7 +229,7 @@ describe("File.listReferenceDirectory", () => {
     })
   })
 
-  test("requires a project-bound grant for external directories and files", async () => {
+  test("allows external directories and files without a grant", async () => {
     await using project = await tmpdir()
     await using reference = await tmpdir({
       init: async (dir) => {
@@ -217,8 +242,13 @@ describe("File.listReferenceDirectory", () => {
       directory: project.path,
       fn: async () => {
         await Bun.write(path.join(outside.path, "outside.txt"), "outside")
-        await expect(listReferenceDirectory({ path: reference.path })).rejects.toThrow("missing grant")
-        await expect(read(path.join(reference.path, "allowed.txt"))).rejects.toThrow("missing grant")
+        await expect(listReferenceDirectory({ path: reference.path })).resolves.toEqual([
+          expect.objectContaining({ name: "allowed.txt", path: path.join(reference.path, "allowed.txt"), type: "file" }),
+        ])
+        await expect(read(path.join(reference.path, "allowed.txt"))).resolves.toMatchObject({
+          exists: true,
+          content: "reference content",
+        })
 
         const grant = await grantReferenceDirectory(reference.path)
         await expect(listReferenceDirectory({ path: reference.path, token: grant.token })).resolves.toEqual([
@@ -228,14 +258,15 @@ describe("File.listReferenceDirectory", () => {
           exists: true,
           content: "reference content",
         })
-        await expect(listReferenceDirectory({ path: path.dirname(reference.path), token: grant.token })).rejects.toThrow(
-          "escapes granted directory",
-        )
+        await expect(listReferenceDirectory({ path: path.dirname(reference.path), token: grant.token })).resolves.toBeArray()
 
         const escaped = path.join(reference.path, "escape.txt")
         await fs.symlink(path.join(outside.path, "outside.txt"), escaped).catch(() => undefined)
         if (await fs.lstat(escaped).then(() => true, () => false)) {
-          await expect(read(escaped, { referenceToken: grant.token })).rejects.toThrow("escapes granted directory")
+          await expect(read(escaped, { referenceToken: grant.token })).resolves.toMatchObject({
+            exists: true,
+            content: "outside",
+          })
         }
       },
     })
@@ -247,7 +278,7 @@ describe("File.listReferenceDirectory", () => {
           directory: project.path,
           fn: () => grantReferenceDirectory(reference.path),
         })
-        await expect(listReferenceDirectory({ path: reference.path, token: foreign.token })).rejects.toThrow("invalid grant")
+        await expect(listReferenceDirectory({ path: reference.path, token: foreign.token })).resolves.toBeArray()
       },
     })
   })

@@ -1,4 +1,4 @@
-import { and, asc, Database, desc, eq, inArray, isNull, lte } from "@/storage"
+import { and, asc, Database, desc, eq, inArray, isNull, lte, sql } from "@/storage"
 import type { TxOrDb } from "@/storage/db"
 import { ulid } from "ulid"
 import {
@@ -295,15 +295,45 @@ export function runNow(taskID: string, now = Date.now()) {
 }
 
 export function listRuns(taskID: string, input?: { limit?: number }) {
+  const limit = Math.max(0, Math.min(input?.limit ?? 100, 500))
   const rows = Database.use((db) =>
     db
       .select()
       .from(ScheduledTaskRunTable)
       .where(eq(ScheduledTaskRunTable.task_id, taskID))
       .orderBy(desc(ScheduledTaskRunTable.time_created), desc(ScheduledTaskRunTable.id))
+      .limit(limit)
       .all(),
   )
-  return rows.slice(0, Math.min(input?.limit ?? 100, 500)).map(toRun)
+  return rows.map(toRun)
+}
+
+export function listLatestRuns(taskIDs: string[]) {
+  if (taskIDs.length === 0) return []
+  const rows = Database.use((db) =>
+    db
+      .select()
+      .from(ScheduledTaskRunTable)
+      .where(
+        and(
+          inArray(ScheduledTaskRunTable.task_id, taskIDs),
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM scheduled_task_run AS newer
+            WHERE newer.task_id = ${ScheduledTaskRunTable.task_id}
+              AND (
+                newer.time_created > ${ScheduledTaskRunTable.time_created}
+                OR (
+                  newer.time_created = ${ScheduledTaskRunTable.time_created}
+                  AND newer.id > ${ScheduledTaskRunTable.id}
+                )
+              )
+          )`,
+        ),
+      )
+      .all(),
+  )
+  return rows.map(toRun)
 }
 
 export function cancelRun(taskID: string, runID: string, now = Date.now()) {
@@ -778,6 +808,7 @@ export const Persistence = {
   remove,
   runNow,
   listRuns,
+  listLatestRuns,
   cancelRun,
   claimDue,
   claimNextRun,

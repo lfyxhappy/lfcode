@@ -410,6 +410,7 @@ describe("desktop automation protocol", () => {
             url: "https://example.com/",
             title: "Example",
             presentation: "sidebar",
+            newTab: true,
           }),
         }),
       )
@@ -426,6 +427,7 @@ describe("desktop automation protocol", () => {
           url: "https://example.com/",
           title: "Example",
           presentation: "sidebar",
+          newTab: true,
         },
       ])
     } finally {

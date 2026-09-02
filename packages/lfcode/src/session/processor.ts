@@ -28,6 +28,7 @@ import { classifyValidationError } from "@/tool/tool"
 import { nativeWebSearchToolOutput } from "@/tool/websearch/native-result"
 import { sameToolFailureCount } from "./part-helpers"
 import { isUserHiddenSystemActorID } from "@/actor/visibility"
+import { snapshotMeasurement } from "./context-snapshot"
 
 const DOOM_LOOP_THRESHOLD = 3
 const REDACTION_TAIL_CHARS = 128
@@ -87,6 +88,9 @@ export type ReplayInput = {
    * overflow / prune estimation stays correct.
    */
   overhead?: { cost: number; tokensIn: number; tokensOut: number }
+  requestEnvelopeTokens?: number
+  /** Session-run cancellation signal shared with candidates and judge. */
+  abortSignal?: AbortSignal
 }
 
 export interface Handle {
@@ -129,6 +133,7 @@ type Input = {
   submitAt?: number
   agentMetrics?: AgentMetrics
   manageSessionStatus?: boolean
+  requestEnvelopeTokens?: number
 }
 
 export interface Interface {
@@ -193,6 +198,12 @@ interface ProcessorContext extends Input {
   responseTokens: MessageV2.Assistant["tokens"]
   stepPartIds: PartID[]
   pendingText: string
+  /**
+   * Wall-clock anchor for the request represented by the current assistant.
+   * Completion can happen out of order, so snapshots must use request order,
+   * never the time at which a provider stream happens to finish.
+   */
+  requestEnvelopeMeasuredAt: number | undefined
 }
 
 type StreamEvent = Event
@@ -233,6 +244,9 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         model: input.model,
         agentMetrics: input.agentMetrics,
+        requestEnvelopeTokens: input.requestEnvelopeTokens,
+        requestEnvelopeMeasuredAt:
+          input.requestEnvelopeTokens !== undefined ? input.assistantMessage.time.created : undefined,
         toolcalls: {},
         shouldBreak: false,
         snapshot: undefined,
@@ -355,6 +369,36 @@ export const layer: Layer.Layer<
         overhead?: { cost: number; tokensIn: number; tokensOut: number }
       }) {
         ctx.stepFinished = true
+        // Direct processor callers (compaction/replay tests and maintenance
+        // actors) do not run inside an Instance. The normal prompt path supplies
+        // the envelope estimate, which is the canonical context metric. Keep a
+        // provider-only fallback for older/replay callers that cannot provide
+        // the serialized request envelope.
+        const measurement =
+          ctx.requestEnvelopeTokens !== undefined || input.status === "completed"
+            ? snapshotMeasurement(input.usage.tokens, ctx.requestEnvelopeTokens)
+            : undefined
+        if (measurement && isMain && ctx.assistantMessage.mode !== "compaction") {
+          const { saveSnapshot } = yield* Effect.promise(() => import("./context-snapshot-store"))
+          yield* Effect.sync(() =>
+            saveSnapshot({
+              sessionID: ctx.sessionID,
+              agentID: ctx.assistantMessage.agentID ?? "main",
+              activeContextTokens: measurement.activeContextTokens,
+              contextWindowTokens: ctx.model.limit.context || null,
+              providerID: ctx.model.providerID,
+              modelID: ctx.model.id,
+              // Keep the request's ordering anchor. A late completion from an
+              // older request must never replace a newer main-turn snapshot.
+              measuredAt: ctx.requestEnvelopeMeasuredAt ?? ctx.assistantMessage.time.created ?? Date.now(),
+              measurementSource: measurement.measurementSource,
+            }),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => slog.warn("context snapshot persistence failed", { cause })),
+            ),
+          )
+        }
         yield* session.updatePart({
           id: PartID.ascending(),
           reason: input.reason,
@@ -416,6 +460,81 @@ export const layer: Layer.Layer<
         return part
       })
 
+      const createMissingToolCall = Effect.fn("SessionProcessor.createMissingToolCall")(function* (input: {
+        toolCallID: string
+        toolName: string
+        toolInput: Record<string, any>
+        providerExecuted?: boolean
+        error?: unknown
+      }) {
+        const existing = MessageV2.parts(ctx.assistantMessage.id).find(
+          (part): part is MessageV2.ToolPart => part.type === "tool" && part.callID === input.toolCallID,
+        )
+        if (existing) {
+          if (
+            input.error !== undefined &&
+            (existing.state.status === "pending" || existing.state.status === "running")
+          ) {
+            const end = Date.now()
+            const start = "time" in existing.state ? existing.state.time.start : end
+            yield* session.updatePart({
+              ...existing,
+              state: {
+                status: "error",
+                input: existing.state.input,
+                error: errorMessage(input.error),
+                metadata: {
+                  ...(existing.metadata ?? {}),
+                  ...(input.providerExecuted ? { providerExecuted: true } : {}),
+                },
+                time: { start, end },
+              },
+            })
+            yield* settleToolCall(input.toolCallID)
+          }
+          // Late duplicate provider events must not create a second part for
+          // the same call. The first terminal observation remains authoritative.
+          return existing
+        }
+        const now = Date.now()
+        const part = yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.assistantMessage.sessionID,
+          type: "tool",
+          tool: input.toolName,
+          callID: input.toolCallID,
+          ...(input.error === undefined
+            ? {
+                state: {
+                  status: "running" as const,
+                  input: input.toolInput,
+                  time: { start: now },
+                },
+              }
+            : {
+                state: {
+                  status: "error" as const,
+                  input: input.toolInput,
+                  error: errorMessage(input.error),
+                  ...(input.providerExecuted ? { metadata: { providerExecuted: true } } : {}),
+                  time: { start: now, end: now },
+                },
+              }),
+          ...(input.providerExecuted ? { metadata: { providerExecuted: true } } : {}),
+        } satisfies MessageV2.ToolPart)
+        ctx.stepPartIds.push(part.id)
+        if (input.error === undefined) {
+          ctx.toolcalls[input.toolCallID] = {
+            done: yield* Deferred.make<void>(),
+            partID: part.id,
+            messageID: part.messageID,
+            sessionID: part.sessionID,
+          }
+        }
+        return part
+      })
+
       const completeToolCall = Effect.fn("SessionProcessor.completeToolCall")(function* (
         toolCallID: string,
         output: {
@@ -426,7 +545,8 @@ export const layer: Layer.Layer<
         },
       ) {
         const match = yield* readToolCall(toolCallID)
-        if (!match || match.part.state.status !== "running") return
+        if (!match || (match.part.state.status !== "running" && match.part.state.status !== "pending")) return
+        const startedAt = "time" in match.part.state ? match.part.state.time.start : Date.now()
         const completed =
           match.part.tool === "native_web_search"
             ? nativeWebSearchToolOutput({ action: match.part.state.input, output })
@@ -439,7 +559,7 @@ export const layer: Layer.Layer<
             output: completed.output,
             metadata: completed.metadata,
             title: completed.title,
-            time: { start: match.part.state.time.start, end: Date.now() },
+            time: { start: startedAt, end: Date.now() },
             attachments: "attachments" in completed ? completed.attachments : undefined,
           },
         })
@@ -448,14 +568,19 @@ export const layer: Layer.Layer<
 
       const failToolCall = Effect.fn("SessionProcessor.failToolCall")(function* (toolCallID: string, error: unknown) {
         const match = yield* readToolCall(toolCallID)
-        if (!match || match.part.state.status !== "running") return false
+        if (!match || (match.part.state.status !== "running" && match.part.state.status !== "pending")) return false
+        const startedAt = "time" in match.part.state ? match.part.state.time.start : Date.now()
         yield* session.updatePart({
           ...match.part,
           state: {
             status: "error",
             input: match.part.state.input,
             error: errorMessage(error),
-            time: { start: match.part.state.time.start, end: Date.now() },
+            metadata:
+              (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) && ctx.shouldBreak
+                ? { blocked: true }
+                : undefined,
+            time: { start: startedAt, end: Date.now() },
           },
         })
         if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError) {
@@ -525,8 +650,13 @@ export const layer: Layer.Layer<
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
             }
+            if (ctx.toolcalls[value.id]) return
+            const persisted = MessageV2.parts(ctx.assistantMessage.id).find(
+              (part): part is MessageV2.ToolPart => part.type === "tool" && part.callID === value.id,
+            )
+            if (persisted && persisted.state.status !== "pending") return
             const part = yield* session.updatePart({
-              id: ctx.toolcalls[value.id]?.partID ?? PartID.ascending(),
+              id: persisted?.id ?? PartID.ascending(),
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.assistantMessage.sessionID,
               type: "tool",
@@ -554,19 +684,30 @@ export const layer: Layer.Layer<
             if (ctx.assistantMessage.summary) {
               throw new Error(`Tool call not allowed while generating summary: ${value.toolName}`)
             }
-            yield* updateToolCall(value.toolCallId, (match) => ({
-              ...match,
-              tool: value.toolName,
-              state: {
-                ...match.state,
-                status: "running",
-                input: value.input,
-                time: { start: Date.now() },
-              },
-              metadata: match.metadata?.providerExecuted
-                ? { ...value.providerMetadata, providerExecuted: true }
-                : value.providerMetadata,
-            }))
+            const existing = yield* readToolCall(value.toolCallId)
+            if (existing) {
+              if (existing.part.state.status === "completed" || existing.part.state.status === "error") return
+              yield* updateToolCall(value.toolCallId, (match) => ({
+                ...match,
+                tool: value.toolName,
+                state: {
+                  ...match.state,
+                  status: "running",
+                  input: value.input,
+                  time: { start: Date.now() },
+                },
+                metadata: match.metadata?.providerExecuted
+                  ? { ...value.providerMetadata, providerExecuted: true }
+                  : value.providerMetadata,
+              }))
+            } else {
+              yield* createMissingToolCall({
+                toolCallID: value.toolCallId,
+                toolName: value.toolName,
+                toolInput: isRecord(value.input) ? value.input : {},
+                providerExecuted: (value as { providerExecuted?: boolean }).providerExecuted,
+              })
+            }
 
             const parts = MessageV2.parts(ctx.assistantMessage.id)
             const recentParts = parts.slice(-DOOM_LOOP_THRESHOLD)
@@ -604,7 +745,16 @@ export const layer: Layer.Layer<
           }
 
           case "tool-error": {
-            yield* failToolCall(value.toolCallId, value.error)
+            const failed = yield* failToolCall(value.toolCallId, value.error)
+            if (!failed) {
+              yield* createMissingToolCall({
+                toolCallID: value.toolCallId,
+                toolName: value.toolName,
+                toolInput: (value.input as Record<string, any>) ?? {},
+                providerExecuted: value.providerExecuted,
+                error: value.error,
+              })
+            }
             const error = errorMessage(value.error)
             const retryCount = yield* session
               .messages({ sessionID: ctx.sessionID, limit: 100, agentID: ctx.assistantMessage.agentID })
@@ -640,8 +790,34 @@ export const layer: Layer.Layer<
             return
           }
 
-          case "error":
-            throw value.error
+          case "error": {
+            // Some provider adapters surface a tool execution/protocol failure
+            // as a generic error event while retaining the call identity. Keep
+            // that failure as a model-visible tool observation; only a true
+            // stream/provider error should terminate the processor and enter
+            // the normal retry/error path.
+            const toolError = value as {
+              toolCallId?: string
+              toolName?: string
+              input?: unknown
+              providerExecuted?: boolean
+              error?: unknown
+            }
+            if (toolError.toolCallId && toolError.toolName && toolError.error !== undefined) {
+              const failed = yield* failToolCall(toolError.toolCallId, toolError.error)
+              if (!failed) {
+                yield* createMissingToolCall({
+                  toolCallID: toolError.toolCallId,
+                  toolName: toolError.toolName,
+                  toolInput: isRecord(toolError.input) ? toolError.input : {},
+                  providerExecuted: toolError.providerExecuted,
+                  error: toolError.error,
+                })
+              }
+              return
+            }
+            throw toolError.error ?? new Error("Provider stream error")
+          }
 
           case "start-step":
             if (ctx.stepStartedAt && !ctx.stepFinished) return
@@ -840,11 +1016,11 @@ export const layer: Layer.Layer<
         }
         ctx.reasoningMap = {}
 
-        yield* Effect.forEach(
-          Object.values(ctx.toolcalls),
-          (call) => Deferred.await(call.done).pipe(Effect.timeout("250 millis"), Effect.ignore),
-          { concurrency: "unbounded" },
-        )
+        // Never wait for a tool Deferred during processor cleanup. A provider
+        // stream can be interrupted after a tool call is persisted but before
+        // its completion event arrives; waiting here makes cancellation depend
+        // on an event that can no longer be delivered. The persisted part state
+        // below is the source of truth and is finalized as aborted when needed.
 
         for (const toolCallID of Object.keys(ctx.toolcalls)) {
           const match = yield* readToolCall(toolCallID)
@@ -901,7 +1077,19 @@ export const layer: Layer.Layer<
           error: ctx.assistantMessage.error,
           visible: !isUserHiddenSystemActorID(ctx.assistantMessage.agentID),
         })
-        if (isMain && manageSessionStatus) yield* status.set(ctx.sessionID, { type: "idle" })
+        if (isMain && manageSessionStatus) {
+          yield* status.set(
+            ctx.sessionID,
+            SessionRetry.retryable(error)
+              ? {
+                  type: "recoverable",
+                  message: "The provider connection failed. The session can be resumed.",
+                  reason: error.data && "message" in error.data ? String(error.data.message) : error.name,
+                  at: Date.now(),
+                }
+              : { type: "idle" },
+          )
+        }
       })
 
       const ensureTerminalStep = Effect.fn("SessionProcessor.ensureTerminalStep")(function* () {
@@ -931,6 +1119,9 @@ export const layer: Layer.Layer<
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         slog.info("process")
+        ctx.requestEnvelopeTokens = streamInput.requestEnvelopeTokens
+        ctx.requestEnvelopeMeasuredAt =
+          streamInput.requestEnvelopeTokens !== undefined ? ctx.assistantMessage.time.created : undefined
         ctx.needsOverflowHandling = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
@@ -957,7 +1148,6 @@ export const layer: Layer.Layer<
             ctx.stepPartIds = []
             ctx.toolcalls = {}
             const stream = llm.stream({ ...streamInput, abortSignal: abortController.signal })
-
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
               Stream.takeUntil(() => ctx.needsOverflowHandling),
@@ -986,8 +1176,16 @@ export const layer: Layer.Layer<
                   })
                 }
                 ctx.stepPartIds = []
-              }),
+              }).pipe(
+                // Cleanup is recovery bookkeeping. If the database is already
+                // unhealthy, keep the original provider/tool error so the
+                // retry policy can still classify it and the model can recover.
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => slog.warn("failed to remove partial step parts", { cause: String(cause) })),
+                ),
+              ),
             ),
+            Effect.interruptible,
             Effect.retry(
               SessionRetry.policy({
                 parse,
@@ -999,12 +1197,30 @@ export const layer: Layer.Layer<
                         message: info.message,
                         next: info.next,
                       })
+                        .pipe(
+                          // Status updates are UI/diagnostic side effects. A
+                          // stale session row or closed event bus must not
+                          // cancel the retry schedule or mask its source error.
+                          Effect.catchCauseIf(
+                            (cause) => !Cause.hasInterruptsOnly(cause),
+                            (cause) =>
+                              Effect.sync(() =>
+                                slog.warn("retry status update failed; continuing retry", {
+                                  attempt: info.attempt,
+                                  error: String(cause),
+                                }),
+                              ),
+                          ),
+                        )
                     : Effect.void,
               }),
             ),
             Effect.catch(halt),
             Effect.ensuring(
               cleanup().pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => slog.error("cleanup failed", { cause: Cause.squash(cause) })),
+                ),
                 Effect.ensuring(
                   Effect.sync(() => {
                     removeExternalAbort?.()
@@ -1031,10 +1247,27 @@ export const layer: Layer.Layer<
 
       const replay = Effect.fn("SessionProcessor.replay")(function* (input: ReplayInput) {
         slog.info("replay", { toolCalls: input.toolCalls.length, finish: input.finishReason })
+        ctx.requestEnvelopeTokens = input.requestEnvelopeTokens
+        ctx.requestEnvelopeMeasuredAt =
+          input.requestEnvelopeTokens !== undefined ? ctx.assistantMessage.time.created : undefined
         ctx.needsOverflowHandling = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
         const ctrl = new AbortController()
+        const externalAbortSignal = input.abortSignal
+        const abort = () => {
+          aborted = true
+          ctrl.abort()
+        }
+        const removeExternalAbort = (() => {
+          if (!externalAbortSignal) return
+          if (externalAbortSignal.aborted) {
+            abort()
+            return
+          }
+          externalAbortSignal.addEventListener("abort", abort, { once: true })
+          return () => externalAbortSignal.removeEventListener("abort", abort)
+        })()
 
         const emptyUsage = {
           inputTokens: 0,
@@ -1219,9 +1452,22 @@ export const layer: Layer.Layer<
               (cause) => Effect.fail(Cause.squash(cause)),
             ),
             Effect.catch(halt),
-            Effect.ensuring(cleanup()),
+            Effect.ensuring(
+              cleanup().pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => slog.error("cleanup failed", { cause: Cause.squash(cause) })),
+                ),
+                Effect.ensuring(Effect.sync(() => removeExternalAbort?.())),
+              ),
+            ),
           )
 
+          if (ctrl.signal.aborted) {
+            if (!ctx.assistantMessage.error) {
+              yield* halt(new DOMException("Aborted", "AbortError"))
+            }
+            return "stop"
+          }
           yield* syncInteractiveWaiting()
           if (ctx.needsOverflowHandling) return "overflow"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"

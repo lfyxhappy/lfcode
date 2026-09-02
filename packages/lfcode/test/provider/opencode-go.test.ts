@@ -57,6 +57,26 @@ describe("OpenCode Go provider", () => {
     })
   })
 
+  test("maps GLM-5.3-Flash discovery to the official profile", async () => {
+    const result = await OpenCodeGo.discover({
+      fetch: async () => Response.json({ data: [{ id: "glm-5.3-flash" }] }),
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      source: "stored",
+      models: [
+        {
+          id: "glm-5.3-flash",
+          name: "glm-5.3-flash",
+          protocol: "openai-chat",
+          reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+          capabilities: { reasoning: true, temperature: true, tool_call: true },
+        },
+      ],
+    })
+  })
+
   test("reads all quota windows and keeps the API key private", async () => {
     let authorization: string | undefined
     const result = await OpenCodeGo.usage({

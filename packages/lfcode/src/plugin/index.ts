@@ -30,7 +30,7 @@ import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
 import { CheckpointSplitoverPlugin } from "./checkpoint-splitover"
 import { SubagentProgressCheckerPlugin } from "./subagent-progress-checker"
-import { Effect, Layer, Context, Stream } from "effect"
+import { Cause, Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { errorMessage } from "@/util/error"
@@ -744,10 +744,25 @@ export const layer = Layer.effect(
     >(name: Name, input: Input, output: Output) {
       if (!name) return output
       const s = yield* InstanceState.get(state)
-      for (const hook of s.hooks) {
+      for (const [hookIndex, hook] of s.hooks.entries()) {
         const fn = hook[name] as any
         if (!fn) continue
-        yield* Effect.promise(async () => fn(input, output))
+        // Plugin hooks are extension side effects. A broken hook must not turn
+        // an otherwise valid model/tool result into a failed session step;
+        // continue with the remaining hooks and preserve the current output.
+        yield* Effect.promise(async () => fn(input, output)).pipe(
+          Effect.timeout("10 seconds"),
+          Effect.catchCause((cause) => {
+            if (Cause.hasInterrupts(cause)) return Effect.interrupt
+            return Effect.sync(() =>
+              log.warn("plugin hook failed open", {
+                hook: String(name),
+                hookIndex,
+                error: String(cause),
+              }),
+            )
+          }),
+        )
       }
       return output
     })

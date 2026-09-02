@@ -41,6 +41,8 @@ export const SessionTable = sqliteTable(
     goal: text({ mode: "json" }).$type<GoalState>(),
     interaction: text({ mode: "json" }).$type<SessionInteractionInfo>(),
     extension: text({ mode: "json" }).$type<ProjectExtension>(),
+    recoverable: integer().notNull().default(0),
+    recoverable_reason: text(),
     ...Timestamps,
     time_last_user: integer(),
     time_compacting: integer(),

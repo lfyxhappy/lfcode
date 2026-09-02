@@ -28,7 +28,8 @@ const AutomationTaskCreateOpenAPI = z.toJSONSchema(AutomationTaskCreate) as unkn
 const AutomationTaskPatchOpenAPI = z.toJSONSchema(AutomationTaskPatch) as unknown as OpenAPIV3_1.SchemaObject
 const AutomationSettingsOpenAPI = z.toJSONSchema(AutomationSettings) as unknown as OpenAPIV3_1.SchemaObject
 
-const AutomationList = z.object({ items: AutomationTask.array() }).meta({ ref: "AutomationTaskList" })
+const AutomationTaskListItem = AutomationTask.extend({ latestRun: AutomationRun.optional() }).meta({ ref: "AutomationTaskListItem" })
+const AutomationList = z.object({ items: AutomationTaskListItem.array() }).meta({ ref: "AutomationTaskList" })
 const AutomationRunList = z.object({ items: AutomationRun.array() }).meta({ ref: "AutomationRunList" })
 const AutomationSessionResolution = z
   .object({ task: AutomationTask, run: AutomationRun.nullable(), directory: z.string().min(1) })
@@ -38,6 +39,7 @@ export type AutomationRouteService = {
   getSettings(): Promise<z.output<typeof AutomationSettings>> | z.output<typeof AutomationSettings>
   updateSettings(input: z.output<typeof AutomationSettings>): Promise<z.output<typeof AutomationSettings>> | z.output<typeof AutomationSettings>
   list(input?: { includeDeleted?: boolean }): Promise<z.output<typeof AutomationTask>[]> | z.output<typeof AutomationTask>[]
+  listLatestRuns?(taskIDs: string[]): Promise<z.output<typeof AutomationRun>[]> | z.output<typeof AutomationRun>[]
   create(input: z.output<typeof AutomationTaskCreate>): Promise<z.output<typeof AutomationTask>> | z.output<typeof AutomationTask>
   get(
     id: string,
@@ -87,7 +89,18 @@ export function createGlobalAutomationRoutes(service: AutomationRouteService) {
         },
       }),
       validator("query", z.object({ includeDeleted: QueryBoolean.optional() }).strict()),
-      async (c) => c.json({ items: await service.list(c.req.valid("query")) }),
+      async (c) => {
+        const tasks = await service.list(c.req.valid("query"))
+        if (!service.listLatestRuns || tasks.length === 0) return c.json({ items: tasks })
+        const latestRuns = await service.listLatestRuns(tasks.map((task) => task.id))
+        const latestByTask = new Map(latestRuns.map((run) => [run.taskID, run]))
+        return c.json({
+          items: tasks.map((task) => {
+            const latestRun = latestByTask.get(task.id)
+            return latestRun ? { ...task, latestRun } : task
+          }),
+        })
+      },
     )
     .get(
       "/settings",

@@ -11,7 +11,7 @@ import type {
 import { showToast } from "@lfcode-ai/ui/toast"
 import { getFilename } from "@lfcode-ai/shared/util/path"
 import { retry } from "@lfcode-ai/shared/util/retry"
-import { batch, createContext, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
+import { batch, createContext, createEffect, getOwner, onCleanup, onMount, type ParentProps, untrack, useContext } from "solid-js"
 import { createStore, produce, reconcile, unwrap } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { Persist, persisted } from "@/utils/persist"
@@ -19,7 +19,7 @@ import type { InitError } from "../pages/error"
 import { useGlobalSDK } from "./global-sdk"
 import { bootstrapDirectory, bootstrapGlobal, clearProviderRev } from "./global-sync/bootstrap"
 import { createChildStoreManager } from "./global-sync/child-store"
-import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./global-sync/event-reducer"
+import { applyActivitySnapshot, applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches, normalizeActivity } from "./global-sync/event-reducer"
 import { createRefreshQueue } from "./global-sync/queue"
 import { mergeSessionGoal } from "./global-sync/session-goal"
 import { clearSessionPrefetchDirectory } from "./global-sync/session-prefetch"
@@ -91,6 +91,8 @@ function createGlobalSync() {
   const pendingRequestVersion = new Map<string, number>()
   let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
+  const activityCalibrationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const activityCalibrationRequests = new Map<string, Promise<void>>()
 
   onCleanup(() => {
     active = false
@@ -98,6 +100,83 @@ function createGlobalSync() {
   onCleanup(() => {
     if (eventFrame !== undefined) cancelAnimationFrame(eventFrame)
     if (eventTimer !== undefined) clearTimeout(eventTimer)
+    for (const timer of activityCalibrationTimers.values()) clearTimeout(timer)
+    activityCalibrationTimers.clear()
+  })
+
+  const activitySessionIDs = (directory: string) => {
+    const child = children.children[directory]
+    if (!child) return []
+    const store = child[0]
+    const ids = new Set<string>()
+    for (const [sessionID, status] of Object.entries(store.session_status)) {
+      if (status && isSessionStreaming(status)) ids.add(sessionID)
+    }
+    for (const [sessionID, activities] of Object.entries(store.activity ?? {})) {
+      if (activities?.some((activity) => !["completed", "failed", "cancelled"].includes(activity.status ?? ""))) ids.add(sessionID)
+    }
+    return [...ids]
+  }
+
+  const calibrateActivities = (directory: string, force = false) => {
+    if (!force && globalSDK.event.connection() === "connected") return Promise.resolve()
+    const pending = activityCalibrationRequests.get(directory)
+    if (pending) return pending
+    const child = children.children[directory]
+    if (!child) return Promise.resolve()
+    const promise = Promise.all(
+      activitySessionIDs(directory).map((sessionID) => {
+        const revisionsBeforeRequest = new Map(
+          (child[0].activity?.[sessionID] ?? []).map((activity) => [activity.id, activity.revision]),
+        )
+        return retry(() => sdkFor(directory).activity.list({ sessionID })).then((response) => {
+            if (!children.children[directory]) return
+            applyActivitySnapshot({
+              sessionID,
+              activities: response.data?.items ?? [],
+              store: children.children[directory][0],
+              setStore: children.children[directory][1],
+              revisionsBeforeRequest,
+            })
+          })
+      }),
+    ).then(() => {})
+    activityCalibrationRequests.set(directory, promise)
+    void promise
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => {
+        activityCalibrationRequests.delete(directory)
+        if (active && globalSDK.event.connection() !== "connected") scheduleActivityCalibration(directory)
+      })
+    return promise
+  }
+
+  const scheduleActivityCalibration = (directory: string, immediate = false, force = false) => {
+    if (!force && globalSDK.event.connection() === "connected") return
+    if (!children.children[directory] || activitySessionIDs(directory).length === 0) return
+    const existing = activityCalibrationTimers.get(directory)
+    if (existing) {
+      if (!immediate) return
+      clearTimeout(existing)
+    }
+    const timer = setTimeout(() => {
+      activityCalibrationTimers.delete(directory)
+      void calibrateActivities(directory, force)
+    }, immediate ? 0 : 30_000)
+    activityCalibrationTimers.set(directory, timer)
+  }
+
+  createEffect(() => {
+    const connected = globalSDK.event.connection() === "connected"
+    if (connected) {
+      for (const timer of activityCalibrationTimers.values()) clearTimeout(timer)
+      activityCalibrationTimers.clear()
+      return
+    }
+    for (const directory of activatedDirectories) scheduleActivityCalibration(directory)
   })
 
   const cacheProjects = () => {
@@ -304,6 +383,7 @@ function createGlobalSync() {
       children.pin(directory)
       try {
         const child = children.ensureChild(directory)
+        scheduleActivityCalibration(directory)
         const cache = children.vcsCache.get(directory)
         if (!cache) return
 
@@ -371,6 +451,15 @@ function createGlobalSync() {
     }
     children.mark(directory)
     const [store, setStore] = existing
+    if (event.type.startsWith("activity.")) {
+      const activity = normalizeActivity(event.properties)
+      if (activity?.revision !== undefined) {
+        const current = store.activity?.[activity.sessionID]?.find((item) => item.id === activity.id)
+        if (current?.revision !== undefined && activity.revision > current.revision + 1) {
+          scheduleActivityCalibration(directory, true, true)
+        }
+      }
+    }
     applyDirectoryEvent({
       event,
       directory,

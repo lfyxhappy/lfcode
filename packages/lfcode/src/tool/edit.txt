@@ -1,12 +1,12 @@
 The only file-editing tool. Read the target before modifying it, then choose one operation:
 
-- `replace` is the default. Use it for one verified text change in one file. Provide `filePath`, the exact current `oldString`, and `newString`. Include enough unchanged surrounding text for a unique match. Use `replaceAll` only when every match must change.
+- `replace` is the default. Use it for one verified text change in one file. Provide `path`, the exact current `oldString`, and `newString`. Include enough unchanged surrounding text for a unique match. Use `replaceAll` only when every match must change.
 - `patch` is for multiple hunks, files, or file add/delete/move operations. Provide only `patchText` with a pure `*** Begin Patch` / `*** End Patch` envelope.
-- `write` intentionally replaces an entire file or creates a new one. Provide `filePath` and complete `content`; do not use it for a small localized change.
+- `write` intentionally replaces an entire file or creates a new one. Provide `path` and complete `content`; do not use it for a small localized change.
 
 Rules:
-- Relative `filePath` values are resolved from the current session directory. On Windows, prefer forward slashes such as `C:/repo/file.ts` to avoid JSON escaping errors.
-- For existing files, perform a fresh Read before the first edit and after any context or version failure. Copy exact content after the line number prefix; never include the `line: ` prefix itself in `oldString`.
+- Relative `path` values are resolved from the current session directory. On Windows, prefer forward slashes such as `C:/repo/file.ts` to avoid JSON escaping errors.
+- For existing files, perform a fresh `read` before the first edit and after any context or version failure. Copy exact content after the line number prefix; never include the `line: ` prefix itself in `oldString`.
 - A `replace` with empty `oldString` creates a new file only. It never overwrites an existing file. Use `write` only when a whole-file replacement is intentional.
 - Do not use `shell`, Python, or another terminal command to bypass a failed edit. Read the current file, make one corrected `edit` call, then report the remaining blocker if it still fails.
 - Use only the canonical schema fields shown in the tool definition. Legacy editing tools and their argument shapes are not supported.

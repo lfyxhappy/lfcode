@@ -29,6 +29,7 @@ export const Model = z.object({
 export type Model = z.infer<typeof Model>
 export const Source = z.enum(["temporary", "stored"])
 export const ErrorCategory = z.enum(["missing_api_key", "unauthorized", "invalid_response", "network"])
+export const UsageErrorCategory = z.enum(["missing_api_key", "unauthorized", "rate_limited", "invalid_response", "network"])
 export const DiscoverResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), source: Source, models: z.array(Model) }),
   z.object({ ok: z.literal(false), models: z.array(Model).length(0), error: ErrorCategory }),
@@ -51,7 +52,7 @@ export const UsageResult = z.object({ usage: z.object({ rolling: UsageWindow, we
 export type UsageResult = z.infer<typeof UsageResult>
 export const UsageQueryResult = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), usage: UsageResult.shape.usage }),
-  z.object({ ok: z.literal(false), error: ErrorCategory }),
+  z.object({ ok: z.literal(false), error: UsageErrorCategory }),
 ])
 export type UsageQueryResult = z.infer<typeof UsageQueryResult>
 
@@ -116,7 +117,11 @@ export async function usage(input: { storedApiKey?: string; signal?: AbortSignal
       headers: { Authorization: `Bearer ${key}` },
       signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(MODELS_TIMEOUT_MS)]) : AbortSignal.timeout(MODELS_TIMEOUT_MS),
     })
-    if (!response.ok) return { ok: false, error: response.status === 401 || response.status === 403 ? "unauthorized" : "invalid_response" }
+    if (!response.ok)
+      return {
+        ok: false,
+        error: response.status === 401 || response.status === 403 ? "unauthorized" : response.status === 429 ? "rate_limited" : "invalid_response",
+      }
     const parsed = UsageResult.safeParse(await response.json())
     if (!parsed.success) return { ok: false, error: "invalid_response" }
     return { ok: true, usage: parsed.data.usage }

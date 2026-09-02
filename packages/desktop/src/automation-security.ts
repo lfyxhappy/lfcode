@@ -148,7 +148,18 @@ export function automationErrorResponse(error: unknown) {
 }
 
 export function browserAutomationError(
-  code: "browser_target_missing" | "browser_target_not_ready" | "browser_bridge_unavailable" | "browser_renderer_unavailable",
+  code:
+    | "browser_target_missing"
+    | "browser_tab_not_found"
+    | "browser_target_not_ready"
+    | "browser_bridge_unavailable"
+    | "browser_renderer_unavailable"
+    | "browser_navigation_failed"
+    | "navigation_timeout"
+    | "stale_snapshot_ref"
+    | "no_back_history"
+    | "no_forward_history",
+  context?: { ref?: string },
 ) {
   const details = {
     browser_target_missing: {
@@ -156,6 +167,12 @@ export function browserAutomationError(
       message: "No active side browser tab exists for this session.",
       retryable: false,
       recovery: "Open or bind a side browser tab for this session, then retry.",
+    },
+    browser_tab_not_found: {
+      status: 404,
+      message: "The requested side browser tab does not exist for this session.",
+      retryable: false,
+      recovery: "Use the tabID returned by browser.open for this session, or omit tabID to use the active tab.",
     },
     browser_target_not_ready: {
       status: 409,
@@ -175,8 +192,38 @@ export function browserAutomationError(
       retryable: true,
       recovery: "Wait for the tab to finish loading or reopen it, then retry.",
     },
+    browser_navigation_failed: {
+      status: 502,
+      message: "The side browser could not navigate to the requested page.",
+      retryable: true,
+      recovery: "Retry the browser request. If it keeps failing, reopen the side browser tab.",
+    },
+    navigation_timeout: {
+      status: 504,
+      message: "The side browser navigation did not settle before the timeout.",
+      retryable: true,
+      recovery: "Wait for the page to finish loading, then retry the operation or reopen the tab.",
+    },
+    stale_snapshot_ref: {
+      status: 409,
+      message: "The browser snapshot reference is stale or does not exist.",
+      retryable: true,
+      recovery: "Take a fresh browser snapshot and retry with the new ref.",
+    },
+    no_back_history: {
+      status: 409,
+      message: "The current side browser tab has no back history.",
+      retryable: false,
+      recovery: "Navigate to another page first, or omit the back operation.",
+    },
+    no_forward_history: {
+      status: 409,
+      message: "The current side browser tab has no forward history.",
+      retryable: false,
+      recovery: "Use forward only after navigating back in this tab.",
+    },
   }[code]
-  return new AutomationHttpError(details.status, code, details.message, {
+  return new AutomationHttpError(details.status, code, context?.ref ? `${details.message} Ref=${context.ref}` : details.message, {
     retryable: details.retryable,
     recovery: details.recovery,
   })
@@ -224,7 +271,12 @@ function isReadOnlyPostRoute(path: string) {
     path === "/browser/capture-element" ||
     path === "/browser/console" ||
     path === "/browser/network" ||
-    path === "/browser/list-cached-resources"
+    path === "/browser/list-cached-resources" ||
+    path === "/browser/wait-selector" ||
+    path === "/browser/wait-url" ||
+    path === "/browser/wait-load-state" ||
+    path === "/browser/wait-navigation" ||
+    path === "/browser/wait"
   )
 }
 

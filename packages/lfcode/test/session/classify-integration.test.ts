@@ -119,6 +119,54 @@ describe("classifier routing — integration", () => {
     }
   })
 
+  test("recoverable edit validation error continues into an explicit write", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const targetPath = path.join(tmp.path, "recovered.html")
+    const stub = startScriptedLLMServer([
+      {
+        lines: toolCallResponse({
+          id: "call_bad_edit",
+          name: "edit",
+          args: JSON.stringify({ path: targetPath, content: "<h1>recovered</h1>" }),
+        }),
+      },
+      {
+        lines: toolCallResponse({
+          id: "call_good_edit",
+          name: "edit",
+          args: JSON.stringify({ operation: "write", path: targetPath, content: "<h1>recovered</h1>" }),
+        }),
+      },
+      { lines: textStopResponse("finished") },
+    ])
+    try {
+      await Bun.write(targetPath, "<h1>before</h1>")
+      await writeConfig(tmp.path, stub.origin)
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Effect.gen(function* () {
+              const sessions = yield* Session.Service
+              const prompt = yield* SessionPrompt.Service
+              const session = yield* sessions.create({ title: "recoverable-edit" })
+              const result = yield* prompt.prompt({
+                sessionID: session.id,
+                agent: "build",
+                parts: [{ type: "text", text: "Update the HTML file and finish." }],
+              })
+
+              expect(stub.captures.length).toBe(3)
+              expect(yield* Effect.promise(() => Bun.file(targetPath).text())).toBe("<h1>recovered</h1>")
+              expect(result.parts.some((part) => part.type === "text" && part.text === "finished")).toBe(true)
+            }),
+          ),
+      })
+    } finally {
+      await stub.stop()
+    }
+  })
+
   test("main json_schema gate: non-continue classification writes StructuredOutputError", async () => {
     await using tmp = await tmpdir({ git: true })
     const stub = startScriptedLLMServer([{ lines: textStopResponse("plain text, not structured") }])

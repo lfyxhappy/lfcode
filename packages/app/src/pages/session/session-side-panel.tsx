@@ -1,4 +1,16 @@
-import { For, Match, Show, Switch, batch, createEffect, createMemo, createSignal, lazy, onCleanup, type JSX } from "solid-js"
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  lazy,
+  onCleanup,
+  type JSX,
+} from "solid-js"
 import { Portal } from "solid-js/web"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -49,6 +61,7 @@ import { canUseTerminal } from "@/pages/session/runtime-capabilities"
 import { BrowserKeepaliveSlot } from "@/pages/session/browser-keepalive-slot"
 import { SubagentDispatchRail } from "@/components/session/subagent-dispatch-rail"
 import { DeepResearchRail } from "@/components/session/deep-research-rail"
+import { actorDispatchesFromActivities, type ActorDispatch } from "@/components/subagent-api"
 import { SUBAGENT_VIEW_REQUEST_EVENT } from "@lfcode-ai/ui/message-part-events"
 
 type LauncherItem = {
@@ -59,7 +72,9 @@ type LauncherItem = {
   disabled: boolean
 }
 
-const SideChatPanel = lazy(() => import("@/pages/session/side-chat-panel").then((mod) => ({ default: mod.SideChatPanel })))
+const SideChatPanel = lazy(() =>
+  import("@/pages/session/side-chat-panel").then((mod) => ({ default: mod.SideChatPanel })),
+)
 const FileTree = lazy(() => import("@/components/file-tree"))
 const FileTabContent = lazy(() => import("@/pages/session/file-tabs").then((mod) => ({ default: mod.FileTabContent })))
 
@@ -99,7 +114,11 @@ export function SessionSidePanel(props: {
   const isDesktop = createMediaQuery(wideSessionLayoutQuery)
   const terminalAvailable = createMemo(() => canUseTerminal(platform.platform, server.isLocal()))
   const [mobileSubagentMount, setMobileSubagentMount] = createSignal<HTMLElement>()
-  const mobileActors = createMemo(() => (params.id ? (sync.data.actor ?? {})[params.id] ?? [] : []))
+  const mobileDispatches = createMemo<ActorDispatch[]>(() =>
+    actorDispatchesFromActivities(params.id ? (sync.data.activity?.[params.id] ?? []) : []),
+  )
+  const mobileActors = createMemo(() => (params.id ? ((sync.data.actor ?? {})[params.id] ?? []) : []))
+  const refreshMobileDispatches = async () => undefined
   const shown = createMemo(
     () =>
       platform.platform !== "desktop" ||
@@ -195,7 +214,11 @@ export function SessionSidePanel(props: {
     normalizeTab,
     review: reviewTab,
     hasReview: props.canReview,
-    detachedTabs: createMemo(() => layout.detachedPanels.listFor(sessionKey)().map((item) => item.tab)),
+    detachedTabs: createMemo(() =>
+      layout.detachedPanels
+        .listFor(sessionKey)()
+        .map((item) => item.tab),
+    ),
   })
   const openedTabs = tabState.openedTabs
   const activeTab = tabState.activeTab
@@ -363,7 +386,11 @@ export function SessionSidePanel(props: {
     layout.fileTree.clearReference()
     layout.fileTree.setTab("all")
   }
-  const referenceName = () => referencePath()?.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || referencePath()
+  const referenceName = () =>
+    referencePath()
+      ?.replace(/[\\/]+$/u, "")
+      .split(/[\\/]/u)
+      .at(-1) || referencePath()
   const referenceEmpty = createMemo(() => {
     const target = referencePath()
     if (!target) return false
@@ -470,7 +497,7 @@ export function SessionSidePanel(props: {
       return sideChatTitle(sideChatTabID(tab) ?? "")
     }
     const path = file.pathFromTab(tab)
-    return path ? path.split(/[\\/]/).pop() ?? path : tab
+    return path ? (path.split(/[\\/]/).pop() ?? path) : tab
   }
 
   const detachTab = async (tab: string) => {
@@ -567,495 +594,514 @@ export function SessionSidePanel(props: {
 
   return (
     <>
-    <Show when={isDesktop()}>
-      <aside
-        id="review-panel"
-        data-component="session-side-panel"
-        aria-label={language.t("session.panel.reviewAndFiles")}
-        aria-hidden={!open()}
-        inert={!open()}
-        data-resizing={props.size.active()}
-        class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
-        classList={{
-          "pointer-events-none": !open(),
-        }}
-        style={{ width: panelWidth() }}
-      >
-        <div class="size-full flex border-l border-border-weaker-base">
-          <div
-            aria-hidden={!reviewOpen()}
-            inert={!reviewOpen()}
-            class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
-            classList={{
-              "pointer-events-none": !reviewOpen(),
-            }}
-          >
-            <div class="size-full min-w-0 h-full bg-background-base">
-              <DragDropProvider
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                collisionDetector={closestCenter}
-              >
-                <DragDropSensors />
-                <ConstrainDragYAxis />
-                <Tabs value={activeTab()} onChange={openTab} class="size-full flex min-h-0 flex-col">
-                  <div class="sticky top-0 shrink-0 flex">
-                    <Tabs.List
-                      data-component="detached-dock-target"
-                      data-session-tab-strip="true"
-                      data-scrollable={tabStripMetrics().scrollable ? "true" : "false"}
-                      data-active={store.dockTargetActive ? "true" : "false"}
-                      style={{
-                        "--session-side-tab-width": `${tabStripMetrics().width}px`,
-                        "--session-side-tab-min-width": `${tabStripMetrics().minWidth}px`,
-                      }}
-                      ref={(el: HTMLDivElement) => {
-                        const stop = createFileTabListSync({ el })
-                        const resizeObserver = new ResizeObserver(() => {
+      <Show when={isDesktop()}>
+        <aside
+          id="review-panel"
+          data-component="session-side-panel"
+          aria-label={language.t("session.panel.reviewAndFiles")}
+          aria-hidden={!open()}
+          inert={!open()}
+          data-resizing={props.size.active()}
+          class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
+          classList={{
+            "pointer-events-none": !open(),
+          }}
+          style={{ width: panelWidth() }}
+        >
+          <div class="size-full flex border-l border-border-weaker-base">
+            <div
+              aria-hidden={!reviewOpen()}
+              inert={!reviewOpen()}
+              class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
+              classList={{
+                "pointer-events-none": !reviewOpen(),
+              }}
+            >
+              <div class="size-full min-w-0 h-full bg-background-base">
+                <DragDropProvider
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={handleDragOver}
+                  collisionDetector={closestCenter}
+                >
+                  <DragDropSensors />
+                  <ConstrainDragYAxis />
+                  <Tabs value={activeTab()} onChange={openTab} class="size-full flex min-h-0 flex-col">
+                    <div class="sticky top-0 shrink-0 flex">
+                      <Tabs.List
+                        data-component="detached-dock-target"
+                        data-session-tab-strip="true"
+                        data-scrollable={tabStripMetrics().scrollable ? "true" : "false"}
+                        data-active={store.dockTargetActive ? "true" : "false"}
+                        style={{
+                          "--session-side-tab-width": `${tabStripMetrics().width}px`,
+                          "--session-side-tab-min-width": `${tabStripMetrics().minWidth}px`,
+                        }}
+                        ref={(el: HTMLDivElement) => {
+                          const stop = createFileTabListSync({ el })
+                          const resizeObserver = new ResizeObserver(() => {
+                            setStore("tabStripWidth", el.clientWidth)
+                          })
                           setStore("tabStripWidth", el.clientWidth)
-                        })
-                        setStore("tabStripWidth", el.clientWidth)
-                        resizeObserver.observe(el)
-                        onCleanup(stop)
-                        onCleanup(() => resizeObserver.disconnect())
-                        createEffect(() => {
-                          if (!platform.setDetachedDockTarget || !platform.clearDetachedDockTarget) return
-                          const rect = el.getBoundingClientRect()
-                          setStore("tabStripBounds", rect)
-                          void platform.setDetachedDockTarget({
-                            sessionKey: sessionKey(),
-                            rect: {
-                              x: rect.x,
-                              y: rect.y,
-                              width: rect.width,
-                              height: rect.height,
-                            },
+                          resizeObserver.observe(el)
+                          onCleanup(stop)
+                          onCleanup(() => resizeObserver.disconnect())
+                          createEffect(() => {
+                            if (!platform.setDetachedDockTarget || !platform.clearDetachedDockTarget) return
+                            const rect = el.getBoundingClientRect()
+                            setStore("tabStripBounds", rect)
+                            void platform.setDetachedDockTarget({
+                              sessionKey: sessionKey(),
+                              rect: {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height,
+                              },
+                            })
+                            onCleanup(() => {
+                              void platform.clearDetachedDockTarget?.()
+                            })
                           })
-                          onCleanup(() => {
-                            void platform.clearDetachedDockTarget?.()
-                          })
-                        })
-                      }}
-                      classList={{ "ring-1 ring-border-info-base": store.dockTargetActive }}
-                    >
-                      <Show when={reviewTab() && props.canReview()}>
-                        <Tabs.Trigger
-                          value="review"
-                          class="[--tabs-trigger-width:112px] [--tabs-trigger-min-width:112px]"
-                          closeButton={
-                            <TooltipKeybind
-                              title={language.t("common.closeTab")}
-                              keybind={command.keybind("tab.close")}
-                              placement="bottom"
-                              gutter={10}
-                            >
-                              <IconButton
-                                icon="close-small"
-                                variant="ghost"
-                                class="h-5 w-5"
-                                onClick={closeReviewTab}
-                                aria-label={language.t("common.closeTab")}
-                              />
-                            </TooltipKeybind>
-                          }
-                          hideCloseButton
-                          onPointerDown={markExplicitReviewActivation}
-                          onKeyDown={markExplicitReviewActivation}
-                          onMiddleClick={closeReviewTab}
-                        >
-                          <div class="flex items-center gap-1.5">
-                            <div>{language.t("session.tab.review")}</div>
-                            <Show when={props.hasReview()}>
-                              <div>{props.reviewCount()}</div>
-                            </Show>
-                          </div>
-                        </Tabs.Trigger>
-                      </Show>
-                      <SortableProvider ids={openedTabs()}>
-                        <For each={openedTabs()}>
-                          {(tab) => (
-                            <SortableTab
-                              tab={tab}
-                              onTabClose={tabs().close}
-                              detachBounds={() => store.tabStripBounds}
-                              onDetachPreviewChange={(value) => {
-                                setStore("detachPreview", value)
-                              }}
-                              onDetach={(next) => {
-                                if (isSideChatTab(next)) return
-                                void detachTab(next)
-                              }}
-                              onBrowserTabClose={(tabID) => {
-                                layout.view(sessionKey()).browser.close(tabID)
-                                tabs().close(browserTab(tabID))
-                              }}
-                              onSideChatTabClose={(sessionID) => {
-                                props.onCloseSideChat?.(sessionID)
-                              }}
-                              getSideChatTitle={sideChatTitle}
-                            />
-                          )}
-                        </For>
-                      </SortableProvider>
-                      <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
-                        <DropdownMenu gutter={8} placement="bottom-start">
-                          <DropdownMenu.Trigger
-                            as={IconButton}
-                            icon="plus-small"
-                            variant="ghost"
-                            iconSize="large"
-                            class="rounded-lg text-text-weak hover:bg-surface-hover"
-                            aria-label={language.t("common.moreOptions")}
-                          />
-                          <DropdownMenu.Portal>
-                            <DropdownMenu.Content class="min-w-[248px] rounded-lg border border-border-weaker-base bg-background-panel p-1.5 shadow-md">
-                              <div class="flex flex-col gap-1">
-                                <For each={launcherItems()}>
-                                  {(item) => (
-                                    <DropdownMenu.Item
-                                      disabled={item.disabled}
-                                      onSelect={() => openLauncherItem(item.id)}
-                                      class="rounded-lg px-3 py-2 hover:bg-surface-hover"
-                                    >
-                                      <div class="flex min-w-0 items-center gap-3">
-                                        <div class="flex size-4 shrink-0 items-center justify-center text-text-muted">
-                                          <Icon name={item.icon as any} size="small" />
-                                        </div>
-                                        <div class="min-w-0 flex-1 text-13-medium text-text-primary">{item.label}</div>
-                                        <Show when={item.keybind}>
-                                          <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
-                                        </Show>
-                                      </div>
-                                    </DropdownMenu.Item>
-                                  )}
-                                </For>
-                              </div>
-                            </DropdownMenu.Content>
-                          </DropdownMenu.Portal>
-                        </DropdownMenu>
-                      </div>
-                    </Tabs.List>
-                  </div>
-
-                  <div class="relative flex-1 min-h-0 overflow-hidden">
-                    <Show when={reviewTab() && props.canReview() && activeTab() === "review"}>
-                      {props.reviewPanel()}
-                    </Show>
-
-                    <Show when={activeTab() === "empty"}>
-                      <div class="h-full min-h-0 overflow-hidden bg-background-base">
-                        <div class="flex h-full items-center justify-center px-6 pb-16">
-                          <div class="mx-auto w-full max-w-[380px] rounded-xl border border-border-weaker-base bg-surface-raised-base p-1.5 shadow-xs-border-base">
-                            <For each={launcherItems()}>
-                              {(item) => (
-                                <Button
+                        }}
+                        classList={{ "ring-1 ring-border-info-base": store.dockTargetActive }}
+                      >
+                        <Show when={reviewTab() && props.canReview()}>
+                          <Tabs.Trigger
+                            value="review"
+                            class="[--tabs-trigger-width:112px] [--tabs-trigger-min-width:112px]"
+                            closeButton={
+                              <TooltipKeybind
+                                title={language.t("common.closeTab")}
+                                keybind={command.keybind("tab.close")}
+                                placement="bottom"
+                                gutter={10}
+                              >
+                                <IconButton
+                                  icon="close-small"
                                   variant="ghost"
-                                  disabled={item.disabled}
-                                  onClick={() => openLauncherItem(item.id)}
-                                  class="h-12 w-full justify-start rounded-lg px-3 text-left text-text-strong hover:bg-surface-raised-base-hover"
-                                >
-                                  <div class="flex min-w-0 w-full items-center gap-3">
-                                    <div class="flex size-5 shrink-0 items-center justify-center text-icon-weak-base">
-                                      <Icon name={item.icon as any} size="small" />
+                                  class="h-5 w-5"
+                                  onClick={closeReviewTab}
+                                  aria-label={language.t("common.closeTab")}
+                                />
+                              </TooltipKeybind>
+                            }
+                            hideCloseButton
+                            onPointerDown={markExplicitReviewActivation}
+                            onKeyDown={markExplicitReviewActivation}
+                            onMiddleClick={closeReviewTab}
+                          >
+                            <div class="flex items-center gap-1.5">
+                              <div>{language.t("session.tab.review")}</div>
+                              <Show when={props.hasReview()}>
+                                <div>{props.reviewCount()}</div>
+                              </Show>
+                            </div>
+                          </Tabs.Trigger>
+                        </Show>
+                        <SortableProvider ids={openedTabs()}>
+                          <For each={openedTabs()}>
+                            {(tab) => (
+                              <SortableTab
+                                tab={tab}
+                                onTabClose={tabs().close}
+                                detachBounds={() => store.tabStripBounds}
+                                onDetachPreviewChange={(value) => {
+                                  setStore("detachPreview", value)
+                                }}
+                                onDetach={(next) => {
+                                  if (isSideChatTab(next)) return
+                                  void detachTab(next)
+                                }}
+                                onBrowserTabClose={(tabID) => {
+                                  layout.view(sessionKey()).browser.close(tabID)
+                                  tabs().close(browserTab(tabID))
+                                }}
+                                onSideChatTabClose={(sessionID) => {
+                                  props.onCloseSideChat?.(sessionID)
+                                }}
+                                getSideChatTitle={sideChatTitle}
+                              />
+                            )}
+                          </For>
+                        </SortableProvider>
+                        <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                          <DropdownMenu gutter={8} placement="bottom-start">
+                            <DropdownMenu.Trigger
+                              as={IconButton}
+                              icon="plus-small"
+                              variant="ghost"
+                              iconSize="large"
+                              class="rounded-lg text-text-weak hover:bg-surface-hover"
+                              aria-label={language.t("common.moreOptions")}
+                            />
+                            <DropdownMenu.Portal>
+                              <DropdownMenu.Content class="min-w-[248px] rounded-lg border border-border-weaker-base bg-background-panel p-1.5 shadow-md">
+                                <div class="flex flex-col gap-1">
+                                  <For each={launcherItems()}>
+                                    {(item) => (
+                                      <DropdownMenu.Item
+                                        disabled={item.disabled}
+                                        onSelect={() => openLauncherItem(item.id)}
+                                        class="rounded-lg px-3 py-2 hover:bg-surface-hover"
+                                      >
+                                        <div class="flex min-w-0 items-center gap-3">
+                                          <div class="flex size-4 shrink-0 items-center justify-center text-text-muted">
+                                            <Icon name={item.icon as any} size="small" />
+                                          </div>
+                                          <div class="min-w-0 flex-1 text-13-medium text-text-primary">
+                                            {item.label}
+                                          </div>
+                                          <Show when={item.keybind}>
+                                            <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
+                                          </Show>
+                                        </div>
+                                      </DropdownMenu.Item>
+                                    )}
+                                  </For>
+                                </div>
+                              </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                          </DropdownMenu>
+                        </div>
+                      </Tabs.List>
+                    </div>
+
+                    <div class="relative flex-1 min-h-0 overflow-hidden">
+                      <Show when={reviewTab() && props.canReview() && activeTab() === "review"}>
+                        {props.reviewPanel()}
+                      </Show>
+
+                      <Show when={activeTab() === "empty"}>
+                        <div class="h-full min-h-0 overflow-hidden bg-background-base">
+                          <div class="flex h-full items-center justify-center px-6 pb-16">
+                            <div class="mx-auto w-full max-w-[380px] rounded-xl border border-border-weaker-base bg-surface-raised-base p-1.5 shadow-xs-border-base">
+                              <For each={launcherItems()}>
+                                {(item) => (
+                                  <Button
+                                    variant="ghost"
+                                    disabled={item.disabled}
+                                    onClick={() => openLauncherItem(item.id)}
+                                    class="h-12 w-full justify-start rounded-lg px-3 text-left text-text-strong hover:bg-surface-raised-base-hover"
+                                  >
+                                    <div class="flex min-w-0 w-full items-center gap-3">
+                                      <div class="flex size-5 shrink-0 items-center justify-center text-icon-weak-base">
+                                        <Icon name={item.icon as any} size="small" />
+                                      </div>
+                                      <div class="min-w-0 flex-1 text-14-medium">{item.label}</div>
+                                      <Show when={item.keybind}>
+                                        <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
+                                      </Show>
                                     </div>
-                                    <div class="min-w-0 flex-1 text-14-medium">{item.label}</div>
-                                    <Show when={item.keybind}>
-                                      <div class="shrink-0 text-12-regular text-text-weak">{item.keybind}</div>
-                                    </Show>
-                                  </div>
-                                </Button>
-                              )}
-                            </For>
+                                  </Button>
+                                )}
+                              </For>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </Show>
+                      </Show>
 
-                    <Show when={activeFileTab()} keyed>
-                      {(tab) => <FileTabContent tab={tab} />}
-                    </Show>
+                      <Show when={activeFileTab()} keyed>
+                        {(tab) => <FileTabContent tab={tab} />}
+                      </Show>
 
-                    <For each={browserTabs()}>
-                      {(tab) => (
-                        <div
-                          class="size-full min-h-0 overflow-hidden contain-strict"
-                          style={{ display: activeTab() === tab ? undefined : "none" }}
-                        >
-                          <BrowserKeepaliveSlot
-                            sessionKey={sessionKey()}
-                            tab={tab}
-                            visible={reviewOpen() && activeTab() === tab}
-                          />
-                        </div>
-                      )}
-                    </For>
-
-                    <For each={sideChatTabs()}>
-                      {(tab) => {
-                        const id = createMemo(() => sideChatTabID(tab))
-                        return (
+                      <For each={browserTabs()}>
+                        {(tab) => (
                           <div
-                            class="absolute inset-0 min-h-0 overflow-hidden contain-strict"
-                            aria-hidden={activeTab() === tab ? undefined : "true"}
-                            inert={activeTab() !== tab}
-                            style={{
-                              visibility: activeTab() === tab ? "visible" : "hidden",
-                              "pointer-events": activeTab() === tab ? "auto" : "none",
-                            }}
+                            class="size-full min-h-0 overflow-hidden contain-strict"
+                            style={{ display: activeTab() === tab ? undefined : "none" }}
                           >
-                            <SideChatPanel
-                              sessionID={id() ?? ""}
-                              active={activeTab() === tab}
-                              setContentRef={(el) => {
-                                if (activeTab() !== tab) return
-                                props.setActiveSideChatContentRef?.(el)
-                              }}
-                              inputRef={(el) => {
-                                if (activeTab() !== tab) return
-                                props.setActiveSideChatInputRef?.(el)
-                              }}
+                            <BrowserKeepaliveSlot
+                              sessionKey={sessionKey()}
+                              tab={tab}
+                              visible={reviewOpen() && activeTab() === tab}
                             />
+                          </div>
+                        )}
+                      </For>
+
+                      <For each={sideChatTabs()}>
+                        {(tab) => {
+                          const id = createMemo(() => sideChatTabID(tab))
+                          return (
+                            <div
+                              class="absolute inset-0 min-h-0 overflow-hidden contain-strict"
+                              aria-hidden={activeTab() === tab ? undefined : "true"}
+                              inert={activeTab() !== tab}
+                              style={{
+                                visibility: activeTab() === tab ? "visible" : "hidden",
+                                "pointer-events": activeTab() === tab ? "auto" : "none",
+                              }}
+                            >
+                              <SideChatPanel
+                                sessionID={id() ?? ""}
+                                active={activeTab() === tab}
+                                setContentRef={(el) => {
+                                  if (activeTab() !== tab) return
+                                  props.setActiveSideChatContentRef?.(el)
+                                }}
+                                inputRef={(el) => {
+                                  if (activeTab() !== tab) return
+                                  props.setActiveSideChatInputRef?.(el)
+                                }}
+                              />
+                            </div>
+                          )
+                        }}
+                      </For>
+                    </div>
+                  </Tabs>
+                  <DragOverlay>
+                    <Show when={store.detachPreview ? undefined : store.activeDraggable} keyed>
+                      {(tab) => {
+                        const path = file.pathFromTab(tab)
+                        return (
+                          <div data-component="detached-tab-drag-preview">
+                            <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
                           </div>
                         )
                       }}
-                    </For>
-                  </div>
-                </Tabs>
-                <DragOverlay>
-                  <Show when={store.detachPreview ? undefined : store.activeDraggable} keyed>
-                    {(tab) => {
-                      const path = file.pathFromTab(tab)
+                    </Show>
+                  </DragOverlay>
+                  <Show when={store.detachPreview}>
+                    {(preview) => {
+                      const path = file.pathFromTab(preview().tab)
+                      const browserID = browserTabID(preview().tab)
+                      const browser = browserID ? view().browser.get(browserID) : undefined
                       return (
-                        <div data-component="detached-tab-drag-preview">
-                          <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
+                        <div
+                          data-component="detached-tab-live-preview"
+                          style={{
+                            width: `${preview().width}px`,
+                            height: `${preview().height}px`,
+                            left: `${preview().x - preview().offsetX}px`,
+                            top: `${preview().y - preview().offsetY}px`,
+                          }}
+                        >
+                          <Show
+                            when={browser}
+                            fallback={<Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>}
+                          >
+                            {(value) => (
+                              <div class="flex items-center gap-1.5 min-w-0">
+                                <div class="flex size-4 shrink-0 items-center justify-center rounded-sm bg-surface-base">
+                                  <Icon name="window-cursor" size="small" class="text-text-weak" />
+                                </div>
+                                <span class="text-14-medium truncate">
+                                  {formatBrowserTabLabel(value().title ?? value().url)}
+                                </span>
+                              </div>
+                            )}
+                          </Show>
                         </div>
                       )
                     }}
                   </Show>
-                </DragOverlay>
-                <Show when={store.detachPreview}>
-                  {(preview) => {
-                    const path = file.pathFromTab(preview().tab)
-                    const browserID = browserTabID(preview().tab)
-                    const browser = browserID ? view().browser.get(browserID) : undefined
-                    return (
-                      <div
-                        data-component="detached-tab-live-preview"
-                        style={{
-                          width: `${preview().width}px`,
-                          height: `${preview().height}px`,
-                          left: `${preview().x - preview().offsetX}px`,
-                          top: `${preview().y - preview().offsetY}px`,
-                        }}
-                      >
-                        <Show
-                          when={browser}
-                          fallback={<Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>}
-                        >
-                          {(value) => (
-                            <div class="flex items-center gap-1.5 min-w-0">
-                              <div class="flex size-4 shrink-0 items-center justify-center rounded-sm bg-surface-base">
-                                <Icon name="window-cursor" size="small" class="text-text-weak" />
-                              </div>
-                              <span class="text-14-medium truncate">
-                                {formatBrowserTabLabel(value().title ?? value().url)}
-                              </span>
-                            </div>
-                          )}
-                        </Show>
-                      </div>
-                    )
-                  }}
-                </Show>
-              </DragDropProvider>
+                </DragDropProvider>
+              </div>
             </div>
-          </div>
 
-          <Show when={shown()}>
-            <div
-              id="file-tree-panel"
-              aria-hidden={!fileOpen()}
-              inert={!fileOpen()}
-              data-component="session-file-tree"
-              data-resizing={props.size.active()}
-              class="relative min-w-0 h-full shrink-0 overflow-hidden"
-              classList={{
-                "pointer-events-none": !fileOpen(),
-              }}
-              style={{ width: treeWidth() }}
-            >
-              <Show when={fileOpen()}>
-                <div
-                  class="h-full flex flex-col overflow-hidden group/filetree"
-                  classList={{ "border-l border-border-weaker-base": reviewOpen() }}
-                >
-                  <Tabs
-                  variant="pill"
-                  value={fileTreeTab()}
-                  onChange={setFileTreeTabValue}
-                  class="h-full"
-                  data-scope="filetree"
-                >
-                  <Tabs.List>
-                    <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
-                      {props.reviewCount()}{" "}
-                      {language.t(
-                        props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
-                      )}
-                    </Tabs.Trigger>
-                    <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
-                      {language.t("session.files.all")}
-                    </Tabs.Trigger>
-                  </Tabs.List>
-                  <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
-                    <Switch>
-                      <Match when={props.hasReview() || !props.diffsReady()}>
-                        <Show
-                          when={props.diffsReady()}
-                          fallback={
-                            <div class="px-2 py-2 text-12-regular text-text-weak">
-                              {language.t("common.loading")}
-                              {language.t("common.loading.ellipsis")}
-                            </div>
-                          }
-                        >
-                          <FileTree
-                            path=""
-                            class="pt-3"
-                            allowed={diffFiles()}
-                            kinds={kinds()}
-                            draggable={false}
-                            active={props.activeDiff}
-                            onFileClick={(node) => props.focusReviewDiff(node.path)}
-                          />
-                        </Show>
-                      </Match>
-                    </Switch>
-                  </Tabs.Content>
-                  <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
-                    <Switch>
-                      <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
-                      <Match when={true}>
-                        <div class="min-h-0">
-                          <div class="sticky top-0 z-10 bg-background-stronger py-3">
-                            <div class="flex h-9 items-center gap-2 rounded-lg bg-surface-base px-3">
-                              <Icon name="magnifying-glass" class="shrink-0 text-icon-weak-base" />
-                              <TextField
-                                variant="ghost"
-                                type="text"
-                                value={allFilesSearch()}
-                                onChange={setAllFilesSearch}
-                                placeholder={language.t("common.search.placeholder")}
-                                class="min-w-0 flex-1"
-                              />
-                              <Show when={allFilesSearch()}>
-                                <IconButton
-                                  icon="circle-x"
-                                  variant="ghost"
-                                  aria-label={language.t("common.clearSearch")}
-                                  onClick={() => setAllFilesSearch("")}
-                                />
-                              </Show>
-                            </div>
-                          </div>
-                          <Show
-                            when={!allFilesSearchLoading()}
-                            fallback={
-                              <div class="px-2 py-2 text-12-regular text-text-weak">
-                                {language.t("common.loading")}
-                                {language.t("common.loading.ellipsis")}
-                              </div>
-                            }
-                          >
+            <Show when={shown()}>
+              <div
+                id="file-tree-panel"
+                aria-hidden={!fileOpen()}
+                inert={!fileOpen()}
+                data-component="session-file-tree"
+                data-resizing={props.size.active()}
+                class="relative min-w-0 h-full shrink-0 overflow-hidden"
+                classList={{
+                  "pointer-events-none": !fileOpen(),
+                }}
+                style={{ width: treeWidth() }}
+              >
+                <Show when={fileOpen()}>
+                  <div
+                    class="h-full flex flex-col overflow-hidden group/filetree"
+                    classList={{ "border-l border-border-weaker-base": reviewOpen() }}
+                  >
+                    <Tabs
+                      variant="pill"
+                      value={fileTreeTab()}
+                      onChange={setFileTreeTabValue}
+                      class="h-full"
+                      data-scope="filetree"
+                    >
+                      <Tabs.List>
+                        <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
+                          {props.reviewCount()}{" "}
+                          {language.t(
+                            props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
+                          )}
+                        </Tabs.Trigger>
+                        <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
+                          {language.t("session.files.all")}
+                        </Tabs.Trigger>
+                      </Tabs.List>
+                      <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
+                        <Switch>
+                          <Match when={props.hasReview() || !props.diffsReady()}>
                             <Show
-                              when={!allFilesSearch().trim() || (allFilesMatches()?.length ?? 0) > 0}
+                              when={props.diffsReady()}
                               fallback={
-                                <div class="px-2 py-2 text-12-regular text-text-weak">{language.t("palette.empty")}</div>
+                                <div class="px-2 py-2 text-12-regular text-text-weak">
+                                  {language.t("common.loading")}
+                                  {language.t("common.loading.ellipsis")}
+                                </div>
                               }
                             >
                               <FileTree
                                 path=""
-                                class="pb-3"
-                                allowed={allFilesSearch().trim() ? allFilesMatches() : undefined}
-                                modified={diffFiles()}
+                                class="pt-3"
+                                allowed={diffFiles()}
                                 kinds={kinds()}
-                                onFileClick={(node) => openTab(file.tab(node.path))}
+                                draggable={false}
+                                active={props.activeDiff}
+                                onFileClick={(node) => props.focusReviewDiff(node.path)}
                               />
                             </Show>
-                          </Show>
-                        </div>
-                      </Match>
-                    </Switch>
-                  </Tabs.Content>
-                  <Tabs.Content value="folder" class="bg-background-stronger px-3 py-0">
-                    <Show when={referencePath()} keyed fallback={empty(language.t("session.files.empty"))}>
-                      {(target) => (
-                        <div class="min-h-0">
-                          <div class="sticky top-0 z-10 flex items-center gap-1 border-b border-border-weaker-base bg-background-stronger py-2">
-                            <IconButton
-                              icon="arrow-left"
-                              variant="ghost"
-                              aria-label={language.t("session.files.backToProject")}
-                              title={language.t("session.files.backToProject")}
-                              onClick={showAllFiles}
-                            />
-                            <div class="min-w-0 flex-1" title={target}>
-                              <div class="truncate text-12-medium text-text-strong">{referenceName()}</div>
-                              <div class="truncate text-10-regular text-text-weak">{target}</div>
+                          </Match>
+                        </Switch>
+                      </Tabs.Content>
+                      <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
+                        <Switch>
+                          <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
+                          <Match when={true}>
+                            <div class="min-h-0">
+                              <div class="sticky top-0 z-10 bg-background-stronger py-3">
+                                <div class="flex h-9 items-center gap-2 rounded-lg bg-surface-base px-3">
+                                  <Icon name="magnifying-glass" class="shrink-0 text-icon-weak-base" />
+                                  <TextField
+                                    variant="ghost"
+                                    type="text"
+                                    value={allFilesSearch()}
+                                    onChange={setAllFilesSearch}
+                                    placeholder={language.t("common.search.placeholder")}
+                                    class="min-w-0 flex-1"
+                                  />
+                                  <Show when={allFilesSearch()}>
+                                    <IconButton
+                                      icon="circle-x"
+                                      variant="ghost"
+                                      aria-label={language.t("common.clearSearch")}
+                                      onClick={() => setAllFilesSearch("")}
+                                    />
+                                  </Show>
+                                </div>
+                              </div>
+                              <Show
+                                when={!allFilesSearchLoading()}
+                                fallback={
+                                  <div class="px-2 py-2 text-12-regular text-text-weak">
+                                    {language.t("common.loading")}
+                                    {language.t("common.loading.ellipsis")}
+                                  </div>
+                                }
+                              >
+                                <Show
+                                  when={!allFilesSearch().trim() || (allFilesMatches()?.length ?? 0) > 0}
+                                  fallback={
+                                    <div class="px-2 py-2 text-12-regular text-text-weak">
+                                      {language.t("palette.empty")}
+                                    </div>
+                                  }
+                                >
+                                  <FileTree
+                                    path=""
+                                    class="pb-3"
+                                    allowed={allFilesSearch().trim() ? allFilesMatches() : undefined}
+                                    modified={diffFiles()}
+                                    kinds={kinds()}
+                                    onFileClick={(node) => openTab(file.tab(node.path))}
+                                  />
+                                </Show>
+                              </Show>
                             </div>
-                            <IconButton
-                              icon="folder"
-                              variant="ghost"
-                              aria-label={language.t("session.files.openInExplorer")}
-                              title={language.t("session.files.openInExplorer")}
-                              onClick={openReferenceInExplorer}
-                            />
-                            <IconButton
-                              icon="copy"
-                              variant="ghost"
-                              aria-label={language.t("session.files.copyPath")}
-                              title={language.t("session.files.copyPath")}
-                              onClick={copyReferencePath}
-                            />
-                            <Button size="small" variant="ghost" onClick={() => void file.referenceTree.refresh(target)}>
-                              {language.t("session.files.refresh")}
-                            </Button>
-                          </div>
-                          <Show when={referenceEmpty()} fallback={<FileTree path={target} tree={file.referenceTree} normalizePath={file.referenceTree.normalize} class="py-3" onFileClick={(node) => openTab(file.tab(node.path))} />}>
-                            {empty(language.t("session.files.referenceEmpty"))}
-                          </Show>
-                        </div>
-                      )}
-                    </Show>
-                  </Tabs.Content>
-                  </Tabs>
-                </div>
-              </Show>
-              <Show when={fileOpen()}>
-                <div onPointerDown={() => props.size.start()}>
-                  <ResizeHandle
-                    direction="horizontal"
-                    edge="start"
-                    size={layout.fileTree.width()}
-                    min={200}
-                    max={480}
-                    onResize={(width) => {
-                      props.size.touch()
-                      layout.fileTree.resize(width)
-                    }}
-                    collapseThreshold={152}
-                    onCollapse={() => layout.fileTree.close()}
-                  />
-                </div>
-              </Show>
-            </div>
-          </Show>
-        </div>
-      </aside>
-    </Show>
-    <Show when={!isDesktop() && !!params.id && mobileSubagentMount()}>
-      <Portal mount={mobileSubagentMount()!}>
+                          </Match>
+                        </Switch>
+                      </Tabs.Content>
+                      <Tabs.Content value="folder" class="bg-background-stronger px-3 py-0">
+                        <Show when={referencePath()} keyed fallback={empty(language.t("session.files.empty"))}>
+                          {(target) => (
+                            <div class="min-h-0">
+                              <div class="sticky top-0 z-10 flex items-center gap-1 border-b border-border-weaker-base bg-background-stronger py-2">
+                                <IconButton
+                                  icon="arrow-left"
+                                  variant="ghost"
+                                  aria-label={language.t("session.files.backToProject")}
+                                  title={language.t("session.files.backToProject")}
+                                  onClick={showAllFiles}
+                                />
+                                <div class="min-w-0 flex-1" title={target}>
+                                  <div class="truncate text-12-medium text-text-strong">{referenceName()}</div>
+                                  <div class="truncate text-10-regular text-text-weak">{target}</div>
+                                </div>
+                                <IconButton
+                                  icon="folder"
+                                  variant="ghost"
+                                  aria-label={language.t("session.files.openInExplorer")}
+                                  title={language.t("session.files.openInExplorer")}
+                                  onClick={openReferenceInExplorer}
+                                />
+                                <IconButton
+                                  icon="copy"
+                                  variant="ghost"
+                                  aria-label={language.t("session.files.copyPath")}
+                                  title={language.t("session.files.copyPath")}
+                                  onClick={copyReferencePath}
+                                />
+                                <Button
+                                  size="small"
+                                  variant="ghost"
+                                  onClick={() => void file.referenceTree.refresh(target)}
+                                >
+                                  {language.t("session.files.refresh")}
+                                </Button>
+                              </div>
+                              <Show
+                                when={referenceEmpty()}
+                                fallback={
+                                  <FileTree
+                                    path={target}
+                                    tree={file.referenceTree}
+                                    normalizePath={file.referenceTree.normalize}
+                                    class="py-3"
+                                    onFileClick={(node) => openTab(file.tab(node.path))}
+                                  />
+                                }
+                              >
+                                {empty(language.t("session.files.referenceEmpty"))}
+                              </Show>
+                            </div>
+                          )}
+                        </Show>
+                      </Tabs.Content>
+                    </Tabs>
+                  </div>
+                </Show>
+                <Show when={fileOpen()}>
+                  <div onPointerDown={() => props.size.start()}>
+                    <ResizeHandle
+                      direction="horizontal"
+                      edge="start"
+                      size={layout.fileTree.width()}
+                      min={200}
+                      max={480}
+                      onResize={(width) => {
+                        props.size.touch()
+                        layout.fileTree.resize(width)
+                      }}
+                      collapseThreshold={152}
+                      onCollapse={() => layout.fileTree.close()}
+                    />
+                  </div>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </aside>
+      </Show>
+      <Show when={!isDesktop() && !!params.id && mobileSubagentMount()}>
+        <Portal mount={mobileSubagentMount()!}>
           <aside
             data-component="session-mobile-subagents"
             aria-label="子智能体"
@@ -1065,20 +1111,24 @@ export function SessionSidePanel(props: {
               <DeepResearchRail
                 sessionID={params.id!}
                 directory={sdk.directory}
+                dispatches={mobileDispatches}
+                onRefresh={refreshMobileDispatches}
                 onOpenSubagent={openMobileSubagent}
                 showEmpty
               />
               <SubagentDispatchRail
                 sessionID={params.id!}
                 directory={sdk.directory}
+                dispatches={mobileDispatches}
+                onRefresh={refreshMobileDispatches}
                 actors={mobileActors}
                 onOpenSubagent={openMobileSubagent}
                 showEmpty
               />
             </div>
           </aside>
-      </Portal>
-    </Show>
+        </Portal>
+      </Show>
     </>
   )
 }

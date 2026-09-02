@@ -5,6 +5,7 @@ import {
 } from "@ai-sdk/provider"
 import type { OpenAICompatibleChatPrompt } from "./openai-compatible-api-types"
 import { convertToBase64 } from "@ai-sdk/provider-utils"
+import { toolInputForModel } from "@/session/tool-input"
 
 function getOpenAIMetadata(message: { providerOptions?: SharedV3ProviderOptions }) {
   return message?.providerOptions?.copilot ?? {}
@@ -104,7 +105,7 @@ export function convertToOpenAICompatibleChatMessages(prompt: LanguageModelV3Pro
                 type: "function",
                 function: {
                   name: part.toolName,
-                  arguments: JSON.stringify(part.input),
+                  arguments: JSON.stringify(toolInputForModel(part.input)),
                 },
                 ...partMetadata,
               })

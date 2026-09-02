@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack } from "solid-js"
+import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import { IconButton } from "@lfcode-ai/ui/icon-button"
 import { TextField } from "@lfcode-ai/ui/text-field"
 import { Tooltip } from "@lfcode-ai/ui/tooltip"
@@ -6,7 +6,6 @@ import { showToast } from "@lfcode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useFile } from "@/context/file"
-import { usePrompt } from "@/context/prompt"
 import {
   BROWSER_COMMAND_EVENT,
   browserTabID,
@@ -14,22 +13,12 @@ import {
   normalizeBrowserURL,
 } from "@/pages/session/helpers"
 import { usePlatform } from "@/context/platform"
-import {
-  appendBrowserReferenceToPrompt,
-  type BrowserReferenceCandidate,
-  type BrowserReferenceState,
-} from "./browser-reference"
-
-const BROWSER_REFERENCE_CHANNEL = "lfcode-browser-reference"
-const BROWSER_REFERENCE_REFRESH_EVENT = "lfcode:browser-reference-refresh"
-const BROWSER_REFERENCE_POLL_MS = 1_200
 
 export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey: string }) {
   const language = useLanguage()
   const layout = useLayout()
   const platform = usePlatform()
   const file = useFile()
-  const prompt = usePrompt()
   const currentSessionKey = createMemo(() => props.sessionKey)
   const currentSessionID = createMemo(() => {
     const key = props.sessionKey
@@ -41,25 +30,64 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
   const sessionView = createMemo(() => layout.view(currentSessionKey))
   let webviewRef: any
   let inputRef: HTMLInputElement | HTMLTextAreaElement | undefined
-  let referenceOverlayRef: HTMLDivElement | undefined
-  let referenceTextRef: HTMLDivElement | undefined
-  let selectionActionRef: HTMLDivElement | undefined
-  let elementActionRef: HTMLDivElement | undefined
   let lastLoadedURL = ""
   let ready = false
   let registeredGuestID: number | undefined
   let pendingGuestID: number | undefined
   let registeredGuestBinding: string | undefined
   let pendingGuestBinding: string | undefined
-  let latestReferenceState: BrowserReferenceState = {}
+  let lastReportedBrowserState = ""
+  let browserReportFrame: number | undefined
+  let browserReportTimer: number | undefined
+  let pendingBrowserReport: Parameters<NonNullable<typeof platform.reportBrowserState>>[0] | undefined
   const [windowID, setWindowID] = createSignal<number | null>(null)
   const [siteDataBusy, setSiteDataBusy] = createSignal(false)
   const [guestReady, setGuestReady] = createSignal(false)
   const [addressDraft, setAddressDraft] = createSignal<string>()
-  const [referenceState, setReferenceState] = createSignal<BrowserReferenceState>({})
   const [webview, setWebview] = createSignal<any>()
   const visible = createMemo(() => props.visible !== false)
   let guestBindingKey: string | undefined
+
+  const flushBrowserReport = () => {
+    browserReportTimer = undefined
+    const report = pendingBrowserReport
+    pendingBrowserReport = undefined
+    if (!report || !platform.reportBrowserState) return
+    void platform.reportBrowserState(report)
+  }
+
+  const reportBrowserState = (
+    report: Parameters<NonNullable<typeof platform.reportBrowserState>>[0],
+    immediate = false,
+  ) => {
+    const signature = JSON.stringify(report)
+    if (signature === lastReportedBrowserState) return
+    lastReportedBrowserState = signature
+    if (immediate) {
+      pendingBrowserReport = undefined
+      if (browserReportFrame !== undefined) cancelAnimationFrame(browserReportFrame)
+      browserReportFrame = undefined
+      if (browserReportTimer !== undefined) window.clearTimeout(browserReportTimer)
+      browserReportTimer = undefined
+      void platform.reportBrowserState?.(report)
+      return
+    }
+    pendingBrowserReport = report
+    if (browserReportFrame === undefined) {
+      browserReportFrame = requestAnimationFrame(() => {
+        browserReportFrame = undefined
+        if (browserReportTimer === undefined) browserReportTimer = window.setTimeout(flushBrowserReport, 80)
+      })
+    }
+  }
+
+  onCleanup(() => {
+    if (browserReportFrame !== undefined) cancelAnimationFrame(browserReportFrame)
+    if (browserReportTimer !== undefined) window.clearTimeout(browserReportTimer)
+    browserReportFrame = undefined
+    browserReportTimer = undefined
+    pendingBrowserReport = undefined
+  })
 
   const guestElementAttached = (guest = webview()) => !!guest?.isConnected && !!guest.ownerDocument?.contains(guest)
 
@@ -190,71 +218,6 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
     }
   }
 
-  const appendWebReference = (candidate: BrowserReferenceCandidate | undefined) => {
-    const next = appendBrowserReferenceToPrompt(prompt.current(), candidate)
-    if (!next) return
-    prompt.set(next.prompt, next.cursor)
-    showToast({
-      title: "已加入引用",
-      description: candidate?.mode === "element" ? "当前网页元素已加入输入框。" : "当前网页选区已加入输入框。",
-    })
-  }
-
-  const applyReferenceState = (next: BrowserReferenceState | undefined) => {
-    latestReferenceState = next ?? {}
-    setReferenceState(latestReferenceState)
-    const overlay = referenceOverlayRef
-    if (!overlay) return
-    const selection = latestReferenceState.selection
-    const element = latestReferenceState.element
-    const visible = !!(selection || element)
-    overlay.style.display = visible ? "" : "none"
-    overlay.dataset.browserReferenceSelectionLabel = selection?.label ?? ""
-    overlay.dataset.browserReferenceSelectionText = selection?.text ?? ""
-    overlay.dataset.browserReferenceSelectionUrl = selection?.url ?? ""
-    overlay.dataset.browserReferenceSelectionTitle = selection?.title ?? ""
-    overlay.dataset.browserReferenceSelectionSelector = selection?.selector ?? ""
-    overlay.dataset.browserReferenceSelectionMode = selection?.mode ?? ""
-    overlay.dataset.browserReferenceElementLabel = element?.label ?? ""
-    overlay.dataset.browserReferenceElementText = element?.text ?? ""
-    overlay.dataset.browserReferenceElementUrl = element?.url ?? ""
-    overlay.dataset.browserReferenceElementTitle = element?.title ?? ""
-    overlay.dataset.browserReferenceElementSelector = element?.selector ?? ""
-    overlay.dataset.browserReferenceElementMode = element?.mode ?? ""
-    if (referenceTextRef) {
-      referenceTextRef.textContent =
-        selection?.text || element?.text || "选中文本或点击页面元素后，可直接加入当前输入框。"
-    }
-    if (selectionActionRef) {
-      selectionActionRef.style.display = selection?.text ? "" : "none"
-    }
-    if (elementActionRef) {
-      elementActionRef.style.display = element?.text ? "" : "none"
-    }
-  }
-
-  const readReferenceStateFromGuest = async () => {
-    const current = webview()
-    if (!ready || !guestReady() || !guestElementAttached(current) || !current?.executeJavaScript) return
-    let next: unknown
-    try {
-      next = await current.executeJavaScript(`(() => {
-        const raw = document.documentElement?.dataset?.lfcodeBrowserReference
-        if (!raw) return {}
-        try {
-          const parsed = JSON.parse(raw)
-          return parsed && typeof parsed === "object" ? parsed : {}
-        } catch {
-          return {}
-        }
-      })()`)
-    } catch {
-      return
-    }
-    if (!next || typeof next !== "object") return
-    return next as BrowserReferenceState
-  }
-
   onMount(() => {
     if (!platform.getWindowID) return
     void platform.getWindowID().then(setWindowID).catch(() => setWindowID(null))
@@ -280,6 +243,7 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
     registeredGuestBinding = undefined
     setGuestReady(false)
     ready = false
+    lastReportedBrowserState = ""
   })
 
   const runCommand = (command: "back" | "forward" | "reload" | "stop" | "focusAddress") => {
@@ -400,31 +364,30 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
           error: options?.clearError ? undefined : options?.error ?? current?.error,
         }
         sessionView().browser.sync(id, next)
-        void platform.reportBrowserState?.({
+        const report = {
           sessionKey: currentSessionKey(),
           tabID: id,
           ...next,
-        })
+        }
+        reportBrowserState(report, options?.loading !== undefined || options?.error !== undefined)
       }
 
       const start = () => {
-        setReferenceState({})
-        applyReferenceState({})
         sessionView().browser.update(id, {
           loading: true,
           error: undefined,
         })
-        void platform.reportBrowserState?.({
+        const report = {
           sessionKey: currentSessionKey(),
           tabID: id,
           loading: true,
-        })
+        }
+        reportBrowserState(report, true)
         ensureGuestRegistration()
       }
 
       const fail = (event?: Event) => {
         lastLoadedURL = ""
-        applyReferenceState({})
         const details = event as ({ errorCode?: number; errorDescription?: string } & Event) | undefined
         const code = typeof details?.errorCode === "number" ? details.errorCode : undefined
         const description = typeof details?.errorDescription === "string" ? details.errorDescription : undefined
@@ -480,12 +443,13 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
           loading: true,
           error: undefined,
         })
-        void platform.reportBrowserState?.({
+        const report = {
           sessionKey: currentSessionKey(),
           tabID: id,
           input: next && next !== "about:blank" ? next : state()?.input,
           loading: true,
-        })
+        }
+        reportBrowserState(report, true)
       }
       const finishMainNavigation = (event?: Event) => {
         sync({
@@ -510,17 +474,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         sessionView().browser.update(id, {
           title: ready && guestElementAttached(guest) ? guest.getTitle?.() || current?.title : current?.title,
         })
-      }
-      const onIpcMessage = (event: Event) => {
-        const detail = event as { channel?: string; args?: unknown[]; detail?: { channel?: string; args?: unknown[] } }
-        const payload = detail.detail ?? detail
-        if (payload.channel !== BROWSER_REFERENCE_CHANNEL) return
-        const next = payload.args?.[0]
-        if (!next || typeof next !== "object") {
-          applyReferenceState({})
-          return
-        }
-        applyReferenceState(next as BrowserReferenceState)
+        reportBrowserState({
+          sessionKey: currentSessionKey(),
+          tabID: id,
+          title: ready && guestElementAttached(guest) ? guest.getTitle?.() || current?.title : current?.title,
+        })
       }
       const onCommand = (event: Event) => {
         const detail = (event as CustomEvent<{ command?: "back" | "forward" | "reload" | "stop" | "focusAddress"; tabID?: string }>).detail
@@ -538,12 +496,8 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
           return
         }
         finish()
-        pollReferenceState()
       }
       let guestProbeFrame = 0
-      let referencePollTimer: number | undefined
-      let referencePollPending = false
-      let referencePollingDisposed = false
       const probeGuestRegistration = (attempt = 0) => {
         if (!guestElementAttached(guest)) {
           if (attempt >= 12) return
@@ -562,51 +516,6 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         }
         guestProbeFrame = requestAnimationFrame(() => probeGuestRegistration(attempt + 1))
       }
-      const scheduleReferencePoll = () => {
-        if (referencePollingDisposed || referencePollTimer !== undefined || document.visibilityState !== "visible" || !untrack(visible)) return
-        referencePollTimer = window.setTimeout(() => {
-          referencePollTimer = undefined
-          pollReferenceState()
-        }, BROWSER_REFERENCE_POLL_MS)
-      }
-      const pollReferenceState = () => {
-        if (!guestElementAttached(guest) || !ready || !guestReady() || !untrack(visible)) return
-        if (document.visibilityState !== "visible" || referencePollPending) return
-        referencePollPending = true
-        void readReferenceStateFromGuest()
-          .then((next) => {
-            if (next) {
-              applyReferenceState(next)
-              return
-            }
-            const target = desktopTarget()
-            if (!target || !platform.getBrowserReferenceState) return
-            return platform.getBrowserReferenceState(target).then((fallback) => {
-              if (!fallback || typeof fallback !== "object") return
-              applyReferenceState(fallback as BrowserReferenceState)
-            })
-          })
-          .catch(() => {})
-          .finally(() => {
-            referencePollPending = false
-            scheduleReferencePoll()
-          })
-      }
-      const onReferenceRefresh = (event: Event) => {
-        const detail = (event as CustomEvent<{ tabID?: string }>).detail
-        if (detail?.tabID !== id) return
-        pollReferenceState()
-      }
-      const onDocumentVisibilityChange = () => {
-        if (document.visibilityState === "visible") {
-          pollReferenceState()
-          return
-        }
-        if (referencePollTimer !== undefined) {
-          window.clearTimeout(referencePollTimer)
-          referencePollTimer = undefined
-        }
-      }
 
       guest.addEventListener("did-start-loading", start)
       guest.addEventListener("did-finish-load", finish)
@@ -618,21 +527,14 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
       guest.addEventListener("page-title-updated", onTitleUpdated)
       guest.addEventListener("did-fail-load", fail)
       guest.addEventListener("dom-ready", onReady)
-      guest.addEventListener("ipc-message", onIpcMessage)
       guest.addEventListener("new-window", openWindow)
       window.addEventListener(BROWSER_COMMAND_EVENT, onCommand)
-      window.addEventListener(BROWSER_REFERENCE_REFRESH_EVENT, onReferenceRefresh)
-      document.addEventListener("visibilitychange", onDocumentVisibilityChange)
       requestAnimationFrame(hydrateGuestState)
       probeGuestRegistration()
-      pollReferenceState()
 
       onCleanup(() => {
-        referencePollingDisposed = true
         if (guestProbeFrame) cancelAnimationFrame(guestProbeFrame)
-        if (referencePollTimer !== undefined) window.clearTimeout(referencePollTimer)
         ready = false
-        applyReferenceState({})
         guest.removeEventListener("did-start-loading", start)
         guest.removeEventListener("did-finish-load", finish)
         guest.removeEventListener("did-stop-loading", finish)
@@ -643,11 +545,8 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
         guest.removeEventListener("page-title-updated", onTitleUpdated)
         guest.removeEventListener("did-fail-load", fail)
         guest.removeEventListener("dom-ready", onReady)
-        guest.removeEventListener("ipc-message", onIpcMessage)
         guest.removeEventListener("new-window", openWindow)
         window.removeEventListener(BROWSER_COMMAND_EVENT, onCommand)
-        window.removeEventListener(BROWSER_REFERENCE_REFRESH_EVENT, onReferenceRefresh)
-        document.removeEventListener("visibilitychange", onDocumentVisibilityChange)
         if (guestBindingKey === bindingKey) guestBindingKey = undefined
       })
     }),
@@ -713,7 +612,6 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
     if (ready) reportGuestReady()
     if (!visible()) return
     syncActiveBrowserTab()
-    window.dispatchEvent(new CustomEvent(BROWSER_REFERENCE_REFRESH_EVENT, { detail: { tabID: tabID() } }))
   })
 
   const currentFilePath = createMemo(() => {
@@ -867,11 +765,11 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
                 resetGuestBeforeDispose()
                 sessionView().browser.close(id)
                 layout.tabs(currentSessionKey).close(props.tab)
-                void platform.reportBrowserState?.({
+                reportBrowserState({
                   sessionKey: currentSessionKey(),
                   tabID: id,
                   closed: true,
-                })
+                }, true)
               }}
               aria-label={language.t("common.closeTab")}
             />
@@ -909,37 +807,6 @@ export function BrowserPanel(props: { tab: string; visible?: boolean; sessionKey
                   </div>
                 </div>
               </Show>
-              <div
-                ref={referenceOverlayRef}
-                data-browser-reference-active="true"
-                class="absolute right-3 top-3 z-10 max-w-[22rem] rounded-lg border border-border-weak-base bg-surface-raised-stronger-non-alpha px-3 py-2 shadow-[var(--shadow-xs-border)]"
-                style={{ display: "none" }}
-              >
-                <div class="text-11-medium uppercase tracking-[0.08em] text-text-weak">网页引用</div>
-                <div ref={referenceTextRef} class="mt-1 text-12-regular text-text-weak line-clamp-2">
-                  选中文本或点击页面元素后，可直接加入当前输入框。
-                </div>
-                <div class="mt-2 flex flex-wrap gap-2">
-                  <div ref={selectionActionRef} data-browser-reference-kind="selection" style={{ display: "none" }}>
-                    <IconButton
-                      icon="plus"
-                      variant="secondary"
-                      class="size-8 rounded-lg"
-                      onClick={() => appendWebReference(latestReferenceState.selection)}
-                      aria-label="加入网页选区引用"
-                    />
-                  </div>
-                  <div ref={elementActionRef} data-browser-reference-kind="element" style={{ display: "none" }}>
-                    <IconButton
-                      icon="selector"
-                      variant="secondary"
-                      class="size-8 rounded-lg"
-                      onClick={() => appendWebReference(latestReferenceState.element)}
-                      aria-label="加入网页元素引用"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
           )}
         </Show>

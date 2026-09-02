@@ -30,6 +30,7 @@ import { ResizeHandle } from "@lfcode-ai/ui/resize-handle"
 import { Select } from "@lfcode-ai/ui/select"
 import { Tabs } from "@lfcode-ai/ui/tabs"
 import { Icon } from "@lfcode-ai/ui/icon"
+import { Button } from "@lfcode-ai/ui/button"
 import { createAutoScroll } from "@lfcode-ai/ui/hooks"
 import { previewSelectedLines } from "@lfcode-ai/ui/pierre/selection-bridge"
 import { showToast } from "@lfcode-ai/ui/toast"
@@ -502,8 +503,8 @@ export default function Page() {
     })
   }
 
-  const openBrowserTab = (url: string, title?: string, activate = true) => {
-    const id = createBrowserTabID()
+  const openBrowserTab = (url: string, title?: string, activate = true, requestedID?: string) => {
+    const id = requestedID ?? createBrowserTabID()
     const tab = browserTab(id)
     batch(() => {
       layout.view(sessionKey()).browser.open(id, url, title)
@@ -515,8 +516,8 @@ export default function Page() {
     return { id, tab }
   }
 
-  const openDetachedBrowserTab = async (url: string, title: string | undefined, background: boolean) => {
-    const id = createBrowserTabID()
+  const openDetachedBrowserTab = async (url: string, title: string | undefined, background: boolean, requestedID?: string) => {
+    const id = requestedID ?? createBrowserTabID()
     const tab = browserTab(id)
     const detachedWindowID = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     const route = buildDetachedSidePanelRoute({
@@ -619,10 +620,10 @@ export default function Page() {
       if (detail?.reason === "tool") {
         const title = typeof detail.title === "string" ? detail.title : undefined
         if (detail.presentation === "sidebar") {
-          openBrowserTab(next, title)
+          openBrowserTab(next, title, true, detail.newTab ? detail.tabID : undefined)
           return
         }
-        void openDetachedBrowserTab(next, title, detail.presentation !== "detached")
+        void openDetachedBrowserTab(next, title, detail.presentation !== "detached", detail.newTab ? detail.tabID : undefined)
         return
       }
       openBrowserTab(next)
@@ -1323,15 +1324,10 @@ export default function Page() {
       platform.platform === "desktop"
         ? (path: string) => {
             const target = file.normalize(path)
-            void sdk.client.file
-              .referenceGrant({ path: target })
-              .then((result) => {
-                const grant = result.data
-                if (!grant) throw new Error("Reference directory grant was not returned")
-                file.referenceTree.authorize(grant.root, grant.token)
-                layout.fileTree.openReference(grant.root)
-              })
-              .catch((error) => showPathError(target, error))
+            // External directories are accessible through the authenticated
+            // file API without a pre-grant. Keep the legacy grant endpoint
+            // available for older clients, but do not require it for browsing.
+            layout.fileTree.openReference(target)
           }
         : undefined,
     onOpenFolder: (path: string) => {
@@ -1633,6 +1629,8 @@ export default function Page() {
       }
     | undefined
   let fillFrame: number | undefined
+  let layoutFrame: number | undefined
+  let layoutSignature: string | undefined
   let mainViewportPreserveFrame: number | undefined
   let mainViewportMutationLock:
     | {
@@ -1822,6 +1820,7 @@ export default function Page() {
       delete scroller.dataset.sessionScrollerId
     }
     scroller = el
+    layoutSignature = undefined
     setScrollRefVersion((value) => value + 1)
     if (el) {
       el.dataset.sessionScroller = "true"
@@ -1843,15 +1842,22 @@ export default function Page() {
     autoScroll.markUserScrolled()
   }
 
-  createResizeObserver(
-    () => content,
-    () => {
+  const scheduleTimelineLayout = () => {
+    if (layoutFrame !== undefined) return
+    layoutFrame = requestAnimationFrame(() => {
+      layoutFrame = undefined
       const el = scroller
-      if (el) scheduleScrollState(el, { capture: false, sessionID: params.id })
+      if (!el) return
+      const signature = `${el.scrollHeight}:${el.clientHeight}`
+      if (signature === layoutSignature) return
+      layoutSignature = signature
+      scheduleScrollState(el, { capture: false, sessionID: params.id })
       viewportController?.notifyLayout()
       fill()
-    },
-  )
+    })
+  }
+
+  createResizeObserver(() => content, scheduleTimelineLayout)
 
   viewportController = new TimelineVirtualController({
     active: () => {
@@ -3339,7 +3345,7 @@ export default function Page() {
       }
     }
     if (action === "browser.open") {
-      const value = input as { url?: unknown; title?: unknown; presentation?: unknown } | undefined
+      const value = input as { url?: unknown; title?: unknown; presentation?: unknown; tabID?: unknown } | undefined
       const url = typeof value?.url === "string" ? value.url : ""
       if (!url) throw new Error("Missing url")
       const title = typeof value?.title === "string" ? value.title : undefined
@@ -3349,8 +3355,8 @@ export default function Page() {
           : "headless"
       const target =
         presentation === "sidebar"
-          ? openBrowserTab(url, title)
-          : await openDetachedBrowserTab(url, title, presentation === "headless")
+          ? openBrowserTab(url, title, true, typeof value?.tabID === "string" ? value.tabID : undefined)
+          : await openDetachedBrowserTab(url, title, presentation === "headless", typeof value?.tabID === "string" ? value.tabID : undefined)
       await waitForAutomationFrames(3)
       return { ...target, presentation, state: readSessionAutomationState() }
     }
@@ -4122,6 +4128,7 @@ export default function Page() {
     if (diffTimer !== undefined) window.clearTimeout(diffTimer)
     if (scrollStateFrame !== undefined) cancelAnimationFrame(scrollStateFrame)
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
+    if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
     if (mainViewportPreserveFrame !== undefined) cancelAnimationFrame(mainViewportPreserveFrame)
     clearTimelineVisualSnapshot()
     if (pendingSideChatFocusFrame !== undefined) cancelAnimationFrame(pendingSideChatFocusFrame)

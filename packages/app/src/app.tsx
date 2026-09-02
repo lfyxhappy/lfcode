@@ -52,6 +52,8 @@ const loadDirectoryLayout = () => import("@/pages/directory-layout")
 const DirectoryLayout = lazy(loadDirectoryLayout)
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
+const PluginsPage = lazy(() => import("@/components/settings-plugins").then((mod) => ({ default: mod.SettingsPlugins })))
+const AutomationPage = lazy(() => import("@/components/settings-automation").then((mod) => ({ default: mod.SettingsAutomation })))
 const File = lazy(() => import("@lfcode-ai/ui/file").then((mod) => ({ default: mod.File })))
 
 if (typeof location === "object" && [location.pathname, location.hash].some((route) => /\/session(?:\/|$)/.test(route))) {
@@ -59,9 +61,43 @@ if (typeof location === "object" && [location.pathname, location.hash].some((rou
   void loadSession()
 }
 
-const SessionRoute = () => <Session />
+const SessionRoute = () => (
+  <RouteRecoveryBoundary>
+    <Session />
+  </RouteRecoveryBoundary>
+)
+
+function RouteRecoveryBoundary(props: ParentProps) {
+  const language = useLanguage()
+  return (
+    <ErrorBoundary
+      fallback={() => (
+        <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 bg-background-base px-6 text-center">
+          <p class="text-sm text-text-weak">{language.t("error.page.description")}</p>
+          <Button size="large" onClick={() => window.location.reload()}>
+            {language.t("error.page.action.restart")}
+          </Button>
+        </div>
+      )}
+    >
+      {props.children}
+    </ErrorBoundary>
+  )
+}
 
 const SessionIndexRoute = () => <Navigate href="session" />
+
+const HomeRecoveryRoute = () => (
+  <RouteRecoveryBoundary>
+    <HomeRoute />
+  </RouteRecoveryBoundary>
+)
+
+const DirectoryRecoveryRoute = (props: ParentProps) => (
+  <RouteRecoveryBoundary>
+    <DirectoryLayout>{props.children}</DirectoryLayout>
+  </RouteRecoveryBoundary>
+)
 
 function HomeLayout(props: ParentProps) {
   return <AppLayout>{props.children}</AppLayout>
@@ -395,11 +431,13 @@ export function AppInterface(props: {
                   root={(routerProps) => <RouterRoot appChildren={props.children}>{routerProps.children}</RouterRoot>}
                 >
                   <Route path="/" component={HomeLayout}>
-                    <Route path="/" component={HomeRoute} />
+                  <Route path="/" component={HomeRecoveryRoute} />
                   </Route>
-                  <Route path="/:dir" component={DirectoryLayout}>
+                  <Route path="/:dir" component={DirectoryRecoveryRoute}>
                     <Route path="/" component={SessionIndexRoute} />
                     <Route path="/session/:id?" component={SessionRoute} />
+                    <Route path="/plugins" component={PluginsPage} />
+                    <Route path="/automation" component={AutomationPage} />
                   </Route>
                 </Dynamic>
               </GlobalSyncProvider>

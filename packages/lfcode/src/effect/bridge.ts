@@ -30,7 +30,7 @@ export function make(): Effect.Effect<Shape> {
         try {
           return Instance.current
         } catch (err) {
-          if (!(err instanceof LocalContext.NotFound)) throw err
+          if (!LocalContext.isNotFound(err, "instance")) throw err
         }
       })()
     const workspace = (yield* WorkspaceRef) ?? WorkspaceContext.workspaceID

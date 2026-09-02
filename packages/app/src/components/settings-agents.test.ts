@@ -22,8 +22,7 @@ describe("agent settings permissions", () => {
     expect(DEFAULT_CUSTOM_AGENT_PERMISSION).toEqual({
       "*": "deny",
       read: "allow",
-      glob: "allow",
-      grep: "allow",
+      search: "allow",
       actor: "deny",
     })
   })

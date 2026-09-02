@@ -11,7 +11,7 @@ import type {
   SnapshotFileDiff,
   Todo,
 } from "@lfcode-ai/sdk/v2/client"
-import type { State, VcsCache } from "./types"
+import type { SessionActivity, State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
 import { mergeSessionGoal } from "./session-goal"
@@ -19,6 +19,95 @@ import { diffs as list, message as clean } from "@/utils/diffs"
 import { dropInlineImageCacheForSessionParts, sanitizeSessionPart } from "../session-part-sanitize"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined
+
+const stringValue = (value: unknown) => (typeof value === "string" && value.length > 0 ? value : undefined)
+
+const numberValue = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined)
+
+export function normalizeActivity(properties: unknown): SessionActivity | undefined {
+  const props = asRecord(properties)
+  if (!props) return
+  const raw = asRecord(props.activity) ?? props
+  const sessionID = stringValue(props.sessionID) ?? stringValue(raw.sessionID)
+  const id = stringValue(raw.id) ?? stringValue(raw.activityID) ?? stringValue(props.activityID)
+  if (!sessionID || !id) return
+  const kind = stringValue(raw.kind) ?? stringValue(raw.type) ?? stringValue(props.kind) ?? "unknown"
+  const revision = numberValue(raw.revision) ?? numberValue(props.revision)
+  const time = asRecord(raw.time)
+  const metadata = asRecord(raw.metadata)
+  const dispatch = asRecord(metadata?.dispatch)
+  const createdAt =
+    numberValue(raw.createdAt) ??
+    numberValue(raw.timeCreated) ??
+    numberValue(time?.created) ??
+    numberValue(props.createdAt) ??
+    Date.now()
+  return {
+    id,
+    sessionID,
+    revision,
+    kind,
+    status: stringValue(raw.status),
+    title: stringValue(raw.title) ?? stringValue(dispatch?.description),
+    summary: stringValue(raw.summary) ?? stringValue(dispatch?.result) ?? stringValue(dispatch?.error),
+    createdAt,
+    updatedAt: numberValue(raw.updatedAt) ?? numberValue(raw.timeUpdated) ?? numberValue(time?.updated),
+    hookID: stringValue(raw.hookID),
+    hookName: stringValue(raw.hookName),
+    event: stringValue(raw.event),
+    durationMs: numberValue(raw.durationMs),
+    metadata,
+  }
+}
+
+export function applyActivitySnapshot(input: {
+  sessionID: string
+  activities: unknown[]
+  store: Store<State>
+  setStore: SetStoreFunction<State>
+  revisionsBeforeRequest?: Map<string, number | undefined>
+}) {
+  const incoming = input.activities
+    .map((activity) => normalizeActivity(activity))
+    .filter((activity): activity is SessionActivity => activity?.sessionID === input.sessionID)
+    .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+    .slice(0, 48)
+
+  // Keep only events that arrived after the request began. Everything else is
+  // replaced by the authoritative snapshot, including removed activities.
+  const incomingByID = new Map(incoming.map((activity) => [activity.id, activity]))
+  const current = input.store.activity?.[input.sessionID] ?? []
+  for (const activity of current) {
+    const next = incomingByID.get(activity.id)
+    const before = input.revisionsBeforeRequest?.get(activity.id)
+    const existedBeforeRequest = input.revisionsBeforeRequest?.has(activity.id) ?? false
+    if (!existedBeforeRequest || (activity.revision ?? 0) > (before ?? 0)) {
+      if (!next || (activity.revision ?? 0) > (next.revision ?? 0)) incomingByID.set(activity.id, activity)
+    }
+  }
+  const next = [...incomingByID.values()]
+    .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+    .slice(0, 48)
+  input.setStore("activity", input.sessionID, next)
+}
+
+function upsertActivity(input: { sessionID: string; activity: SessionActivity; setStore: SetStoreFunction<State> }) {
+  input.setStore("activity", (current) => current ?? {})
+  input.setStore(
+    "activity",
+    input.sessionID,
+    (current: SessionActivity[] | undefined) => {
+      const previous = current?.find((item) => item.id === input.activity.id)
+      if (previous?.revision !== undefined && input.activity.revision !== undefined && input.activity.revision < previous.revision) return current
+      const next = [...(current ?? []).filter((item) => item.id !== input.activity.id), input.activity]
+      next.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+      return next.slice(0, 48)
+    },
+  )
+}
 
 // Defense in depth for an interrupted/replayed server stream. The runtime is
 // authoritative and filters these messages before transport; the renderer must
@@ -213,6 +302,29 @@ export function applyDirectoryEvent(input: {
       )
       break
     }
+    case "activity.created":
+    case "activity.updated":
+    case "activity.completed": {
+      const activity = normalizeActivity(event.properties)
+      if (!activity) break
+      upsertActivity({ sessionID: activity.sessionID, activity, setStore: input.setStore })
+      break
+    }
+    case "activity.removed": {
+      const props = asRecord(event.properties)
+      const activity = normalizeActivity(event.properties)
+      const sessionID = activity?.sessionID ?? stringValue(props?.sessionID)
+      const activityID = activity?.id ?? stringValue(props?.activityID) ?? stringValue(props?.id)
+      if (!sessionID || !activityID) break
+      if (!input.store.activity) {
+        input.setStore("activity", {})
+        break
+      }
+      input.setStore("activity", sessionID, (current: SessionActivity[] | undefined) =>
+        current?.filter((item) => item.id !== activityID),
+      )
+      break
+    }
     case "hook.run.completed": {
       const props = event.properties as {
         sessionID?: string
@@ -225,6 +337,12 @@ export function applyDirectoryEvent(input: {
         timeCreated: number
       }
       if (!props.sessionID) break
+      const activity = normalizeActivity({
+        ...props,
+        id: `${props.hookID}:${props.timeCreated}`,
+        kind: "hook",
+      })
+      if (activity) upsertActivity({ sessionID: props.sessionID, activity, setStore: input.setStore })
       input.setStore(
         produce((draft) => {
           const runs = (draft.hook_run ??= {})[props.sessionID!] ?? []

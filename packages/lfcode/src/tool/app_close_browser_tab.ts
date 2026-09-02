@@ -22,7 +22,7 @@ export const AppCloseBrowserTabTool = Tool.define(
         )
         return {
           title: "Closed side browser tab",
-          output: JSON.stringify(result, null, 2),
+          output: JSON.stringify(result, null, 2) ?? "null",
           metadata: {
             sessionKey,
           },

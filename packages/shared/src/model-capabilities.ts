@@ -117,6 +117,19 @@ export function inferModelCapabilities(input: {
   const model = (input.modelID ?? "").toLowerCase()
   const api = (input.apiID ?? "").toLowerCase()
   const value = [model, api].join(" ")
+
+  if (/glm[-_ ]?5\.3[-_ ]?flash/.test(value)) {
+    capabilities.reasoning = true
+    capabilities.tool_call = true
+    capabilities.temperature = true
+    capabilities.attachment = true
+    capabilities.patch_editing = true
+    capabilities.input.image = true
+    capabilities.input.video = true
+    capabilities.input.pdf = true
+    return capabilities
+  }
+
   const catalog = lookupModelCatalog(input)
 
   if (catalog) {
@@ -302,6 +315,7 @@ export function inferModelCapabilities(input: {
 
 export function inferModelLimits(input: { modelID?: string; apiID?: string }) {
   const value = `${input.modelID ?? ""} ${input.apiID ?? ""}`.toLowerCase()
+  if (/glm[-_ ]?5\.3[-_ ]?flash/.test(value)) return { context: 1_000_000, output: 128_000 }
   const catalog = lookupModelCatalog(input)
   if (catalog) return { context: catalog.c, output: catalog.x }
   if (/gpt-5\.[5-9]|gpt-5\.6|gpt-(?:luna|sol|terra)/.test(value)) return { context: 1_050_000, output: 128_000 }
@@ -335,6 +349,7 @@ export function inferModelLimits(input: { modelID?: string; apiID?: string }) {
 
 export function inferModelReasoningOptions(input: { modelID?: string; apiID?: string; reasoning?: boolean }) {
   const value = `${input.modelID ?? ""} ${input.apiID ?? ""}`.toLowerCase()
+  if (/glm[-_ ]?5\.3[-_ ]?flash/.test(value)) return ["low", "high", "max"]
   const catalog = lookupModelCatalog(input)
   const reasoning = input.reasoning ?? inferModelCapabilities(input).reasoning
   if (!reasoning) return []

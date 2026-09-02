@@ -1,4 +1,5 @@
 import type { SessionGoal } from "@/context/global-sync/types"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
 
 export function formatGoalElapsed(ms?: number) {
   if (!ms || ms <= 0) return "0m"
@@ -19,7 +20,7 @@ export function goalElapsedMs(goal?: SessionGoal["state"], now = Date.now()) {
 export function formatGoalTokens(goal?: SessionGoal["state"]) {
   const stats = goal?.stats?.tokens
   if (!stats) return "0"
-  return `${(stats.input ?? 0) + (stats.output ?? 0) + (stats.reasoning ?? 0)}`
+  return formatTokenCount((stats.input ?? 0) + (stats.output ?? 0) + (stats.reasoning ?? 0))
 }
 
 export function goalStatusText(status?: SessionGoal["state"] extends { status?: infer T } ? T : string) {

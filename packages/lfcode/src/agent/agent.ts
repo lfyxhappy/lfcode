@@ -323,10 +323,7 @@ export const layer = Layer.effect(
               Permission.fromConfig({
                 "*": "deny",
                 read: "allow",
-                file_info: "allow",
-                tree: "allow",
                 search: "allow",
-                archive_inspect: "allow",
                 memory: "allow",
                 shell: "allow",
                 external_directory: {
@@ -338,10 +335,7 @@ export const layer = Layer.effect(
             ),
             toolAllowlist: [
               "read",
-              "file_info",
-              "tree",
               "search",
-              "archive_inspect",
               "memory",
               "shell",
             ],
@@ -358,10 +352,7 @@ export const layer = Layer.effect(
               Permission.fromConfig({
                 "*": "deny",
                 read: "allow",
-                file_info: "allow",
-                tree: "allow",
                 search: "allow",
-                archive_inspect: "allow",
                 memory: "allow",
                 shell: "allow",
                 external_directory: {
@@ -373,10 +364,7 @@ export const layer = Layer.effect(
             ),
             toolAllowlist: [
               "read",
-              "file_info",
-              "tree",
               "search",
-              "archive_inspect",
               "memory",
               "shell",
             ],
@@ -406,14 +394,9 @@ export const layer = Layer.effect(
                 Permission.fromConfig({
                   "*": "deny",
                   read: "allow",
-                  grep: "allow",
-                  glob: "allow",
-                  tree: "allow",
-                  file_info: "allow",
                   search: "allow",
                   webfetch: "allow",
                   websearch: "allow",
-                  codesearch: "allow",
                   actor: "deny",
                 }),
                 user,

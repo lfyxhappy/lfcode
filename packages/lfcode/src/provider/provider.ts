@@ -1097,6 +1097,12 @@ export const Model = Schema.Struct({
   variants: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
   cacheTTL: Schema.optional(Schema.Number),
   cachePromptTTL: Schema.optional(Schema.Literals(["5m", "1h"])),
+  metadata: Schema.optional(
+    Schema.Struct({
+      source: Schema.String,
+      updatedAt: Schema.optional(Schema.String),
+    }),
+  ),
 })
   .annotate({ identifier: "Model" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
@@ -1307,6 +1313,10 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       interleaved: model.interleaved ?? false,
     }),
     release_date: model.release_date ?? "",
+    metadata: {
+      source: "models.dev",
+      ...(model.last_updated || model.release_date ? { updatedAt: model.last_updated ?? model.release_date } : {}),
+    },
     variants: {},
   }
 
@@ -1435,6 +1445,8 @@ const layer: Layer.Layer<
 
           for (const [modelID, model] of Object.entries(provider.models ?? {})) {
             const existingModel = parsed.models[model.id ?? modelID]
+            const isOpenCodeProvider = providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID
+            const catalogBacked = isOpenCodeProvider && existingModel !== undefined
             const apiID = model.id ?? existingModel?.api.id ?? modelID
             const minimaxResponses =
               providerID === "minimax-cn-coding-plan" && ModelsDev.isMiniMaxResponsesModelID(apiID)
@@ -1485,11 +1497,9 @@ const layer: Layer.Layer<
               },
               status: model.status ?? existingModel?.status ?? "active",
               name,
-              reasoning_options: resolveModelReasoningOptions(
-                model.reasoning_options,
-                existingModel?.reasoning_options,
-                inferModelProfile({ modelID, apiID }),
-              ),
+              reasoning_options: catalogBacked
+                ? existingModel?.reasoning_options
+                : resolveModelReasoningOptions(model.reasoning_options, existingModel?.reasoning_options, inferModelProfile({ modelID, apiID })),
               providerID: ProviderID.make(providerID),
               capabilities: runtimeCapabilities({
                 base:
@@ -1503,13 +1513,10 @@ const layer: Layer.Layer<
                     input: { text: true, audio: false, image: false, video: false, pdf: false },
                     output: { text: true, audio: false, image: false, video: false, pdf: false },
                   } satisfies Partial<ReturnType<typeof normalizeModelCapabilities>>),
-                inferred: inferModelCapabilities({ modelID, apiID }),
-                legacy: legacyCapabilityConfig(model),
-                explicit: model.capabilities as ModelCapabilityConfig | undefined,
-                inferredLast:
-                  providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID
-                    ? inferModelCapabilities({ modelID, apiID })
-                    : undefined,
+                inferred: catalogBacked ? undefined : inferModelCapabilities({ modelID, apiID }),
+                legacy: catalogBacked ? undefined : legacyCapabilityConfig(model),
+                explicit: catalogBacked ? undefined : (model.capabilities as ModelCapabilityConfig | undefined),
+                inferredLast: !catalogBacked && isOpenCodeProvider ? inferModelCapabilities({ modelID, apiID }) : undefined,
                 interleaved:
                   model.interleaved ??
                   existingModel?.capabilities.interleaved ??
@@ -1518,18 +1525,19 @@ const layer: Layer.Layer<
                     : false),
               }),
               cost: {
-                input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,
-                output: model?.cost?.output ?? existingModel?.cost?.output ?? 0,
+                input: (catalogBacked ? existingModel?.cost?.input : model?.cost?.input) ?? existingModel?.cost?.input ?? 0,
+                output: (catalogBacked ? existingModel?.cost?.output : model?.cost?.output) ?? existingModel?.cost?.output ?? 0,
                 cache: {
-                  read: model?.cost?.cache_read ?? existingModel?.cost?.cache.read ?? 0,
-                  write: model?.cost?.cache_write ?? existingModel?.cost?.cache.write ?? 0,
+                  read: (catalogBacked ? existingModel?.cost?.cache.read : model?.cost?.cache_read) ?? existingModel?.cost?.cache.read ?? 0,
+                  write: (catalogBacked ? existingModel?.cost?.cache.write : model?.cost?.cache_write) ?? existingModel?.cost?.cache.write ?? 0,
                 },
               },
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {
                 context: (() => {
                   const inferred = inferModelLimits({ modelID, apiID })
-                  if (providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID) return inferred.context
+                  if (catalogBacked) return existingModel.limit.context
+                  if (isOpenCodeProvider) return model.limit?.context ?? inferred.context
                   const explicit = model.limit?.context ?? existingModel?.limit?.context
                   if (explicit !== undefined && explicit > 0) return explicit
                   if (inferred.context !== undefined) return inferred.context
@@ -1547,13 +1555,16 @@ const layer: Layer.Layer<
                 })(),
                 input: model.limit?.input ?? existingModel?.limit?.input,
                 output:
-                  providerID === OPENCODE_PROVIDER_ID || providerID === OPENCODE_GO_PROVIDER_ID
-                    ? inferModelLimits({ modelID, apiID }).output
+                  catalogBacked
+                    ? existingModel.limit.output
+                    : isOpenCodeProvider
+                      ? model.limit?.output ?? inferModelLimits({ modelID, apiID }).output
                     : [model.limit?.output, existingModel?.limit?.output].find((value) => value !== undefined && value > 0) ?? inferModelLimits({ modelID, apiID }).output,
               },
               headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
               family: model.family ?? existingModel?.family ?? "",
-              release_date: model.release_date ?? existingModel?.release_date ?? "",
+              release_date: (catalogBacked ? existingModel?.release_date : model.release_date) ?? existingModel?.release_date ?? "",
+              metadata: catalogBacked ? existingModel?.metadata : undefined,
               cachePromptTTL: model.cachePromptTTL ?? existingModel?.cachePromptTTL,
               variants: {},
             }

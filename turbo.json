@@ -20,11 +20,6 @@
       "outputs": [".artifacts/unit/junit.xml"],
       "passThroughEnv": ["*"]
     },
-    "@lfcode-ai/cli#test": {
-      "dependsOn": ["^build"],
-      "outputs": [],
-      "passThroughEnv": ["*"]
-    },
     "@lfcode-ai/app#test": {
       "dependsOn": ["^build"],
       "outputs": []

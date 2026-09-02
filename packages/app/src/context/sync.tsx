@@ -11,6 +11,7 @@ import {
   setSessionPrefetch,
 } from "./global-sync/session-prefetch"
 import { useGlobalSync } from "./global-sync"
+import { applyActivitySnapshot } from "./global-sync/event-reducer"
 import { useSDK } from "./sdk"
 import type { Message, Part } from "@lfcode-ai/sdk/v2/client"
 import {
@@ -503,11 +504,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
             const hasSession = Binary.search(store.session, sessionID, (s) => s.id).found
             const cached = store.message[sessionID] !== undefined && meta.limit[key] !== undefined
+            const activityCached = store.activity?.[sessionID] !== undefined
             // Messages can survive a restart in the client cache while actor
             // registrations do not. Keep the actor snapshot as an independent
             // cache so reopening a session always hydrates the subagent rail.
             const actorsCached = store.actor[sessionID] !== undefined
-            if (cached && hasSession && actorsCached && !opts?.force) return
+            if (cached && hasSession && actorsCached && activityCached && !opts?.force) return
 
             const limit = Math.max(meta.limit[key] ?? 0, initialMessagePageSize)
             const sessionReq = hasSession && !opts?.force
@@ -529,6 +531,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                   )
                 })
             const actorReq = retry(() => client.session.actors({ sessionID }))
+            const activityReq = activityCached && !opts?.force
+              ? Promise.resolve()
+              : retry(() => client.activity.list({ sessionID })).then((activities) => {
+                  if (!tracked(directory, sessionID)) return
+                  applyActivitySnapshot({
+                    sessionID,
+                    activities: activities.data?.items ?? [],
+                    store,
+                    setStore,
+                  })
+                })
             const messagesReq = cached && !opts?.force
               ? Promise.resolve()
               : loadMessages({
@@ -556,6 +569,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 }[]
                 setStore("actor", sessionID, list.filter((actor) => actor.visible !== false).sort((a, b) => a.time.created - b.time.created))
               }),
+              activityReq,
               messagesReq,
             ])
           })

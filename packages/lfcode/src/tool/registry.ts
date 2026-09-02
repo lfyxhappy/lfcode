@@ -1,7 +1,7 @@
 import { PlanExitTool } from "./plan"
 import { Session } from "../session"
 import { QuestionTool } from "./question"
-import { BashTool, ShellTool } from "./bash"
+import { ShellTool } from "./bash"
 import { EditTool } from "./edit"
 import { HistoryTool } from "./history"
 import { MemoryTool } from "./memory"
@@ -39,7 +39,7 @@ import { ChangeDirectoryTool } from "./change-directory"
 import { Glob } from "@lfcode-ai/shared/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context } from "effect"
+import { Cause, Effect, Layer, Context } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -83,33 +83,18 @@ import { AppListWindowsTool } from "./app_list_windows"
 import { AppGetEventsTool } from "./app_get_events"
 import { AppGetAutomationStatusTool } from "./app_get_automation_status"
 import { AppWaitForEventTool } from "./app_wait_for_event"
-import { AppGetConsoleTool } from "./app_get_console"
-import { AppGetNetworkTool } from "./app_get_network"
 import { AppCaptureWindowTool } from "./app_capture_window"
 import { AppCaptureDiagnosticsBundleTool } from "./app_capture_diagnostics_bundle"
-import { AppOpenBrowserTool } from "./app_open_browser"
 import { AppOpenRouteTool } from "./app_open_route"
 import { AppOpenSessionTool } from "./app_open_session"
 import { AppOpenSideChatTool } from "./app_open_side_chat"
 import { AppFocusSideChatTool } from "./app_focus_side_chat"
 import { AppCloseSideChatTool } from "./app_close_side_chat"
 import { AppFiletabActionTool } from "./app_filetab_action"
-import { AppReadBrowserPageTool } from "./app_read_browser_page"
-import { AppBrowserSnapshotTool } from "./app_browser_snapshot"
-import { AppBrowserScreenshotTool } from "./app_browser_screenshot"
-import { AppBrowserExtractResourceTool } from "./app_browser_extract_resource"
-import { AppBrowserListCachedResourcesTool } from "./app_browser_list_cached_resources"
-import { AppBrowserDownloadResourceTool } from "./app_browser_download_resource"
-import { AppFocusBrowserTabTool } from "./app_focus_browser_tab"
-import { AppBrowserClickTool } from "./app_browser_click"
-import { AppBrowserScrollTool } from "./app_browser_scroll"
-import { AppBrowserTypeTool } from "./app_browser_type"
-import { AppBrowserWaitTool } from "./app_browser_wait"
 import { AppSetInputTool } from "./app_set_input"
 import { AppAppendInputTool } from "./app_append_input"
 import { AppSendTool } from "./app_send"
 import { AppWaitForStateTool } from "./app_wait_for_state"
-import { AppCloseBrowserTabTool } from "./app_close_browser_tab"
 import { BrowserTool } from "./browser"
 import { AppControlTool, AppControlToolID } from "./app_control"
 import { CppTool } from "./cpp"
@@ -127,53 +112,16 @@ import { appControlPermissionRank } from "@/app-control/client"
 
 const log = Log.create({ service: "tool.registry" })
 
-const browserToolIDs = new Set<string>([
-  AppGetConsoleTool.id,
-  AppGetNetworkTool.id,
-  AppOpenBrowserTool.id,
-  AppBrowserSnapshotTool.id,
-  AppReadBrowserPageTool.id,
-  AppBrowserScreenshotTool.id,
-  AppBrowserListCachedResourcesTool.id,
-  AppBrowserExtractResourceTool.id,
-  AppBrowserDownloadResourceTool.id,
-  AppFocusBrowserTabTool.id,
-  AppBrowserClickTool.id,
-  AppBrowserScrollTool.id,
-  AppBrowserTypeTool.id,
-  AppBrowserWaitTool.id,
-  AppCloseBrowserTabTool.id,
-])
-
-const appReadToolIDs = new Set<string>([
-  AppGetStateTool.id,
-  AppEditorQueryTool.id,
-  AppFiletabQueryTool.id,
-  AppUiQueryTool.id,
-  AppListWindowsTool.id,
-  AppGetEventsTool.id,
-  AppGetAutomationStatusTool.id,
-  AppWaitForEventTool.id,
-  AppCaptureWindowTool.id,
-  AppCaptureDiagnosticsBundleTool.id,
-  AppWaitForStateTool.id,
-])
-
-const appSessionToolIDs = new Set<string>([
-  AppOpenRouteTool.id,
-  AppOpenSessionTool.id,
-  AppOpenSideChatTool.id,
-  AppFocusSideChatTool.id,
-  AppCloseSideChatTool.id,
-  AppFiletabActionTool.id,
-  AppUiActionTool.id,
-  AppEditorActionTool.id,
-  AppSetInputTool.id,
-  AppAppendInputTool.id,
-  AppSendTool.id,
-])
-
-const legacyAppToolIDs = new Set<string>([...appReadToolIDs, ...appSessionToolIDs, AppDomTool.id])
+const failOpen = <A, E, R>(label: string, effect: Effect.Effect<A, E, R>, fallback: A): Effect.Effect<A, never, R> =>
+  effect.pipe(
+    Effect.catchCause((cause) => {
+      if (Cause.hasInterrupts(cause)) return Effect.interrupt
+      return Effect.sync(() => {
+        log.warn("tool registry side effect failed; continuing", { label, error: String(cause) })
+        return fallback
+      })
+    }),
+  )
 
 const managementToolIDs = new Set<string>([
   "plugin_author",
@@ -290,7 +238,6 @@ export const layer = Layer.effect(
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
-    const bash = yield* BashTool
     const pip = yield* PipTool
     const python = yield* PythonTool
     const cpp = yield* CppTool
@@ -326,33 +273,18 @@ export const layer = Layer.effect(
     const appGetEventsTool = yield* AppGetEventsTool
     const appGetAutomationStatusTool = yield* AppGetAutomationStatusTool
     const appWaitForEventTool = yield* AppWaitForEventTool
-    const appGetConsoleTool = yield* AppGetConsoleTool
-    const appGetNetworkTool = yield* AppGetNetworkTool
     const appCaptureWindowTool = yield* AppCaptureWindowTool
     const appCaptureDiagnosticsBundleTool = yield* AppCaptureDiagnosticsBundleTool
-    const appOpenBrowserTool = yield* AppOpenBrowserTool
     const appOpenRouteTool = yield* AppOpenRouteTool
     const appOpenSessionTool = yield* AppOpenSessionTool
     const appOpenSideChatTool = yield* AppOpenSideChatTool
     const appFocusSideChatTool = yield* AppFocusSideChatTool
     const appCloseSideChatTool = yield* AppCloseSideChatTool
     const appFiletabActionTool = yield* AppFiletabActionTool
-    const appReadBrowserPageTool = yield* AppReadBrowserPageTool
-    const appBrowserSnapshotTool = yield* AppBrowserSnapshotTool
-    const appBrowserScreenshotTool = yield* AppBrowserScreenshotTool
-    const appBrowserExtractResourceTool = yield* AppBrowserExtractResourceTool
-    const appBrowserListCachedResourcesTool = yield* AppBrowserListCachedResourcesTool
-    const appBrowserDownloadResourceTool = yield* AppBrowserDownloadResourceTool
-    const appFocusBrowserTabTool = yield* AppFocusBrowserTabTool
-    const appBrowserClickTool = yield* AppBrowserClickTool
-    const appBrowserScrollTool = yield* AppBrowserScrollTool
-    const appBrowserTypeTool = yield* AppBrowserTypeTool
-    const appBrowserWaitTool = yield* AppBrowserWaitTool
     const appSetInputTool = yield* AppSetInputTool
     const appAppendInputTool = yield* AppAppendInputTool
     const appSendTool = yield* AppSendTool
     const appWaitForStateTool = yield* AppWaitForStateTool
-    const appCloseBrowserTabTool = yield* AppCloseBrowserTabTool
     const appControlTargets = yield* Effect.all({
       get_state: Tool.init(appGetStateTool),
       editor_action: Tool.init(appEditorActionTool),
@@ -404,7 +336,10 @@ export const layer = Layer.effect(
               Effect.gen(function* () {
                 const pluginCtx: PluginToolContext = {
                   ...toolCtx,
-                  ask: (req) => toolCtx.ask(req),
+                  // Keep the permission failure intact at runtime. The public
+                  // plugin contract predates typed Effect errors, so this is a
+                  // type-only widening at the adapter boundary.
+                  ask: (req) => toolCtx.ask(req) as unknown as Effect.Effect<void>,
                   directory: ctx.directory,
                   worktree: ctx.worktree,
                 }
@@ -428,36 +363,53 @@ export const layer = Layer.effect(
           }
         }
 
-        const dirs = yield* config.directories()
+        const dirs = yield* failOpen("directories", config.directories(), [])
         const matches = dirs.flatMap((dir) =>
           Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
         )
-        if (matches.length) yield* config.waitForDependencies()
+        if (matches.length) yield* failOpen("wait-for-dependencies", config.waitForDependencies(), undefined)
         for (const match of matches) {
           const namespace = path.basename(match, path.extname(match))
           // `match` is an absolute filesystem path from `Glob.scanSync(..., { absolute: true })`.
           // Import it as `file://` so Node on Windows accepts the dynamic import.
-          const mod = yield* Effect.promise(() => import(pathToFileURL(match).href))
+          const mod = yield* failOpen(
+            `load:${match}`,
+            Effect.promise(() => import(pathToFileURL(match).href)),
+            undefined,
+          )
+          if (!mod) continue
           for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
-            custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
+            const tool = yield* failOpen(
+              `definition:${id}`,
+              Effect.try({
+                try: () => fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def),
+                catch: (error) => error,
+              }),
+              undefined,
+            )
+            if (tool) custom.push(tool)
           }
         }
 
-        const plugins = yield* plugin.list()
+        const plugins = yield* failOpen("plugin-list", plugin.list(), [])
         for (const p of plugins) {
           for (const [id, def] of Object.entries(p.tool ?? {})) {
-            custom.push(fromPlugin(id, def))
+            const tool = yield* failOpen(
+              `plugin-definition:${id}`,
+              Effect.try({
+                try: () => fromPlugin(id, def),
+                catch: (error) => error,
+              }),
+              undefined,
+            )
+            if (tool) custom.push(tool)
           }
         }
 
-        yield* config.get()
-        const questionEnabled =
-          ["app", "cli", "desktop"].includes(Flag.LFCODE_CLIENT) || Flag.LFCODE_ENABLE_QUESTION_TOOL
-
+        yield* failOpen("config", config.get(), undefined)
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
           shell: Tool.init(shell),
-          bash: Tool.init(bash),
           pip: Tool.init(pip),
           python: Tool.init(python),
           cpp: Tool.init(cpp),
@@ -491,33 +443,18 @@ export const layer = Layer.effect(
           appGetEvents: Effect.succeed(appControlTargets.get_events),
           appGetAutomationStatus: Effect.succeed(appControlTargets.get_automation_status),
           appWaitForEvent: Effect.succeed(appControlTargets.wait_for_event),
-          appGetConsole: Tool.init(appGetConsoleTool),
-          appGetNetwork: Tool.init(appGetNetworkTool),
           appCaptureWindow: Effect.succeed(appControlTargets.capture_window),
           appCaptureDiagnosticsBundle: Effect.succeed(appControlTargets.capture_diagnostics_bundle),
-          appOpenBrowser: Tool.init(appOpenBrowserTool),
           appOpenRoute: Effect.succeed(appControlTargets.open_route),
           appOpenSession: Effect.succeed(appControlTargets.open_session),
           appOpenSideChat: Effect.succeed(appControlTargets.open_side_chat),
           appFocusSideChat: Effect.succeed(appControlTargets.focus_side_chat),
           appCloseSideChat: Effect.succeed(appControlTargets.close_side_chat),
           appFiletabAction: Effect.succeed(appControlTargets.filetab_action),
-          appReadBrowserPage: Tool.init(appReadBrowserPageTool),
-          appBrowserSnapshot: Tool.init(appBrowserSnapshotTool),
-          appBrowserScreenshot: Tool.init(appBrowserScreenshotTool),
-          appBrowserExtractResource: Tool.init(appBrowserExtractResourceTool),
-          appBrowserListCachedResources: Tool.init(appBrowserListCachedResourcesTool),
-          appBrowserDownloadResource: Tool.init(appBrowserDownloadResourceTool),
-          appFocusBrowserTab: Tool.init(appFocusBrowserTabTool),
-          appBrowserClick: Tool.init(appBrowserClickTool),
-          appBrowserScroll: Tool.init(appBrowserScrollTool),
-          appBrowserType: Tool.init(appBrowserTypeTool),
-          appBrowserWait: Tool.init(appBrowserWaitTool),
           appSetInput: Effect.succeed(appControlTargets.set_input),
           appAppendInput: Effect.succeed(appControlTargets.append_input),
           appSend: Effect.succeed(appControlTargets.send),
           appWaitForState: Effect.succeed(appControlTargets.wait_for_state),
-          appCloseBrowserTab: Tool.init(appCloseBrowserTabTool),
           browser: Tool.init(browserTool),
           appControl: Tool.init(appControl),
           edit: Tool.init(edit),
@@ -595,84 +532,21 @@ export const layer = Layer.effect(
         return {
           custom,
           builtin: [
-            tool.invalid,
             extensionSearch,
             extensionUse,
-            ...(questionEnabled ? [tool.question] : []),
+            tool.question,
             tool.shell,
-            tool.pip,
-            tool.python,
-            tool.cpp,
-            tool.runtimeManage,
             tool.shellProcess,
-            tool.office,
-            tool.toolOutput,
-            tool.pluginAuthor,
-            tool.pluginManage,
-            tool.skillManage,
-            tool.hookManage,
-            tool.mcpManage,
-            tool.providerManage,
-            tool.credentialManage,
-            tool.contextBroker,
-            tool.capabilityManage,
             tool.read,
-            tool.fileInfo,
             tool.fileSearch,
-            tool.archiveInspect,
-            tool.tree,
-            tool.editHistory,
             tool.appControl,
-            tool.appGetState,
-            tool.appEditorAction,
-            tool.appEditorQuery,
-            tool.appFiletabQuery,
-            tool.appUiAction,
-            tool.appUiQuery,
-            tool.appDom,
-            tool.appListWindows,
-            tool.appGetEvents,
-            tool.appGetAutomationStatus,
-            tool.appWaitForEvent,
-            tool.appGetConsole,
-            tool.appGetNetwork,
-            tool.appCaptureWindow,
-            tool.appCaptureDiagnosticsBundle,
-            tool.appOpenBrowser,
-            tool.appOpenRoute,
-            tool.appOpenSession,
-            tool.appOpenSideChat,
-            tool.appFocusSideChat,
-            tool.appCloseSideChat,
-            tool.appFiletabAction,
-            tool.appReadBrowserPage,
-            tool.appBrowserSnapshot,
-            tool.appBrowserScreenshot,
-            tool.appBrowserExtractResource,
-            tool.appBrowserListCachedResources,
-            tool.appBrowserDownloadResource,
-            tool.appFocusBrowserTab,
-            tool.appBrowserClick,
-            tool.appBrowserScroll,
-            tool.appBrowserType,
-            tool.appBrowserWait,
-            tool.appSetInput,
-            tool.appAppendInput,
-            tool.appSend,
-            tool.appWaitForState,
-            tool.appCloseBrowserTab,
             tool.browser,
             tool.edit,
             tool.fetch,
             tool.search,
-            tool.code,
             tool.skill,
-            tool.changedir,
             tool.actor,
-            ...(Flag.LFCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
-            tool.plan,
             tool.memory,
-            tool.history,
             tool.task,
             tool.createGoal,
             tool.getGoal,
@@ -745,12 +619,9 @@ export const layer = Layer.effect(
 
       const extensionIDs = new Set(cacheState.custom.map((tool) => tool.id))
       const activeSkills = new Set(input.activeSkills ?? [])
-      const activeExtensionIDs = new Set(
-        cacheState.custom
-          .filter((tool) => tool.activationSkill && extensionToolIsActive(tool, activeSkills))
-          .map((tool) => tool.id),
-      )
-      let filtered = (yield* all()).filter((tool) => !extensionIDs.has(tool.id) || activeExtensionIDs.has(tool.id))
+      // Extensions remain discoverable only through search_tool/use_tool. They
+      // are never injected into the base model tool schema.
+      let filtered = (yield* all()).filter((tool) => !extensionIDs.has(tool.id))
       filtered = filtered.filter((tool) => {
         const explicitlyAllowed = input.agent.toolAllowlist?.includes(tool.id) ?? false
         if (managementToolIDs.has(tool.id)) return explicitlyAllowed
@@ -767,19 +638,6 @@ export const layer = Layer.effect(
         if (tool.id === ActorTool.id) return input.agent.mode === "primary" || explicitlyAllowed
         if (tool.id === AppControlToolID) return appControl.enabled
         if (tool.id === BrowserTool.id) return browserControl.enabled
-        // Browser tools are a shared verification capability. Their visibility
-        // is controlled by the browser switch; a child-agent allowlist must not
-        // hide them and make read-only/browser diagnostics impossible.
-        if (browserToolIDs.has(tool.id)) return browserControl.enabled
-        if (legacyAppToolIDs.has(tool.id)) {
-          if (!explicitlyAllowed || !appControl.enabled) return false
-          if (appReadToolIDs.has(tool.id)) return true
-          if (appSessionToolIDs.has(tool.id)) {
-            return appControlPermissionRank(appControl.permission) >= appControlPermissionRank("session_control")
-          }
-          return appControlPermissionRank(appControl.permission) >= appControlPermissionRank("full_app_control")
-        }
-
         return true
       })
 
@@ -790,9 +648,9 @@ export const layer = Layer.effect(
         // `use_tool` still verifies both the discovered name and skill activation.
         filtered = filtered.filter(
           (tool) =>
-            ["invalid", "search_tool", "use_tool"].includes(tool.id) ||
+            ["search_tool", "use_tool"].includes(tool.id) ||
             tool.id === BrowserTool.id ||
-            browserToolIDs.has(tool.id) ||
+            tool.id === AppControlToolID ||
             allowed.has(tool.id),
         )
       }
@@ -801,39 +659,52 @@ export const layer = Layer.effect(
 
       const result = yield* Effect.forEach(
         filtered,
-        Effect.fnUntraced(function* (tool: Tool.Def) {
-          using _ = log.time(tool.id)
-          const output = {
-            description: tool.description,
-            parameters: tool.parameters,
-          }
-          yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
-          const style = resolveStyle(tool.id)
-          const useShell = style === "shell" && tool.shell !== undefined
-          if (style === "shell" && !tool.shell) {
-            warnShellFallbackOnce(tool.id)
-          }
-          const effective: Tool.Def = useShell ? shellWrap(tool) : tool
-          const description = useShell ? tool.shell!.description : output.description
-          return {
-            id: tool.id,
-            description: [
-              description,
-              tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,
-              tool.id === SkillTool.id ? yield* describeSkill() : undefined,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-            parameters: useShell ? effective.parameters : output.parameters,
-            execute: effective.execute,
-            metadata: Tool.definitionMetadata(effective),
-            formatValidationError: effective.formatValidationError,
-          }
-        }),
+        (tool: Tool.Def): Effect.Effect<Tool.Def | undefined> =>
+          Effect.gen(function* () {
+            using _ = log.time(tool.id)
+            const output = {
+              description: tool.description,
+              parameters: tool.parameters,
+            }
+            yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
+            const style = resolveStyle(tool.id)
+            const useShell = style === "shell" && tool.shell !== undefined
+            if (style === "shell" && !tool.shell) {
+              warnShellFallbackOnce(tool.id)
+            }
+            const effective: Tool.Def = useShell ? shellWrap(tool) : tool
+            const description = useShell ? tool.shell!.description : output.description
+            return {
+              id: tool.id,
+              description: [
+                description,
+                tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,
+                tool.id === SkillTool.id ? yield* describeSkill() : undefined,
+              ]
+                .filter(Boolean)
+                .join("\n"),
+              parameters: useShell ? effective.parameters : output.parameters,
+              execute: effective.execute,
+              metadata: Tool.definitionMetadata(effective),
+              formatValidationError: effective.formatValidationError,
+            }
+          }).pipe(
+            Effect.catchCause((cause) => {
+              if (Cause.hasInterrupts(cause)) return Effect.interrupt
+              return Effect.sync(() => {
+                log.warn("tool definition unavailable; omitting from request", {
+                  tool: tool.id,
+                  error: String(cause),
+                })
+                return undefined
+              })
+            }),
+          ),
         { concurrency: "unbounded" },
       )
-      cacheState.cache.set(key, { expires: Date.now() + 15_000, tools: result })
-      return result
+      const available = result.filter((tool): tool is Tool.Def => tool !== undefined)
+      cacheState.cache.set(key, { expires: Date.now() + 15_000, tools: available })
+      return available
     })
 
     const named: Interface["named"] = Effect.fn("ToolRegistry.named")(function* () {

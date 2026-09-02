@@ -18,10 +18,6 @@ const require = createRequire(import.meta.url)
 const PLAYWRIGHT_MCP_COMMAND = ["cmd", "/c", "npx", "-y", "@playwright/mcp@0.0.73"] as const
 const PLAYWRIGHT_MCP_CDP_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--cdp-endpoint=http://127.0.0.1:9222"] as const
 const PLAYWRIGHT_MCP_LEGACY_COMMAND = [...PLAYWRIGHT_MCP_COMMAND, "--browser", "chrome"] as const
-const PLAYWRIGHT_MCP_REMOTE_URL = "{env:LFCODE_SERVER_URL}/global/mcp/playwright"
-const PLAYWRIGHT_MCP_REMOTE_HEADERS = {
-  authorization: "{env:LFCODE_SERVER_AUTH}",
-} as const
 const WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND = [
   "cmd",
   "/c",
@@ -29,13 +25,6 @@ const WINDOWS_COMPUTER_USE_MCP_LEGACY_COMMAND = [
   "\"%LFCODE_CONFIG_DIR%\\resources\\mcp\\windows-computer-use-mcp\\bundle\\index.js\"",
 ] as const
 const WINDOWS_COMPUTER_USE_MCP_PREVIOUS_COMMAND = ["node", "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js"] as const
-const WINDOWS_COMPUTER_USE_MCP_COMMAND = [
-  "{env:LFCODE_BUNDLED_NODE}",
-  "{env:LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR}/bundle/index.js",
-] as const
-const WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT = {
-  ELECTRON_RUN_AS_NODE: "1",
-} as const
 const PLAYWRIGHT_MCP_KEYS = ["type", "command", "enabled"] as const
 const PLAYWRIGHT_MCP_REMOTE_KEYS = ["type", "url", "headers", "enabled"] as const
 const WINDOWS_COMPUTER_USE_MCP_KEYS = ["type", "command", "enabled"] as const
@@ -47,7 +36,7 @@ const CODEGRAPH_NODE_MCP_COMMAND = [
   "--mcp",
 ] as const
 const CODEGRAPH_MCP_KEYS = ["type", "command", "enabled"] as const
-const BUNDLED_MCP_MIGRATION_VERSION = 3
+const BUNDLED_MCP_MIGRATION_VERSION = 5
 const CODEGRAPH_MCP_MIGRATION_VERSION = 2
 const DEFAULT_LSP_MIGRATION_VERSION = 1
 
@@ -146,21 +135,7 @@ function codegraphConfig(codegraph: CodegraphBootstrap) {
 }
 
 function defaultRootConfig(codegraph?: CodegraphBootstrap) {
-  const mcp = {
-    playwright: {
-      type: "remote" as const,
-      url: PLAYWRIGHT_MCP_REMOTE_URL,
-      headers: PLAYWRIGHT_MCP_REMOTE_HEADERS,
-      enabled: true,
-    },
-    "windows-computer-use": {
-      type: "local" as const,
-      command: WINDOWS_COMPUTER_USE_MCP_COMMAND,
-      environment: WINDOWS_COMPUTER_USE_MCP_ENVIRONMENT,
-      enabled: true,
-    },
-    ...(codegraph?.kind === "bundled" ? { codegraph: codegraphConfig(codegraph) } : {}),
-  }
+  const mcp = codegraph?.kind === "bundled" ? { codegraph: codegraphConfig(codegraph) } : {}
   return {
     $schema: "https://lfcode.ai/config.json",
     lsp: true,
@@ -197,9 +172,6 @@ export function applyBootstrapState(app: App, state: DesktopBootstrapState) {
   delete process.env.LFCODE_GIT_PATH
   delete process.env.LFCODE_GIT_SSH_PATH
   delete process.env.LFCODE_GIT_LESS_PATH
-  process.env.LFCODE_WINDOWS_COMPUTER_USE_MCP_DIR = app.isPackaged
-    ? join(process.resourcesPath, "mcp", "windows-computer-use-mcp").replaceAll("\\", "/")
-    : join(app.getAppPath(), "../../.windows-computer-use-mcp").replaceAll("\\", "/")
   if (process.platform === "win32") {
     const managedPythonRoot = state.layout ? join(state.layout.configDir, "plugins", "runtime-python", "data") : undefined
     const managedPythonPath = managedPythonRoot ? join(managedPythonRoot, "Scripts", "python.exe").replaceAll("\\", "/") : ""
@@ -614,39 +586,14 @@ async function upgradeManagedRootConfigFile(layout: RootLayout, codegraph: Codeg
   }
 
   if (mcp) {
-    const playwright = mcp.playwright
-    if (
-      isLegacyPlaywrightConfig(playwright) ||
-      isPlaywrightCdpConfig(playwright) ||
-      isStaleBundledPlaywrightRemoteConfig(playwright) ||
-      (bundledMcpMigrationPending && playwright === undefined)
-    ) {
-      updated = applyEdits(
-        updated,
-        modify(updated, ["mcp", "playwright"], defaultRootConfig(codegraph).mcp.playwright, {
-          formattingOptions: {
-            insertSpaces: true,
-            tabSize: 2,
-          },
-        }),
-      )
+    if (Object.hasOwn(mcp, "playwright")) {
+      updated = applyEdits(updated, modify(updated, ["mcp", "playwright"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
       changed = true
     }
 
-    const windowsComputerUse = mcp["windows-computer-use"]
-    if (
-      isLegacyWindowsComputerUseConfig(windowsComputerUse) ||
-      (bundledMcpMigrationPending && windowsComputerUse === undefined)
-    ) {
-      updated = applyEdits(
-        updated,
-        modify(updated, ["mcp", "windows-computer-use"], defaultRootConfig(codegraph).mcp["windows-computer-use"], {
-          formattingOptions: {
-            insertSpaces: true,
-            tabSize: 2,
-          },
-        }),
-      )
+    if (Object.hasOwn(mcp, "playwright") || Object.hasOwn(mcp, "windows-computer-use")) {
+      updated = applyEdits(updated, modify(updated, ["mcp", "playwright"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+      updated = applyEdits(updated, modify(updated, ["mcp", "windows-computer-use"], undefined, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
       changed = true
     }
 

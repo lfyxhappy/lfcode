@@ -1,4 +1,6 @@
 import type { AssistantMessage, Message } from "@lfcode-ai/sdk/v2/client"
+import { formatTokenCount } from "@lfcode-ai/shared/token-format"
+export { formatTokenCount } from "@lfcode-ai/shared/token-format"
 
 export const TPS_WINDOW_MS = 5_000
 // Keep extra history so sparse provider updates still retain a sample before the window cutoff.
@@ -32,16 +34,6 @@ export function estimateTextTokens(input: string) {
   }
   flushAscii()
   return tokens
-}
-
-export function formatTokenCount(value: number) {
-  if (!Number.isFinite(value)) return "—"
-  const absolute = Math.abs(value)
-  const formatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
-  if (absolute < 1_000) return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value)
-  if (absolute < 1_000_000) return `${formatter.format(value / 1_000)}K`
-  if (absolute < 1_000_000_000) return `${formatter.format(value / 1_000_000)}M`
-  return `${formatter.format(value / 1_000_000_000)}B`
 }
 
 export type TokenSample = {

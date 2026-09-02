@@ -159,7 +159,7 @@ CRITICAL CONSTRAINTS:
 
 6. Do not call Read on source files (no /tmp/.../src/lexer.ts type reads). The conversation already contains everything you need. Reading source files wastes turns.
 
-7. Available tools (runtime-enforced whitelist): read, file_info, tree, search, archive_inspect, edit, edit_history, task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use `edit` only: `operation:"replace"` for one exact current block and `operation:"patch"` for broader file changes.
+7. Available tools (runtime-enforced whitelist): read, search, edit, and task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use `edit` only: `operation:"replace"` for one exact current block and `operation:"patch"` for broader file changes.
 
 8. After turn 2's Edits, your response is complete. Do not summarize what you wrote.
 

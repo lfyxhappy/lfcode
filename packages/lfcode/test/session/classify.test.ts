@@ -111,7 +111,7 @@ describe("classifyAssistantStep", () => {
 
   describe("core guarantee: any finish + client tool part => continue", () => {
     for (const finish of ["stop", "other", "length", "content-filter"]) {
-      test(`finish=${finish} + client tool part (with non-empty final text) => continue`, () => {
+      test(`finish=${finish} + client tool part (with non-empty final text) => ${finish === "content-filter" ? "filtered" : "continue"}`, () => {
         expect(
           classifyAssistantStep({
             phase: "after-process",
@@ -119,7 +119,7 @@ describe("classifyAssistantStep", () => {
             assistant: assistantInfo("m-2", { finish }),
             parts: [textPart("m-2", "looks done but a tool is still pending"), toolPart("m-2")],
           }),
-        ).toEqual({ type: "continue" })
+        ).toEqual({ type: finish === "content-filter" ? "filtered" : "continue" })
       })
     }
   })
@@ -344,6 +344,28 @@ describe("classifyAssistantStep", () => {
     expect(result).toEqual({ type: "failed", reason: "APIError" })
   })
 
+  test("pending tool part plus assistant error → failed for interruption retry", () => {
+    const pendingPart = {
+      ...basePart("m-2"),
+      type: "tool" as const,
+      callID: "call-pending",
+      tool: "browser",
+      state: { status: "pending" as const, input: {}, raw: "{}" },
+    } as unknown as MessageV2.Part
+
+    expect(
+      classifyAssistantStep({
+        phase: "after-process",
+        lastUser,
+        assistant: assistantInfo("m-2", {
+          finish: "stop",
+          error: new MessageV2.APIError({ message: "renderer disconnected", isRetryable: true }).toObject(),
+        }),
+        parts: [pendingPart],
+      }),
+    ).toEqual({ type: "failed", reason: "APIError" })
+  })
+
   test("PowerShell syntax guard error + text => continue for command recovery", () => {
     const guardError =
       "This Windows terminal tool only accepts PowerShell 7 (`pwsh`) syntax. Bash heredocs are not supported here."
@@ -361,6 +383,54 @@ describe("classifyAssistantStep", () => {
         lastUser,
         assistant: assistantInfo("m-2", { finish: "tool-calls" }),
         parts: [textPart("m-2", "I will inspect the archive count."), errorPart],
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("runtime tool error + text => continue so the model can handle the error", () => {
+    const errorPart = {
+      ...basePart("m-2"),
+      type: "tool" as const,
+      callID: "call-1",
+      tool: "browser",
+      state: {
+        status: "error" as const,
+        input: { url: "file:///missing.html" },
+        error: "navigation failed: ERR_FILE_NOT_FOUND",
+        time: { start: 1, end: 2 },
+      },
+    } as unknown as MessageV2.Part
+
+    expect(
+      classifyAssistantStep({
+        phase: "after-process",
+        lastUser,
+        assistant: assistantInfo("m-2", { finish: "tool-calls" }),
+        parts: [textPart("m-2", "I will retry with another route."), errorPart],
+      }),
+    ).toEqual({ type: "continue" })
+  })
+
+  test("legacy edit validation error + text => continue for edit recovery", () => {
+    const errorPart = {
+      ...basePart("m-2"),
+      type: "tool" as const,
+      callID: "call-1",
+      tool: "edit",
+      state: {
+        status: "error" as const,
+        input: { path: "index.html", content: "<html />" },
+        error: "[tool_error] edit_replace_fields_missing\noldString and newString are required when operation is replace.",
+        time: { start: 1, end: 2 },
+      },
+    } as unknown as MessageV2.Part
+
+    expect(
+      classifyAssistantStep({
+        phase: "after-process",
+        lastUser,
+        assistant: assistantInfo("m-2", { finish: "tool-calls" }),
+        parts: [textPart("m-2", "I will create the file."), errorPart],
       }),
     ).toEqual({ type: "continue" })
   })

@@ -210,6 +210,26 @@ describe("assistant messages", () => {
 })
 
 describe("tool calls", () => {
+  test("does not double-encode a provider-supplied JSON object string", () => {
+    const result = convertToCopilotMessages([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            input: '{"operation":{"action":"run"}}',
+            toolCallId: "actor-call",
+            toolName: "actor",
+          },
+        ],
+      },
+    ])
+
+    const firstMessage = (result as Array<unknown>)[0] as { tool_calls?: Array<{ function: { arguments: string } }> }
+    const toolCall = firstMessage.tool_calls?.[0]
+    expect(toolCall?.function.arguments).toBe('{"operation":{"action":"run"}}')
+  })
+
   test("should stringify arguments to tool calls", () => {
     const result = convertToCopilotMessages([
       {

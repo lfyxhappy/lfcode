@@ -93,7 +93,7 @@ export const CppTool = Tool.define(
             args: params.args,
           })
           yield* ctx.ask({
-            permission: "bash",
+            permission: "shell",
             patterns: [compiler.command],
             always: ["*"],
             metadata: {
@@ -162,7 +162,7 @@ const ensureCppCompiler = Effect.fn("CppTool.ensureCppCompiler")(function* (ctx:
     )
   }
   yield* ctx.ask({
-    permission: "bash",
+    permission: "shell",
     patterns: ["runtime:install:cpp-compiler"],
     always: ["*"],
     metadata: {

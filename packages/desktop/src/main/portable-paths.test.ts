@@ -45,7 +45,6 @@ describe("desktop bootstrap paths", () => {
     $schema: "https://lfcode.ai/config.json",
     lsp: true,
     mcp: {
-      playwright: playwrightRemoteConfig,
       "windows-computer-use": windowsComputerUseConfig,
     },
   }
@@ -569,7 +568,7 @@ describe("desktop bootstrap paths", () => {
       },
     })
     expect(JSON.parse(await fs.readFile(path.join(root, "state", "migration.json"), "utf8"))).toMatchObject({
-      bundledMcpVersion: 3,
+      bundledMcpVersion: 4,
     })
   })
 
@@ -633,7 +632,6 @@ describe("desktop bootstrap paths", () => {
           command: ["codegraph", "serve", "--mcp"],
           enabled: true,
         },
-        playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
     })
@@ -873,7 +871,6 @@ describe("desktop bootstrap paths", () => {
       $schema: "https://lfcode.ai/config.json",
       lsp: true,
       mcp: {
-        playwright: playwrightRemoteConfig,
         "windows-computer-use": windowsComputerUseConfig,
       },
     })
@@ -964,7 +961,7 @@ describe("desktop bootstrap paths", () => {
     expect(JSON.parse(await fs.readFile(path.join(managedRoot, "lfcode.jsonc"), "utf8"))).toEqual({
       lsp: true,
       mcp: {
-        playwright: playwrightRemoteConfig,
+        "windows-computer-use": windowsComputerUseConfig,
       },
     })
   })

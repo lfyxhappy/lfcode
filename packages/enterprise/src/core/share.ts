@@ -1,5 +1,5 @@
 import { Message, Model, Part, Session, SnapshotFileDiff } from "@lfcode-ai/sdk/v2"
-import { iife } from "@lfcode-ai/core/util/iife"
+import { iife } from "@lfcode-ai/shared/util/iife"
 import z from "zod"
 import { Storage } from "./storage"
 

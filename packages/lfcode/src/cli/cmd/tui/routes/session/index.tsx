@@ -37,12 +37,8 @@ import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util"
 import type { Tool } from "@/tool"
 import type { ReadTool } from "@/tool/read"
-import type { WriteTool } from "@/tool/write"
-import { BashTool } from "@/tool/bash"
-import type { GlobTool } from "@/tool/glob"
-import type { GrepTool } from "@/tool/grep"
+import { ShellTool } from "@/tool/bash"
 import type { EditTool } from "@/tool/edit"
-import type { ApplyPatchTool } from "@/tool/apply_patch"
 import type { WebFetchTool } from "@/tool/webfetch"
 import type { CodeSearchTool } from "@/tool/codesearch"
 import type { WebSearchTool } from "@/tool/websearch"
@@ -1661,7 +1657,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   return (
     <Show when={!shouldHide()}>
       <Switch>
-        <Match when={props.part.tool === "bash"}>
+        <Match when={props.part.tool === "shell" || props.part.tool === "bash"}>
           <Bash {...toolprops} />
         </Match>
         <Match when={props.part.tool === "glob"}>
@@ -1714,15 +1710,48 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   )
 }
 
-type ToolProps<T> = {
-  input: Partial<Tool.InferParameters<T>>
-  metadata: Partial<Tool.InferMetadata<T>>
-  permission: Record<string, any>
+type LegacyTool<Input, Metadata> = { input: Input; metadata: Metadata }
+
+type ToolProps<T> = T extends LegacyTool<infer Input, infer Metadata>
+  ? {
+      input: Partial<Input>
+      metadata: Partial<Metadata>
+      permission: Record<string, any>
+      tool: string
+      output?: string
+      part: ToolPart
+    }
+  : {
+      input: Partial<Tool.InferParameters<T>>
+      metadata: Partial<Tool.InferMetadata<T>>
+      permission: Record<string, any>
+      tool: string
+      output?: string
+      part: ToolPart
+    }
+type LegacyWrite = LegacyTool<{ filePath: string; content?: string }, { diagnostics?: Record<string, Record<string, unknown>[]> }>
+type LegacyGlob = LegacyTool<{ pattern: string; path?: string }, { count?: number }>
+type LegacyGrep = LegacyTool<{ pattern: string; path?: string }, { matches?: number }>
+type LegacyPatchFile = {
+  type: string
+  relativePath: string
+  filePath: string
+  patch: string
+  additions: number
+  deletions: number
+  movePath?: string
+}
+type LegacyPatch = LegacyTool<{ patchText?: string }, { files?: LegacyPatchFile[]; diagnostics?: Record<string, Record<string, unknown>[]> }>
+type DisplayToolProps = {
+  input: Record<string, unknown>
+  metadata: Record<string, unknown>
+  permission: Record<string, unknown>
   tool: string
   output?: string
   part: ToolPart
 }
-function PlanExit(props: ToolProps<any>) {
+
+function PlanExit(props: { metadata: { feedback?: string }; part: ToolPart }) {
   const { theme } = useTheme()
   const dismissed = createMemo(
     () => props.part.state.status === "completed" && props.part.state.metadata?.switched === false,
@@ -1743,7 +1772,7 @@ function PlanExit(props: ToolProps<any>) {
   )
 }
 
-function GenericTool(props: ToolProps<any>) {
+function GenericTool(props: DisplayToolProps) {
   const { theme } = useTheme()
   const ctx = use()
   const output = createMemo(() => props.output?.trim() ?? "")
@@ -1988,7 +2017,7 @@ function hasLongDisplayLine(content: string) {
   return displayLines(content).some((line) => line.length > TOOL_COLLAPSE_MAX_LINE_LENGTH)
 }
 
-function Bash(props: ToolProps<typeof BashTool>) {
+function Bash(props: ToolProps<typeof ShellTool>) {
   const { theme } = useTheme()
   const sync = useSync()
   const isRunning = createMemo(() => props.part.state.status === "running")
@@ -2055,7 +2084,7 @@ function Bash(props: ToolProps<typeof BashTool>) {
   )
 }
 
-function Write(props: ToolProps<typeof WriteTool>) {
+function Write(props: ToolProps<LegacyWrite>) {
   const { theme, syntax } = useTheme()
   const [expanded, setExpanded] = createSignal(false)
   const code = createMemo(() => {
@@ -2106,7 +2135,7 @@ function Write(props: ToolProps<typeof WriteTool>) {
   )
 }
 
-function Glob(props: ToolProps<typeof GlobTool>) {
+function Glob(props: ToolProps<LegacyGlob>) {
   return (
     <InlineTool icon="✱" pending="Finding files..." complete={props.input.pattern} part={props.part}>
       Glob "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
@@ -2151,7 +2180,7 @@ function Read(props: ToolProps<typeof ReadTool>) {
   )
 }
 
-function Grep(props: ToolProps<typeof GrepTool>) {
+function Grep(props: ToolProps<LegacyGrep>) {
   return (
     <InlineTool icon="✱" pending="Searching content..." complete={props.input.pattern} part={props.part}>
       Grep "{props.input.pattern}" <Show when={props.input.path}>in {normalizePath(props.input.path)} </Show>
@@ -2292,14 +2321,14 @@ function Edit(props: ToolProps<typeof EditTool>) {
     return ctx.width > 120 ? "split" : "unified"
   })
 
-  const ft = createMemo(() => filetype(props.input.filePath))
+  const ft = createMemo(() => filetype(props.input.path))
 
   const diffContent = createMemo(() => props.metadata.diff)
 
   return (
     <Switch>
       <Match when={props.metadata.diff !== undefined}>
-        <BlockTool title={"← Edit " + normalizePath(props.input.filePath!)} part={props.part}>
+        <BlockTool title={"← Edit " + normalizePath(props.input.path!)} part={props.part}>
           <box paddingLeft={1}>
             <diff
               diff={diffContent()}
@@ -2321,19 +2350,19 @@ function Edit(props: ToolProps<typeof EditTool>) {
               removedLineNumberBg={theme.diffRemovedLineNumberBg}
             />
           </box>
-          <Diagnostics diagnostics={props.metadata.diagnostics} filePath={props.input.filePath ?? ""} />
+          <Diagnostics diagnostics={props.metadata.diagnostics} filePath={props.input.path ?? ""} />
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.filePath} part={props.part}>
-          Edit {normalizePath(props.input.filePath!)} {input({ replaceAll: props.input.replaceAll })}
+        <InlineTool icon="←" pending="Preparing edit..." complete={props.input.path} part={props.part}>
+          Edit {normalizePath(props.input.path!)} {input({ replaceAll: props.input.replaceAll })}
         </InlineTool>
       </Match>
     </Switch>
   )
 }
 
-function ApplyPatch(props: ToolProps<typeof ApplyPatchTool>) {
+function ApplyPatch(props: ToolProps<LegacyPatch>) {
   const ctx = use()
   const { theme, syntax } = useTheme()
   const [expanded, setExpanded] = createSignal<string[]>([])
