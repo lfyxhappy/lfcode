@@ -1,55 +1,60 @@
 # Lfcode v2.0.0
 
-Lfcode v2 brings the coding agent into a local-first workbench for real project work. Conversations, code, terminals, browser sessions, skills, MCP tools, plugins, model providers, and project rules now live in one workflow.
+Lfcode v2.0.0 是一次完整的桌面工作台升级：把会话、项目上下文、代码编辑、终端、浏览器、Agent、扩展和模型连接放进同一条可恢复的本地工作流。
 
-## What is new
+## 版本亮点
 
-### A complete desktop workbench
+### 全新的桌面工作台
 
-- A focused session workspace for prompts, responses, code changes, tool output, and project context.
-- Faster navigation between sessions, projects, workspaces, files, and browser panels.
-- Session archive actions that keep the sidebar compact without changing project or workspace menus.
-- Improved context status, usage metrics, performance cards, and activity visibility.
+- 会话时间线、输入区、文件上下文、变更面板和终端可以同屏协作。
+- 项目、工作区、文件、浏览器面板和历史会话之间可以快速切换。
+- 支持会话归档、上下文状态、使用量与活动信息查看，减少长任务中的信息丢失。
+- Windows 桌面端提供可见的运行状态、可中断操作和可继续推进的任务记录。
 
-### Agent orchestration and research
+### Agent 编排与长任务
 
-- Background agent dispatch with parent/child task tracking.
-- Deep Research coordination with researcher progress and recoverable task state.
-- More reliable actor reuse, retry, recovery, cancellation, and post-stop persistence.
-- Context planning and snapshots for long-running sessions and handoffs.
+- 支持主 Agent 派发后台 Agent，并保留父子任务关系、状态和结果。
+- Deep Research 协调器可以派发多个只读研究员，等待结果后汇总带引用的中文报告。
+- 后台任务支持进度、取消、恢复、重试和重启后的状态对账。
+- 上下文计划、检查点和快照帮助长会话在中断后继续工作。
 
-### Tools and extensibility
+### 工具与扩展体系
 
-- Integrated terminal, browser, code editing, file operations, search, patching, and office workflows.
-- Skills and plugin discovery with settings surfaces for management.
-- MCP and external-agent workflows with clearer status and failure handling.
-- Scheduled automations, notifications, subagent presets, and reusable project instructions.
+- 集成 PowerShell 7 终端、代码编辑、文件操作、搜索、补丁和浏览器验证。
+- 支持受管 Python、C++20 编译运行，以及 DOCX/XLSX/PPTX 的 OfficeCLI 检查、编辑、渲染和验证流程。
+- Skills、MCP、插件和项目规则可以在设置中发现、管理并接入会话。
+- 提供自动化规则、Hook、通知、插件制作和预览能力，扩展前可先校验和测试。
 
-### Provider catalog and LFAPI
+### 提供商目录与 LFAPI
 
-- Improved provider and model selection flows with popular-provider grouping.
-- Provider quota and usage views for supported providers.
-- New LFAPI popular provider at `https://ai.liangfeng.net.cn/v1`.
-- LFAPI supports OpenAI-compatible Chat Completions and Responses protocols.
-- LFAPI model discovery is available through `/models` and the Lfcode settings flow; credentials are kept out of discovery responses and temporary discovery keys are not persisted.
+- 提供商选择按热门目录组织，并支持模型发现、能力信息和使用量视图。
+- 新增 LFAPI 热门供应商：`https://ai.liangfeng.net.cn/v1`。
+- LFAPI 接入 OpenAI-compatible Chat Completions 与 Responses 协议。
+- `/models` 发现流程不会返回凭据；临时发现 Key 不会写入保存配置。
+- 协议和发现能力已经接入 Lfcode 设置流程；真实模型生成测试仍需要有效 LFAPI API Key。
 
-### Windows release lane
+### Windows 发布链路
 
-- Dedicated pre-release and production Windows lanes with separate icons and data roots.
-- Hash-checked package synchronization that preserves production runtime data.
-- Bundled Git, Python, CodeGraph, shell parser assets, and runtime configuration validation.
+- 预发布版与生产使用版采用独立的数据根目录和图标，便于先验证再推广。
+- 快速同步会校验关键文件哈希，并只向目标目录追加缺失数据。
+- 生产目录中的数据库、会话、附件、快照、工具输出和日志不会因升级被覆盖或删除。
+- 稳定 Windows 安装程序：`lfcode-win-x64.exe`。
 
-### Product introduction page
+### GitHub Pages 产品页
 
-- The Lfcode product introduction page is now published through GitHub Pages at:
-  `https://lfyxhappy.github.io/lfcode/`
+产品介绍页已发布到 [https://lfyxhappy.github.io/lfcode/](https://lfyxhappy.github.io/lfcode/)，页面内容与当前 Lfcode 的会话工作台、Agent 编排、扩展系统和本地优先特征保持一致。
 
-## Upgrade notes
+## 升级说明
 
-- Existing project files, sessions, attachments, databases, and runtime state are preserved during the Windows promotion flow.
-- Provider credentials must be configured again only when adding a new provider or changing its local configuration.
-- LFAPI protocol and model discovery are implemented. A live model-generation check still requires a valid LFAPI API key.
+- Windows 用户可下载本 Release 的 `lfcode-win-x64.exe` 安装程序。
+- 已有项目文件、会话、数据库、附件和运行状态会在发布链路中保留。
+- 新增供应商或更换本地模型配置时，需要在设置中重新填写对应凭据。
+- LFAPI 的协议识别与模型发现已实现，但在没有有效 Key 前不要把“可发现模型”视为“已完成真实生成验证”。
 
-## Verification
+## 校验信息
 
-This release is checked with repository linting and type checking, package-local tests, Windows packaging checks, installed-copy health checks, release asset verification, and GitHub Pages smoke checks.
+- 安装程序：`lfcode-win-x64.exe`
+- 校验文件：`lfcode-win-x64.exe.sha256`
+- 自动更新元数据：`latest.yml`
+
+本次发布不包含 API Key、GitHub Token、Cookie 或其他凭据。
